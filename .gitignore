@@ -91,14 +91,17 @@ corpus-facts.frc
 # Compiled knowledge bundles
 *.frc
 
-# Strategy/engineering docs (README, LICENSE, CHANGELOG only are public)
-docs/*.md
-*.md
+# Private docs and strategy notes (README, LICENSE, CHANGELOG, CONTRIBUTING,
+# CLA, and the public benchmarking guide only are committed)
+**/*.md
 !README.md
 !LICENSE*
 !CHANGELOG.md
 !CONTRIBUTING.md
 !CLA.md
+!docs/BENCHMARKING.md
+
+# Frensense attribution policy: no bot trailers in commit messages.
 
 # Benchmark scorecards and probe artifacts
 benchmark/scorecard.json
