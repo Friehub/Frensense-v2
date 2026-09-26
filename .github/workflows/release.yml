@@ -170,7 +170,7 @@ jobs:
         with:
           egress-policy: audit
       - name: Download all artifacts
-        uses: actions/download-artifact@fdafc3f9f2e2a522dc1d230e6a03de57a1e71c95 # v4.3.0
+        uses: actions/download-artifact@18f0f591fbc635562c815484d73b6e8e3980482e # v4.3.0
         with:
           path: artifacts
       - name: Generate hashes
@@ -248,7 +248,7 @@ jobs:
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # stable
 
       - name: Download all artifacts
-        uses: actions/download-artifact@fdafc3f9f2e2a522dc1d230e6a03de57a1e71c95 # v4.3.0
+        uses: actions/download-artifact@18f0f591fbc635562c815484d73b6e8e3980482e # v4.3.0
         with:
           path: artifacts
 
@@ -315,7 +315,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag_name }}
       - name: Download all artifacts
-        uses: actions/download-artifact@fdafc3f9f2e2a522dc1d230e6a03de57a1e71c95 # v4.3.0
+        uses: actions/download-artifact@18f0f591fbc635562c815484d73b6e8e3980482e # v4.3.0
         with:
           path: artifacts
       - name: Prepare binaries for release
