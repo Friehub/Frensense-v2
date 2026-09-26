@@ -1,0 +1,141 @@
+# Rust
+target/
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build artifacts (NAPI)
+*.node
+frensense
+frensense.exe
+frensense.d.ts
+frensense.js
+index.js
+index.d.ts
+
+# Frensense caches
+.frensense/
+.gensense/
+docs/.vitepress/dist
+docs/.vitepress/cache
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Fuzzing
+fuzz/corpus
+fuzz/artifacts
+fuzz/target
+
+# Benchmarking
+bench_samples/
+frensense-bench/datasets/juiceshop/
+frensense-bench/datasets/nodegoat/
+frensense-bench/datasets/synthetic/
+frensense-bench/results/
+__pycache__/
+scripts/__pycache__/
+perf.data
+perf.data.old
+
+# Generated / report files
+clippy_errors*.txt
+clippy_report.txt
+debug_registry.txt
+self_audit_report.json
+historical-scan-*.csv
+bom.json
+RULES.md
+future_improvements.md
+TODO.md
+*.log
+
+# Other
+*.cast
+test-*.js
+*.orig
+*.rej
+dump_filter*.rs
+
+# Large files
+*.zip
+*.db
+frensense-corpus.frc
+scripts/harvest_streaming/raw/
+corpus/ground_truth/
+corpus/baselines/
+tests/benchmarks/samples/
+
+# Secrets
+.env
+corpus/archived/
+
+# npm tarballs
+*.tgz
+
+# ── Proprietary: never push ─────────────────────────────────────────
+# Corpus (the learning asset, positive/negative families, manifests)
+corpus/by-vuln/
+corpus/targets/
+corpus/facts/
+corpus/semantic_filters.toml
+corpus/baselines/
+corpus-facts.frc
+
+# Compiled knowledge bundles
+*.frc
+
+# Strategy/engineering docs (README, LICENSE, CHANGELOG only are public)
+docs/*.md
+*.md
+!README.md
+!LICENSE*
+!CHANGELOG.md
+!CONTRIBUTING.md
+!CLA.md
+
+# Benchmark scorecards and probe artifacts
+benchmark/scorecard.json
+benchmark/owasp_scorecard.json
+
+# Unreleased crate
+frensense-runtime/
+
+# Benchmark target app
+juice-shop/
+
+# Agent workspace
+.freebuff/
+dist/binaries/
+
+# Ground-truth label sets (private benchmark knowledge)
+scripts/juiceshop-ground-truth.json
+scripts/nodegoat-ground-truth.json
+
+# Corpus / benchmark authoring tooling (private)
+scripts/benchmark_suite.py
+scripts/migrate_corpus.py
+scripts/benchmark_juice_shop.py
+scripts/benchmark_nodegoat.py
+scripts/fix-corpus-fps.py
+scripts/corpus_check.py
+scripts/classify_findings.py
+scripts/extract_fps.py
+scripts/extract_19_fps.py
+scripts/generate_corpus.js
+scripts/generate_m2m8_variants.py
+scripts/inject_context.py
+scripts/compute_metrics.py
+scripts/swarm_seeder.ts
+scripts/train_calibration.py
+scripts/__pycache__/
+frensense-bench/runners/run_juiceshop.sh
+
+# Benchmark internals (scorecards, OWASP baselines, cases)
+benchmark/
