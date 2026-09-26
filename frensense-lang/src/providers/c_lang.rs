@@ -49,7 +49,8 @@ fn classify_c(kind: &str) -> NodeRole {
         },
 
         // ── Control flow ─────────────────────────────────────────────────
-        "if_statement" | "conditional_expression" | "switch_statement" => NodeRole::Branch,
+        "if_statement" | "switch_statement" => NodeRole::Branch,
+        "conditional_expression" => NodeRole::Conditional,
         "for_statement" | "while_statement" | "do_statement" => NodeRole::Loop,
         "return_statement" => NodeRole::Return,
 

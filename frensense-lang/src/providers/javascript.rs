@@ -79,7 +79,8 @@ fn classify_js(kind: &str) -> NodeRole {
         },
 
         // ── Control flow ─────────────────────────────────────────────────
-        "if_statement" | "ternary_expression" | "switch_statement" => NodeRole::Branch,
+        "if_statement" | "switch_statement" => NodeRole::Branch,
+        "ternary_expression" => NodeRole::Conditional,
         "for_statement" | "for_in_statement" | "for_of_statement" | "while_statement"
         | "do_statement" => NodeRole::Loop,
         "return_statement" => NodeRole::Return,

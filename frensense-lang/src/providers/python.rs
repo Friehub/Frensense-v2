@@ -76,6 +76,7 @@ fn classify_python(kind: &str) -> NodeRole {
             object_field: "object",
             property_field: "attribute",
         },
+        "conditional_expression" => NodeRole::Conditional,
         "subscript" => NodeRole::MemberAccess {
             object_field: "value",
             property_field: "subscript",
@@ -810,6 +811,12 @@ impl LanguageSpec for PythonSpec {
             ("$function", crate::spec::SinkLabel::NoSqlInjection),
             ("$accumulator", crate::spec::SinkLabel::NoSqlInjection),
         ]
+    }
+
+    fn ternary_cond_index(&self) -> usize {
+        // Python: `then if cond else else_arm` — the condition is the
+        // middle named child, unlike JS/C where it comes first.
+        1
     }
 
     fn known_source_patterns(&self) -> &'static [&'static str] {
