@@ -19,7 +19,7 @@ c-grammar    = ["dep:tree-sitter-c"]
 
 [dependencies]
 tree-sitter = "0.23"
-rustc-hash  = "1"
+rustc-hash  = "2"
 
 [dependencies.tree-sitter-typescript]
 version  = "0.23"
