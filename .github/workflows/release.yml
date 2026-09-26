@@ -1,0 +1,336 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.2.1)'
+        required: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # 0. Prepare: Decide if we should release and ensure tags exist
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      tag_name: ${{ steps.check.outputs.tag_name }}
+    permissions:
+      contents: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+        with:
+          fetch-depth: 0
+
+      - name: Check version and tags
+        id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            RAW="${{ github.event.inputs.tag }}"
+            if [[ -z "$RAW" ]]; then
+              RAW="$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')"
+            fi
+            RAW="${RAW#v}"
+            TAG="v$RAW"
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "tag_name=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == refs/heads/main ]]; then
+            VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+            TAG="v$VERSION"
+            if git rev-parse "$TAG" >/dev/null 2>&1; then
+              echo "Tag $TAG already exists. Skipping automatic release."
+              echo "should_release=false" >> $GITHUB_OUTPUT
+            else
+              echo "New version $VERSION detected on main. Creating tag $TAG."
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git tag "$TAG"
+              git push origin "$TAG"
+              echo "should_release=true" >> $GITHUB_OUTPUT
+              echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          fi
+
+  # 1. Build Native Artifacts for all platforms
+  build-native:
+    name: Build Native (${{ matrix.settings.target }})
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ${{ matrix.settings.host }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            bin_name: frensense
+          - host: macos-latest
+            target: x86_64-apple-darwin
+            bin_name: frensense
+          - host: macos-14
+            target: aarch64-apple-darwin
+            bin_name: frensense
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            bin_name: frensense.exe
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+        with:
+          ref: ${{ needs.prepare.outputs.tag_name }}
+
+      - name: Setup Node
+        uses: actions/setup-node@f1f314fca9dfce2769ece7d933488f076716723e # v4.4.0
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # stable
+        with:
+          targets: ${{ matrix.settings.target }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build CLI Binary
+        run: cargo build --release --target ${{ matrix.settings.target }}
+
+      - name: Build FRC Bundle
+        # The corpus is proprietary and not in the public repo; skip unless
+        # corpus/targets exists (private release runners only).
+        if: matrix.settings.host == 'ubuntu-latest' && hashFiles('corpus/targets/**') != ''
+        run: cargo run --release -p frensense-bundler --bin frensense-bundler -- -c corpus/targets -o frensense-corpus.frc
+
+      - name: Upload FRC Artifact
+        if: matrix.settings.host == 'ubuntu-latest' && hashFiles('corpus/targets/**') != ''
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v4.6.2
+        with:
+          name: frensense-corpus
+          path: frensense-corpus.frc
+
+      - name: Smoke test CLI binary
+        shell: bash
+        run: |
+          binary="target/${{ matrix.settings.target }}/release/${{ matrix.settings.bin_name }}"
+          file "$binary" || true
+          "$binary" --version
+          "$binary" --help
+          echo 'fn main() { let x = 1; }' > /tmp/test_smoke.rs
+          "$binary" /tmp/test_smoke.rs --json > /dev/null
+          echo "CLI smoke test passed"
+
+      - name: Upload CLI Artifact
+        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v4.6.2
+        with:
+          name: cli-${{ matrix.settings.target }}
+          path: target/${{ matrix.settings.target }}/release/${{ matrix.settings.bin_name }}
+
+  # 2. Generate Hashes for SLSA
+  generate-hashes:
+    name: Generate Hashes
+    runs-on: ubuntu-latest
+    needs: [prepare, build-native]
+    permissions:
+      contents: read
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
+        with:
+          egress-policy: audit
+      - name: Download all artifacts
+        uses: actions/download-artifact@fdafc3f9f2e2a522dc1d230e6a03de57a1e71c95 # v4.3.0
+        with:
+          path: artifacts
+      - name: Generate hashes
+        id: hash
+        run: |
+          cd artifacts
+          find . -type f | xargs sha256sum | base64 -w0 > hashes.txt
+          echo "hashes=$(cat hashes.txt)" >> $GITHUB_OUTPUT
+
+  # 3. SLSA Provenance
+  provenance:
+    needs: [prepare, generate-hashes]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a # v2.1.0
+    with:
+      base64-subjects: ${{ needs.generate-hashes.outputs.hashes }}
+      upload-assets: true
+
+  # 4. Publish to Crates.io
+  publish-cargo:
+    name: Publish to Crates.io
+    runs-on: ubuntu-latest
+    needs: [prepare, build-native]
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+        with:
+          ref: ${{ needs.prepare.outputs.tag_name }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # stable
+      - name: Publish frensense
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+          EXISTS=$(curl -sf -H "User-Agent: frensense-release" "https://crates.io/api/v1/crates/frensense" | python3 -c "import json,sys; print(json.load(sys.stdin).get('crate',{}).get('max_version',''))" 2>/dev/null || echo "")
+          if [ "$EXISTS" = "$VERSION" ]; then
+            echo "frensense@$VERSION already published. Skipping."
+          else
+            echo "Publishing frensense@$VERSION to crates.io..."
+            cargo publish -p frensense --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --no-default-features --features rust,typescript,fingerprinting --allow-dirty
+          fi
+      - name: Wait for crates.io index
+        run: sleep 60
+
+  # 5. Publish to NPM
+  publish-npm:
+    name: Publish to NPM
+    runs-on: ubuntu-latest
+    needs: [prepare, build-native]
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+        with:
+          ref: ${{ needs.prepare.outputs.tag_name }}
+      - name: Setup Node
+        uses: actions/setup-node@f1f314fca9dfce2769ece7d933488f076716723e # v4.4.0
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # stable
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@fdafc3f9f2e2a522dc1d230e6a03de57a1e71c95 # v4.3.0
+        with:
+          path: artifacts
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Prepare NPM package
+        run: |
+          mkdir -p dist/binaries
+
+          # CLI binaries (platform-named for the postinstall resolver)
+          # The .frc corpus is embedded in the binary via include_bytes!, no need to ship it
+          cp artifacts/cli-x86_64-unknown-linux-gnu/frensense    ./dist/binaries/frensense-linux-x64
+          cp artifacts/cli-x86_64-apple-darwin/frensense          ./dist/binaries/frensense-macos-x64
+          cp artifacts/cli-aarch64-apple-darwin/frensense          ./dist/binaries/frensense-macos-arm64
+          cp artifacts/cli-x86_64-pc-windows-msvc/frensense.exe   ./dist/binaries/frensense-windows-x64.exe
+
+      - name: Test NPM package before publish
+        run: |
+          npm pack
+          TESTDIR=$(mktemp -d)
+          cd "$TESTDIR"
+          npm init -y > /dev/null
+          echo "registry=https://registry.npmjs.org/" > .npmrc
+          npm install "$GITHUB_WORKSPACE"/friehub-frensense-*.tgz
+          ./node_modules/.bin/frensense --version
+          echo 'fn main() { let x = 1; }' > test.rs
+          ./node_modules/.bin/frensense test.rs --json > /dev/null
+          echo 'NPM package OK'
+
+      - name: Check version not already published
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://registry.npmjs.org/@friehub/frensense/$VERSION")
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "Version $VERSION already exists on NPM. Skipping."
+            echo "already_published=true" >> $GITHUB_OUTPUT
+          else
+            echo "Version $VERSION not found on NPM. Will publish."
+            echo "already_published=false" >> $GITHUB_OUTPUT
+          fi
+        id: npm_check
+
+      - name: Publish to NPM
+        if: steps.npm_check.outputs.already_published != 'true'
+        run: npm publish --tag latest --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # 6. Create GitHub Release
+  github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [prepare, build-native, provenance]
+    environment: production
+    permissions:
+      contents: write
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+        with:
+          ref: ${{ needs.prepare.outputs.tag_name }}
+      - name: Download all artifacts
+        uses: actions/download-artifact@fdafc3f9f2e2a522dc1d230e6a03de57a1e71c95 # v4.3.0
+        with:
+          path: artifacts
+      - name: Prepare binaries for release
+        run: |
+          mkdir -p release-binaries
+          for dir in artifacts/cli-*/; do
+            target=$(basename "$dir" | sed 's/cli-//')
+            ext=""
+            if [[ "$target" == *"windows"* ]]; then ext=".exe"; fi
+            cp "${dir}frensense${ext}" "release-binaries/frensense-${target}${ext}"
+          done
+      - name: Release
+        uses: softprops/action-gh-release@26994186c0ac3ef5cae75ac16aa32e8153525f77 # v2.4.2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag_name }}
+          files: release-binaries/*
+          generate_release_notes: true
+          prerelease: false
