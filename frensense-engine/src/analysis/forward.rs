@@ -1159,8 +1159,30 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
         Instruction::CallVirtual {
             method,
             dest: Some(d),
+            receiver,
             ..
-        } => config.sources.contains(method) && *d == var,
+        } if *d == var => {
+            // Module-qualified calls (`random.randint(...)`) lower as
+            // CallVirtual with the module as receiver, while verb-named
+            // methods (`res.json(...)`) carry an object receiver. Match the
+            // full member path `receiver.method` against dotted source
+            // facts first, then the bare method name (same over-approximate
+            // last-segment semantics as sinks).
+            if config.sources.contains(method) {
+                return true;
+            }
+            if let Operand::Var(r) = receiver
+                && let Some(root) = FactTable::receiver_root(ir, *r)
+            {
+                let path = format!("{root}.{method}");
+                return config.sources.contains(&path)
+                    || config
+                        .sources
+                        .iter()
+                        .any(|s| path.starts_with(s.as_str()) && path.as_bytes().get(s.len()) == Some(&b'.'));
+            }
+            false
+        }
         Instruction::LoadField { base, field, .. } => {
             // Member-expression source: `req.body` lowers to LoadField
             // chains, the *dest* of each link has no source_name, so the

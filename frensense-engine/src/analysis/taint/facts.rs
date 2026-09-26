@@ -174,6 +174,11 @@ pub struct FactTable {
     /// undefined, values read off the result are not attacker-controlled
     /// (see [`SanitizerKind::SessionTrust`]).
     pub session_roots: FxHashSet<String>,
+    /// Taint-source patterns learned from a `.frc` bundle: call names or
+    /// member-access paths whose results carry attacker-controlled data.
+    /// Merged into the scan's `TaintConfig::sources` before analysis so
+    /// bundles teach new frameworks without touching the built-in tables.
+    pub learned_sources: FxHashSet<String>,
 }
 
 impl FactTable {
@@ -249,6 +254,15 @@ impl FactTable {
         }
         self.session_roots
             .extend(other.session_roots.iter().cloned());
+        self.learned_sources
+            .extend(other.learned_sources.iter().cloned());
+    }
+
+    /// Source patterns to merge into the scan's `TaintConfig`: the union of
+    /// spec-derived names and bundle-learned ones. The engine matches both
+    /// by full name and, for dotted entries, by last segment.
+    pub fn source_patterns(&self) -> impl Iterator<Item = &str> {
+        self.learned_sources.iter().map(|s| s.as_str())
     }
 
     /// Is `last(receiver_root)` a trusted session-store accessor?
@@ -421,10 +435,16 @@ impl FactTable {
 }
 
 /// One learned fact as persisted in a `.frc` bundle. A tagged union over the
-/// two fact kinds, serde-friendly, decodable into a [`FactTable`].
+/// three fact kinds, serde-friendly, decodable into a [`FactTable`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub enum LearnedFactEntry {
+    /// A taint source pattern: a call name or member-access path whose
+    /// result carries attacker-controlled data. Merged into the scan's
+    /// [`TaintConfig::sources`] so bundles teach new frameworks without
+    /// touching the built-in tables. Matches by full name or, for dotted
+    /// entries, by last segment (same convention as sinks).
+    Source { pattern: String },
     Sink {
         call: String,
         /// Dangerous argument slots; empty = all slots dangerous.
@@ -459,6 +479,9 @@ impl LearnedFactEntry {
     /// Insert this fact into a [`FactTable`].
     pub fn apply(&self, table: &mut FactTable) {
         match self {
+            LearnedFactEntry::Source { pattern } => {
+                table.learned_sources.insert(pattern.clone());
+            }
             LearnedFactEntry::Sink {
                 call,
                 dangerous_args,

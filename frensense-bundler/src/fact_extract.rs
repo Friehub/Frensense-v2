@@ -639,6 +639,7 @@ fn separates(family: &Family, config: &TaintConfig, facts: &FactTable) -> bool {
 
 fn fact_key(e: &LearnedFactEntry) -> (String, String) {
     match e {
+        LearnedFactEntry::Source { pattern } => ("source".into(), pattern.clone()),
         LearnedFactEntry::Sink { call, .. } => ("sink".into(), call.clone()),
         LearnedFactEntry::Sanitizer { call, .. } => ("san".into(), call.clone()),
         LearnedFactEntry::Check { rule, call, .. } => ("check".into(), format!("{rule}:{call}")),

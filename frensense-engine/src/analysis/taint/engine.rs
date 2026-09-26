@@ -214,8 +214,29 @@ pub(crate) fn source_description(
         Instruction::CallVirtual {
             method,
             dest: Some(d),
+            receiver,
             ..
-        } if config.sources.contains(method) && *d == var => Some(method.clone()),
+        } if *d == var => {
+            // Module-qualified calls (`random.randint(...)`) lower as
+            // CallVirtual: prefer the full `receiver.method` path (dotted
+            // source facts), fall back to the bare method name.
+            if config.sources.contains(method) {
+                return Some(method.clone());
+            }
+            if let Operand::Var(r) = receiver
+                && let Some(root) = crate::analysis::taint::facts::FactTable::receiver_root(ir, *r)
+            {
+                let path = format!("{root}.{method}");
+                if config.sources.contains(&path)
+                    || config.sources.iter().any(|s| {
+                        path.starts_with(s.as_str()) && path.as_bytes().get(s.len()) == Some(&b'.')
+                    })
+                {
+                    return Some(path);
+                }
+            }
+            None
+        }
         Instruction::LoadField { base, field, .. } => {
             let path = member_access_path(ir, *base, field);
             let root = path.split('.').next().unwrap_or("");
@@ -504,6 +525,9 @@ impl<'a> BackwardTaintEngine<'a> {
     }
 
     /// Merge additional (e.g. bundle-learned) facts over the built-in table.
+    /// Bundle-learned source patterns must be merged into the scan's
+    /// `TaintConfig` by the caller (see `FactTable::source_patterns`):
+    /// this engine holds the config behind a shared reference.
     pub fn with_fact_table(mut self, facts: &FactTable) -> Self {
         self.facts.merge(facts);
         self

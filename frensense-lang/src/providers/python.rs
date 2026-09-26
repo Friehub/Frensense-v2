@@ -78,7 +78,7 @@ fn classify_python(kind: &str) -> NodeRole {
         },
         "subscript" => NodeRole::MemberAccess {
             object_field: "value",
-            property_field: "slice",
+            property_field: "subscript",
         },
 
         // ── Control flow ─────────────────────────────────────────────────

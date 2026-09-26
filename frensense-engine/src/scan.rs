@@ -82,6 +82,15 @@ pub fn scan_prepared(
     config: &TaintConfig,
     facts: &FactTable,
 ) -> ScanResult {
+    // Bundle-learned source patterns widen the config: a `.frc` bundle
+    // teaches new framework sources without touching the built-in tables.
+    // Local mutable copy; the caller's config stays shared and unchanged.
+    let mut config = config.clone();
+    config
+        .sources
+        .extend(facts.learned_sources.iter().cloned());
+    let config = &config;
+
     let mut statics: FxHashMap<String, &FunctionIR> = FxHashMap::default();
     // Leak per function: the program graph borrows IRs for its lifetime.
     // Scan results own no reference to them, and scans are long-lived.

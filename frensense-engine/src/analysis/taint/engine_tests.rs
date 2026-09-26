@@ -641,4 +641,84 @@ pub mod demand_tests {
         assert!(fwd.alerts[0].contains("db.execute"));
         assert!(bwd_alerts[0].contains("db.execute"));
     }
+
+    // -----------------------------------------------------------------------
+    // Learned dotted source fact on a module-qualified CallVirtual.
+    //
+    //   fn main() { v = random.randint(0, 10); eval(v); }
+    //
+    // `random.randint` lowers as CallVirtual (receiver `random`, method
+    // `randint`), NOT CallStatic, so a bare-method-name match misses it.
+    // The dotted source fact (`random.randint`) must resolve via the
+    // receiver root. Without the fact, the path is Unknown/Clean.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_backward_learned_module_qualified_source() {
+        use crate::analysis::taint::facts::{fact_table_from_entries, LearnedFactEntry};
+
+        let mut main = FunctionIR::new("main".into());
+        {
+            let b = main.entry_block;
+            let mem0 = main.initial_memory_state;
+            let random_mod = main.new_var(dummy_meta("random"));
+            let v = main.new_var(dummy_meta("v"));
+            let m1 = main.new_var(mem_meta("m1"));
+            main.push_instruction(
+                b,
+                Instruction::CallVirtual {
+                    dest: Some(v),
+                    mem_out: m1,
+                    mem_in: mem0,
+                    method: "randint".into(),
+                    receiver: Operand::Var(random_mod),
+                    args: vec![Operand::IntLiteral(0), Operand::IntLiteral(10)],
+                },
+            );
+            let m2 = main.new_var(mem_meta("m2"));
+            main.push_instruction(
+                b,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m2,
+                    mem_in: m1,
+                    func: "eval".into(),
+                    args: vec![Operand::Var(v)],
+                },
+            );
+            main.set_terminator(b, Terminator::Return { src: None });
+        }
+
+        let prog = build_program(vec![main]);
+        let cfg = TaintConfig {
+            sources: [].into_iter().collect(),
+            sinks: ["eval".to_string()].into_iter().collect(),
+            sanitizers: [].into_iter().collect(),
+        };
+
+        // No learned facts: no source, so the walk bottoms out Unknown →
+        // not reported as a Vulnerable advisory.
+        let empty = crate::analysis::taint::facts::FactTable::default();
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg).with_fact_table(&empty);
+        engine.run();
+        assert!(
+            engine
+                .findings
+                .iter()
+                .all(|f| f.verdict != BackwardVerdict::Vulnerable),
+            "no learned source fact → no Vulnerable finding, got {:?}",
+            engine.findings
+        );
+
+        // With the dotted learned Source fact, the flow is Vulnerable.
+        let facts = fact_table_from_entries(&[LearnedFactEntry::Source {
+            pattern: "random.randint".into(),
+        }]);
+        let mut cfg2 = cfg.clone();
+        cfg2.sources
+            .extend(facts.learned_sources.iter().cloned());
+        let mut engine2 = BackwardTaintEngine::new(&prog, &cfg2).with_fact_table(&facts);
+        engine2.run();
+        assert_eq!(engine2.findings.len(), 1, "learned source fact must fire");
+        assert_eq!(engine2.findings[0].verdict, BackwardVerdict::Vulnerable);
+    }
 }

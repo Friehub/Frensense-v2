@@ -84,6 +84,9 @@ fn run_facts_pipeline(corpus_dir: &Path, output_path: &Path) -> Result<(), Strin
 
     for f in &facts {
         let call = match &f.entry {
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::Source { pattern } => {
+                format!("source:{pattern}")
+            }
             frensense_engine::analysis::taint::facts::LearnedFactEntry::Sink { call, .. } => {
                 format!("sink:{call}")
             }

@@ -66,11 +66,15 @@ def load_cases(csv_path: Path, testcode: Path) -> list[dict]:
     return cases
 
 
-def scan_case(binary: Path, case: dict) -> dict:
+def scan_case(binary: Path, case: dict, bundle: Path | None = None) -> dict:
     """Scan one case file in isolation (own process: no cross-case state)."""
     try:
+        cmd = [str(binary), str(case["file"])]
+        if bundle is not None:
+            cmd += ["--corpus-bundle", str(bundle)]
+        cmd += ["--json"]
         proc = subprocess.run(
-            [str(binary), str(case["file"]), "--json"],
+            cmd,
             capture_output=True, text=True, timeout=120,
         )
         data = json.loads(proc.stdout) if proc.stdout.strip() else {"advisories": []}
@@ -158,12 +162,18 @@ def main() -> None:
                     help="OWASP BenchmarkPython expectedresults CSV")
     ap.add_argument("--owasp-testcode", default=None,
                     help="testcode dir with the .py cases (default: CSV dir / testcode)")
+    ap.add_argument("--bundle", default=None,
+                    help=".frc corpus bundle passed to every scan via --corpus-bundle")
     args = ap.parse_args()
 
     binary = Path(args.bin)
+    bundle = Path(args.bundle) if args.bundle else None
     if not binary.exists():
         print(f"[ERROR] frensense binary not found at {binary}", file=sys.stderr)
         print("        build it with: cargo build --release", file=sys.stderr)
+        sys.exit(1)
+    if bundle is not None and not bundle.exists():
+        print(f"[ERROR] bundle not found at {bundle}", file=sys.stderr)
         sys.exit(1)
 
     csv_path = Path(args.owasp_csv)
@@ -179,7 +189,7 @@ def main() -> None:
           f"scanning with {args.workers} workers...")
     t0 = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
-        results = list(ex.map(lambda c: scan_case(binary, c), cases_list))
+        results = list(ex.map(lambda c: scan_case(binary, c, bundle), cases_list))
     elapsed = time.time() - t0
 
     errors = sum(1 for r in results if "error" in r)

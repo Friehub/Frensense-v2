@@ -230,6 +230,50 @@ impl<'a> LoweringContext<'a> {
                         }
                         None
                     }
+                    (Some(lhs), Some(value_node))
+                        if lhs.kind() == "subscript" || lhs.kind() == "attribute" =>
+                    {
+                        // Python-style member/element store: `m['k'] = v`,
+                        // `obj.attr = v`. Without this arm the Declaration
+                        // fall-through re-visits the LHS as an r-value read
+                        // and the store (and its taint) is lost entirely.
+                        let rhs_op = self.visit_node(value_node).unwrap_or(Operand::Unknown);
+                        if let Some(lval) = self.visit_lvalue(lhs) {
+                            match lval {
+                                LValue::Variable(dest) => {
+                                    self.ir.push_instruction(
+                                        self.current_block,
+                                        Instruction::Assign { dest, src: rhs_op },
+                                    );
+                                }
+                                LValue::Field { base, field } => {
+                                    self.ir.push_instruction(
+                                        self.current_block,
+                                        Instruction::StoreField {
+                                            mem_out: self.memory_var,
+                                            mem_in: self.memory_var,
+                                            base,
+                                            field,
+                                            src: rhs_op,
+                                        },
+                                    );
+                                }
+                                LValue::Element { base, index } => {
+                                    self.ir.push_instruction(
+                                        self.current_block,
+                                        Instruction::StoreElement {
+                                            mem_out: self.memory_var,
+                                            mem_in: self.memory_var,
+                                            base,
+                                            index,
+                                            src: rhs_op,
+                                        },
+                                    );
+                                }
+                            }
+                        }
+                        None
+                    }
                     _ => {
                         // Container: lower children (each declarator hits the
                         // (name, value) arm above).

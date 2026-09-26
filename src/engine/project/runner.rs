@@ -50,7 +50,7 @@ impl Engine {
         }
 
         // Built-in config + fact table from the language specs present.
-        let (config, mut facts) = build_spec_tables(&files);
+        let (mut config, mut facts) = build_spec_tables(&files);
 
         // Merge corpus-owned seed facts (deployment-specific knowledge:
         // session-store roots, project conventions). Spec tables first,
@@ -82,6 +82,12 @@ impl Engine {
                     tracing::warn!("failed to load corpus bundle: {e}");
                 }
             }
+        }
+
+        // Bundle-learned source patterns widen the taint config: the bundle
+        // teaches new framework sources without touching the built-in tables.
+        for pattern in facts.source_patterns() {
+            config.sources.insert(pattern.to_string());
         }
 
         let result = scan::scan(&files, &config, &facts);
