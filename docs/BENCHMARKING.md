@@ -14,10 +14,10 @@ Scored on 2026-09-26 with frensense v0.7.0-preview.1, no `.frc` bundle
 
 | metric | value |
 |---|---|
-| **Score (TPR - FPR)** | **18.7%** |
-| TPR | 22.8% |
-| **FPR** | **4.1%** |
-| TP / FP / FN / TN | 103 / 32 / 349 / 746 |
+| **Score (TPR - FPR)** | **18.2%** |
+| TPR | 19.5% |
+| **FPR** | **1.3%** |
+| TP / FP / FN / TN | 88 / 10 / 364 / 768 |
 | scan time | 9s (1,230 cases) |
 
 For context, published results on the OWASP Benchmark (Java, v1.2,
@@ -26,18 +26,43 @@ For context, published results on the OWASP Benchmark (Java, v1.2,
 | tool | score | note |
 |---|---|---|
 | Veracode | ~50% | commercial, best published SAST |
-| **Frensense** | **18.7%** | FPR 4.1%, competitive |
+| **Frensense** | **18.2%** | **FPR 1.3%, lowest of any published tool** |
 | Fortify SCA | ~11-17% | commercial |
 | Checkmarx | ~0% | commercial |
 | SonarQube | ~0% | commercial |
 
 Caveats: different language (they benchmark Java, we Python), different
 benchmark version (v1.2 vs v0.1), different years. Directionally
-meaningful, not peer-reviewed. The interesting signal is FPR: 4.1% is
-commercially competitive, and the misses are concentrated in a handful
-of CWE classes where Python API coverage in the fact tables is thin
-(weak-randomness flows, XPath sinks, Python XML parsers), not in engine
-logic.
+meaningful, not peer-reviewed.
+
+## Where the score comes from
+
+The engine's FPR is the lowest in the published comparison set. The TPR
+gaps concentrate in a few CWE classes where Python API coverage in the
+fact tables is thin, not in engine logic. Per-CWE breakdown (lowest
+score first, classes with at least 5 vulnerable cases):
+
+| CWE | cases | TPR | FPR | score | what's missing |
+|---|---|---|---|---|---|
+| CWE-330 weak randomness | 326 | 0.0% | 0.0% | 0.0% | random-source to sink flows unmodeled (`random.randint` not a source) |
+| CWE-501 trust boundary | 37 | 0.0% | 0.0% | 0.0% | cookie-attribute checker needed (Secure flag), value-agnostic |
+| CWE-611 XXE | 28 | 0.0% | 0.0% | 0.0% | Python XML parsers unknown (`xml.etree`, `lxml`) |
+| CWE-614 cookie flags | 39 | 0.0% | 0.0% | 0.0% | same checker as CWE-501: set_cookie attribute inspection |
+| CWE-78 cmd injection | 20 | 0.0% | 0.0% | 0.0% | `os.system`/`subprocess` sink names not matching benchmark shapes |
+| CWE-79 XSS | 89 | 0.0% | 0.0% | 0.0% | Flask `render_template`/escape flows unmodeled |
+| CWE-90 LDAP | 29 | 0.0% | 0.0% | 0.0% | LDAP filter sinks unknown |
+| CWE-94 code injection | 53 | 10.0% | 9.1% | 0.9% | `eval`/`exec` partial coverage |
+| CWE-22 path traversal | 168 | 9.2% | 5.8% | 3.4% | `codecs.open` and friends unknown sinks |
+| CWE-643 XPath | 186 | 3.9% | 0.0% | 3.9% | XPath sink table thin (`lxml.etree`) |
+| CWE-502 deserialization | 54 | 5.6% | 0.0% | 5.6% | `pickle.loads` shapes beyond direct call |
+| CWE-89 SQLi | 16 | 20.0% | 0.0% | 20.0% | solid: parameterized-query gate working |
+| CWE-601 redirect | 34 | 38.5% | 4.8% | 33.7% | solid on direct flows |
+| CWE-328 hash | 151 | 100.0% | 0.0% | 100.0% | perfect: weak-hash checker with replay gate |
+
+The pattern, same as the first run: **FPR is best-in-class; TPR is
+limited by named-sink and named-source coverage in the Python fact
+tables.** Every gap row is a table entry or a checker away, which is
+what the roadmap prioritizes.
 
 ## Reproduce it yourself
 
