@@ -387,7 +387,38 @@ impl GuardMap {
                         } => {
                             next.push(*u);
                         }
-                        Instruction::BinaryOp { lhs, rhs, .. } => {
+                        Instruction::BinaryOp { op, lhs, rhs, .. } => {
+                            // Containment / equality guard: `if needle in x:`,
+                            // `if x == ALLOWED:` where the sibling operand is a
+                            // literal. The var side is *checked* by this branch:
+                            // values flowing past the guarded region were
+                            // compared against a literal allow/deny list. The
+                            // comparison itself does not transform the value,
+                            // so it is invisible to the value-flow walk (the
+                            // guard is a sibling use of the var, never a link
+                            // in the chain) and must be registered here
+                            // structurally, same as guard-style calls.
+                            let literal_sibling = matches!(
+                                (lhs, rhs),
+                                (Operand::StringLiteral(_), _)
+                                    | (_, Operand::StringLiteral(_))
+                                    | (Operand::IntLiteral(_), _)
+                                    | (_, Operand::IntLiteral(_))
+                            );
+                            let is_comparison = op.contains("in")
+                                || op == "=="
+                                || op == "!="
+                                || op == "not";
+                            if literal_sibling && is_comparison {
+                                for op in [lhs, rhs] {
+                                    if let Operand::Var(u) = op {
+                                        guards.entry(*u).or_default().push(bid);
+                                    }
+                                }
+                            }
+                            // Keep walking: boolean chains
+                            // (`if x == A or x == B:`) nest BinaryOps, so the
+                            // var side may itself be a deeper comparison.
                             for op in [lhs, rhs] {
                                 if let Operand::Var(u) = op {
                                     next.push(*u);

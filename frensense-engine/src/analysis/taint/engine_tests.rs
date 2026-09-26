@@ -721,4 +721,206 @@ pub mod demand_tests {
         assert_eq!(engine2.findings.len(), 1, "learned source fact must fire");
         assert_eq!(engine2.findings[0].verdict, BackwardVerdict::Vulnerable);
     }
+
+    // -----------------------------------------------------------------------
+    // Guard quality: containment guard on a tainted var cuts the path.
+    //
+    //   fn handler(request) {
+    //     bar = request.form.get("p");
+    //     if "../" in bar { return; }
+    //     open(bar);            // sink, guarded
+    //   }
+    //
+    // The containment test is a *sibling use* of `bar`: the backward walk
+    // never passes through it, so the GuardMap must register it
+    // structurally (cond BinaryOp with a literal sibling). The guard block
+    // dominates the sink block, so the flow is Sanitized, not Vulnerable.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_containment_guard_cuts_path() {
+        let mut handler = FunctionIR::new("handler".into());
+        {
+            let b0 = handler.entry_block;
+            let mem0 = handler.initial_memory_state;
+
+            // bar = request.form.get("p")
+            let req = handler.new_var(dummy_meta("request"));
+            let form = handler.new_var(dummy_meta("request.form"));
+            handler.push_instruction(
+                b0,
+                Instruction::LoadField {
+                    dest: form,
+                    mem_in: mem0,
+                    base: req,
+                    field: "form".into(),
+                },
+            );
+            let got = handler.new_var(dummy_meta("got"));
+            let m1 = handler.new_var(mem_meta("m1"));
+            handler.push_instruction(
+                b0,
+                Instruction::CallVirtual {
+                    dest: Some(got),
+                    mem_out: m1,
+                    mem_in: mem0,
+                    method: "get".into(),
+                    receiver: Operand::Var(form),
+                    args: vec![Operand::StringLiteral("\"p\"".into())],
+                },
+            );
+            let bar = handler.new_var(dummy_meta("bar"));
+            handler.push_instruction(
+                b0,
+                Instruction::Assign {
+                    dest: bar,
+                    src: Operand::Var(got),
+                },
+            );
+            // cond = "../" in bar
+            let cond = handler.new_var(dummy_meta("cond"));
+            handler.push_instruction(
+                b0,
+                Instruction::BinaryOp {
+                    dest: cond,
+                    op: "in".into(),
+                    lhs: Operand::StringLiteral("\"../\"".into()),
+                    rhs: Operand::Var(bar),
+                },
+            );
+
+            let guarded = handler.new_block();
+            let merge = handler.new_block();
+            handler.set_terminator(
+                b0,
+                Terminator::Branch {
+                    cond: Operand::Var(cond),
+                    true_block: guarded,
+                    false_block: merge,
+                },
+            );
+            handler.add_edge(b0, guarded);
+            handler.add_edge(b0, merge);
+
+            // sink in merge: open(bar)
+            let m2 = handler.new_var(mem_meta("m2"));
+            handler.push_instruction(
+                merge,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m2,
+                    mem_in: m1,
+                    func: "open".into(),
+                    args: vec![Operand::Var(bar)],
+                },
+            );
+            handler.set_terminator(merge, Terminator::Return { src: None });
+        }
+
+        let cfg = TaintConfig {
+            sources: [
+                "request.form.get".to_string(),
+                "request.form".to_string(),
+                "request".to_string(),
+            ]
+            .into_iter()
+            .collect(),
+            sinks: ["open".to_string()].into_iter().collect(),
+            sanitizers: [].into_iter().collect(),
+        };
+        let prog = build_program(vec![handler]);
+        let (findings, _stats) = run_backward(&cfg, &prog);
+
+        let vulns: Vec<_> = findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            vulns.is_empty(),
+            "containment-guarded flow must not be Vulnerable, got {:?}",
+            findings
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Same flow WITHOUT the guard: Vulnerable (the guard is what makes the
+    // difference, proving the test above isn't vacuous).
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_unguarded_flow_still_vulnerable() {
+        let mut handler = FunctionIR::new("handler".into());
+        {
+            let b0 = handler.entry_block;
+            let mem0 = handler.initial_memory_state;
+            let req = handler.new_var(dummy_meta("request"));
+            let form = handler.new_var(dummy_meta("request.form"));
+            handler.push_instruction(
+                b0,
+                Instruction::LoadField {
+                    dest: form,
+                    mem_in: mem0,
+                    base: req,
+                    field: "form".into(),
+                },
+            );
+            let got = handler.new_var(dummy_meta("got"));
+            let m1 = handler.new_var(mem_meta("m1"));
+            handler.push_instruction(
+                b0,
+                Instruction::CallVirtual {
+                    dest: Some(got),
+                    mem_out: m1,
+                    mem_in: mem0,
+                    method: "get".into(),
+                    receiver: Operand::Var(form),
+                    args: vec![Operand::StringLiteral("\"p\"".into())],
+                },
+            );
+            let bar = handler.new_var(dummy_meta("bar"));
+            handler.push_instruction(
+                b0,
+                Instruction::Assign {
+                    dest: bar,
+                    src: Operand::Var(got),
+                },
+            );
+            let merge = handler.new_block();
+            handler.set_terminator(b0, Terminator::Jump(merge));
+            handler.add_edge(b0, merge);
+
+            let m2 = handler.new_var(mem_meta("m2"));
+            handler.push_instruction(
+                merge,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m2,
+                    mem_in: m1,
+                    func: "open".into(),
+                    args: vec![Operand::Var(bar)],
+                },
+            );
+            handler.set_terminator(merge, Terminator::Return { src: None });
+        }
+
+        let cfg = TaintConfig {
+            sources: [
+                "request.form.get".to_string(),
+                "request.form".to_string(),
+                "request".to_string(),
+            ]
+            .into_iter()
+            .collect(),
+            sinks: ["open".to_string()].into_iter().collect(),
+            sanitizers: [].into_iter().collect(),
+        };
+        let prog = build_program(vec![handler]);
+        let (findings, _stats) = run_backward(&cfg, &prog);
+
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.verdict == BackwardVerdict::Vulnerable),
+            "unguarded flow must stay Vulnerable, got {:?}",
+            findings
+        );
+    }
 }
