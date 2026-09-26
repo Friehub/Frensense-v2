@@ -19,6 +19,7 @@ fn print_help() {
     println!("Options:");
     println!("  --json                     Output findings as JSON");
     println!("  --sarif                    Output findings in SARIF format");
+    println!("  --github                   GitHub Actions annotations (::error/::warning/::notice)");
     println!("  --strict                   Exit with code 1 if any findings");
     println!("  --severity <level>         Minimum severity: critical, warning, info");
     println!("  --language <lang>          Language filter (rust, typescript, javascript, python)");

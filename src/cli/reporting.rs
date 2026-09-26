@@ -37,6 +37,9 @@ pub fn print_results(
                     .map_err(|e| FrensenseError::Config(format!("JSON error: {e}")))?
             );
         }
+        "github" => {
+            print!("{}", Reporter::to_github_annotations(advisories));
+        }
         _ => {
             if advisories.is_empty() {
                 println!("Analysis Complete: No findings.");
