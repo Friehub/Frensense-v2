@@ -373,6 +373,10 @@ fn python_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
         "escape" | "html_escape" | "cgi_escape" => Some(SanitizerKind::HtmlEscape),
         // Bleach, MarkupSafe
         "clean" | "linkify" | "Markup" => Some(SanitizerKind::HtmlEscape),
+        // Project-local escaping wrappers: `escape_*` is the near-universal
+        // naming convention for output-encoding helpers (OWASP Benchmark's
+        // helpers.escape_for_html, Django's escape, in-house wrappers).
+        name if name.starts_with("escape_") => Some(SanitizerKind::HtmlEscape),
         // URL encoding
         "quote" | "quote_plus" | "urlencode" => Some(SanitizerKind::UrlEncode),
         // Path normalization
@@ -764,10 +768,11 @@ impl LanguageSpec for PythonSpec {
             ("res.send", crate::spec::SinkLabel::ResponseLeak),
             ("res.json", crate::spec::SinkLabel::ResponseLeak),
             // Unsafe Deserialization
+            // (yaml.safe_load is deliberately NOT a sink: it resolves only
+            // basic YAML types, which is what makes it the *safe* API.)
             ("pickle.loads", crate::spec::SinkLabel::UnsafeDeserialize),
             ("pickle.load", crate::spec::SinkLabel::UnsafeDeserialize),
             ("yaml.load", crate::spec::SinkLabel::UnsafeDeserialize),
-            ("yaml.safe_load", crate::spec::SinkLabel::UnsafeDeserialize),
             ("marshal.loads", crate::spec::SinkLabel::UnsafeDeserialize),
             ("shelve.open", crate::spec::SinkLabel::UnsafeDeserialize),
             ("loads", crate::spec::SinkLabel::UnsafeDeserialize),
@@ -782,12 +787,12 @@ impl LanguageSpec for PythonSpec {
             ("info", crate::spec::SinkLabel::LogLeak),
             ("debug", crate::spec::SinkLabel::LogLeak),
             // Prototype Pollution
-            ("Object.assign", crate::spec::SinkLabel::PrototypePollution),
-            ("_.merge", crate::spec::SinkLabel::PrototypePollution),
-            ("_.defaultsDeep", crate::spec::SinkLabel::PrototypePollution),
-            ("_.set", crate::spec::SinkLabel::PrototypePollution),
-            ("$.extend", crate::spec::SinkLabel::PrototypePollution),
-            ("setPrototypeOf", crate::spec::SinkLabel::PrototypePollution),
+            // NOTE: JS-only prototype-pollution sinks (_.set, $.extend,
+            // setPrototypeOf, Object.assign) are deliberately NOT in the
+            // Python table. The engine matches sinks by last segment, so a
+            // bare "_.set" entry would make every `.set(` call (e.g.
+            // Flask's response.set_cookie lowering, ConfigParser.set) a
+            // prototype-pollution sink. Python has no prototype chains.
             // XXE
             ("DOMParser", crate::spec::SinkLabel::Xxe),
             // JWT
@@ -859,13 +864,17 @@ impl LanguageSpec for PythonSpec {
         &[
             "escape",
             "html_escape",
+            "escape_html",
+            "escape_for_html",
+            "escape_url",
+            "escape_js",
+            "escape_xml",
             "quote",
             "quote_plus",
             "sanitize",
             "validate_email",
             "bleach",
             "clean",
-            "escape_html",
             "quoteattr",
             "markupsafe.escape",
             "bleach.clean",
@@ -1015,17 +1024,15 @@ impl LanguageSpec for PythonSpec {
                     "hashlib.sha512",
                     "bcrypt",
                 ],
-            ),
-            (
-                "deserialize",
-                &[
-                    "loads",
-                    "load",
-                    "json.loads",
-                    "yaml.safe_load",
-                    "pickle.loads",
-                ],
-            ),
+            ),                (
+                    "deserialize",
+                    &[
+                        "loads",
+                        "load",
+                        "json.loads",
+                        "pickle.loads",
+                    ],
+                ),
             ("sanitize", &["escape", "bleach.clean", "markupsafe.escape"]),
             ("regex", &["re.compile", "re.match", "re.search", "re.sub"]),
             ("process", &["os.system", "os.popen", "subprocess"]),
