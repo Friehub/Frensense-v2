@@ -42,3 +42,7 @@ frensense-bundler = { version = "0.7.0-preview.1", path = "frensense-bundler" }
 
 [dev-dependencies]
 tempfile = "3"
+
+[[bin]]
+name = "frensense-lsp"
+path = "src/bin/frensense-lsp.rs"
