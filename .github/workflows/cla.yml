@@ -26,7 +26,7 @@ jobs:
           github.event_name == 'pull_request_target' ||
           github.event.comment.body == 'recheck' ||
           github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'
-        uses: manaflow-ai/cla-github-action@main
+        uses: manaflow-ai/cla-github-action@v3.2.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # A fine-grained PAT with contents:write on the cla-signatures branch.
