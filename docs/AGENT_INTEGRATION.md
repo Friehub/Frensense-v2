@@ -244,5 +244,4 @@ change what the engine can see, and both sides must agree on reality.
 
 - [MCP_USAGE.md](MCP_USAGE.md): agent tool surface + end-to-end session
 - [LSP_USAGE.md](LSP_USAGE.md): editor surface
-- [FRENSENSE_CORPUS_GUIDE.md](FRENSENSE_CORPUS_GUIDE.md): building bundles
 - README: install, one-crate-three-binaries

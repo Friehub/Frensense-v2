@@ -234,8 +234,6 @@ python3 scripts/owasp_benchmark.py \
   workflow.
 - [docs/BENCHMARKING.md](docs/BENCHMARKING.md): benchmark methodology and
   per-CWE results.
-- [docs/FRENSENSE_CORPUS_GUIDE.md](docs/FRENSENSE_CORPUS_GUIDE.md):
-  building and using `.frc` knowledge bundles.
 
 ## Knowledge Bundles (.frc)
 

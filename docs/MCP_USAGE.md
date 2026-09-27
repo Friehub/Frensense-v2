@@ -8,30 +8,47 @@
 stdio). Every tool calls the same analysis engine as the CLI: same
 lowering, same fact tables, same stable finding IDs.
 
-## Setup
+## Installation
 
-**Build / install** (one crate, three binaries; see the README's
-"One crate, three binaries" section):
+`frensense-mcp` is a self-contained binary — no runtime, no daemon, no
+plugin step. Get it and put it on `PATH`:
 
-```bash
-cargo build --release --bin frensense-mcp
-# → target/release/frensense-mcp
-```
-
-**Register with your MCP client**. The client launches the server as a
-subprocess over stdio, so it only needs the command. Claude Code:
+**Download a release binary** (recommended):
 
 ```bash
-claude mcp add frensense -- /path/to/frensense-mcp
+# Linux x86_64 — replace the tag with the latest release
+curl -L https://github.com/Friehub/frensense-v2/releases/latest/download/frensense-mcp-x86_64-unknown-linux-gnu \
+  -o /usr/local/bin/frensense-mcp && chmod +x /usr/local/bin/frensense-mcp
 ```
 
-Claude Desktop (`claude_desktop_config.json`):
+**Or install from source** (requires a Rust toolchain):
+
+```bash
+cargo install frensense   # installs frensense, frensense-mcp, frensense-lsp
+```
+
+The MCP binary is always built alongside the CLI and the LSP server — one
+crate, one `cargo install`, three binaries.
+
+## Registering with your MCP client
+
+MCP clients launch the server themselves as a subprocess over stdio; you
+only tell them the command. The binary must be on `PATH` or referenced by
+absolute path.
+
+**Claude Code:**
+
+```bash
+claude mcp add frensense -- frensense-mcp
+```
+
+**Claude Desktop** (`claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
     "frensense": {
-      "command": "/path/to/frensense-mcp",
+      "command": "frensense-mcp",
       "env": {
         "FRENSENSE_CORPUS_BUNDLE": "/path/to/frensense-corpus.frc"
       }
@@ -40,10 +57,14 @@ Claude Desktop (`claude_desktop_config.json`):
 }
 ```
 
-`FRENSENSE_CORPUS_BUNDLE` is optional and session-wide: point it at a
-`.frc` bundle and every tool call merges its learned facts into the
-built-in tables. `frensense_scan_file` and `frensense_diff` also accept a
-per-call `corpus_bundle` argument, which overrides the environment value.
+**Cursor / Zed / any MCP-capable client**: point the command at the
+binary; no extra flags needed.
+
+`FRENSENSE_CORPUS_BUNDLE` is optional and session-wide: set it once in the
+server env and every tool call merges those learned facts into the
+built-in tables automatically. `frensense_scan_file` and
+`frensense_diff` also accept a per-call `corpus_bundle` argument that
+overrides the environment value for that single call.
 
 ## The three tools
 
@@ -56,23 +77,42 @@ Directory-level audit. Best for "scan the whole project before you commit".
   "arguments": { "path": "src", "severity_threshold": "warning" } }
 ```
 
-Returns `{ "clean": bool, "advisories": [...] }`; `clean: true` means the
-tree satisfies all invariants.
+Arguments:
+
+| argument | type | default | description |
+|---|---|---|---|
+| `path` | string | **required** | File or directory to audit |
+| `severity_threshold` | `critical` \| `warning` \| `info` | `warning` | Minimum severity to include |
+| `language` | string | — | Filter by language (`rust`, `typescript`, `javascript`, `python`) |
+| `corpus_bundle` | string | — | Path to a `.frc` bundle; overrides `FRENSENSE_CORPUS_BUNDLE` |
+| `stream` | bool | `false` | Emit per-finding `notification` messages as they arrive, then the final result |
+
+Returns `{ "clean": bool, "advisories": [...] }`.
 
 ### `frensense_scan_file`: is THIS file clean?
 
 Single-file scan for agent edit loops. Faster and fully scoped; the result
-labels every advisory with file/line/column, plus top-level `stable_ids`.
+labels every advisory with file/line/column, plus a top-level `stable_ids`
+array.
 
 ```json
 { "name": "frensense_scan_file",
   "arguments": { "path": "src/pay.py" } }
 ```
 
+Arguments:
+
+| argument | type | default | description |
+|---|---|---|---|
+| `path` | string | **required** | Absolute or relative path to one file |
+| `severity_threshold` | `critical` \| `warning` \| `info` | `info` | Minimum severity |
+| `min_confidence` | float 0–1 | `0.0` | Minimum engine confidence |
+| `corpus_bundle` | string | — | Path to a `.frc` bundle |
+
 Unsupported extensions (`.txt`, `.md`, …) return
 `{ "unsupported_file": true, ... }` rather than an error, so the agent can
-skip them without exception handling. `path` on a missing file returns an
-explicit error message; a nonexistent `corpus_bundle` does too.
+skip them without exception handling. A nonexistent `path` or
+`corpus_bundle` returns an explicit `"error"` field with `clean: false`.
 
 ### `frensense_diff`: does MY change introduce findings?
 
@@ -86,22 +126,32 @@ what a gate must not miss).
 { "name": "frensense_diff", "arguments": { "repo": "." } }
 ```
 
-or with an explicit patch (works outside any git repository):
+Or with an explicit patch (works outside any git repository):
 
 ```json
 { "name": "frensense_diff",
   "arguments": { "repo": "/work/project", "diff_text": "diff --git a/app.py b/app.py\n--- a/app.py\n+++ b/app.py\n@@ -4,2 +5,3 @@\n def digest(data):\n+    return hashlib.md5(data).hexdigest()\n     pass\n" } }
 ```
 
-The result carries the parsed `added_ranges` per file (so the agent can
-see what was considered "the change"), `files_scanned`, `advisories`
-filtered to added lines, and their `stable_ids`.
+Arguments:
+
+| argument | type | default | description |
+|---|---|---|---|
+| `repo` | string | `.` | Repository root; files in the diff are resolved here |
+| `diff_text` | string | — | Unified diff text; omit to run `git diff HEAD` in `repo` |
+| `severity_threshold` | `critical` \| `warning` \| `info` | `info` | Minimum severity |
+| `min_confidence` | float 0–1 | `0.0` | Minimum engine confidence |
+| `corpus_bundle` | string | — | Path to a `.frc` bundle |
+
+The result carries `added_ranges` per file (what the tool considered "the
+change"), `files_scanned`, `advisories` filtered to added lines, and their
+`stable_ids`.
 
 ## End-to-end agent session
 
 A realistic loop: agent edits a file → checks the diff → fixes → verifies
 the fix by stable ID. The session below is real output from
-v0.7.0-preview.1 against this change to `src/pay.py` in a git repo
+v0.7.0-preview.2 against this change to `src/pay.py` in a git repo
 (`hash_password` was holding an MD5 password hash and `find_user` built
 SQL by concatenation; the agent rewrote both, but also added a new
 `hash_token` helper that still uses MD5):
@@ -167,8 +217,8 @@ the signal to iterate.
 
 The change is clean. Compare IDs, not lines: `FRN-a441e6e7b795…` appearing
 in step 1 and disappearing in step 2 is proof *that specific finding* was
-fixed. The ID is stable across line shifts, so it survives unrelated
-edits anywhere above the finding.
+fixed. The ID is stable across line shifts, so it survives unrelated edits
+anywhere above the finding.
 
 **3. Optional: focus on the single file** while iterating (faster than a
 diff when the agent is only touching one buffer):
@@ -198,6 +248,7 @@ diff when the agent is only touching one buffer):
 - The server speaks the standard MCP lifecycle: `initialize` →
   `initialized` → tool calls; `shutdown`/`exit` to stop. `tools/list`
   always reflects the current tool set.
+- Protocol version: `2024-11-05`.
 - Logs go to **stderr**; stdout is protocol-only. Never parse stderr.
 - Advisory JSON is the same `Advisory` schema the CLI's `--json` emits
   (fingerprint, taint path steps, tags), so agent-side parsing code works
@@ -209,5 +260,5 @@ diff when the agent is only touching one buffer):
 ## Related
 
 - `docs/LSP_USAGE.md`: the same engine inside your editor
-- `docs/FRENSENSE_CORPUS_GUIDE.md`: building `.frc` bundles
-- README: single-binary installation details
+- `docs/AGENT_INTEGRATION.md`: CI wiring, baseline gating, GitHub annotations
+- README: install and quick-start reference
