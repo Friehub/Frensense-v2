@@ -115,14 +115,13 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@f1f314fca9dfce2769ece7d933488f076716723e # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: stable
-        with:
           targets: ${{ matrix.settings.target }}
 
       - name: Install dependencies
@@ -298,7 +297,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@f1f314fca9dfce2769ece7d933488f076716723e # v4.4.0
         with:
-          node-version: 20
+          node-version: 22
           registry-url: 'https://registry.npmjs.org'
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
