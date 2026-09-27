@@ -4,6 +4,7 @@
 //! MCP request dispatcher.
 
 use super::audit::{run_audit, run_audit_streamed, tool_definition};
+use super::scan_file::{run_scan_file, tool_definition as scan_file_tool_definition};
 use super::protocol::{JsonRpcRequest, JsonRpcResponse, rpc_error, rpc_no_response, rpc_result};
 use serde_json::{Value, json};
 
@@ -31,18 +32,31 @@ pub fn handle_request(req: JsonRpcRequest) -> JsonRpcResponse {
 
         "tools/list" => {
             let result = json!({
-                "tools": [tool_definition()]
+                "tools": [tool_definition(), scan_file_tool_definition()]
             });
             rpc_result(req.id, result)
         }
 
         "tools/call" => {
             let name = req.params.get("name").and_then(Value::as_str).unwrap_or("");
+            let args = &req.params["arguments"];
+
+            if name == "frensense_scan_file" {
+                let result_data = run_scan_file(args);
+                let result = json!({
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": serde_json::to_string_pretty(&result_data).unwrap_or_default()
+                        }
+                    ]
+                });
+                return rpc_result(req.id, result);
+            }
+
             if name != "frensense_audit" {
                 return rpc_error(req.id, -32602, format!("unknown tool: {name}"));
             }
-
-            let args = &req.params["arguments"];
 
             let path = args
                 .get("path")

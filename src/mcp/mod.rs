@@ -5,3 +5,4 @@
 pub mod audit;
 pub mod handler;
 pub mod protocol;
+pub mod scan_file;
