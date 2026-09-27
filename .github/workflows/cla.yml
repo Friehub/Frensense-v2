@@ -33,13 +33,12 @@ jobs:
           PERSONAL_ACCESS_TOKEN: ${{ secrets.CLA_SIGNATURES_TOKEN }}
         with:
           # The CLA document contributors sign.
-          path-to-document: 'https://github.com/Friehub/Frensense/blob/fix/release-v4/CLA.md'
+          path-to-document: 'https://github.com/Friehub/Frensense-v2/blob/main/CLA.md'
           # Where signed entries (login + timestamp + CLA version) are stored.
           path-to-signatures: 'signatures/cla.json'
           branch: 'cla-signatures'
-          # never block maintainers or bots
+          # Never block maintainers or bots.
           allowlist: 'Friehub,dependabot[bot],github-actions[bot]'
-          # Re-request signatures when CLA.md version changes.
           signed-commit-message: 'CLA signed by $contributorString'
-          custom-not-signed-pr-message: 'Thanks for your contribution! Please sign our CLA (CLA.md) by commenting the signing line below, one click, once ever.'
-          custom-signed-pr-message: 'CLA signed, thank you!'
+          custom-notsigned-prcomment: 'Thanks for your contribution! Please sign our CLA (CLA.md) by commenting the signing line below — one click, once ever.'
+          custom-allsigned-prcomment: 'CLA signed — thank you!'
