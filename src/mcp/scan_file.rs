@@ -46,6 +46,10 @@ pub fn tool_definition() -> Value {
                     "maximum": 1.0,
                     "default": 0.0,
                     "description": "Minimum engine confidence for a finding to be reported"
+                },
+                "corpus_bundle": {
+                    "type": "string",
+                    "description": "Optional path to a .frc knowledge bundle whose learned Source/Sink facts extend the built-in tables (framework-specific taint sources etc.)"
                 }
             },
             "required": ["path"]
@@ -102,10 +106,25 @@ pub fn filter_advisories(
 ///
 /// # Errors
 /// Propagates engine failures (unreadable file, internal analysis error).
-pub fn scan_file(path: &Path, min_confidence: f64) -> crate::Result<Vec<Advisory>> {
+pub fn scan_file(
+    path: &Path,
+    min_confidence: f64,
+    corpus_bundle: Option<&str>,
+) -> crate::Result<Vec<Advisory>> {
+    let mut engine = build_engine(min_confidence, corpus_bundle);
+    engine.run(path)
+}
+
+/// Engine construction shared by every MCP tool. The CLI wires the same
+/// three knobs; the MCP surface must not drift from it (learned `.frc`
+/// facts are part of a scan's meaning, not an optional extra).
+pub(crate) fn build_engine(min_confidence: f64, corpus_bundle: Option<&str>) -> Engine {
     let mut engine = Engine::new();
     engine.set_min_confidence(min_confidence);
-    engine.run(path)
+    if let Some(bundle) = corpus_bundle {
+        engine.set_corpus_bundle_path(std::path::PathBuf::from(bundle));
+    }
+    engine
 }
 
 /// Build the JSON-RPC `tools/call` result payload.
@@ -172,8 +191,18 @@ pub fn run_scan_file(args: &Value) -> Value {
         .and_then(Value::as_f64)
         .unwrap_or(0.0)
         .clamp(0.0, 1.0);
+    let corpus_bundle = args.get("corpus_bundle").and_then(Value::as_str);
+    if let Some(bundle) = corpus_bundle
+        && !Path::new(bundle).exists()
+    {
+        return json!({
+            "clean": false,
+            "advisories": [],
+            "error": format!("corpus bundle does not exist: {bundle}")
+        });
+    }
 
-    match scan_file(path, min_confidence) {
+    match scan_file(path, min_confidence, corpus_bundle) {
         Ok(advisories) => {
             let filtered = filter_advisories(advisories, severity_threshold, min_confidence);
             result_payload(path, &filtered)

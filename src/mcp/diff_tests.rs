@@ -135,7 +135,7 @@ index 1111111..2222222 100644
  
 ";
     let (ranges, advisories, scanned) =
-        run_diff(&dir, Some(diff), "info", 0.0).expect("run_diff");
+        run_diff(&dir, Some(diff), "info", 0.0, None).expect("run_diff");
     assert_eq!(scanned, 1);
     assert!(ranges.contains_key("app.py"));
     // The pre-existing md5 finding is on line 5 — NOT on the added line
@@ -160,7 +160,7 @@ index 1111111..2222222 100644
 +    return hashlib.md5(data).hexdigest()
      pass
 ";
-    let (ranges2, advisories2, _) = run_diff(&dir, Some(diff2), "info", 0.0).expect("run_diff 2");
+    let (ranges2, advisories2, _) = run_diff(&dir, Some(diff2), "info", 0.0, None).expect("run_diff 2");
     let expected_line: Vec<u32> = ranges2["app.py"].iter().map(|r| r.start).collect();
     assert_eq!(expected_line, vec![6]);
     assert!(
@@ -180,7 +180,7 @@ fn end_to_end_git_diff_in_temp_repo() {
     // Working-tree change that introduces a finding on an added line.
     std::fs::write(dir.join("bad.py"), "import hashlib\n\n\ndef d(x):\n    return hashlib.md5(x).hexdigest()\n").unwrap();
 
-    let (ranges, advisories, _) = run_diff(&dir, None, "info", 0.0).expect("git run_diff");
+    let (ranges, advisories, _) = run_diff(&dir, None, "info", 0.0, None).expect("git run_diff");
     assert!(ranges.contains_key("bad.py"), "ranges: {ranges:?}");
     assert!(
         advisories.iter().any(|a| a.file_path.ends_with("bad.py")),

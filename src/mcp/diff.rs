@@ -20,7 +20,7 @@
 //! stays in `frensense-lang`, analysis stays in the engine.
 
 use super::scan_file::{is_supported, severity_rank};
-use crate::{Advisory, Engine, Severity};
+use crate::{Advisory, Severity};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -58,6 +58,10 @@ pub fn tool_definition() -> Value {
                     "maximum": 1.0,
                     "default": 0.0,
                     "description": "Minimum engine confidence for a finding to be reported"
+                },
+                "corpus_bundle": {
+                    "type": "string",
+                    "description": "Optional path to a .frc knowledge bundle whose learned Source/Sink facts extend the built-in tables"
                 }
             }
         }
@@ -325,6 +329,7 @@ pub fn run_diff(
     diff_text: Option<&str>,
     severity_threshold: &str,
     min_confidence: f64,
+    corpus_bundle: Option<&str>,
 ) -> crate::Result<DiffScanOutcome> {
     let diff = match diff_text {
         Some(d) => d.to_string(),
@@ -338,8 +343,8 @@ pub fn run_diff(
     // by collect_files' own rules.
     let mut all = Vec::new();
     let mut scanned = 0usize;
-    let mut engine = Engine::new();
-    engine.set_min_confidence(min_confidence);
+    let mut engine =
+        super::scan_file::build_engine(min_confidence, corpus_bundle);
     for path in ranges.keys() {
         let abs = repo.join(path);
         if !is_supported(&abs) {
@@ -429,6 +434,16 @@ pub fn run_diff_tool(args: &Value) -> Value {
         .and_then(Value::as_f64)
         .unwrap_or(0.0)
         .clamp(0.0, 1.0);
+    let corpus_bundle = args.get("corpus_bundle").and_then(Value::as_str);
+    if let Some(bundle) = corpus_bundle
+        && !Path::new(bundle).exists()
+    {
+        return json!({
+            "clean": false,
+            "advisories": [],
+            "error": format!("corpus bundle does not exist: {bundle}")
+        });
+    }
 
     if diff_text.is_none() {
         // Only hit git when asked to; an explicit diff_text must work
@@ -456,7 +471,7 @@ pub fn run_diff_tool(args: &Value) -> Value {
         }
     }
 
-    match run_diff(repo, diff_text, severity_threshold, min_confidence) {
+    match run_diff(repo, diff_text, severity_threshold, min_confidence, corpus_bundle) {
         Ok((ranges, advisories, scanned)) => result_payload(&ranges, &advisories, scanned),
         Err(e) => json!({
             "clean": false,

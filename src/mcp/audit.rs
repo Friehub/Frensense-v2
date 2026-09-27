@@ -6,7 +6,7 @@
 //! Audit orchestration logic for the MCP server.
 
 use super::protocol::{RequestId, rpc_result, write_response};
-use crate::{Advisory, Engine, Severity};
+use crate::{Advisory, Severity};
 use serde_json::{Value, json};
 use std::io::{self, Write};
 use std::path::Path;
@@ -31,6 +31,10 @@ pub fn tool_definition() -> Value {
                 "language": {
                     "type": "string",
                     "description": "Filter by language (rust, typescript, javascript, python)"
+                },
+                "corpus_bundle": {
+                    "type": "string",
+                    "description": "Optional path to a .frc knowledge bundle whose learned Source/Sink facts extend the built-in tables"
                 }
             },
             "required": ["path"]
@@ -98,7 +102,10 @@ pub fn run_audit_streamed(
         return;
     }
 
-    let mut engine = Engine::new();
+    let corpus_bundle = std::env::var("FRENSENSE_CORPUS_BUNDLE").ok()
+        .filter(|p| !p.is_empty());
+
+    let mut engine = super::scan_file::build_engine(0.0, corpus_bundle.as_deref());
 
     let advisories = match engine.run(target) {
         Ok(a) => a,
@@ -148,7 +155,10 @@ pub fn run_audit(path: &str, severity_threshold: &str, language: Option<&str>) -
         });
     }
 
-    let mut engine = Engine::new();
+    let corpus_bundle = std::env::var("FRENSENSE_CORPUS_BUNDLE").ok()
+        .filter(|p| !p.is_empty());
+
+    let mut engine = super::scan_file::build_engine(0.0, corpus_bundle.as_deref());
 
     let advisories = match engine.run(target) {
         Ok(advisories) => advisories,
