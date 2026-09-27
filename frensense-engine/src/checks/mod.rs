@@ -21,12 +21,15 @@
 
 pub mod guard_bypass;
 pub mod schema_policy;
+pub mod uaf;
 pub mod weak_hash;
 
 #[cfg(test)]
 mod guard_bypass_tests;
 #[cfg(test)]
 mod schema_policy_tests;
+#[cfg(test)]
+mod uaf_tests;
 #[cfg(test)]
 mod weak_hash_tests;
 
@@ -82,6 +85,7 @@ pub fn check_all<'a>(
             .chain(guard_bypass::check(ir))
             .chain(guard_bypass::check_credentials(ir))
             .chain(schema_policy::check(ir))
+            .chain(uaf::check(ir))
             .chain(learned::check(ir, facts));
         for f in findings {
             let key = (
