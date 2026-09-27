@@ -194,19 +194,19 @@ stdio.
 Scored against the OWASP Benchmark for Python: 1,230 third-party test
 cases with an authoritative expected-results CSV. Zero overlap with any
 Frensense knowledge bundle. This run uses the engine alone, no `.frc`
-bundle:
+bundle (`v0.7.0-preview.2`):
 
 | metric | value |
 |---|---|
-| **Score (TPR - FPR)** | **18.7%** |
-| TPR | 22.8% |
-| **FPR** | **4.1%** |
-| TP / FP / FN / TN | 103 / 32 / 349 / 746 |
+| **Score (TPR - FPR)** | **23.1%** |
+| TPR | 26.1% |
+| **FPR** | **3.0%** |
+| TP / FP / FN / TN | 118 / 23 / 334 / 755 |
 | scan time | 9s |
 
 For comparison, the OWASP project's published Benchmark scorecards
 (Java, v1.2): Veracode ~50%, Fortify SCA ~11-17%, Checkmarx ~0%,
-SonarQube ~0%. The standout number is the false-positive rate: 4.1% is
+SonarQube ~0%. The standout number is the false-positive rate: 3.0% is
 commercially competitive, and the recall gaps are concentrated in a few
 CWE classes where Python API coverage is still thin, not in engine
 logic. See the caveats and the full per-CWE table in
