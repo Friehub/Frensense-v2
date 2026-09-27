@@ -92,7 +92,8 @@ corpus-facts.frc
 *.frc
 
 # Private docs and strategy notes (README, LICENSE, CHANGELOG, CONTRIBUTING,
-# CLA, and the public benchmarking guide only are committed)
+# CLA, the public benchmarking guide, and the MCP/LSP/agent-integration
+# usage guides only are committed)
 **/*.md
 !README.md
 !LICENSE*
@@ -100,6 +101,9 @@ corpus-facts.frc
 !CONTRIBUTING.md
 !CLA.md
 !docs/BENCHMARKING.md
+!docs/MCP_USAGE.md
+!docs/LSP_USAGE.md
+!docs/AGENT_INTEGRATION.md
 
 # Frensense attribution policy: no bot trailers in commit messages.
 

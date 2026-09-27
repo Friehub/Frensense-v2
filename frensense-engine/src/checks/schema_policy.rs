@@ -45,45 +45,43 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
     let mut enforcers: Vec<&str> = Vec::new();
     for block in ir.blocks.values() {
         for instr in &block.instructions {
-            match instr {
-                Instruction::CallVirtual {
-                    method,
-                    receiver,
-                    args,
-                    dest,
-                    ..
-                } => {
-                    let seg = method.rsplit('.').next().unwrap_or(method);
-                    if seg == "describe" || seg == "description" {
-                        let text = args.first().and_then(|a| match a {
-                            Operand::StringLiteral(s) => Some(s.clone()),
-                            _ => None,
-                        });
-                        if let Some(text) = text {
-                            let span = dest
-                                .as_ref()
-                                .and_then(|d| ir.var_metadata.get(d))
-                                .and_then(|m| m.byte_range)
-                                .or_else(|| {
-                                    if let Operand::Var(r) = receiver {
-                                        ir.var_metadata.get(r).and_then(|m| m.byte_range)
-                                    } else {
-                                        None
-                                    }
-                                });
-                            described.push((text, span));
-                        }
-                    } else if ENFORCERS.contains(&seg) {
-                        enforcers.push(seg);
-                    } else if NUMBER_BUILDERS.contains(&seg) {
+            if let Instruction::CallVirtual {
+                method,
+                receiver,
+                args,
+                dest,
+                ..
+            } = instr
+            {
+                let seg = method.rsplit('.').next().unwrap_or(method);
+                if seg == "describe" || seg == "description" {
+                    let text = args.first().and_then(|a| match a {
+                        Operand::StringLiteral(s) => Some(s.clone()),
+                        _ => None,
+                    });
+                    if let Some(text) = text {
                         let span = dest
                             .as_ref()
                             .and_then(|d| ir.var_metadata.get(d))
-                            .and_then(|m| m.byte_range);
-                        builders.push((seg.to_string(), span));
+                            .and_then(|m| m.byte_range)
+                            .or_else(|| {
+                                if let Operand::Var(r) = receiver {
+                                    ir.var_metadata.get(r).and_then(|m| m.byte_range)
+                                } else {
+                                    None
+                                }
+                            });
+                        described.push((text, span));
                     }
+                } else if ENFORCERS.contains(&seg) {
+                    enforcers.push(seg);
+                } else if NUMBER_BUILDERS.contains(&seg) {
+                    let span = dest
+                        .as_ref()
+                        .and_then(|d| ir.var_metadata.get(d))
+                        .and_then(|m| m.byte_range);
+                    builders.push((seg.to_string(), span));
                 }
-                _ => {}
             }
         }
     }

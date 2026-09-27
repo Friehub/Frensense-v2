@@ -2,7 +2,7 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-mod runner;
+pub(crate) mod runner;
 
 use crate::{FileId, Severity};
 use std::path::PathBuf;
@@ -82,3 +82,7 @@ impl Default for Engine {
         Self::new()
     }
 }
+
+#[cfg(test)]
+#[path = "stable_id_tests.rs"]
+mod stable_id_tests;

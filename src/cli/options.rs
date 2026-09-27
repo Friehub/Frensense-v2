@@ -40,6 +40,9 @@ pub fn parse_options(args: &[String]) -> CliOptions {
         match args[i].as_str() {
             "--json" => options.format = "json".to_string(),
             "--sarif" => options.format = "sarif".to_string(),
+            "--github" | "--github-annotations" => {
+                options.format = "github".to_string();
+            }
             "--strict" => options.is_strict = true,
             "--diff-only" => options.diff_only = true,
             "--severity" => {

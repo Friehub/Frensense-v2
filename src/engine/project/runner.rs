@@ -240,15 +240,7 @@ fn advisory_from_checker(
         ))
         .with_tags(["checker", &c.rule]);
     advisory.requires_human = false;
-    advisory.fingerprint = {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        file.hash(&mut h);
-        c.rule.hash(&mut h);
-        c.function.hash(&mut h);
-        line.hash(&mut h);
-        format!("{:016x}", h.finish())
-    };
+    advisory.fingerprint = stable_fingerprint(&[file, &c.rule, &c.function]);
     advisory
 }
 
@@ -340,16 +332,37 @@ fn advisory_from_finding(
             )
         })
         .collect();
-    advisory.fingerprint = {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        file.hash(&mut h);
-        f.sink.hash(&mut h);
-        f.function.hash(&mut h);
-        src.hash(&mut h);
-        format!("{:016x}", h.finish())
-    };
+    advisory.fingerprint = stable_fingerprint(&[file, f.sink.as_str(), f.function.as_str(), src]);
     advisory
+}
+
+/// Stable finding ID: an FNV-1a hash over the finding's semantic
+/// coordinates (file, rule/sink, enclosing function, source). Deliberately
+/// EXCLUDES line/column so the ID survives line shifts — adding 10 lines
+/// above a finding must not make it look new to baselines and diff gates.
+/// What re-identifies a finding as "the same bug": the same dangerous API
+/// or rule, in the same function, in the same file. Edit the function
+/// itself (rename, remove the call) and the ID legitimately changes —
+/// that IS a different code state.
+///
+/// FNV-1a rather than DefaultHasher: DefaultHasher's seed is stable only
+/// within one process for SipHash with fixed keys — actually fixed keys
+/// make it cross-process stable too, but FNV-1a is deterministic by spec,
+/// cheap, and dependency-free. Two components joined with `\u{1f}` so
+/// ("ab","c") and ("a","bc") hash differently.
+pub fn stable_fingerprint(components: &[&str]) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for (i, part) in components.iter().enumerate() {
+        if i > 0 {
+            hash ^= 0x1f_u64;
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        for byte in part.as_bytes() {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    format!("{hash:016x}")
 }
 
 /// Shape-based dedup over located findings: group by (path shape, sink file,

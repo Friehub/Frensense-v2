@@ -2,6 +2,52 @@
 
 Thank you for helping make Frensense better! This document explains how to contribute code and how your contribution is licensed.
 
+## Contributing with AI agents
+
+AI coding agents (Claude Code, Codex, Cursor, and similar) are welcome as
+contributors, with a few ground rules that keep main stable:
+
+1. **Small, mechanical PRs only.** Bug fixes, table entries, test coverage,
+   doc improvements. Architectural changes need a human-driven proposal in
+   an issue first.
+2. **The agent must run the full gate locally before the PR is opened:**
+
+   ```bash
+   cargo fmt --all -- --check
+   cargo clippy --all-features --all-targets -- -D warnings
+   cargo test --workspace
+   ```
+
+   CI runs exactly these (plus smoke tests of the `frensense`, MCP, and LSP
+   binaries). A red CI run from skipping the local gate wastes everyone's
+   time.
+3. **A human reviews and submits.** The PR must be opened by a person who
+   has read the diff; the commit author line should say who (or what) wrote
+   the change, and commits must be signed (`git commit -s`).
+4. **Engine changes need a fixture test.** If your change alters findings
+   (a new source, sink, sanitizer, guard, or lowering behavior), add a unit
+   test with a minimal reproduction of the pattern. PRs that change
+   detection behavior without a test are rejected.
+5. **No benchmark chasing.** Do not tune rules against the OWASP
+   BenchmarkPython corpus. Tests must reproduce *real-world* patterns; the
+   benchmark is an independent measurement, not a target list.
+
+## What CI enforces (the merge gate)
+
+| check | command | policy |
+|---|---|---|
+| Style | `cargo fmt --all -- --check` | must pass |
+| Lint | `cargo clippy --all-features --all-targets -- -D warnings` | warnings are errors |
+| Tests | `cargo test --workspace --all-features` | must pass |
+| MSRV | `cargo +1.95 check --all-features` | must compile |
+| Supply chain | `cargo deny` (advisories, licenses, bans) | must pass |
+| Delivery surfaces | CLI/MCP/LSP binary smoke tests | must pass |
+| Consistency | a known finding must appear in both CLI and MCP output | must pass |
+
+A PR can only merge when every check is green; the merge queue is the final
+barrier. This is deliberate: no regression reaches `main` through an
+overlooked warning or an unrun test.
+
 ## Licence
 
 Frensense is licensed under **GPL-3.0-only** (see [LICENSE](LICENSE)). By opening a pull request you agree that your contribution is licensed to the project and its users under GPL-3.0-only.

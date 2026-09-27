@@ -68,7 +68,11 @@ pub enum NodeRole {
     },
 
     // ── Control flow ──────────────────────────────────────────────────────
-    Branch,  // if / switch / ternary / match-arm
+    Branch, // if / switch / match-arm
+    /// Ternary conditional EXPRESSION (`a ? b : c`, Python `a if c else b`).
+    /// Separate from Branch: both arms are expressions producing a value,
+    /// lowered as branch + Phi, not as a statement-level fork.
+    Conditional,
     Loop,    // for / while / do / loop
     Return,  // return statement / expression
     Try,     // try { … }
@@ -313,6 +317,15 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// }
     /// ```
     fn classify(&self, kind: &str) -> NodeRole;
+
+    /// Index of the condition among a ternary expression's named children.
+    ///
+    /// JS/TS `a ? b : c` → `[cond, then, else]`, condition at 0.
+    /// Python `then if cond else else_arm` → `[then, cond, else]`,
+    /// condition at 1 (middle). Defaults to 0.
+    fn ternary_cond_index(&self) -> usize {
+        0
+    }
 
     /// Is this node kind a *property-name* (a named field access) rather
     /// than a computed index?

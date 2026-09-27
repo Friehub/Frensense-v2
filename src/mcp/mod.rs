@@ -3,5 +3,7 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 pub mod audit;
+pub mod diff;
 pub mod handler;
 pub mod protocol;
+pub mod scan_file;

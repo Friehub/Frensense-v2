@@ -634,6 +634,94 @@ impl<'a> LoweringContext<'a> {
                 }
             }
 
+            NodeRole::Conditional => {
+                // Ternary expression: `a ? b : c` (JS/C),
+                // `b if cond else c` (Python). Lower as a real branch with
+                // both arms in their own blocks and a Phi at the merge, so
+                // the backward walk sees two alternative value paths and
+                // branch feasibility can prune the infeasible arm (the
+                // CWE-330-style `bar = const if always_true else param`
+                // FP shape).
+                let mut cursor = node.walk();
+                let children: Vec<Node> = node
+                    .children(&mut cursor)
+                    .filter(|c| c.is_named())
+                    .collect();
+                if children.len() < 3 {
+                    // Degenerate: fall through the generic child walk.
+                    return self.visit_children_generic(node);
+                }
+                let cond_idx = self.spec.ternary_cond_index().min(children.len() - 1);
+                let cond_node = children[cond_idx];
+                let (then_node, else_node) = if cond_idx == 0 {
+                    // JS/C layout: [cond, then, else].
+                    (children[1], children[2])
+                } else {
+                    // Python layout: [then, cond, else].
+                    (children[0], children[2])
+                };
+
+                let cond_op = self.visit_node(cond_node).unwrap_or(Operand::Unknown);
+
+                // One merge var assigned in BOTH arm blocks. The SSA builder
+                // places a Phi for it at the dominance frontier (the merge
+                // block) and fills its incoming edges during renaming, so the
+                // lowering must NOT hand-place a Phi: a lowering-placed phi
+                // with pre-populated incoming vars is invisible to the SSA
+                // rename pass (it rewrites phi.dest but not pre-existing
+                // incoming vars), leaving the phi with stale defs the value
+                // flow can never reach.
+                let dest = self.ir.new_var(VarMetadata {
+                    source_name: None,
+                    type_name: None,
+                    byte_range: Some((node.start_byte(), node.end_byte())),
+                    is_memory_state: false,
+                    object_keys: Vec::new(),
+                });
+
+                let true_block = self.ir.new_block();
+                let false_block = self.ir.new_block();
+                let merge_block = self.ir.new_block();
+                self.ir.set_terminator(
+                    self.current_block,
+                    Terminator::Branch {
+                        cond: cond_op,
+                        true_block,
+                        false_block,
+                    },
+                );
+                self.ir.add_edge(self.current_block, true_block);
+                self.ir.add_edge(self.current_block, false_block);
+
+                // Then arm: bind the merge var.
+                self.env.push(FxHashMap::default());
+                self.current_block = true_block;
+                let then_op = self.visit_node(then_node).unwrap_or(Operand::Unknown);
+                self.ir.push_instruction(
+                    self.current_block,
+                    Instruction::Assign { dest, src: then_op },
+                );
+                self.ir
+                    .set_terminator(self.current_block, Terminator::Jump(merge_block));
+                self.ir.add_edge(self.current_block, merge_block);
+                self.env.pop();
+
+                // Else arm: bind the same merge var.
+                self.env.push(FxHashMap::default());
+                self.current_block = false_block;
+                let else_op = self.visit_node(else_node).unwrap_or(Operand::Unknown);
+                self.ir.push_instruction(
+                    self.current_block,
+                    Instruction::Assign { dest, src: else_op },
+                );
+                self.ir
+                    .set_terminator(self.current_block, Terminator::Jump(merge_block));
+                self.ir.add_edge(self.current_block, merge_block);
+                self.env.pop();
+
+                self.current_block = merge_block;
+                Some(Operand::Var(dest))
+            }
             NodeRole::Branch => {
                 // if / switch statements. Grammar fields differ per language;
                 // walk named children: condition = first expression-ish child,
@@ -956,5 +1044,20 @@ impl<'a> LoweringContext<'a> {
                 last_op
             }
         }
+    }
+
+    /// Generic child walk shared by degenerate shapes (returns the last
+    /// child operand, same semantics as the catch-all arm).
+    fn visit_children_generic(&mut self, node: Node) -> Option<Operand> {
+        let mut cursor = node.walk();
+        let mut last_op = None;
+        for child in node.children(&mut cursor) {
+            if child.is_named()
+                && let Some(op) = self.visit_node(child)
+            {
+                last_op = Some(op);
+            }
+        }
+        last_op
     }
 }

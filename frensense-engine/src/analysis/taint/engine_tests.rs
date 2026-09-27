@@ -654,7 +654,7 @@ pub mod demand_tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_backward_learned_module_qualified_source() {
-        use crate::analysis::taint::facts::{fact_table_from_entries, LearnedFactEntry};
+        use crate::analysis::taint::facts::{LearnedFactEntry, fact_table_from_entries};
 
         let mut main = FunctionIR::new("main".into());
         {
@@ -714,8 +714,7 @@ pub mod demand_tests {
             pattern: "random.randint".into(),
         }]);
         let mut cfg2 = cfg.clone();
-        cfg2.sources
-            .extend(facts.learned_sources.iter().cloned());
+        cfg2.sources.extend(facts.learned_sources.iter().cloned());
         let mut engine2 = BackwardTaintEngine::new(&prog, &cfg2).with_fact_table(&facts);
         engine2.run();
         assert_eq!(engine2.findings.len(), 1, "learned source fact must fire");
@@ -920,6 +919,295 @@ pub mod demand_tests {
                 .iter()
                 .any(|f| f.verdict == BackwardVerdict::Vulnerable),
             "unguarded flow must stay Vulnerable, got {:?}",
+            findings
+        );
+    }
+    // -----------------------------------------------------------------------
+    // Branch feasibility: `bar = "safe" if const_true else param` — the
+    // tainted else arm is dead, so the flow through the phi is not
+    // Vulnerable.
+    //
+    //   b0: bar_src = get(...); c1 = 7 * 18; c2 = c1 + 106 (as concat);
+    //       c3 = c2 > 200; branch c3 ? b1 : b2
+    //   b1: t = "safe"; jump merge
+    //   b2: e = bar_src; jump merge
+    //   merge: phi bar = phi(t@b1, e@b2); open(bar)
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_const_true_ternary_prunes_tainted_arm() {
+        let mut handler = FunctionIR::new("handler".into());
+        {
+            let b0 = handler.entry_block;
+            let mem0 = handler.initial_memory_state;
+
+            let req = handler.new_var(dummy_meta("request"));
+            let cookies = handler.new_var(dummy_meta("request.cookies"));
+            handler.push_instruction(
+                b0,
+                Instruction::LoadField {
+                    dest: cookies,
+                    mem_in: mem0,
+                    base: req,
+                    field: "cookies".into(),
+                },
+            );
+            let got = handler.new_var(dummy_meta("got"));
+            let m1 = handler.new_var(mem_meta("m1"));
+            handler.push_instruction(
+                b0,
+                Instruction::CallVirtual {
+                    dest: Some(got),
+                    mem_out: m1,
+                    mem_in: mem0,
+                    method: "get".into(),
+                    receiver: Operand::Var(cookies),
+                    args: vec![Operand::StringLiteral("\"p\"".into())],
+                },
+            );
+
+            // c1 = 7 * 18; c2 = c1 + 106; c3 = c2 > 200 (all constants).
+            let c1 = handler.new_var(dummy_meta("c1"));
+            handler.push_instruction(
+                b0,
+                Instruction::BinaryOp {
+                    dest: c1,
+                    op: "*".into(),
+                    lhs: Operand::IntLiteral(7),
+                    rhs: Operand::IntLiteral(18),
+                },
+            );
+            let c2 = handler.new_var(dummy_meta("c2"));
+            handler.push_instruction(
+                b0,
+                Instruction::BinaryOp {
+                    dest: c2,
+                    op: "concat".into(),
+                    lhs: Operand::Var(c1),
+                    rhs: Operand::IntLiteral(106),
+                },
+            );
+            let c3 = handler.new_var(dummy_meta("c3"));
+            handler.push_instruction(
+                b0,
+                Instruction::BinaryOp {
+                    dest: c3,
+                    op: ">".into(),
+                    lhs: Operand::Var(c2),
+                    rhs: Operand::IntLiteral(200),
+                },
+            );
+
+            let then_b = handler.new_block();
+            let else_b = handler.new_block();
+            let merge = handler.new_block();
+            handler.set_terminator(
+                b0,
+                Terminator::Branch {
+                    cond: Operand::Var(c3),
+                    true_block: then_b,
+                    false_block: else_b,
+                },
+            );
+            handler.add_edge(b0, then_b);
+            handler.add_edge(b0, else_b);
+
+            // then arm: t = "safe" (constant)
+            let t = handler.new_var(dummy_meta("t"));
+            handler.push_instruction(
+                then_b,
+                Instruction::Assign {
+                    dest: t,
+                    src: Operand::StringLiteral("safe".into()),
+                },
+            );
+            handler.set_terminator(then_b, Terminator::Jump(merge));
+            handler.add_edge(then_b, merge);
+
+            // else arm: e = tainted param
+            let e = handler.new_var(dummy_meta("e"));
+            handler.push_instruction(
+                else_b,
+                Instruction::Assign {
+                    dest: e,
+                    src: Operand::Var(got),
+                },
+            );
+            handler.set_terminator(else_b, Terminator::Jump(merge));
+            handler.add_edge(else_b, merge);
+
+            // merge: phi bar = phi(t@then, e@else); open(bar)
+            let bar = handler.new_var(dummy_meta("bar"));
+            handler.push_phi(
+                merge,
+                Phi {
+                    dest: bar,
+                    incoming: vec![(then_b, t), (else_b, e)],
+                },
+            );
+            let m2 = handler.new_var(mem_meta("m2"));
+            handler.push_instruction(
+                merge,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m2,
+                    mem_in: m1,
+                    func: "open".into(),
+                    args: vec![Operand::Var(bar)],
+                },
+            );
+            handler.set_terminator(merge, Terminator::Return { src: None });
+        }
+
+        let cfg = TaintConfig {
+            sources: [
+                "request.cookies.get".to_string(),
+                "request.cookies".to_string(),
+                "request".to_string(),
+            ]
+            .into_iter()
+            .collect(),
+            sinks: ["open".to_string()].into_iter().collect(),
+            sanitizers: [].into_iter().collect(),
+        };
+        let prog = build_program(vec![handler]);
+        let (findings, _stats) = run_backward(&cfg, &prog);
+        let vulns: Vec<_> = findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            vulns.is_empty(),
+            "const-true ternary must prune the tainted else arm, got {:?}",
+            findings
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Same shape but the condition is NOT decidable: both arms stay live
+    // and the tainted arm must still be reported (recall guard).
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_undecided_ternary_keeps_tainted_arm() {
+        let mut handler = FunctionIR::new("handler".into());
+        {
+            let b0 = handler.entry_block;
+            let mem0 = handler.initial_memory_state;
+
+            let req = handler.new_var(dummy_meta("request"));
+            let cookies = handler.new_var(dummy_meta("request.cookies"));
+            handler.push_instruction(
+                b0,
+                Instruction::LoadField {
+                    dest: cookies,
+                    mem_in: mem0,
+                    base: req,
+                    field: "cookies".into(),
+                },
+            );
+            let got = handler.new_var(dummy_meta("got"));
+            let m1 = handler.new_var(mem_meta("m1"));
+            handler.push_instruction(
+                b0,
+                Instruction::CallVirtual {
+                    dest: Some(got),
+                    mem_out: m1,
+                    mem_in: mem0,
+                    method: "get".into(),
+                    receiver: Operand::Var(cookies),
+                    args: vec![Operand::StringLiteral("\"p\"".into())],
+                },
+            );
+
+            // cond = got.length-ish? Use a NON-constant comparison:
+            // cond = (unknown_var > 200) where unknown_var has no def.
+            let unknown = handler.new_var(dummy_meta("unknown"));
+            let cond = handler.new_var(dummy_meta("cond"));
+            handler.push_instruction(
+                b0,
+                Instruction::BinaryOp {
+                    dest: cond,
+                    op: ">".into(),
+                    lhs: Operand::Var(unknown),
+                    rhs: Operand::IntLiteral(200),
+                },
+            );
+
+            let then_b = handler.new_block();
+            let else_b = handler.new_block();
+            let merge = handler.new_block();
+            handler.set_terminator(
+                b0,
+                Terminator::Branch {
+                    cond: Operand::Var(cond),
+                    true_block: then_b,
+                    false_block: else_b,
+                },
+            );
+            handler.add_edge(b0, then_b);
+            handler.add_edge(b0, else_b);
+
+            let t = handler.new_var(dummy_meta("t"));
+            handler.push_instruction(
+                then_b,
+                Instruction::Assign {
+                    dest: t,
+                    src: Operand::StringLiteral("safe".into()),
+                },
+            );
+            handler.set_terminator(then_b, Terminator::Jump(merge));
+            handler.add_edge(then_b, merge);
+
+            let e = handler.new_var(dummy_meta("e"));
+            handler.push_instruction(
+                else_b,
+                Instruction::Assign {
+                    dest: e,
+                    src: Operand::Var(got),
+                },
+            );
+            handler.set_terminator(else_b, Terminator::Jump(merge));
+            handler.add_edge(else_b, merge);
+
+            let bar = handler.new_var(dummy_meta("bar"));
+            handler.push_phi(
+                merge,
+                Phi {
+                    dest: bar,
+                    incoming: vec![(then_b, t), (else_b, e)],
+                },
+            );
+            let m2 = handler.new_var(mem_meta("m2"));
+            handler.push_instruction(
+                merge,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m2,
+                    mem_in: m1,
+                    func: "open".into(),
+                    args: vec![Operand::Var(bar)],
+                },
+            );
+            handler.set_terminator(merge, Terminator::Return { src: None });
+        }
+
+        let cfg = TaintConfig {
+            sources: [
+                "request.cookies.get".to_string(),
+                "request.cookies".to_string(),
+                "request".to_string(),
+            ]
+            .into_iter()
+            .collect(),
+            sinks: ["open".to_string()].into_iter().collect(),
+            sanitizers: [].into_iter().collect(),
+        };
+        let prog = build_program(vec![handler]);
+        let (findings, _stats) = run_backward(&cfg, &prog);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.verdict == BackwardVerdict::Vulnerable),
+            "undecided ternary must keep the tainted arm live, got {:?}",
             findings
         );
     }
