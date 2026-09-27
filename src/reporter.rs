@@ -205,9 +205,7 @@ fn escape_workflow_property(value: &str) -> String {
 /// Escape a workflow-command message body (after the `::` separator).
 /// `%` and line breaks are still structural here; `,` and `:` are not.
 fn escape_workflow_message(value: &str) -> String {
-    value
-        .replace('%', "%25")
-        .replace(['\r', '\n'], " ")
+    value.replace('%', "%25").replace(['\r', '\n'], " ")
 }
 
 /// Byte offset → 1-based (line, column) within a file, reading the source
@@ -244,9 +242,9 @@ fn line_col_for(file: &str, byte_offset: usize) -> Option<(usize, usize)> {
 }
 #[cfg(test)]
 mod sarif_line_mapping_tests {
+    use super::Reporter;
     use super::line_col_for;
     use crate::Advisory;
-    use super::Reporter;
 
     #[test]
     fn maps_byte_offset_to_line_and_column() {
@@ -328,7 +326,11 @@ mod sarif_line_mapping_tests {
         adv.observation = "100% of flows\nreach eval()".into();
 
         let out = Reporter::to_github_annotations(&[adv]);
-        assert_eq!(out.lines().count(), 1, "newline in message must be collapsed: {out:?}");
+        assert_eq!(
+            out.lines().count(),
+            1,
+            "newline in message must be collapsed: {out:?}"
+        );
         let line = out.lines().next().unwrap();
         // Property delimiters escaped in the title (before ::).
         assert!(line.contains("title=Injection%2C the sequel%3A harder"));

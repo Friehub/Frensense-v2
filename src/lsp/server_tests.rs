@@ -24,7 +24,10 @@ fn uri_conversion_round_trips() {
     assert_eq!(path_to_uri("/tmp/x.py"), "file:///tmp/x.py");
     assert_eq!(path_to_uri("/a b/c.py"), "file:///a%20b/c.py");
     // Round trip.
-    assert_eq!(uri_to_path(&path_to_uri("/dir with space/f.py")), "/dir with space/f.py");
+    assert_eq!(
+        uri_to_path(&path_to_uri("/dir with space/f.py")),
+        "/dir with space/f.py"
+    );
 }
 
 #[test]
@@ -115,7 +118,10 @@ fn protocol_round_trip_open_save_close() {
     // initialize response.
     assert_eq!(messages[0]["id"], 1);
     assert_eq!(messages[0]["result"]["serverInfo"]["name"], "frensense-lsp");
-    assert_eq!(messages[0]["result"]["capabilities"]["textDocumentSync"]["change"], 1);
+    assert_eq!(
+        messages[0]["result"]["capabilities"]["textDocumentSync"]["change"],
+        1
+    );
 
     // didOpen → publishDiagnostics with the md5 finding.
     let publish = &messages[1];
@@ -129,7 +135,12 @@ fn protocol_round_trip_open_save_close() {
     // didClose → publishDiagnostics with an empty array.
     let cleared = &messages[2];
     assert_eq!(cleared["method"], "textDocument/publishDiagnostics");
-    assert!(cleared["params"]["diagnostics"].as_array().unwrap().is_empty());
+    assert!(
+        cleared["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 
     // shutdown response.
     assert_eq!(messages[3]["id"], 2);

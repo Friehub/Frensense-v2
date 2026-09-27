@@ -1176,10 +1176,9 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
             {
                 let path = format!("{root}.{method}");
                 return config.sources.contains(&path)
-                    || config
-                        .sources
-                        .iter()
-                        .any(|s| path.starts_with(s.as_str()) && path.as_bytes().get(s.len()) == Some(&b'.'));
+                    || config.sources.iter().any(|s| {
+                        path.starts_with(s.as_str()) && path.as_bytes().get(s.len()) == Some(&b'.')
+                    });
             }
             false
         }

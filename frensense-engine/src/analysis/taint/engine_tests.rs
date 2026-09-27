@@ -654,7 +654,7 @@ pub mod demand_tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_backward_learned_module_qualified_source() {
-        use crate::analysis::taint::facts::{fact_table_from_entries, LearnedFactEntry};
+        use crate::analysis::taint::facts::{LearnedFactEntry, fact_table_from_entries};
 
         let mut main = FunctionIR::new("main".into());
         {
@@ -714,8 +714,7 @@ pub mod demand_tests {
             pattern: "random.randint".into(),
         }]);
         let mut cfg2 = cfg.clone();
-        cfg2.sources
-            .extend(facts.learned_sources.iter().cloned());
+        cfg2.sources.extend(facts.learned_sources.iter().cloned());
         let mut engine2 = BackwardTaintEngine::new(&prog, &cfg2).with_fact_table(&facts);
         engine2.run();
         assert_eq!(engine2.findings.len(), 1, "learned source fact must fire");
@@ -1060,9 +1059,13 @@ pub mod demand_tests {
         }
 
         let cfg = TaintConfig {
-            sources: ["request.cookies.get".to_string(), "request.cookies".to_string(), "request".to_string()]
-                .into_iter()
-                .collect(),
+            sources: [
+                "request.cookies.get".to_string(),
+                "request.cookies".to_string(),
+                "request".to_string(),
+            ]
+            .into_iter()
+            .collect(),
             sinks: ["open".to_string()].into_iter().collect(),
             sanitizers: [].into_iter().collect(),
         };
@@ -1188,9 +1191,13 @@ pub mod demand_tests {
         }
 
         let cfg = TaintConfig {
-            sources: ["request.cookies.get".to_string(), "request.cookies".to_string(), "request".to_string()]
-                .into_iter()
-                .collect(),
+            sources: [
+                "request.cookies.get".to_string(),
+                "request.cookies".to_string(),
+                "request".to_string(),
+            ]
+            .into_iter()
+            .collect(),
             sinks: ["open".to_string()].into_iter().collect(),
             sanitizers: [].into_iter().collect(),
         };

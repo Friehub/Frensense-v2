@@ -11,13 +11,14 @@ use crate::engine::Engine;
 use std::path::PathBuf;
 
 fn tempdir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("frensense-baseline-{name}-{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("frensense-baseline-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("mkdir");
     dir
 }
 
-fn scan(dir: &PathBuf, file: &str) -> Vec<crate::Advisory> {
+fn scan(dir: &std::path::Path, file: &str) -> Vec<crate::Advisory> {
     Engine::new().run(&dir.join(file)).expect("scan")
 }
 
@@ -48,8 +49,8 @@ fn baseline_tolerates_line_shifts_flags_new_finding() {
     assert_eq!(current[0].line, baseline[0].line + 5);
     assert_eq!(current[0].fingerprint, baseline[0].fingerprint);
 
-    let no_regression = compare_baseline(&current, baseline_path.to_str().unwrap())
-        .expect("compare");
+    let no_regression =
+        compare_baseline(&current, baseline_path.to_str().unwrap()).expect("compare");
     assert!(!no_regression, "shifted finding must not be a regression");
 
     // Round 3: an actual second bug appears.
@@ -60,8 +61,8 @@ fn baseline_tolerates_line_shifts_flags_new_finding() {
     .unwrap();
     let with_new = scan(&dir, "app.py");
     assert_eq!(with_new.len(), 2);
-    let regression = compare_baseline(&with_new, baseline_path.to_str().unwrap())
-        .expect("compare 2");
+    let regression =
+        compare_baseline(&with_new, baseline_path.to_str().unwrap()).expect("compare 2");
     assert!(regression, "a second bug IS a regression");
     let _ = std::fs::remove_dir_all(&dir);
 }

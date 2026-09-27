@@ -67,10 +67,13 @@ fn parses_added_ranges_across_hunks_and_files() {
 
     // The markdown file is parsed too (it's in the diff; whether it gets
     // scanned is the tool's gating decision, not the parser's).
-    assert!(ranges.get("readme.md").is_some());
+    assert!(ranges.contains_key("readme.md"));
 
     // The removed line's old position (3) must NOT be an added range.
-    assert!(!app.iter().any(|r| r.contains(3) && r.start == 3 && r.end == 3));
+    assert!(
+        !app.iter()
+            .any(|r| r.contains(3) && r.start == 3 && r.end == 3)
+    );
 }
 
 #[test]
@@ -85,8 +88,14 @@ fn parses_file_paths_in_order() {
 fn intersection_filters_by_file_and_line() {
     let ranges = added_ranges(DIFF);
     let mk = |path: &str, line: u32| {
-        Advisory::bare("t", crate::Severity::Warning, crate::FileId(0), Path::new(path), "o")
-            .with_line(line)
+        Advisory::bare(
+            "t",
+            crate::Severity::Warning,
+            crate::FileId(0),
+            Path::new(path),
+            "o",
+        )
+        .with_line(line)
     };
 
     // Finding on an added line → kept.
@@ -109,7 +118,12 @@ fn argument_errors() {
     // A non-repo directory without diff_text → explicit error.
     let dir = tempdir("norepo");
     let out = run_diff_tool(&json!({"repo": dir.display().to_string()}));
-    assert!(out["error"].as_str().unwrap().contains("not a git repository"));
+    assert!(
+        out["error"]
+            .as_str()
+            .unwrap()
+            .contains("not a git repository")
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -160,7 +174,8 @@ index 1111111..2222222 100644
 +    return hashlib.md5(data).hexdigest()
      pass
 ";
-    let (ranges2, advisories2, _) = run_diff(&dir, Some(diff2), "info", 0.0, None).expect("run_diff 2");
+    let (ranges2, advisories2, _) =
+        run_diff(&dir, Some(diff2), "info", 0.0, None).expect("run_diff 2");
     let expected_line: Vec<u32> = ranges2["app.py"].iter().map(|r| r.start).collect();
     assert_eq!(expected_line, vec![6]);
     assert!(
@@ -175,10 +190,25 @@ fn end_to_end_git_diff_in_temp_repo() {
     run_git(&dir, &["init", "-q"]);
     std::fs::write(dir.join("ok.py"), "x = 1\n").unwrap();
     run_git(&dir, &["add", "."]);
-    run_git(&dir, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"]);
+    run_git(
+        &dir,
+        &[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-qm",
+            "init",
+        ],
+    );
 
     // Working-tree change that introduces a finding on an added line.
-    std::fs::write(dir.join("bad.py"), "import hashlib\n\n\ndef d(x):\n    return hashlib.md5(x).hexdigest()\n").unwrap();
+    std::fs::write(
+        dir.join("bad.py"),
+        "import hashlib\n\n\ndef d(x):\n    return hashlib.md5(x).hexdigest()\n",
+    )
+    .unwrap();
 
     let (ranges, advisories, _) = run_diff(&dir, None, "info", 0.0, None).expect("git run_diff");
     assert!(ranges.contains_key("bad.py"), "ranges: {ranges:?}");
@@ -195,5 +225,9 @@ fn run_git(dir: &Path, args: &[&str]) {
         .current_dir(dir)
         .output()
         .expect("git spawn");
-    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }

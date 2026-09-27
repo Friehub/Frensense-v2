@@ -116,7 +116,9 @@ fn classify_python(kind: &str) -> NodeRole {
         | "return_type" => NodeRole::Parameters,
         "argument_list" | "generator_expression" => NodeRole::Arguments,
         "class_definition" => NodeRole::ClassDef,
-        "binary_operator" | "comparison_operator" | "boolean_operator" | "not_operator" => NodeRole::BinaryOp,
+        "binary_operator" | "comparison_operator" | "boolean_operator" | "not_operator" => {
+            NodeRole::BinaryOp
+        }
         "unary_operator" => NodeRole::UnaryOp,
         "match_statement" => NodeRole::Match,
         "async_block" => NodeRole::AsyncBlock,
@@ -1031,15 +1033,11 @@ impl LanguageSpec for PythonSpec {
                     "hashlib.sha512",
                     "bcrypt",
                 ],
-            ),                (
-                    "deserialize",
-                    &[
-                        "loads",
-                        "load",
-                        "json.loads",
-                        "pickle.loads",
-                    ],
-                ),
+            ),
+            (
+                "deserialize",
+                &["loads", "load", "json.loads", "pickle.loads"],
+            ),
             ("sanitize", &["escape", "bleach.clean", "markupsafe.escape"]),
             ("regex", &["re.compile", "re.match", "re.search", "re.sub"]),
             ("process", &["os.system", "os.popen", "subprocess"]),

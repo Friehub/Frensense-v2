@@ -5,8 +5,8 @@
 
 use super::audit::{run_audit, run_audit_streamed, tool_definition};
 use super::diff::{run_diff_tool, tool_definition as diff_tool_definition};
-use super::scan_file::{run_scan_file, tool_definition as scan_file_tool_definition};
 use super::protocol::{JsonRpcRequest, JsonRpcResponse, rpc_error, rpc_no_response, rpc_result};
+use super::scan_file::{run_scan_file, tool_definition as scan_file_tool_definition};
 use serde_json::{Value, json};
 
 pub fn handle_request(req: JsonRpcRequest) -> JsonRpcResponse {

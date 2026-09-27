@@ -11,7 +11,8 @@ use super::*;
 use std::path::PathBuf;
 
 fn tempdir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("frensense-scanfile-{name}-{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("frensense-scanfile-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("mkdir");
     dir
@@ -22,7 +23,12 @@ fn tool_definition_shape() {
     let def = tool_definition();
     assert_eq!(def["name"], "frensense_scan_file");
     assert_eq!(def["inputSchema"]["required"][0], "path");
-    assert!(def["description"].as_str().unwrap().contains("ONE source file"));
+    assert!(
+        def["description"]
+            .as_str()
+            .unwrap()
+            .contains("ONE source file")
+    );
     // Distinct from the directory-audit tool.
     assert_ne!(def["name"], audit_tool_name());
 }
@@ -48,13 +54,7 @@ fn supported_gate_follows_specs() {
 fn filter_respects_severity_and_confidence() {
     use crate::Severity;
     let mk = |sev: Severity, conf: f64| {
-        let mut a = Advisory::bare(
-            "t",
-            sev,
-            crate::FileId(0),
-            Path::new("f.py"),
-            "obs",
-        );
+        let mut a = Advisory::bare("t", sev, crate::FileId(0), Path::new("f.py"), "obs");
         a.confidence = conf;
         a
     };
@@ -155,7 +155,8 @@ fn corpus_bundle_extends_fact_tables() {
     assert_eq!(out["clean"], false, "with bundle: expected findings");
     let advs = out["advisories"].as_array().unwrap();
     assert!(
-        advs.iter().any(|a| a["title"].as_str().unwrap().contains("random.randint")),
+        advs.iter()
+            .any(|a| a["title"].as_str().unwrap().contains("random.randint")),
         "expected a learned-source finding, got {advs:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
@@ -167,13 +168,21 @@ fn bundle_fixture_path() -> PathBuf {
     let path = std::path::PathBuf::from("/tmp/cwe-bundle.frc");
     if !path.exists() {
         let out = std::process::Command::new("cargo")
-            .args(["build", "--release", "--example", "make_test_bundle", "-p", "frensense-bundler"])
+            .args([
+                "build",
+                "--release",
+                "--example",
+                "make_test_bundle",
+                "-p",
+                "frensense-bundler",
+            ])
             .output()
             .expect("spawn cargo");
         assert!(out.status.success(), "build bundle example failed");
-        let out = std::process::Command::new(
-            concat!(env!("CARGO_MANIFEST_DIR"), "/target/release/examples/make_test_bundle"),
-        )
+        let out = std::process::Command::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/target/release/examples/make_test_bundle"
+        ))
         .output()
         .expect("run make_test_bundle");
         assert!(out.status.success(), "generate bundle failed");
@@ -190,6 +199,11 @@ fn missing_corpus_bundle_is_a_tool_error() {
         "path": file.display().to_string(),
         "corpus_bundle": "/definitely/not/here.frc",
     }));
-    assert!(out["error"].as_str().unwrap().contains("corpus bundle does not exist"));
+    assert!(
+        out["error"]
+            .as_str()
+            .unwrap()
+            .contains("corpus bundle does not exist")
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }

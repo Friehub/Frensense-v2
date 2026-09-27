@@ -68,7 +68,7 @@ pub enum NodeRole {
     },
 
     // ── Control flow ──────────────────────────────────────────────────────
-    Branch,  // if / switch / match-arm
+    Branch, // if / switch / match-arm
     /// Ternary conditional EXPRESSION (`a ? b : c`, Python `a if c else b`).
     /// Separate from Branch: both arms are expressions producing a value,
     /// lowered as branch + Phi, not as a statement-level fork.

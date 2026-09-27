@@ -7,12 +7,15 @@
 //! this file only to change process-level concerns (env, logging).
 
 fn main() {
-    let bundle = std::env::var("FRENSENSE_CORPUS_BUNDLE").ok().filter(|p| !p.is_empty());
+    let bundle = std::env::var("FRENSENSE_CORPUS_BUNDLE")
+        .ok()
+        .filter(|p| !p.is_empty());
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut reader = stdin.lock();
     let mut writer = stdout.lock();
-    if let Err(e) = frensense::lsp::server::run_server(&mut reader, &mut writer, bundle.as_deref()) {
+    if let Err(e) = frensense::lsp::server::run_server(&mut reader, &mut writer, bundle.as_deref())
+    {
         eprintln!("frensense-lsp: fatal transport error: {e}");
         std::process::exit(1);
     }

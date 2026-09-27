@@ -15,12 +15,16 @@ fn print_help() {
     println!("Frensense v{FRENSENSE_VERSION}, deterministic dataflow security scanner.");
     println!();
     println!("Usage: frensense [path] [options]");
-    println!("       frensense watch [path] [options]   Re-scan on file changes, print new findings");
+    println!(
+        "       frensense watch [path] [options]   Re-scan on file changes, print new findings"
+    );
     println!();
     println!("Options:");
     println!("  --json                     Output findings as JSON");
     println!("  --sarif                    Output findings in SARIF format");
-    println!("  --github                   GitHub Actions annotations (::error/::warning/::notice)");
+    println!(
+        "  --github                   GitHub Actions annotations (::error/::warning/::notice)"
+    );
     println!("  --strict                   Exit with code 1 if any findings");
     println!("  --severity <level>         Minimum severity: critical, warning, info");
     println!("  --language <lang>          Language filter (rust, typescript, javascript, python)");
@@ -49,8 +53,8 @@ fn handle_early_args(args: &[String]) -> bool {
 /// stop-file (`frensense-watch.stop` in the watched root) so scripts and
 /// tests can end the loop deterministically.
 fn run_watch(args: Vec<String>) -> Result<()> {
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     let input_paths = get_input_paths(&args);
     let input_path = input_paths
@@ -75,13 +79,15 @@ fn run_watch(args: Vec<String>) -> Result<()> {
     let stop_file = input_path.join("frensense-watch.stop");
     {
         let stop_flag = Arc::clone(&stop_flag);
-        std::thread::spawn(move || loop {
-            if stop_file.exists() {
-                stop_flag.store(true, Ordering::SeqCst);
-                let _ = std::fs::remove_file(&stop_file);
-                break;
+        std::thread::spawn(move || {
+            loop {
+                if stop_file.exists() {
+                    stop_flag.store(true, Ordering::SeqCst);
+                    let _ = std::fs::remove_file(&stop_file);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
-            std::thread::sleep(std::time::Duration::from_millis(100));
         });
     }
 

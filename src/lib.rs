@@ -160,7 +160,12 @@ impl Advisory {
     /// is display context only, for humans correlating the ID with code.
     #[must_use]
     pub fn stable_id(&self) -> String {
-        format!("FRN-{}@{}:{}", &self.fingerprint[..12.min(self.fingerprint.len())], self.file_path, self.line)
+        format!(
+            "FRN-{}@{}:{}",
+            &self.fingerprint[..12.min(self.fingerprint.len())],
+            self.file_path,
+            self.line
+        )
     }
 }
 

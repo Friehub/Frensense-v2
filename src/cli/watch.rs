@@ -23,8 +23,8 @@
 //! swapping [`snapshot_mtimes`] for a notify-debounced event source
 //! without touching the loop below.
 
-use crate::engine::files::collect_files;
 use crate::Advisory;
+use crate::engine::files::collect_files;
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -96,10 +96,8 @@ impl FileWatcher {
 /// for dataflow advisories) are always treated as new: fail loud, not
 /// silent.
 pub fn new_advisories(previous: &[Advisory], current: &[Advisory]) -> Vec<Advisory> {
-    let seen: std::collections::HashSet<&str> = previous
-        .iter()
-        .map(|a| a.fingerprint.as_str())
-        .collect();
+    let seen: std::collections::HashSet<&str> =
+        previous.iter().map(|a| a.fingerprint.as_str()).collect();
     current
         .iter()
         .filter(|a| !seen.contains(a.fingerprint.as_str()))

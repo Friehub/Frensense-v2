@@ -14,7 +14,7 @@
 
 use super::framing::{read_message, write_message};
 use crate::{Advisory, Engine, Severity};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -212,15 +212,18 @@ pub fn run_server(
                     .and_then(Value::as_str)
                     .unwrap_or_default();
                 let path = uri_to_path(uri);
-                let diagnostics = match diagnostics_for_file(&mut engine, std::path::Path::new(&path))
-                {
-                    Ok(d) => d,
-                    Err(e) => {
-                        eprintln!("frensense-lsp: scan failed for {path}: {e}");
-                        Vec::new()
-                    }
-                };
-                let note = notification("textDocument/publishDiagnostics", publish_params(uri, &diagnostics));
+                let diagnostics =
+                    match diagnostics_for_file(&mut engine, std::path::Path::new(&path)) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            eprintln!("frensense-lsp: scan failed for {path}: {e}");
+                            Vec::new()
+                        }
+                    };
+                let note = notification(
+                    "textDocument/publishDiagnostics",
+                    publish_params(uri, &diagnostics),
+                );
                 write_message(output, &note.to_string())?;
             }
             "textDocument/didClose" => {
@@ -229,7 +232,8 @@ pub fn run_server(
                     .pointer("/textDocument/uri")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                let note = notification("textDocument/publishDiagnostics", publish_params(uri, &[]));
+                let note =
+                    notification("textDocument/publishDiagnostics", publish_params(uri, &[]));
                 write_message(output, &note.to_string())?;
             }
             "shutdown" => {

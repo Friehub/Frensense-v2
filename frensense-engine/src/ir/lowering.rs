@@ -699,10 +699,7 @@ impl<'a> LoweringContext<'a> {
                 let then_op = self.visit_node(then_node).unwrap_or(Operand::Unknown);
                 self.ir.push_instruction(
                     self.current_block,
-                    Instruction::Assign {
-                        dest,
-                        src: then_op,
-                    },
+                    Instruction::Assign { dest, src: then_op },
                 );
                 self.ir
                     .set_terminator(self.current_block, Terminator::Jump(merge_block));
@@ -715,10 +712,7 @@ impl<'a> LoweringContext<'a> {
                 let else_op = self.visit_node(else_node).unwrap_or(Operand::Unknown);
                 self.ir.push_instruction(
                     self.current_block,
-                    Instruction::Assign {
-                        dest,
-                        src: else_op,
-                    },
+                    Instruction::Assign { dest, src: else_op },
                 );
                 self.ir
                     .set_terminator(self.current_block, Terminator::Jump(merge_block));
@@ -754,7 +748,6 @@ impl<'a> LoweringContext<'a> {
                     })
                     .copied();
                 let alt_node = children.iter().find(|c| c.kind().contains("else")).copied();
-
 
                 let cond_op = cond_node
                     .and_then(|c| self.visit_node(c))
@@ -1067,5 +1060,4 @@ impl<'a> LoweringContext<'a> {
         }
         last_op
     }
-
 }

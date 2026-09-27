@@ -157,7 +157,10 @@ pub fn added_ranges(diff: &str) -> BTreeMap<String, Vec<AddedRange>> {
             let ranges = result.entry(file).or_default();
             match ranges.last_mut() {
                 Some(last) if last.end + 1 == line_no => last.end = line_no,
-                _ => ranges.push(AddedRange { start: line_no, end: line_no }),
+                _ => ranges.push(AddedRange {
+                    start: line_no,
+                    end: line_no,
+                }),
             }
             current_line += 1;
             remaining_new = remaining_new.saturating_sub(1);
@@ -343,8 +346,7 @@ pub fn run_diff(
     // by collect_files' own rules.
     let mut all = Vec::new();
     let mut scanned = 0usize;
-    let mut engine =
-        super::scan_file::build_engine(min_confidence, corpus_bundle);
+    let mut engine = super::scan_file::build_engine(min_confidence, corpus_bundle);
     for path in ranges.keys() {
         let abs = repo.join(path);
         if !is_supported(&abs) {
@@ -366,10 +368,7 @@ pub fn run_diff(
     let on_added: Vec<Advisory> = all
         .into_iter()
         .filter(|adv| {
-            ranges
-                .keys()
-                .any(|d| path_matches(&adv.file_path, d))
-                && in_added_lines(adv, &ranges)
+            ranges.keys().any(|d| path_matches(&adv.file_path, d)) && in_added_lines(adv, &ranges)
         })
         .collect();
     Ok((ranges, on_added, scanned))
@@ -471,7 +470,13 @@ pub fn run_diff_tool(args: &Value) -> Value {
         }
     }
 
-    match run_diff(repo, diff_text, severity_threshold, min_confidence, corpus_bundle) {
+    match run_diff(
+        repo,
+        diff_text,
+        severity_threshold,
+        min_confidence,
+        corpus_bundle,
+    ) {
         Ok((ranges, advisories, scanned)) => result_payload(&ranges, &advisories, scanned),
         Err(e) => json!({
             "clean": false,

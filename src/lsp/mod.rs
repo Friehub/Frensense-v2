@@ -31,4 +31,4 @@
 pub mod framing;
 pub mod server;
 
-pub use server::{diagnostics_for_file, run_server, DiagnosticItem, PublishParams};
+pub use server::{DiagnosticItem, PublishParams, diagnostics_for_file, run_server};

@@ -86,9 +86,7 @@ pub fn scan_prepared(
     // teaches new framework sources without touching the built-in tables.
     // Local mutable copy; the caller's config stays shared and unchanged.
     let mut config = config.clone();
-    config
-        .sources
-        .extend(facts.learned_sources.iter().cloned());
+    config.sources.extend(facts.learned_sources.iter().cloned());
     let config = &config;
 
     let mut statics: FxHashMap<String, &FunctionIR> = FxHashMap::default();

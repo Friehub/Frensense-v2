@@ -152,10 +152,7 @@ pub fn result_payload(path: &Path, advisories: &[Advisory]) -> Value {
 /// `frensense_audit`).
 #[must_use]
 pub fn run_scan_file(args: &Value) -> Value {
-    let path_str = args
-        .get("path")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
+    let path_str = args.get("path").and_then(Value::as_str).unwrap_or_default();
     if path_str.is_empty() {
         return json!({
             "clean": false,

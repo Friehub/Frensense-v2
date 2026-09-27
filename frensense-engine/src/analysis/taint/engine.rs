@@ -154,7 +154,11 @@ fn compare_consts(op: &str, l: i64, r: i64) -> Option<bool> {
 /// For the Phi `dest_var` in `merge_block`, return the incoming edges whose
 /// arm block is unreachable because the branch condition is a constant
 /// comparison with a decided outcome. Empty = nothing prunable.
-fn phi_infeasible_incoming(ir: &FunctionIR, merge_block: BlockId, dest_var: VarId) -> Vec<(BlockId, VarId)> {
+fn phi_infeasible_incoming(
+    ir: &FunctionIR,
+    merge_block: BlockId,
+    dest_var: VarId,
+) -> Vec<(BlockId, VarId)> {
     let block = match ir.blocks.get(&merge_block) {
         Some(b) => b,
         None => return Vec::new(),
@@ -566,10 +570,8 @@ impl GuardMap {
                                     | (Operand::IntLiteral(_), _)
                                     | (_, Operand::IntLiteral(_))
                             );
-                            let is_comparison = op.contains("in")
-                                || op == "=="
-                                || op == "!="
-                                || op == "not";
+                            let is_comparison =
+                                op.contains("in") || op == "==" || op == "!=" || op == "not";
                             if literal_sibling && is_comparison {
                                 for op in [lhs, rhs] {
                                     if let Operand::Var(u) = op {

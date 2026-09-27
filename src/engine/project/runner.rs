@@ -240,11 +240,7 @@ fn advisory_from_checker(
         ))
         .with_tags(["checker", &c.rule]);
     advisory.requires_human = false;
-    advisory.fingerprint = stable_fingerprint(&[
-        file,
-        &c.rule,
-        &c.function,
-    ]);
+    advisory.fingerprint = stable_fingerprint(&[file, &c.rule, &c.function]);
     advisory
 }
 
@@ -336,12 +332,7 @@ fn advisory_from_finding(
             )
         })
         .collect();
-    advisory.fingerprint = stable_fingerprint(&[
-        file,
-        f.sink.as_str(),
-        f.function.as_str(),
-        src,
-    ]);
+    advisory.fingerprint = stable_fingerprint(&[file, f.sink.as_str(), f.function.as_str(), src]);
     advisory
 }
 

@@ -25,7 +25,10 @@ fn fingerprint_is_deterministic_and_component_sensitive() {
     assert_eq!(a.len(), 16);
     assert_ne!(stable_fingerprint(&["f.py", "weak_hash", "other"]), a);
     // Component boundaries: ("ab","c") must differ from ("a","bc").
-    assert_ne!(stable_fingerprint(&["ab", "c"]), stable_fingerprint(&["a", "bc"]));
+    assert_ne!(
+        stable_fingerprint(&["ab", "c"]),
+        stable_fingerprint(&["a", "bc"])
+    );
 }
 
 #[test]
@@ -62,8 +65,14 @@ fn fingerprint_survives_line_shift() {
     // hash PORTION must match even though the rendered string differs.
     let id_before = before[0].stable_id();
     let id_after = after[0].stable_id();
-    fn hash_of(id: &str) -> &str { id.split('@').next().unwrap_or("") }
-    assert_eq!(hash_of(&id_after), hash_of(&id_before), "hash portion is the identity");
+    fn hash_of(id: &str) -> &str {
+        id.split('@').next().unwrap_or("")
+    }
+    assert_eq!(
+        hash_of(&id_after),
+        hash_of(&id_before),
+        "hash portion is the identity"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

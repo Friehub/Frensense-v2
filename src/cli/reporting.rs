@@ -170,7 +170,13 @@ pub fn compare_baseline(advisories: &[Advisory], path: &str) -> Result<bool> {
             new_advisories.len()
         );
         for adv in &new_advisories {
-            println!("  + {} {}:{} ({})", adv.stable_id(), adv.file_path, adv.line, adv.title);
+            println!(
+                "  + {} {}:{} ({})",
+                adv.stable_id(),
+                adv.file_path,
+                adv.line,
+                adv.title
+            );
         }
     } else {
         println!("\n[OK] No new advisories compared to baseline.");
