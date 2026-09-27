@@ -140,7 +140,7 @@ jobs:
 
       - name: Upload FRC Artifact
         if: matrix.settings.host == 'ubuntu-latest' && hashFiles('corpus/targets/**') != ''
-        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: frensense-corpus
           path: frensense-corpus.frc
@@ -191,19 +191,19 @@ jobs:
           PYEOF
 
       - name: Upload CLI Artifact
-        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cli-${{ matrix.settings.target }}
           path: target/${{ matrix.settings.target }}/release/${{ matrix.settings.bin_name }}
 
       - name: Upload MCP Artifact
-        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: mcp-${{ matrix.settings.target }}
           path: target/${{ matrix.settings.target }}/release/frensense-mcp${{ matrix.settings.ext }}
 
       - name: Upload LSP Artifact
-        uses: actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5 # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: lsp-${{ matrix.settings.target }}
           path: target/${{ matrix.settings.target }}/release/frensense-lsp${{ matrix.settings.ext }}
@@ -223,7 +223,7 @@ jobs:
         with:
           egress-policy: audit
       - name: Download all artifacts
-        uses: actions/download-artifact@fdafc3f9f2e2a522dc1d230e6a03de57a1e71c95 # v4.3.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
       - name: Generate hashes
@@ -305,7 +305,7 @@ jobs:
           toolchain: stable
 
       - name: Download all artifacts
-        uses: actions/download-artifact@fdafc3f9f2e2a522dc1d230e6a03de57a1e71c95 # v4.3.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
 
@@ -372,7 +372,7 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.tag_name }}
       - name: Download all artifacts
-        uses: actions/download-artifact@fdafc3f9f2e2a522dc1d230e6a03de57a1e71c95 # v4.3.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: artifacts
       - name: Prepare binaries for release
