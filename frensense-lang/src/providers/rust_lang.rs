@@ -655,26 +655,18 @@ impl LanguageSpec for RustSpec {
             ("delete", crate::spec::SinkLabel::NoSqlInjection),
             ("deleteOne", crate::spec::SinkLabel::NoSqlInjection),
             ("deleteMany", crate::spec::SinkLabel::NoSqlInjection),
-            ("find", crate::spec::SinkLabel::NoSqlInjection),
+            ("find_one", crate::spec::SinkLabel::NoSqlInjection),
+            ("find_many", crate::spec::SinkLabel::NoSqlInjection),
+            ("Collection::find", crate::spec::SinkLabel::NoSqlInjection),
             ("findOne", crate::spec::SinkLabel::NoSqlInjection),
             ("findAll", crate::spec::SinkLabel::NoSqlInjection),
             // Storage Write
             ("put", crate::spec::SinkLabel::StorageWrite),
-            ("setItem", crate::spec::SinkLabel::StorageWrite),
             // Log Leak
             ("log", crate::spec::SinkLabel::LogLeak),
             ("error", crate::spec::SinkLabel::LogLeak),
             ("info", crate::spec::SinkLabel::LogLeak),
             ("debug", crate::spec::SinkLabel::LogLeak),
-            // Prototype Pollution
-            ("Object.assign", crate::spec::SinkLabel::PrototypePollution),
-            ("_.merge", crate::spec::SinkLabel::PrototypePollution),
-            ("_.defaultsDeep", crate::spec::SinkLabel::PrototypePollution),
-            ("_.set", crate::spec::SinkLabel::PrototypePollution),
-            ("$.extend", crate::spec::SinkLabel::PrototypePollution),
-            ("setPrototypeOf", crate::spec::SinkLabel::PrototypePollution),
-            // XXE
-            ("DOMParser", crate::spec::SinkLabel::Xxe),
             // JWT
             ("jwt.sign", crate::spec::SinkLabel::Jwt),
         ]
@@ -697,7 +689,6 @@ impl LanguageSpec for RustSpec {
             // Environment
             "std::env::var",
             "env::var",
-            "var",
         ]
     }
 

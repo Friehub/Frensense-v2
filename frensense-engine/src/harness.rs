@@ -168,6 +168,19 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
         // - Python: plain `identifier` children of `parameters`
         // - Rust: `parameter` node wrapping the name identifier as first child
         // - Go: `parameter_declaration` with the name as first child
+        if p.kind() == "self_parameter" {
+            let name = "self".to_string();
+            let v = ctx.ir.new_var(VarMetadata {
+                source_name: Some(name.clone()),
+                type_name: None,
+                byte_range: Some((p.start_byte(), p.end_byte())),
+                is_memory_state: false,
+                object_keys: Vec::new(),
+            });
+            ctx.ir.parameters.push(v);
+            ctx.env.last_mut().unwrap().insert(name, v);
+            continue;
+        }
         let id = match p.kind() {
             "required_parameter" | "optional_parameter" => {
                 p.child_by_field_name("pattern").or_else(|| p.child(0))
