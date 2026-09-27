@@ -44,8 +44,16 @@ frensense . --sarif
 frensense . --diff-only --strict
 
 # Baseline workflow: save current findings, then fail on new ones
+# (findings are identified by stable IDs — a finding that moves lines
+# after an unrelated edit is NOT a regression)
 frensense . --emit-baseline baseline.json
 frensense . --compare-baseline baseline.json --strict
+
+# Watch mode: re-scan on file changes, print only NEW findings
+frensense watch .
+
+# GitHub Actions annotations: findings render on the PR's Files Changed tab
+frensense . --github
 ```
 
 The engine auto-discovers a `frensense-corpus.frc` in the project root, or you
@@ -79,8 +87,89 @@ before committing:
 frensense-mcp
 ```
 
-Agents can request scans, taint-path resolutions, and validate generated code
-against the engine's dataflow analysis.
+### Tools
+
+| tool | what it does |
+|---|---|
+| `frensense_audit` | directory audit; returns `clean` + advisories |
+| `frensense_scan_file` | single-file scan for edit loops ("is THIS file clean?") |
+| `frensense_diff` | scan a git diff / patch and report only findings on added lines |
+
+Every tool supports `.frc` corpus bundles (`corpus_bundle` argument, or set
+`FRENSENSE_CORPUS_BUNDLE` in the server's environment for the whole session),
+and results carry stable finding IDs (`FRN-…`) so an agent can track "did I
+fix THIS finding yet" across edit cycles.
+
+### Installing the MCP server from a single binary
+
+`frensense-mcp` is a self-contained binary — there is no runtime, no package
+manager step, and no plugin to install. Installation is just "put the binary
+somewhere on PATH":
+
+1. **Get the binary.** Either download a release build from the
+   [GitHub releases](https://github.com/Friehub/frensense-v2/releases) page
+   (SLSA L3 provenance attached), or build it yourself:
+
+   ```bash
+   cargo build --release --bin frensense-mcp
+   # → target/release/frensense-mcp
+   ```
+
+2. **Put it on PATH** (any directory works; PATH just makes config cleaner):
+
+   ```bash
+   # system-wide (needs write access to /usr/local/bin):
+   install -m 755 target/release/frensense-mcp /usr/local/bin/
+   # or, user-local (create ~/.local/bin if it does not exist):
+   install -m 755 target/release/frensense-mcp ~/.local/bin/
+   # or keep it wherever it is and use the absolute path in the config below
+   ```
+
+3. **Register it with your MCP client.** MCP clients (Claude Desktop,
+   Claude Code, Cursor, Zed, ...) launch the server themselves as a
+   subprocess over stdio — you only tell them the command. For example, in
+   Claude Desktop's `claude_desktop_config.json`:
+
+   ```json
+   {
+     "mcpServers": {
+       "frensense": {
+         "command": "frensense-mcp",
+         "env": {
+           "FRENSENSE_CORPUS_BUNDLE": "/path/to/frensense-corpus.frc"
+         }
+       }
+     }
+   }
+   ```
+
+   If the binary is not on PATH, use the absolute path (e.g.
+   `/opt/frensense/frensense-mcp`) as `"command"` — clients accept both.
+   In Claude Code, the equivalent one-liner is:
+
+   ```bash
+   claude mcp add frensense -- frensense-mcp
+   ```
+
+That's it: no daemon, no port, no Python/Node runtime. The client spawns the
+binary per session, speaks JSON-RPC over stdin/stdout, and kills it when the
+session ends. The same single-binary story applies to `frensense-lsp` (see
+below) and the `frensense` CLI itself.
+
+## LSP (Editors)
+
+`frensense-lsp` publishes diagnostics as you open and save files — same
+findings, same stable IDs, same severity mapping as the CLI:
+
+```json
+// e.g. VS Code settings.json / Neovim LSP config: point the client at the binary
+{ "command": "frensense-lsp", "args": [] }
+```
+
+Diagnostics appear on `didOpen` and `didSave`; the server scans the saved
+file on disk, so what the editor shows is exactly what CI scans. Like the
+MCP server it is a single self-contained binary launched by the editor over
+stdio.
 
 ## Benchmark Results
 
