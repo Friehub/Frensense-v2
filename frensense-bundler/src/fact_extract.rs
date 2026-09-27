@@ -643,6 +643,9 @@ fn fact_key(e: &LearnedFactEntry) -> (String, String) {
         LearnedFactEntry::Sink { call, .. } => ("sink".into(), call.clone()),
         LearnedFactEntry::Sanitizer { call, .. } => ("san".into(), call.clone()),
         LearnedFactEntry::Check { rule, call, .. } => ("check".into(), format!("{rule}:{call}")),
+        LearnedFactEntry::Policy {
+            rule, when_call, ..
+        } => ("policy".into(), format!("{rule}:{when_call}")),
     }
 }
 

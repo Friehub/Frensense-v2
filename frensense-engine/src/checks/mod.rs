@@ -20,12 +20,15 @@
 //! Line drawn: **built-in = how to look; learned = what to conclude.**
 
 pub mod guard_bypass;
+pub mod policy;
 pub mod schema_policy;
 pub mod uaf;
 pub mod weak_hash;
 
 #[cfg(test)]
 mod guard_bypass_tests;
+#[cfg(test)]
+mod policy_tests;
 #[cfg(test)]
 mod schema_policy_tests;
 #[cfg(test)]
@@ -79,6 +82,19 @@ pub fn check_all<'a>(
             all.push(f);
         }
     }
+    // Co-occurrence policies: function-scoped ones run per function,
+    // module-scoped ones run once over the whole scanned set. Legacy
+    // learned checks fire through the same evaluator after conversion.
+    for f in policy::check_program(&irs, facts) {
+        let key = (
+            f.function.clone(),
+            f.rule.clone(),
+            f.span.map(|s| s.0).unwrap_or(usize::MAX),
+        );
+        if seen.insert(key) {
+            all.push(f);
+        }
+    }
     for ir in &irs {
         let findings = weak_hash::check(ir)
             .into_iter()
@@ -110,13 +126,13 @@ pub fn check_all<'a>(
 /// The learned-check rule: apply corpus-verified checks from the fact
 /// table. Mechanism identical to the seed checks (call matching over the
 /// IR); the conclusions are the bundle's.
-mod learned {
+pub(crate) mod learned {
     use super::CheckerFinding;
     use crate::analysis::taint::facts::FactTable;
     use crate::ir::function::{FunctionIR, Instruction, Operand};
 
     /// Last-segment names of every call in the function (one pass).
-    fn call_segments(ir: &FunctionIR) -> Vec<String> {
+    pub(crate) fn call_segments(ir: &FunctionIR) -> Vec<String> {
         let mut segs = Vec::new();
         for block in ir.blocks.values() {
             for instr in &block.instructions {
@@ -138,7 +154,11 @@ mod learned {
     /// with one of `ops` in this function, inline range enforcement
     /// (`if (d < 0 || d > MAX) …`). Walks one BinaryOp hop up from `var`
     /// and one down (comparisons may be written in either order).
-    fn has_range_check(ir: &FunctionIR, var: crate::ir::function::VarId, ops: &[String]) -> bool {
+    pub(crate) fn has_range_check(
+        ir: &FunctionIR,
+        var: crate::ir::function::VarId,
+        ops: &[String],
+    ) -> bool {
         // Collect BinaryOps involving `var` on either side.
         let involved = |lhs: &Operand, rhs: &Operand| {
             matches!(lhs, Operand::Var(v) if *v == var)

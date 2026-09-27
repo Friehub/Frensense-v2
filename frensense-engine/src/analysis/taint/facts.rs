@@ -136,6 +136,121 @@ pub struct LearnedCheckFact {
     pub unless_range_check: Option<Vec<String>>,
 }
 
+/// A requirement that must hold for a policy's trigger to be considered compliant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PolicyRequirement {
+    /// A named guard call must be present in the scope (e.g. `audit_log`,
+    /// `authorize`, `validate_origin`).
+    GuardCall {
+        /// Call name or last segment.
+        call: String,
+    },
+    /// A call must NOT be present in the scope (forbid a deprecated or
+    /// banned alternative from co-occurring with the trigger).
+    NotCall {
+        call: String,
+    },
+    /// The trigger's guarded argument must participate in a comparison
+    /// against a literal bound with one of `ops`. Direct generalization
+    /// of `LearnedCheckFact::unless_range_check` (inverted).
+    RangeCheck {
+        /// Comparison operators accepted as the bound check.
+        ops: Vec<String>,
+    },
+    /// One of these call names must appear in the scope, presence-required
+    /// (an audit-log write must accompany the privileged action).
+    RequireCall {
+        /// Last-segment names, any one of which satisfies the requirement.
+        any_of: Vec<String>,
+    },
+}
+
+impl PolicyRequirement {
+    /// Last-segment names this requirement matches on (for diagnostics).
+    pub fn call_names(&self) -> Vec<&str> {
+        match self {
+            PolicyRequirement::GuardCall { call } | PolicyRequirement::NotCall { call } => {
+                vec![call.as_str()]
+            }
+            PolicyRequirement::RequireCall { any_of } => {
+                any_of.iter().map(|s| s.as_str()).collect()
+            }
+            PolicyRequirement::RangeCheck { .. } => Vec::new(),
+        }
+    }
+}
+
+/// Where a policy's trigger and requirements are evaluated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyScope {
+    /// Trigger and requirements live in the same function (the default;
+    /// matches the legacy `LearnedCheckFact` semantics exactly).
+    #[default]
+    Function,
+    /// Requirements may be satisfied by ANY function in the scanned program
+    /// (cross-function enforcement: a route handler's guard helper defined
+    /// in a sibling module still counts). More FPs than `Function` when the
+    /// helper is genuinely unrelated; use when the mine loop shows
+    /// cross-file enforcement in the negatives.
+    Module,
+}
+
+/// A corpus-verified co-occurrence policy: WHEN the trigger call appears in
+/// the scope, every requirement must ALSO be satisfiable in the scope, else
+/// the function violates the policy.
+///
+/// The generalization of [`LearnedCheckFact`]: that type's `unless_guard` /
+/// `unless_range_check` fields are exactly `require: [GuardCall{..}]` /
+/// `require: [RangeCheck{..}]` under `PolicyScope::Function`; `to_policy()`
+/// converts losslessly so old bundles keep firing through the new path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub struct PolicyFact {
+    /// Stable rule id, e.g. `"policy_redirect_challenge"`.
+    pub rule: String,
+    /// The trigger call (last segment matched) whose unqualified presence
+    /// raises the policy question.
+    pub when_call: String,
+    /// Requirements that must hold in the scope for the trigger to be
+    /// compliant. Empty = presence-only policy (any trigger fires).
+    #[serde(default)]
+    pub require: Vec<PolicyRequirement>,
+    /// Where trigger and requirements are evaluated.
+    #[serde(default)]
+    pub scope: PolicyScope,
+    /// Advisory text shown to the user (bundle-authored).
+    pub message: String,
+    /// Advisory severity hint: "warning" or "critical".
+    pub severity: String,
+}
+
+impl PolicyFact {
+    /// Convert a legacy [`LearnedCheckFact`] into the generalized form.
+    /// `unless_guard` and `unless_range_check` become requirements; scope is
+    /// always [`PolicyScope::Function`], matching the legacy semantics.
+    pub fn from_legacy(f: &LearnedCheckFact) -> Self {
+        let mut require = Vec::new();
+        if let Some(g) = &f.unless_guard {
+            require.push(PolicyRequirement::GuardCall { call: g.clone() });
+        }
+        if let Some(ops) = &f.unless_range_check {
+            require.push(PolicyRequirement::RangeCheck { ops: ops.clone() });
+        }
+        Self {
+            rule: f.rule.clone(),
+            when_call: f.call.clone(),
+            require,
+            scope: PolicyScope::Function,
+            message: f.message.clone(),
+            severity: f.severity.clone(),
+        }
+    }
+}
+
 /// The merged fact table: built-in language tables + bundle-learned facts.
 ///
 /// Built from a [`TaintConfig`] (name sets, backward compatible) plus
@@ -150,6 +265,11 @@ pub struct FactTable {
     /// Corpus-verified non-dataflow checks (order-preserving; dedup on
     /// `(rule, call)` at merge time).
     pub learned_checks: Vec<LearnedCheckFact>,
+    /// Corpus-verified co-occurrence policies (the generalized check fact).
+    /// Evaluated by `checks::policy`; legacy `learned_checks` entries ALSO
+    /// evaluate there after `PolicyFact::from_legacy` conversion, so bundles
+    /// never need to migrate to keep firing.
+    pub policy_facts: Vec<PolicyFact>,
     /// Last segments that come ONLY from dotted client sinks (`got.get`,
     /// `axios.post`, ...). These verbs are ambiguous, `Map.get`, router
     /// `app.post`, LRU `.put` all share the names, so they match
@@ -239,6 +359,17 @@ impl FactTable {
                 .any(|e| e.rule == c.rule && e.call == c.call)
             {
                 self.learned_checks.push(c.clone());
+            }
+        }
+        // Policy facts accumulate the same way, dedup on (rule, when_call):
+        // the same policy arriving twice must not duplicate findings.
+        for p in &other.policy_facts {
+            if !self
+                .policy_facts
+                .iter()
+                .any(|e| e.rule == p.rule && e.when_call == p.when_call)
+            {
+                self.policy_facts.push(p.clone());
             }
         }
         // Verb-sink bookkeeping accumulates too: dotted client entries
@@ -432,6 +563,16 @@ impl FactTable {
             .filter(|c| c.call.rsplit('.').next() == Some(seg))
             .collect()
     }
+
+    /// Co-occurrence policies whose trigger call's last segment matches
+    /// `call` (same last-segment matching as [`Self::learned_checks_for`]).
+    pub fn policies_for(&self, call: &str) -> Vec<&PolicyFact> {
+        let seg = call.rsplit('.').next().unwrap_or(call);
+        self.policy_facts
+            .iter()
+            .filter(|p| p.when_call.rsplit('.').next() == Some(seg))
+            .collect()
+    }
 }
 
 /// One learned fact as persisted in a `.frc` bundle. A tagged union over the
@@ -456,6 +597,19 @@ pub enum LearnedFactEntry {
         call: String,
         kind: String,
         guard_style: bool,
+    },
+    /// Install a corpus-verified co-occurrence policy (the generalized
+    /// check fact; see [`PolicyFact`]).
+    Policy {
+        rule: String,
+        when_call: String,
+        /// Requirements that must hold for the trigger to be compliant.
+        #[serde(default)]
+        require: Vec<PolicyRequirement>,
+        #[serde(default)]
+        scope: PolicyScope,
+        message: String,
+        severity: String,
     },
     /// Install a corpus-verified non-dataflow check.
     Check {
@@ -520,6 +674,30 @@ impl LearnedFactEntry {
                         guard_style: *guard_style,
                     },
                 );
+            }
+            LearnedFactEntry::Policy {
+                rule,
+                when_call,
+                require,
+                scope,
+                message,
+                severity,
+            } => {
+                let fact = PolicyFact {
+                    rule: rule.clone(),
+                    when_call: when_call.clone(),
+                    require: require.clone(),
+                    scope: *scope,
+                    message: message.clone(),
+                    severity: severity.clone(),
+                };
+                if !table
+                    .policy_facts
+                    .iter()
+                    .any(|e| e.rule == fact.rule && e.when_call == fact.when_call)
+                {
+                    table.policy_facts.push(fact);
+                }
             }
             LearnedFactEntry::Check {
                 rule,

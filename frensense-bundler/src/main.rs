@@ -104,6 +104,13 @@ fn run_facts_pipeline(corpus_dir: &Path, output_path: &Path) -> Result<(), Strin
             } => {
                 format!("check:{rule}({call})")
             }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::Policy {
+                rule,
+                when_call,
+                ..
+            } => {
+                format!("policy:{rule}({when_call})")
+            }
         };
         eprintln!("  [{}] {} ← {}", f.status, call, f.families.join(", "));
     }
