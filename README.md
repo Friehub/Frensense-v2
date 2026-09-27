@@ -229,6 +229,9 @@ python3 scripts/owasp_benchmark.py \
   stable ID).
 - [docs/LSP_USAGE.md](docs/LSP_USAGE.md) — editor setup (Neovim, Helix,
   VS Code) and the protocol walkthrough.
+- [docs/AGENT_INTEGRATION.md](docs/AGENT_INTEGRATION.md) — CI wiring:
+  baseline gating, `--github` annotations, and the agent-fixes/CI-judges
+  workflow.
 - [docs/BENCHMARKING.md](docs/BENCHMARKING.md) — benchmark methodology and
   per-CWE results.
 - [docs/FRENSENSE_CORPUS_GUIDE.md](docs/FRENSENSE_CORPUS_GUIDE.md) —
