@@ -23,8 +23,6 @@ name = "frensense"
 name = "frensense"
 path = "src/bin/frensense.rs"
 
-[[bin]]
-
 [dependencies]
 frensense-engine = { path = "frensense-engine", version = "0.7.0-preview.2", features = ["serialize"] }
 frensense-lang = { path = "frensense-lang", version = "0.7.0-preview.2" }
@@ -40,5 +38,3 @@ frensense-bundler = { version = "0.7.0-preview.2", path = "frensense-bundler" }
 
 [dev-dependencies]
 tempfile = "3"
-
-[[bin]]
