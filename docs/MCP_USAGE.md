@@ -5,12 +5,12 @@
 
 `frensense-mcp` exposes the Frensense engine to AI coding agents over the
 [Model Context Protocol](https://modelcontextprotocol.io) (JSON-RPC on
-stdio). Every tool calls the same analysis engine as the CLI — same
+stdio). Every tool calls the same analysis engine as the CLI: same
 lowering, same fact tables, same stable finding IDs.
 
 ## Setup
 
-**Build / install** (one crate, three binaries — see the README's
+**Build / install** (one crate, three binaries; see the README's
 "One crate, three binaries" section):
 
 ```bash
@@ -18,7 +18,7 @@ cargo build --release --bin frensense-mcp
 # → target/release/frensense-mcp
 ```
 
-**Register with your MCP client** — the client launches the server as a
+**Register with your MCP client**. The client launches the server as a
 subprocess over stdio, so it only needs the command. Claude Code:
 
 ```bash
@@ -47,7 +47,7 @@ per-call `corpus_bundle` argument, which overrides the environment value.
 
 ## The three tools
 
-### `frensense_audit` — is this tree clean?
+### `frensense_audit`: is this tree clean?
 
 Directory-level audit. Best for "scan the whole project before you commit".
 
@@ -56,10 +56,10 @@ Directory-level audit. Best for "scan the whole project before you commit".
   "arguments": { "path": "src", "severity_threshold": "warning" } }
 ```
 
-Returns `{ "clean": bool, "advisories": [...] }` — `clean: true` means the
+Returns `{ "clean": bool, "advisories": [...] }`; `clean: true` means the
 tree satisfies all invariants.
 
-### `frensense_scan_file` — is THIS file clean?
+### `frensense_scan_file`: is THIS file clean?
 
 Single-file scan for agent edit loops. Faster and fully scoped; the result
 labels every advisory with file/line/column, plus top-level `stable_ids`.
@@ -70,11 +70,11 @@ labels every advisory with file/line/column, plus top-level `stable_ids`.
 ```
 
 Unsupported extensions (`.txt`, `.md`, …) return
-`{ "unsupported_file": true, ... }` rather than an error — the agent can
+`{ "unsupported_file": true, ... }` rather than an error, so the agent can
 skip them without exception handling. `path` on a missing file returns an
 explicit error message; a nonexistent `corpus_bundle` does too.
 
-### `frensense_diff` — does MY change introduce findings?
+### `frensense_diff`: does MY change introduce findings?
 
 Scans a unified diff and reports **only findings whose line falls inside
 the diff's added-line ranges**. Without `diff_text`, it runs
@@ -148,7 +148,7 @@ diff --git a/src/pay.py b/src/pay.py
 
 Note what the gate did: the agent *removed* two findings (the md5 password
 hash and the string-concatenated SQL) and *added* one. The diff tool
-correctly reports only the added one — pre-existing findings elsewhere in
+correctly reports only the added one: pre-existing findings elsewhere in
 the file are invisible to this gate, which is exactly what "does my change
 introduce findings?" means. `clean: false` with exactly one stable ID is
 the signal to iterate.
@@ -167,7 +167,7 @@ the signal to iterate.
 
 The change is clean. Compare IDs, not lines: `FRN-a441e6e7b795…` appearing
 in step 1 and disappearing in step 2 is proof *that specific finding* was
-fixed — the ID is stable across line shifts, so it survives unrelated
+fixed. The ID is stable across line shifts, so it survives unrelated
 edits anywhere above the finding.
 
 **3. Optional: focus on the single file** while iterating (faster than a
@@ -203,11 +203,11 @@ diff when the agent is only touching one buffer):
   (fingerprint, taint path steps, tags), so agent-side parsing code works
   for both surfaces.
 - A scan failure on one file (syntax errors, unreadable) is reported per
-  call as `"error": "..."` with `clean: false` — the agent can retry after
+  call as `"error": "..."` with `clean: false`; the agent can retry after
   fixing the file.
 
 ## Related
 
-- `docs/LSP_USAGE.md` — the same engine inside your editor
-- `docs/FRENSENSE_CORPUS_GUIDE.md` — building `.frc` bundles
+- `docs/LSP_USAGE.md`: the same engine inside your editor
+- `docs/FRENSENSE_CORPUS_GUIDE.md`: building `.frc` bundles
 - README: single-binary installation details

@@ -44,7 +44,7 @@ frensense . --sarif
 frensense . --diff-only --strict
 
 # Baseline workflow: save current findings, then fail on new ones
-# (findings are identified by stable IDs — a finding that moves lines
+# (findings are identified by stable IDs: a finding that moves lines
 # after an unrelated edit is NOT a regression)
 frensense . --emit-baseline baseline.json
 frensense . --compare-baseline baseline.json --strict
@@ -61,7 +61,7 @@ can point `--corpus-bundle` at any bundle file.
 
 ### One crate, three binaries
 
-The `frensense` crate ships everything — the CLI, the MCP server for AI
+The `frensense` crate ships everything. The CLI, the MCP server for AI
 agents, and the LSP server for editors are three binaries built from the same
 versioned code:
 
@@ -120,7 +120,7 @@ fix THIS finding yet" across edit cycles.
 
 ### Installing the MCP server from a single binary
 
-`frensense-mcp` is a self-contained binary — there is no runtime, no package
+`frensense-mcp` is a self-contained binary: there is no runtime, no package
 manager step, and no plugin to install. Installation is just "put the binary
 somewhere on PATH":
 
@@ -145,7 +145,7 @@ somewhere on PATH":
 
 3. **Register it with your MCP client.** MCP clients (Claude Desktop,
    Claude Code, Cursor, Zed, ...) launch the server themselves as a
-   subprocess over stdio — you only tell them the command. For example, in
+   subprocess over stdio, so you only tell them the command. For example, in
    Claude Desktop's `claude_desktop_config.json`:
 
    ```json
@@ -162,7 +162,7 @@ somewhere on PATH":
    ```
 
    If the binary is not on PATH, use the absolute path (e.g.
-   `/opt/frensense/frensense-mcp`) as `"command"` — clients accept both.
+   `/opt/frensense/frensense-mcp`) as `"command"`; clients accept both.
    In Claude Code, the equivalent one-liner is:
 
    ```bash
@@ -176,8 +176,8 @@ below) and the `frensense` CLI itself.
 
 ## LSP (Editors)
 
-`frensense-lsp` publishes diagnostics as you open and save files — same
-findings, same stable IDs, same severity mapping as the CLI:
+`frensense-lsp` publishes diagnostics as you open and save files: same
+findings, same stable IDs, same severity mapping as the CLI.
 
 ```json
 // e.g. VS Code settings.json / Neovim LSP config: point the client at the binary
@@ -224,17 +224,17 @@ python3 scripts/owasp_benchmark.py \
 
 ## Detailed Guides
 
-- [docs/MCP_USAGE.md](docs/MCP_USAGE.md) — MCP setup, tool reference, and a
+- [docs/MCP_USAGE.md](docs/MCP_USAGE.md): MCP setup, tool reference, and a
   worked end-to-end agent session (edit → diff-gate → fix → verify by
   stable ID).
-- [docs/LSP_USAGE.md](docs/LSP_USAGE.md) — editor setup (Neovim, Helix,
+- [docs/LSP_USAGE.md](docs/LSP_USAGE.md): editor setup (Neovim, Helix,
   VS Code) and the protocol walkthrough.
-- [docs/AGENT_INTEGRATION.md](docs/AGENT_INTEGRATION.md) — CI wiring:
+- [docs/AGENT_INTEGRATION.md](docs/AGENT_INTEGRATION.md): CI wiring,
   baseline gating, `--github` annotations, and the agent-fixes/CI-judges
   workflow.
-- [docs/BENCHMARKING.md](docs/BENCHMARKING.md) — benchmark methodology and
+- [docs/BENCHMARKING.md](docs/BENCHMARKING.md): benchmark methodology and
   per-CWE results.
-- [docs/FRENSENSE_CORPUS_GUIDE.md](docs/FRENSENSE_CORPUS_GUIDE.md) —
+- [docs/FRENSENSE_CORPUS_GUIDE.md](docs/FRENSENSE_CORPUS_GUIDE.md):
   building and using `.frc` knowledge bundles.
 
 ## Knowledge Bundles (.frc)

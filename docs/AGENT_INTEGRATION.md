@@ -4,8 +4,8 @@
 # Agent + CI Integration Guide
 
 Frensense is designed for a split workflow: **AI agents fix code, CI judges
-it.** This guide wires the two halves together with the CLI surface —
-`--github` for CI annotations, baselines for regression gating — and shows
+it.** This guide wires the two halves together with the CLI surface
+(`--github` for CI annotations, baselines for regression gating) and shows
 where the MCP and LSP surfaces plug in. Every mechanism here shares one
 finding-identity scheme, so "the same bug" means the same thing on both
 sides.
@@ -50,7 +50,7 @@ frensense . --emit-baseline .frensense/baseline.json
 git add .frensense/baseline.json && git commit -m "chore: frensense baseline"
 ```
 
-Commit the baseline file — it is the shared contract between the agent
+Commit the baseline file: it is the shared contract between the agent
 and CI about what debt is accepted.
 
 ### The workflow
@@ -99,7 +99,7 @@ jobs:
 
 Combine them: `--compare-baseline --github` fails the job on regressions
 *and* annotates every finding in the diff view. The baseline gate and the
-annotation rendering are independent — annotations appear for all current
+annotation rendering are independent: annotations appear for all current
 findings so reviewers see the accepted debt in context, while the exit
 code reflects only the regression verdict.
 
@@ -120,7 +120,7 @@ git add .frensense/baseline.json
 
 Reviewers should treat a baseline-shrinking diff the same way they treat
 a test-count-increasing diff: as a positive. If a PR *grows* the
-baseline, that is the agent asking to accept new debt — reject or inspect.
+baseline, that is the agent asking to accept new debt; reject or inspect.
 
 **Migration note:** baselines captured before stable IDs landed
 (pre-`FRN-` fingerprints, which hashed the line number) must be
@@ -139,7 +139,7 @@ that keeps PRs green:
    touched file, and reports only findings on added lines.
 3. **Fix until `clean: true`.** The result's `stable_ids` name exactly
    which findings the change introduces; after a fix, the ID disappearing
-   is proof that specific finding is resolved — regardless of how lines
+   is proof that specific finding is resolved, regardless of how lines
    moved in between.
 4. **Commit.** CI re-runs the same engine over the whole tree; because
    the agent's change introduced nothing new, the baseline gate passes.
@@ -175,7 +175,7 @@ frensense watch .
 ```
 
 - Re-scans changed files every 500 ms and prints **only new findings**
-  (fingerprint-set diff between rounds) — the stream goes quiet when a
+  (fingerprint-set diff between rounds), so the stream goes quiet when a
   fix lands.
 - Accepts the same flags as a one-shot scan, e.g.
   `frensense watch . --corpus-bundle frensense-corpus.frc`.
@@ -193,8 +193,8 @@ A finding has one fingerprint everywhere. Concretely:
 | LSP diagnostics | `code` field of each diagnostic |
 | baseline file | the `fingerprint` field of each stored advisory |
 
-The fingerprint hashes semantic coordinates only — file, rule/sink,
-enclosing function, source — never line numbers. Consequences:
+The fingerprint hashes semantic coordinates only (file, rule/sink,
+enclosing function, source), never line numbers. Consequences:
 
 - Inserting/deleting unrelated code **moves** the finding but keeps its
   identity: baselines don't churn, issue links stay valid.
@@ -242,7 +242,7 @@ change what the engine can see, and both sides must agree on reality.
 
 ## See also
 
-- [MCP_USAGE.md](MCP_USAGE.md) — agent tool surface + end-to-end session
-- [LSP_USAGE.md](LSP_USAGE.md) — editor surface
-- [FRENSENSE_CORPUS_GUIDE.md](FRENSENSE_CORPUS_GUIDE.md) — building bundles
-- README — install, one-crate-three-binaries
+- [MCP_USAGE.md](MCP_USAGE.md): agent tool surface + end-to-end session
+- [LSP_USAGE.md](LSP_USAGE.md): editor surface
+- [FRENSENSE_CORPUS_GUIDE.md](FRENSENSE_CORPUS_GUIDE.md): building bundles
+- README: install, one-crate-three-binaries

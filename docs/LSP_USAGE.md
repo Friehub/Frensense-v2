@@ -14,7 +14,7 @@ standard Language Server Protocol over stdio and ships in the same
 - Scans on `textDocument/didOpen` and `textDocument/didSave`, publishing
   `textDocument/publishDiagnostics` for that file.
 - Scans the **saved file on disk** through the same per-file engine path as
-  `frensense watch` and the MCP tools — the engine is the single source of
+  `frensense watch` and the MCP tools: the engine is the single source of
   truth, so what the editor shows is exactly what CI scans. No in-memory
   AST fork, no incremental-edit replay divergence.
 - Diagnostics map advisories 1:1: Critical → Error (1), Warning → Warning
@@ -23,13 +23,13 @@ standard Language Server Protocol over stdio and ships in the same
   tags; `source` is `"frensense"`.
 - Closing a file clears its diagnostics; unsupported file types clear
   rather than error (closing a deleted file's tab doesn't spam).
-- **Diagnostics only.** `initialize` advertises just `textDocumentSync` —
+- **Diagnostics only.** `initialize` advertises just `textDocumentSync`;
   no hover, completion, or code actions are claimed or supported.
 
 ## Client configuration
 
 Any LSP client that launches a stdio server works. The binary is
-`frensense-lsp` (installed with the rest of the crate — see README,
+`frensense-lsp` (installed with the rest of the crate; see README,
 "One crate, three binaries").
 
 ### Neovim (built-in LSP, Lua)
@@ -70,8 +70,8 @@ binary:
 
 If the binary isn't on `PATH`, use the absolute path (e.g.
 `/opt/frensense/frensense-lsp`). Set `FRENSENSE_CORPUS_BUNDLE` in the
-server `env` to make learned `.frc` facts participate in editor scans —
-the same variable the MCP server reads.
+server `env` to make learned `.frc` facts participate in editor scans,
+using the same variable the MCP server reads.
 
 ## Protocol walkthrough
 
@@ -94,7 +94,7 @@ Content-Length: 63
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
 ```
 
-**Server → client:** capabilities + server info — note only
+**Server → client:** capabilities + server info. Note only
 `textDocumentSync` is claimed:
 
 ```json
@@ -131,13 +131,13 @@ Content-Length: 63
              "tags":["checker","weak_hash"]}}]}}
 ```
 
-Line 3 (0-based) is line 4 (1-based) — the editor underline and the CLI's
+Line 3 (0-based) is line 4 (1-based): the editor underline and the CLI's
 `app.py:4` are the same position. The `code` is the stable finding ID:
 if you insert ten lines above, the underline moves and this string's hash
 portion does not change, so issue-tracker references stay valid.
 
 **3. Fix the file and save** (`didSave`): the next publish contains an
-**empty** diagnostics array — the finding is gone because the code changed,
+**empty** diagnostics array. The finding is gone because the code changed,
 not because it was filtered:
 
 ```json
@@ -165,17 +165,17 @@ seeing a regression.
 
 ## Troubleshooting
 
-- **No diagnostics appear** — check the file extension is a supported
+- **No diagnostics appear**: check the file extension is a supported
   language (Python, JavaScript/TypeScript, Rust, Go). Unsupported files
   publish empty diagnostics by design.
-- **Client logs** — most editors show the server's stderr in an output
+- **Client logs**: most editors show the server's stderr in an output
   panel (VS Code: *Output → your LSP client*). `frensense-lsp` writes scan
   failures there; stdout is protocol-only.
-- **Findings differ from the CLI** — make sure both use the same
+- **Findings differ from the CLI**: make sure both use the same
   `.frc` bundle (`FRENSENSE_CORPUS_BUNDLE` / `--corpus-bundle`); learned
   facts change what the engine can see.
 
 ## Related
 
-- `docs/MCP_USAGE.md` — the same engine for AI agents
+- `docs/MCP_USAGE.md`: the same engine for AI agents
 - README: install, quick start, single-binary notes
