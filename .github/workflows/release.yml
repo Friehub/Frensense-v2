@@ -128,7 +128,7 @@ jobs:
       - name: Build binaries (CLI + MCP + LSP)
         run: |
           cargo build --release --target ${{ matrix.settings.target }} \
-            --bin frensense --bin frensense-mcp --bin frensense-lsp
+            --bin frensense
 
       - name: Build FRC Bundle
         # The corpus is proprietary and not in the public repo; skip unless
@@ -194,17 +194,7 @@ jobs:
           name: cli-${{ matrix.settings.target }}
           path: target/${{ matrix.settings.target }}/release/${{ matrix.settings.bin_name }}
 
-      - name: Upload MCP Artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: mcp-${{ matrix.settings.target }}
-          path: target/${{ matrix.settings.target }}/release/frensense-mcp${{ matrix.settings.ext }}
 
-      - name: Upload LSP Artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: lsp-${{ matrix.settings.target }}
-          path: target/${{ matrix.settings.target }}/release/frensense-lsp${{ matrix.settings.ext }}
 
   # 2. Generate Hashes for SLSA
   generate-hashes:
@@ -305,20 +295,6 @@ jobs:
             ext=""
             if [[ "$target" == *"windows"* ]]; then ext=".exe"; fi
             cp "${dir}frensense${ext}" "release-binaries/frensense-${target}${ext}"
-          done
-          # MCP server (AI agents)
-          for dir in artifacts/mcp-*/; do
-            target=$(basename "$dir" | sed 's/mcp-//')
-            ext=""
-            if [[ "$target" == *"windows"* ]]; then ext=".exe"; fi
-            cp "${dir}frensense-mcp${ext}" "release-binaries/frensense-mcp-${target}${ext}"
-          done
-          # LSP server (editors)
-          for dir in artifacts/lsp-*/; do
-            target=$(basename "$dir" | sed 's/lsp-//')
-            ext=""
-            if [[ "$target" == *"windows"* ]]; then ext=".exe"; fi
-            cp "${dir}frensense-lsp${ext}" "release-binaries/frensense-lsp-${target}${ext}"
           done
       - name: Release
         uses: softprops/action-gh-release@26994186c0ac3ef5cae75ac16aa32e8153525f77 # v2.4.2

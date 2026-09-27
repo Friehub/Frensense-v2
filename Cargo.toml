@@ -24,8 +24,6 @@ name = "frensense"
 path = "src/bin/frensense.rs"
 
 [[bin]]
-name = "frensense-mcp"
-path = "src/bin/frensense-mcp.rs"
 
 [dependencies]
 frensense-engine = { path = "frensense-engine", version = "0.7.0-preview.2", features = ["serialize"] }
@@ -44,5 +42,3 @@ frensense-bundler = { version = "0.7.0-preview.2", path = "frensense-bundler" }
 tempfile = "3"
 
 [[bin]]
-name = "frensense-lsp"
-path = "src/bin/frensense-lsp.rs"
