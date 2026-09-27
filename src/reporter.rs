@@ -207,8 +207,7 @@ fn escape_workflow_property(value: &str) -> String {
 fn escape_workflow_message(value: &str) -> String {
     value
         .replace('%', "%25")
-        .replace('\r', " ")
-        .replace('\n', " ")
+        .replace(['\r', '\n'], " ")
 }
 
 /// Byte offset → 1-based (line, column) within a file, reading the source

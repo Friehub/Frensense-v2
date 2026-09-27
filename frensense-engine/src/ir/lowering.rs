@@ -1068,25 +1068,4 @@ impl<'a> LoweringContext<'a> {
         last_op
     }
 
-    /// Bind a ternary arm's value to a var so the Phi can reference it:
-    /// an existing Var passes through; a literal gets an Assign.
-    fn materialize_arm(&mut self, op: Operand, node: Node) -> crate::ir::function::VarId {
-        match op {
-            Operand::Var(v) => v,
-            other => {
-                let v = self.ir.new_var(VarMetadata {
-                    source_name: None,
-                    type_name: None,
-                    byte_range: Some((node.start_byte(), node.end_byte())),
-                    is_memory_state: false,
-                    object_keys: Vec::new(),
-                });
-                self.ir.push_instruction(
-                    self.current_block,
-                    Instruction::Assign { dest: v, src: other },
-                );
-                v
-            }
-        }
-    }
 }

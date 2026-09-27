@@ -168,7 +168,7 @@ fn phi_infeasible_incoming(ir: &FunctionIR, merge_block: BlockId, dest_var: VarI
     let mut out = Vec::new();
     for &(pred_block, inc_var) in &phi.incoming {
         // Find the branch that targets pred_block.
-        for (_b_id, b) in &ir.blocks {
+        for b in ir.blocks.values() {
             let (cond, true_block, false_block) = match &b.terminator {
                 Terminator::Branch {
                     cond: Operand::Var(c),

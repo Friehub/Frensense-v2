@@ -53,16 +53,9 @@ pub fn snapshot_mtimes(
 }
 
 /// Rolling watcher state: the last observation.
+#[derive(Default)]
 pub struct FileWatcher {
     last: FxHashMap<PathBuf, u64>,
-}
-
-impl Default for FileWatcher {
-    fn default() -> Self {
-        Self {
-            last: FxHashMap::default(),
-        }
-    }
 }
 
 impl FileWatcher {
