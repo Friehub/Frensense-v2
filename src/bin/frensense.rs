@@ -15,6 +15,7 @@ fn print_help() {
     println!("Frensense v{FRENSENSE_VERSION}, deterministic dataflow security scanner.");
     println!();
     println!("Usage: frensense [path] [options]");
+    println!("       frensense watch [path] [options]   Re-scan on file changes, print new findings");
     println!();
     println!("Options:");
     println!("  --json                     Output findings as JSON");
@@ -42,10 +43,82 @@ fn handle_early_args(args: &[String]) -> bool {
     false
 }
 
+/// Watch mode entry: parse the remaining args like a one-shot scan, build
+/// the engine from the same options, then enter the poll loop. Ctrl-C
+/// kills the process (default handler); `should_stop` here also honors a
+/// stop-file (`frensense-watch.stop` in the watched root) so scripts and
+/// tests can end the loop deterministically.
+fn run_watch(args: Vec<String>) -> Result<()> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let input_paths = get_input_paths(&args);
+    let input_path = input_paths
+        .first()
+        .cloned()
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let options: CliOptions = parse_options(&args);
+
+    let language_filter: Option<Vec<&'static str>> = options
+        .language_filter
+        .as_ref()
+        .and_then(|l| frensense::parser::extensions_for(l))
+        .map(|exts| exts.to_vec());
+    let corpus_bundle = options.corpus_bundle_path.clone();
+    let severity = options.severity_filter;
+    let min_confidence = options.min_confidence;
+
+    // Stop-file: polled by a detached thread, lets scripts/tests end the
+    // loop deterministically without signaling machinery. SIGINT keeps the
+    // default handler (process exit).
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let stop_file = input_path.join("frensense-watch.stop");
+    {
+        let stop_flag = Arc::clone(&stop_flag);
+        std::thread::spawn(move || loop {
+            if stop_file.exists() {
+                stop_flag.store(true, Ordering::SeqCst);
+                let _ = std::fs::remove_file(&stop_file);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        });
+    }
+
+    let root = input_path;
+    let stop = Arc::new(AtomicBool::new(false));
+    frensense::cli::run_watch_loop(
+        &root,
+        language_filter.as_ref(),
+        || {
+            let mut engine = frensense::engine::Engine::new();
+            if let Some(ref p) = corpus_bundle {
+                engine.set_corpus_bundle_path(p.clone());
+            }
+            engine.set_severity_filter(severity);
+            engine.set_min_confidence(min_confidence);
+            engine
+        },
+        |engine, path| engine.run(path),
+        || stop.load(Ordering::SeqCst) || stop_flag.load(Ordering::SeqCst),
+    )
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if handle_early_args(&args) {
         return Ok(());
+    }
+
+    // Watch subcommand: poll-loop delivery mode, everything else shared
+    // with the one-shot path (same options, same engine config).
+    if args.iter().any(|a| a == "watch") {
+        return run_watch(
+            args.iter()
+                .filter(|a| a.as_str() != "watch")
+                .cloned()
+                .collect::<Vec<_>>(),
+        );
     }
 
     let input_paths = get_input_paths(&args);

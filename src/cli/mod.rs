@@ -4,6 +4,10 @@
 
 pub mod options;
 pub mod reporting;
+pub mod watch;
+#[cfg(test)]
+mod watch_tests;
 
 pub use options::*;
 pub use reporting::*;
+pub use watch::{FileWatcher, POLL_INTERVAL, format_watch_finding, new_advisories, run_watch_loop, snapshot_mtimes};
