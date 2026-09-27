@@ -27,7 +27,7 @@ dangerous sink.
 ## Quick Start
 
 ```bash
-# Install
+# Install (one crate, three binaries: frensense, frensense-mcp, frensense-lsp)
 cargo install frensense
 
 # Scan a project
@@ -58,6 +58,24 @@ frensense . --github
 
 The engine auto-discovers a `frensense-corpus.frc` in the project root, or you
 can point `--corpus-bundle` at any bundle file.
+
+### One crate, three binaries
+
+The `frensense` crate ships everything — the CLI, the MCP server for AI
+agents, and the LSP server for editors are three binaries built from the same
+versioned code:
+
+| binary | consumer | transport |
+|---|---|---|
+| `frensense` | humans, CI | files/exit code |
+| `frensense-mcp` | AI agents (Claude, Cursor, Zed, …) | JSON-RPC over stdio |
+| `frensense-lsp` | editors (VS Code, Neovim, …) | LSP over stdio |
+
+`cargo install frensense` (or `cargo build --release`) gives you all three;
+each delivery surface in this README assumes the others exist. They share one
+analysis engine, one knowledge-bundle format, and one finding-identity
+scheme, so a finding in your editor, in an agent's scan, and in CI is the
+same finding with the same stable ID.
 
 ## What It Catches
 
