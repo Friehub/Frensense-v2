@@ -5,6 +5,7 @@
 //! Tests for Steensgaard unification (R4 phase 1).
 
 #[cfg(test)]
+#[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod steensgaard_tests {
     use crate::graph::steensgaard::Steensgaard;
     use crate::harness::lower_source;

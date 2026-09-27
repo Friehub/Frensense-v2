@@ -5,6 +5,7 @@
 //! Tests for selective k=1 call-site context sensitivity (task 5).
 
 #[cfg(test)]
+#[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod context_tests {
     use crate::analysis::forward::{InterproceduralTaintEngine, ProgramSvfg};
     use crate::analysis::taint::config::TaintConfig;

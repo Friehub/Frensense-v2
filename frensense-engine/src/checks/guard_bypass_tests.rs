@@ -5,6 +5,7 @@
 //! Tests for the guard-bypass / credential-policy seed checks.
 
 #[cfg(test)]
+#[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod guard_bypass_tests {
     use crate::checks::guard_bypass;
     use crate::harness::lower_source;

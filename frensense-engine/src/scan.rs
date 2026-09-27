@@ -47,6 +47,11 @@ pub struct PreparedProgram {
     irs: FxHashMap<String, FunctionIR>,
     fn_file: FxHashMap<String, String>,
     file_source: FxHashMap<String, String>,
+    /// Lazily built ONCE per program: `Box::leak` clones of the IRs that the
+    /// program graph borrows. Before this cache every [`scan_prepared`] call
+    /// leaked a full IR-set clone, so long-lived processes (MCP/LSP servers,
+    /// the bundler's replay gate) grew without bound across scans.
+    static_irs: std::sync::OnceLock<FxHashMap<String, &'static FunctionIR>>,
 }
 
 /// Lower every file once, remembering which file each function came from
@@ -72,7 +77,20 @@ pub fn prepare(files: &[(String, String, String)]) -> Result<PreparedProgram, St
         irs,
         fn_file,
         file_source,
+        static_irs: std::sync::OnceLock::new(),
     })
+}
+
+impl PreparedProgram {
+    /// The leaked IR views for [`ProgramSvfg::new`], built on first use.
+    fn static_irs(&self) -> &FxHashMap<String, &'static FunctionIR> {
+        self.static_irs.get_or_init(|| {
+            self.irs
+                .iter()
+                .map(|(name, ir)| (name.clone(), Box::leak(Box::new(ir.clone())) as &FunctionIR))
+                .collect()
+        })
+    }
 }
 
 /// Scan a [`PreparedProgram`] under a config and fact table. Same semantics
@@ -89,13 +107,9 @@ pub fn scan_prepared(
     config.sources.extend(facts.learned_sources.iter().cloned());
     let config = &config;
 
-    let mut statics: FxHashMap<String, &FunctionIR> = FxHashMap::default();
-    // Leak per function: the program graph borrows IRs for its lifetime.
-    // Scan results own no reference to them, and scans are long-lived.
-    for (name, ir) in &prepared.irs {
-        let leaked: &'static FunctionIR = Box::leak(Box::new(ir.clone()));
-        statics.insert(name.clone(), leaked);
-    }
+    // The program graph borrows IRs for its lifetime; the leaked clones are
+    // cached on the program (built once), not re-leaked per scan call.
+    let statics = prepared.static_irs();
 
     let fn_file = &prepared.fn_file;
     let file_source = &prepared.file_source;
@@ -105,7 +119,7 @@ pub fn scan_prepared(
     // `facts` also carries corpus-learned checks installed by the bundle.
     let checker_findings = checks::check_all(statics.values().copied(), facts);
 
-    let prog = ProgramSvfg::new(&statics, config);
+    let prog = ProgramSvfg::new(statics, config);
     let mut engine = BackwardTaintEngine::new(&prog, config)
         .with_fact_table(facts)
         .with_fn_file(fn_file);

@@ -66,13 +66,12 @@ pub fn lower_source(
                 if decl.kind() != "variable_declarator" {
                     continue;
                 }
-                if std::env::var("FRENSdbg_STATIC").is_ok() {
-                    eprintln!(
-                        "[static] decl kind={} value={:?}",
-                        decl.kind(),
-                        decl.child_by_field_name("value").map(|v| v.kind())
-                    );
-                }
+                crate::dbg_trace!(
+                    crate::debug_flags::DebugFlags::get().static_trace,
+                    "[static] decl kind={} value={:?}",
+                    decl.kind(),
+                    decl.child_by_field_name("value").map(|v| v.kind())
+                );
                 let Some(value) = decl.child_by_field_name("value") else {
                     continue;
                 };

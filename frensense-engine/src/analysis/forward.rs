@@ -45,15 +45,13 @@
 //!
 //! * [`ProgramSvfg::cross_edges`], the explicit interprocedural edge list
 //!   (deterministic, serialisable, feeds task 4.5's corpus graph store).
-//! * [`ProgramSvfg::summary_registry`], legacy [`FunctionSummary`]s populated
-//!   from the relational summaries, plus the richer [`TaintSummary`]s.
+//! * [`ProgramSvfg`]'s per-function [`TaintSummary`]s, computed bottom-up.
 //! * [`InterproceduralTaintEngine`], BFS over local + cross edges; alerts are
 //!   reported with the function in which the sink lives.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
-use crate::analysis::summary::{FunctionSummary, SummaryRegistry};
 use crate::analysis::taint::config::TaintConfig;
 use crate::analysis::taint::facts::FactTable;
 use crate::graph::callgraph::{CallGraph, CallGraphBuilder};
@@ -225,8 +223,6 @@ pub struct ProgramSvfg<'a> {
     /// Local pass-through edges `(fn, from, to)` suppressed because a summary
     /// replaced them. Consulted by both the summary BFS and the taint engine.
     suppressed: FxHashSet<(usize, NodeKey, NodeKey)>,
-    /// Legacy summaries (from `summary.rs`) populated from `TaintSummary`s.
-    pub summary_registry: SummaryRegistry,
 }
 
 impl<'a> ProgramSvfg<'a> {
@@ -265,7 +261,6 @@ impl<'a> ProgramSvfg<'a> {
             topological_order: Vec::new(),
             cross_edges: FxHashMap::default(),
             suppressed: FxHashSet::default(),
-            summary_registry: SummaryRegistry::new(),
         };
 
         // Resolve the call graph once (aliases, receiver-class methods,
@@ -450,25 +445,6 @@ impl<'a> ProgramSvfg<'a> {
             }
 
             let summary = self.compute_one_summary(fi, config);
-            let legacy = FunctionSummary {
-                function_name: summary.function_name.clone(),
-                returns_tainted_by_params: summary
-                    .param_taints_return
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, t)| **t)
-                    .map(|(i, _)| i)
-                    .collect(),
-                mutates_param_fields: FxHashMap::default(),
-                sinks_params: summary
-                    .param_reaches_sink
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, s)| **s)
-                    .map(|(i, _)| i)
-                    .collect(),
-            };
-            self.summary_registry.register(legacy);
             self.functions[fi].summary = Some(summary);
         }
     }
@@ -929,7 +905,6 @@ impl<'a> ProgramSvfg<'a> {
                 .map(|(sk, edges)| ((sk.f, sk.k), edges))
                 .collect(),
             suppressed: FxHashSet::default(),
-            summary_registry: SummaryRegistry::new(),
         };
 
         // Recompute the config-dependent state under the NEW rule set.
@@ -1191,15 +1166,11 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
             // reconstructs "req.body.args".
             let path = member_access_path(ir, *base, field);
             let root = path.split('.').next().unwrap_or("");
-            #[allow(clippy::disallowed_methods)]
-            {
-                if std::env::var("FRENSdbg_IS_SOURCE").is_ok() {
-                    eprintln!(
-                        "[is_source] path={path:?} hit={}",
-                        config.sources.contains(&path)
-                    );
-                }
-            }
+            crate::dbg_trace!(
+                crate::debug_flags::DebugFlags::get().is_source,
+                "[is_source] path={path:?} hit={}",
+                config.sources.contains(&path)
+            );
             config.sources.contains(&path)
                 || config.sources.contains(root)
                 // Prefix semantics: a configured source that is a path

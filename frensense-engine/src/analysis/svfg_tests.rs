@@ -9,6 +9,7 @@
 //! without a fixed-point loop.
 
 #[cfg(test)]
+#[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod svfg_tests {
     use crate::analysis::taint::config::TaintConfig;
     use crate::graph::heap::PointsToAnalysis;

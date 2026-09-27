@@ -8,6 +8,7 @@
 //! boundary is severed. Receiver-aware: `myMap.get(t)` stays tainted.
 
 #[cfg(test)]
+#[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod session_trust_tests {
     use crate::analysis::taint::engine::BackwardVerdict;
     use crate::analysis::taint::facts::{config_from_spec, fact_table_from_spec};
@@ -34,6 +35,7 @@ export function orderHistory () {
 "#;
 
     /// A plain Map.get with tainted args is NOT a session accessor.
+    #[allow(dead_code)] // kept: documents the flow shape; used only in comments below
     const MAP_FLOW: &str = r#"
 declare const myMap: any
 export function handler (req: any) {
