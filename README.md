@@ -222,6 +222,18 @@ python3 scripts/owasp_benchmark.py \
   --owasp-testcode /tmp/BenchmarkPython/testcode
 ```
 
+## Detailed Guides
+
+- [docs/MCP_USAGE.md](docs/MCP_USAGE.md) — MCP setup, tool reference, and a
+  worked end-to-end agent session (edit → diff-gate → fix → verify by
+  stable ID).
+- [docs/LSP_USAGE.md](docs/LSP_USAGE.md) — editor setup (Neovim, Helix,
+  VS Code) and the protocol walkthrough.
+- [docs/BENCHMARKING.md](docs/BENCHMARKING.md) — benchmark methodology and
+  per-CWE results.
+- [docs/FRENSENSE_CORPUS_GUIDE.md](docs/FRENSENSE_CORPUS_GUIDE.md) —
+  building and using `.frc` knowledge bundles.
+
 ## Knowledge Bundles (.frc)
 
 Detection knowledge ships as `.frc` bundles, compiled, checksummed archives
