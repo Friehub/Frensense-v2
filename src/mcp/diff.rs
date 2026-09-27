@@ -25,6 +25,10 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::path::Path;
 
+/// What one diff scan produced: the parsed added ranges, the advisories
+/// that landed on them, and how many diff files the engine actually ran.
+pub type DiffScanOutcome = (BTreeMap<String, Vec<AddedRange>>, Vec<Advisory>, usize);
+
 /// MCP tool definition for `frensense_diff`.
 #[must_use]
 pub fn tool_definition() -> Value {
@@ -91,7 +95,7 @@ pub fn diff_file_paths(diff: &str) -> Vec<String> {
             continue;
         }
         let path = unquote(path);
-        let path = path.strip_prefix("b/").unwrap_or(&path);
+        let path = path.strip_prefix("b/").unwrap_or(path);
         if seen.insert(path.to_string()) {
             out.push(path.to_string());
         }
@@ -123,7 +127,7 @@ pub fn added_ranges(diff: &str) -> BTreeMap<String, Vec<AddedRange>> {
             let path = path.trim();
             if path != "/dev/null" {
                 let p = unquote(path);
-                let p = p.strip_prefix("b/").unwrap_or(&p).to_string();
+                let p = p.strip_prefix("b/").unwrap_or(p).to_string();
                 current_file = Some(p);
             }
             in_hunk = false;
@@ -321,7 +325,7 @@ pub fn run_diff(
     diff_text: Option<&str>,
     severity_threshold: &str,
     min_confidence: f64,
-) -> crate::Result<(BTreeMap<String, Vec<AddedRange>>, Vec<Advisory>, usize)> {
+) -> crate::Result<DiffScanOutcome> {
     let diff = match diff_text {
         Some(d) => d.to_string(),
         None => git_diff_head(repo).map_err(crate::FrensenseError::Config)?,
