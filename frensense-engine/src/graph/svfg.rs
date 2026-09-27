@@ -594,10 +594,7 @@ impl<'a> SvfgBuilder<'a> {
                         }
                     }
                 }
-                match found {
-                    Some(prev) => v = prev,
-                    None => return None,
-                }
+                v = found?;
             }
             None
         }
