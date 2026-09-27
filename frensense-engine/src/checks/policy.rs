@@ -7,9 +7,9 @@
 //! A [`PolicyFact`] poses a question at every trigger call: do the policy's
 //! requirements hold in the trigger's scope? A function violating the policy
 //! (trigger present, at least one requirement unsatisfied) yields a
-//! [`CheckerFinding`]. This subsumes the legacy `LearnedCheckFact`
-//! modalities — `unless_guard` is an inverted `GuardCall` requirement,
-//! `unless_range_check` an inverted `RangeCheck` — and adds the presence
+//! [`CheckerFinding`]. This complements and operates alongside `LearnedCheckFact`
+//! — `unless_guard` is evaluated as a `GuardCall` requirement,
+//! `unless_range_check` as a `RangeCheck` — and adds the presence
 //! forms (`RequireCall`, `NotCall`) plus a cross-function scope, so bundles
 //! can express "privileged action without its audit log", "dangerous call
 //! without any of its sanctioned wrappers", or "trigger helper defined in a
@@ -27,8 +27,8 @@ use crate::ir::function::{FunctionIR, Instruction, Operand};
 /// Function-scoped policies evaluate per function; module-scoped policies
 /// evaluate against the union of all scanned functions (the check pipeline
 /// passes one scan's IR set here, which is the module the policy author
-/// refers to). Legacy `learned_checks` participate after conversion, so
-/// pre-policy bundles keep firing unchanged.
+/// refers to). Active `learned_checks` participate alongside native policies,
+/// ensuring both check representations fire harmoniously.
 pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFinding> {
     if facts.learned_checks.is_empty() && facts.policy_facts.is_empty() {
         return Vec::new();
@@ -50,18 +50,18 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
     module_segs.sort();
     module_segs.dedup();
 
-    // Converted legacy checks (deduped against native policies by rule id:
+    // Learned checks evaluate alongside native policies (deduped by rule id:
     // a bundle shipping both shapes of the same rule must not fire twice).
     let mut native_rules: Vec<&str> = facts.policy_facts.iter().map(|p| p.rule.as_str()).collect();
     native_rules.sort();
     native_rules.dedup();
     let mut all_policies: Vec<PolicyFact> = Vec::new();
     all_policies.extend(facts.policy_facts.iter().cloned());
-    for legacy in &facts.learned_checks {
-        if native_rules.contains(&legacy.rule.as_str()) {
+    for check in &facts.learned_checks {
+        if native_rules.contains(&check.rule.as_str()) {
             continue;
         }
-        all_policies.push(PolicyFact::from_legacy(legacy));
+        all_policies.push(PolicyFact::from_legacy(check));
     }
 
     let mut findings = Vec::new();
