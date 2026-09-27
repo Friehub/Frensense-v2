@@ -146,11 +146,22 @@ pub fn compare_baseline(advisories: &[Advisory], path: &str) -> Result<bool> {
     let baseline: Vec<Advisory> = serde_json::from_str(&content)
         .map_err(|e| FrensenseError::Config(format!("Failed to parse baseline: {e}")))?;
 
-    let baseline_ids: HashSet<_> = baseline.iter().map(Advisory::identity).collect();
-    let new_advisories: Vec<_> = advisories
-        .iter()
-        .filter(|a| !baseline_ids.contains(&a.identity()))
-        .collect();
+    // Identity is the semantic fingerprint (file + rule/sink + function
+    // + source), stable across line shifts: a finding that moves lines
+    // after an unrelated edit is the SAME finding, not a regression.
+    // Baselines captured before the fingerprint scheme changed carry
+    // line-seeded hashes; those still compare (the hash just never
+    // matches after a shift), so the migration path is: regenerate the
+    // baseline once, then enjoy shift-stable comparisons.
+    let baseline_ids: HashSet<&str> = baseline.iter().map(|a| a.identity()).collect();
+    let mut new_advisories: Vec<&Advisory> = Vec::new();
+    let mut seen: HashSet<&str> = HashSet::new();
+    for adv in advisories {
+        if baseline_ids.contains(adv.identity()) || !seen.insert(adv.identity()) {
+            continue;
+        }
+        new_advisories.push(adv);
+    }
 
     let regression_detected = !new_advisories.is_empty();
     if regression_detected {
@@ -159,7 +170,7 @@ pub fn compare_baseline(advisories: &[Advisory], path: &str) -> Result<bool> {
             new_advisories.len()
         );
         for adv in &new_advisories {
-            println!("  + {}:{} ({})", adv.file_path, adv.line, adv.title);
+            println!("  + {} {}:{} ({})", adv.stable_id(), adv.file_path, adv.line, adv.title);
         }
     } else {
         println!("\n[OK] No new advisories compared to baseline.");

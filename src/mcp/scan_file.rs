@@ -115,6 +115,11 @@ pub fn result_payload(path: &Path, advisories: &[Advisory]) -> Value {
     let mut payload = json!({
         "clean": clean,
         "file": path.display().to_string(),
+        // Stable IDs (shift-resistant fingerprints) for agents tracking
+        // "did I fix THIS finding yet" across edit cycles: ID unchanged
+        // means the bug is still there; ID gone means fixed. The `id`
+        // field of each advisory carries the same value.
+        "stable_ids": advisories.iter().map(|a| a.stable_id()).collect::<Vec<_>>(),
         "advisories": advisories,
     });
     if clean {

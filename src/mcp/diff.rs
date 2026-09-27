@@ -393,6 +393,9 @@ pub fn result_payload(
         "files_touched": files.len(),
         "files_scanned": scanned,
         "added_ranges": files,
+        // Stable IDs of the on-added-line findings: agents gate a change
+        // by comparing IDs across iterations of the same change.
+        "stable_ids": advisories.iter().map(|a| a.stable_id()).collect::<Vec<_>>(),
         "advisories": advisories,
         "message": if advisories.is_empty() {
             "added lines introduce no findings"

@@ -145,15 +145,21 @@ impl Advisory {
         self
     }
 
-    /// Stable identity key for baseline comparisons.
+    /// Stable identity key for baseline comparisons: the semantic
+    /// fingerprint, which excludes line/column and therefore survives
+    /// line shifts (see [`stable_fingerprint`] in the engine runner for
+    /// what goes into the hash).
     #[must_use]
-    pub fn identity(&self) -> (String, String, u32, u32) {
-        (
-            self.fingerprint.clone(),
-            self.file_path.clone(),
-            self.line,
-            self.column,
-        )
+    pub fn identity(&self) -> &str {
+        &self.fingerprint
+    }
+
+    /// Display form of the stable ID: `<short-hash>@<file>:<line>`.
+    /// The hash is the stable part (survives line shifts); the location
+    /// is display context only, for humans correlating the ID with code.
+    #[must_use]
+    pub fn stable_id(&self) -> String {
+        format!("FRN-{}@{}:{}", &self.fingerprint[..12.min(self.fingerprint.len())], self.file_path, self.line)
     }
 }
 

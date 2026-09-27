@@ -6,6 +6,9 @@ pub mod options;
 pub mod reporting;
 pub mod watch;
 #[cfg(test)]
+#[path = "baseline_tests.rs"]
+mod baseline_tests;
+#[cfg(test)]
 mod watch_tests;
 
 pub use options::*;
