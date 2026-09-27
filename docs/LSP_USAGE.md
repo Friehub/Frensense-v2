@@ -7,7 +7,26 @@
 appear as diagnostics when you open or save a file, with the same severity
 mapping, messages, and stable IDs as the CLI and MCP server. It speaks the
 standard Language Server Protocol over stdio and ships in the same
-`frensense` crate.
+`frensense` crate as the CLI and MCP server.
+
+## Installation
+
+`frensense-lsp` is a self-contained binary — no Node.js runtime, no VS
+Code extension marketplace step. Get it and put it on `PATH`:
+
+**Download a release binary** (recommended):
+
+```bash
+# Linux x86_64 — replace the tag with the latest release
+curl -L https://github.com/Friehub/frensense-v2/releases/latest/download/frensense-lsp-x86_64-unknown-linux-gnu \
+  -o /usr/local/bin/frensense-lsp && chmod +x /usr/local/bin/frensense-lsp
+```
+
+**Or install from source** (requires a Rust toolchain):
+
+```bash
+cargo install frensense   # installs frensense, frensense-mcp, frensense-lsp
+```
 
 ## What it does (and deliberately doesn't)
 
@@ -28,9 +47,11 @@ standard Language Server Protocol over stdio and ships in the same
 
 ## Client configuration
 
-Any LSP client that launches a stdio server works. The binary is
-`frensense-lsp` (installed with the rest of the crate; see README,
-"One crate, three binaries").
+Any LSP client that launches a stdio server works. Set
+`FRENSENSE_CORPUS_BUNDLE` in the server's launch environment if you want
+learned `.frc` facts to participate in editor scans — this is read once
+when the binary starts, so it must be in the environment the editor passes
+to the subprocess, not a shell export after the fact.
 
 ### Neovim (built-in LSP, Lua)
 
@@ -38,6 +59,19 @@ Any LSP client that launches a stdio server works. The binary is
 vim.lsp.config('frensense', {
   cmd = { 'frensense-lsp' },
   filetypes = { 'python', 'javascript', 'typescript', 'rust', 'go' },
+})
+vim.lsp.enable('frensense')
+```
+
+With a corpus bundle:
+
+```lua
+vim.lsp.config('frensense', {
+  cmd = { 'frensense-lsp' },
+  filetypes = { 'python', 'javascript', 'typescript', 'rust', 'go' },
+  on_new_config = function(config)
+    config.cmd_env = { FRENSENSE_CORPUS_BUNDLE = '/path/to/frensense-corpus.frc' }
+  end,
 })
 vim.lsp.enable('frensense')
 ```
@@ -52,30 +86,31 @@ language-servers = ["frensense"]
 
 [language-server.frensense]
 command = "frensense-lsp"
+environment = { "FRENSENSE_CORPUS_BUNDLE" = "/path/to/frensense-corpus.frc" }
 ```
 
 ### VS Code (generic LSP client extension)
 
-Point any LSP client extension (e.g. *vscode-lsp* style configs) at the
-binary:
+Point any LSP client extension at the binary:
 
 ```json
 {
   "frensense.server": {
     "command": "frensense-lsp",
-    "args": []
+    "args": [],
+    "env": {
+      "FRENSENSE_CORPUS_BUNDLE": "/path/to/frensense-corpus.frc"
+    }
   }
 }
 ```
 
 If the binary isn't on `PATH`, use the absolute path (e.g.
-`/opt/frensense/frensense-lsp`). Set `FRENSENSE_CORPUS_BUNDLE` in the
-server `env` to make learned `.frc` facts participate in editor scans,
-using the same variable the MCP server reads.
+`/opt/frensense/frensense-lsp`).
 
 ## Protocol walkthrough
 
-The transcript below is real v0.7.0-preview.1 output (captured by piping
+The transcript below is real v0.7.0-preview.2 output (captured by piping
 framed messages into the binary). File on disk:
 
 ```python
@@ -101,7 +136,7 @@ Content-Length: 63
 {"jsonrpc":"2.0","id":1,"result":{"capabilities":
   {"textDocumentSync":{"openClose":true,"change":1,"save":true},
    "positionEncoding":"utf-16"},
- "serverInfo":{"name":"frensense-lsp","version":"0.7.0-preview.1"}}}
+ "serverInfo":{"name":"frensense-lsp","version":"0.7.0-preview.2"}}}
 ```
 
 **2. Client → server:** `initialized`, then open the document:
@@ -174,8 +209,12 @@ seeing a regression.
 - **Findings differ from the CLI**: make sure both use the same
   `.frc` bundle (`FRENSENSE_CORPUS_BUNDLE` / `--corpus-bundle`); learned
   facts change what the engine can see.
+- **`FRENSENSE_CORPUS_BUNDLE` has no effect**: the variable must be set in
+  the environment the editor passes when it spawns the `frensense-lsp`
+  subprocess, not in a shell that is already running.
 
 ## Related
 
 - `docs/MCP_USAGE.md`: the same engine for AI agents
+- `docs/AGENT_INTEGRATION.md`: CI wiring and baseline gating
 - README: install, quick start, single-binary notes

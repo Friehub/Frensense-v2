@@ -26,6 +26,7 @@
 
 pub mod analysis;
 pub mod checks;
+pub mod debug_flags;
 pub mod graph;
 pub mod harness;
 pub mod ir;

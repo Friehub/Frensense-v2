@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0-preview.2] - 2026-09-27
+
 ### Added
 
 - **GitHub Actions annotations**: `frensense . --github` emits one workflow

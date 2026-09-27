@@ -7,9 +7,10 @@
 //! finding against any line its span covers.
 
 #[cfg(test)]
+#[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod schema_policy_tests {
     use crate::analysis::taint::facts::FactTable;
-    use crate::checks::{check_all, schema_policy};
+    use crate::checks::check_all;
     use crate::harness::lower_source;
 
     /// The chatbot tool-schema shape: a z.number() whose describe text

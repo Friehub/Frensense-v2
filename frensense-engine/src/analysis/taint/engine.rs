@@ -52,6 +52,8 @@ use crate::analysis::forward::{
 use crate::analysis::taint::config::TaintConfig;
 use crate::analysis::taint::facts::FactTable;
 use crate::analysis::taint::path::{PathStep, TaintPath};
+use crate::dbg_trace;
+use crate::debug_flags::DebugFlags;
 use crate::graph::svfg::{NodeKey, NodeKind};
 use crate::ir::function::*;
 
@@ -1061,16 +1063,17 @@ impl<'a> BackwardTaintEngine<'a> {
         let mut queue: VecDeque<(usize, NodeKey)> = VecDeque::new();
         queue.push_back((fi, root));
 
+        let dbg = DebugFlags::get();
         while let Some((cf, cur)) = queue.pop_front() {
-            #[allow(clippy::disallowed_methods)]
-            if std::env::var("FRENSdbg_WALK").is_ok() {
-                let kind = self.prog.functions[cf]
+            dbg_trace!(
+                dbg.walk,
+                "[walk] cf={cf} key={cur:?} kind={:?}",
+                self.prog.functions[cf]
                     .svfg
                     .node(&cur)
                     .map(|n| format!("{:?}", n.kind))
-                    .unwrap_or("NONE".into());
-                eprintln!("[walk] cf={cf} key={cur:?} kind={kind}");
-            }
+                    .unwrap_or_else(|| "NONE".into())
+            );
             let ir = self.prog.functions[cf].ir;
 
             // Stop: guard check. If this node's variable is checked by a
@@ -1148,15 +1151,15 @@ impl<'a> BackwardTaintEngine<'a> {
                 .unwrap_or_default();
 
             if local_preds.is_empty() && cross_preds.is_empty() {
-                #[allow(clippy::disallowed_methods)]
-                if std::env::var("FRENSdbg_DEADEND").is_ok() {
-                    let kind = self.prog.functions[cf]
+                dbg_trace!(
+                    dbg.deadend,
+                    "[deadend] cf={cf} key={cur:?} kind={:?}",
+                    self.prog.functions[cf]
                         .svfg
                         .node(&cur)
                         .map(|n| format!("{:?}", n.kind))
-                        .unwrap_or("NONE".into());
-                    eprintln!("[deadend] cf={cf} key={cur:?} kind={kind}");
-                }
+                        .unwrap_or_else(|| "NONE".into())
+                );
                 // Dead end. Classify: unresolvable roots (formal params never
                 // fed by an analysed call site, or environment-defined values
                 // like LoadGlobal / Dereference / CallPointer) are "unknown",
@@ -1210,15 +1213,13 @@ impl<'a> BackwardTaintEngine<'a> {
         // internal callees have ActualRet→FormalRet reverse edges and never
         // reach this dead-end classification.
         if matches!(node.kind, crate::graph::svfg::NodeKind::ActualRet { .. }) {
-            #[allow(clippy::disallowed_methods)]
-            if std::env::var("FRENSdbg_UNRES").is_ok() {
-                eprintln!(
-                    "[unresolvable] ActualRet key={key:?} has_cross={} block={:?} idx={:?}",
-                    self.reverse_cross.contains_key(&(fi, *key)),
-                    key.block,
-                    key.instr_idx
-                );
-            }
+            dbg_trace!(
+                DebugFlags::get().unres,
+                "[unresolvable] ActualRet key={key:?} has_cross={} block={:?} idx={:?}",
+                self.reverse_cross.contains_key(&(fi, *key)),
+                key.block,
+                key.instr_idx
+            );
             let NodeKey {
                 block,
                 instr_idx: Some(idx),

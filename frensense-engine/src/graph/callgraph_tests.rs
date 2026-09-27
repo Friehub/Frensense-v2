@@ -6,6 +6,7 @@
 //! integration with `ProgramSvfg` cross-edge installation.
 
 #[cfg(test)]
+#[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod callgraph_tests {
     use crate::analysis::forward::ProgramSvfg;
     use crate::analysis::taint::config::TaintConfig;
@@ -306,7 +307,7 @@ pub mod callgraph_tests {
         let cg = CallGraphBuilder::new(&irs).build();
 
         assert!(
-            cg.edges.get("caller").is_none(),
+            !cg.edges.contains_key("caller"),
             "no internal edge for external callee"
         );
         let has_ext = cg.unresolved.values().any(|n| n == "libraryFetch");

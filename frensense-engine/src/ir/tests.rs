@@ -3,6 +3,7 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 #[cfg(test)]
+#[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod tests {
     use crate::analysis::taint::config::{TaintConfig, TaintEngine};
     use crate::graph::heap::PointsToAnalysis;

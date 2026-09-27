@@ -5,7 +5,6 @@
 use frensense_bundler::fact_extract::{extract_facts, group_families};
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::facts::{FactTable, LearnedFactEntry};
-use std::path::Path;
 
 fn config() -> TaintConfig {
     TaintConfig {

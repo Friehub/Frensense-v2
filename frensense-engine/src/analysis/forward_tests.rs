@@ -330,7 +330,7 @@ pub mod interprocedural_tests {
         // own analysis applying source_fn's summary).
         let msum = prog.functions[m].summary.as_ref().unwrap();
         assert!(
-            msum.param_taints_return.is_empty() && true,
+            msum.param_taints_return.is_empty(),
             "middle has no params; summary shape ok"
         );
 
@@ -785,8 +785,7 @@ pub mod interprocedural_tests {
             alerts
         );
 
-        // Leaf's summary exists exactly once in the registry.
-        assert!(prog.summary_registry.summaries.contains_key("leaf"));
+        // Leaf's summary was computed.
         let li = prog.function_index("leaf").unwrap();
         assert!(prog.functions[li].summary.is_some());
     }

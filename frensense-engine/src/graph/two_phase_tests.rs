@@ -7,20 +7,18 @@
 //! precision on taint-relevant variables.
 
 #[cfg(test)]
+#[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod two_phase_tests {
     use crate::graph::heap::PointsToAnalysis;
     use crate::graph::steensgaard::Steensgaard;
     use crate::harness::lower_source;
 
+    /// Sorted (var, points-to-set-size) pairs for one analysis.
+    type PtCounts = Vec<(usize, usize)>;
+
     /// Run full Andersen and phase-2 Andersen on every function of `src`
     /// and return the (name, var-points-to-count) pairs for comparison.
-    fn alias_sets(
-        src: &str,
-    ) -> Vec<(
-        String,
-        Vec<(usize, usize)>, // sorted (var, |pts|) for full Andersen
-        Vec<(usize, usize)>, // same for two-phase
-    )> {
+    fn alias_sets(src: &str) -> Vec<(String, PtCounts, PtCounts)> {
         let fns = lower_source("t.ts", src, "ts").expect("lower");
         let mut out = Vec::new();
         for (name, ir) in &fns {
@@ -166,7 +164,7 @@ export function handler(req: any): void {
         let statics: rustc_hash::FxHashMap<String, &crate::ir::function::FunctionIR> =
             fns.iter().map(|(k, v)| (k.clone(), v)).collect();
         let spec = frensense_lang::spec_for_ext("ts").unwrap();
-        let config = crate::analysis::taint::facts::config_from_spec(&*spec);
+        let config = crate::analysis::taint::facts::config_from_spec(spec);
         let prog = crate::analysis::forward::ProgramSvfg::new(&statics, &config);
         let mut engine = BackwardTaintEngine::new(&prog, &config);
         engine.run();
