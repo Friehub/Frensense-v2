@@ -150,24 +150,30 @@ jobs:
           file "$binary" || true
           "$binary" --version
           "$binary" --help
-          echo 'fn main() { let x = 1; }' > /tmp/test_smoke.rs
-          "$binary" /tmp/test_smoke.rs --json > /dev/null
+          echo 'fn main() { let x = 1; }' > test_smoke.rs
+          "$binary" test_smoke.rs --json > /dev/null
+          rm -f test_smoke.rs
           echo "CLI smoke test passed"
 
       - name: Smoke test MCP server
         shell: bash
         run: |
           binary="target/${{ matrix.settings.target }}/release/${{ matrix.settings.bin_name }}"
-          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' |
-            timeout 30 "$binary" mcp 2>/dev/null |
-            grep -q 'frensense-mcp'
-          printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' |
-            timeout 30 "$binary" mcp 2>/dev/null |
-            grep -q 'frensense_scan_file'
-          printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}' |
-            timeout 30 "$binary" mcp 2>/dev/null |
-            grep -q 'frensense_diff'
-          echo "MCP smoke test passed"
+          python3 - "$binary" <<'PYEOF'
+          import json, subprocess, sys
+          binary = sys.argv[1]
+          reqs = "\n".join([
+              json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
+              json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}),
+              json.dumps({"jsonrpc": "2.0", "id": 3, "method": "exit"}),
+          ]) + "\n"
+          proc = subprocess.run([binary, "mcp"], input=reqs.encode(), capture_output=True, timeout=30)
+          out = proc.stdout.decode("utf-8", errors="replace")
+          assert "frensense-mcp" in out, f"initialize response missing serverInfo: {out}"
+          assert "frensense_scan_file" in out, f"tools/list missing frensense_scan_file: {out}"
+          assert "frensense_diff" in out, f"tools/list missing frensense_diff: {out}"
+          print("MCP smoke test passed")
+          PYEOF
 
       - name: Smoke test LSP server
         shell: bash

@@ -70,7 +70,7 @@ jobs:
           cat benchmark-results.json
 
       - name: Store and Publish Benchmark Results
-        uses: benchmark-action/github-action-benchmark@fd31771ce86cc65eab85653da103f71ab1b4479c # v1.9.0
+        uses: benchmark-action/github-action-benchmark@315072f079db10e96004ffb95b9b7263bf3a547e # v1.19.2
         with:
           tool: 'customBiggerIsBetter'
           output-file-path: benchmark-results.json
