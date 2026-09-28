@@ -18,10 +18,13 @@ fn print_help() {
     println!(
         "       frensense watch [path] [options]   Re-scan on file changes, print new findings"
     );
-    println!("       frensense mcp                      Run the Model Context Protocol (MCP) server");
-    println!("       frensense lsp                      Run the Language Server Protocol (LSP) server");
     println!(
+        "       frensense mcp                      Run the Model Context Protocol (MCP) server"
     );
+    println!(
+        "       frensense lsp                      Run the Language Server Protocol (LSP) server"
+    );
+    println!();
     println!();
     println!("Options:");
     println!("  --json                     Output findings as JSON");
@@ -114,7 +117,6 @@ fn run_watch(args: Vec<String>) -> Result<()> {
     )
 }
 
-
 fn run_mcp() -> Result<()> {
     use frensense::mcp::handler::handle_request;
     use frensense::mcp::protocol::{JsonRpcRequest, RequestId, rpc_error, write_response};
@@ -179,12 +181,10 @@ fn run_lsp() -> Result<()> {
 }
 
 fn main() -> Result<()> {
-
     let args: Vec<String> = std::env::args().collect();
     if handle_early_args(&args) {
         return Ok(());
     }
-
 
     // Watch subcommand: poll-loop delivery mode, everything else shared
     // with the one-shot path (same options, same engine config).
@@ -204,7 +204,6 @@ fn main() -> Result<()> {
     if args.iter().any(|a| a == "lsp") {
         return run_lsp();
     }
-
 
     let input_paths = get_input_paths(&args);
     let input_path = input_paths

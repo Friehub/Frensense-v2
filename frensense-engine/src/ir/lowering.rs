@@ -178,6 +178,22 @@ impl<'a> LoweringContext<'a> {
                         n
                     }
                 });
+                let name_node = name_node.map(|n| {
+                    let mut cur = n;
+                    while let Some(inner) = match cur.kind() {
+                        "pointer_declarator"
+                        | "array_declarator"
+                        | "parenthesized_declarator"
+                        | "reference_declarator" => {
+                            let mut wc = cur.walk();
+                            cur.named_children(&mut wc).find(|c| c.kind() != "comment")
+                        }
+                        _ => None,
+                    } {
+                        cur = inner;
+                    }
+                    cur
+                });
                 match (name_node, value_node) {
                     (Some(name_node), Some(value_node)) if name_node.kind() == "identifier" => {
                         // Simple `const name = value`.
@@ -906,8 +922,11 @@ impl<'a> LoweringContext<'a> {
 
             // ─── PRIMITIVES ─────────────────────────────────────────────
             NodeRole::Identifier => Some(self.resolve_identifier(node)),
-            NodeRole::Other if node.kind() == "as_expression" => {
-                // TS cast `expr as T`, transparent for value flow.
+            NodeRole::Other if matches!(node.kind(), "as_expression" | "cast_expression") => {
+                // TS cast `expr as T` / C cast `(T) expr`, transparent for
+                // value flow. The C cast wraps decl-with-init initializers
+                // (`char *p = (char*)malloc(16)`), so dropping the operand
+                // here would drop the initializer value entirely.
                 let mut cursor = node.walk();
                 let mut first = None;
                 for child in node.children(&mut cursor) {

@@ -20,13 +20,25 @@
 //! Line drawn: **built-in = how to look; learned = what to conclude.**
 
 pub mod guard_bypass;
+pub mod memory_summary;
+pub mod oob;
+pub mod policy;
 pub mod schema_policy;
+pub mod uaf;
 pub mod weak_hash;
 
 #[cfg(test)]
 mod guard_bypass_tests;
 #[cfg(test)]
+mod memory_summary_tests;
+#[cfg(test)]
+mod oob_tests;
+#[cfg(test)]
+mod policy_tests;
+#[cfg(test)]
 mod schema_policy_tests;
+#[cfg(test)]
+mod uaf_tests;
 #[cfg(test)]
 mod weak_hash_tests;
 
@@ -66,7 +78,7 @@ pub fn check_all<'a>(
     let irs: Vec<&FunctionIR> = irs.into_iter().collect();
     // Program-level rules run once over the whole IR set (they correlate
     // guards in one function with definitions in another).
-    for f in guard_bypass::check_allowlist_definitions(&irs) {
+    for f in guard_bypass::check_allowlist_definitions(&irs, facts) {
         let key = (
             f.function.clone(),
             f.rule.clone(),
@@ -76,12 +88,29 @@ pub fn check_all<'a>(
             all.push(f);
         }
     }
+    // Co-occurrence policies: function-scoped ones run per function,
+    // module-scoped ones run once over the whole scanned set. Legacy
+    // learned checks fire through the same evaluator after conversion.
+    for f in policy::check_program(&irs, facts) {
+        let key = (
+            f.function.clone(),
+            f.rule.clone(),
+            f.span.map(|s| s.0).unwrap_or(usize::MAX),
+        );
+        if seen.insert(key) {
+            all.push(f);
+        }
+    }
+    let mem_summaries =
+        memory_summary::MemorySummaryRegistry::from_facts(facts).infer_program_summaries_into(&irs);
     for ir in &irs {
-        let findings = weak_hash::check(ir)
+        let findings = weak_hash::check(ir, facts)
             .into_iter()
-            .chain(guard_bypass::check(ir))
-            .chain(guard_bypass::check_credentials(ir))
-            .chain(schema_policy::check(ir))
+            .chain(guard_bypass::check(ir, facts))
+            .chain(guard_bypass::check_credentials(ir, facts))
+            .chain(schema_policy::check(ir, facts))
+            .chain(uaf::check_with_summaries(ir, &mem_summaries))
+            .chain(oob::check_with_summaries(ir, &mem_summaries))
             .chain(learned::check(ir, facts));
         for f in findings {
             let key = (
@@ -106,13 +135,13 @@ pub fn check_all<'a>(
 /// The learned-check rule: apply corpus-verified checks from the fact
 /// table. Mechanism identical to the seed checks (call matching over the
 /// IR); the conclusions are the bundle's.
-mod learned {
+pub(crate) mod learned {
     use super::CheckerFinding;
     use crate::analysis::taint::facts::FactTable;
     use crate::ir::function::{FunctionIR, Instruction, Operand};
 
     /// Last-segment names of every call in the function (one pass).
-    fn call_segments(ir: &FunctionIR) -> Vec<String> {
+    pub(crate) fn call_segments(ir: &FunctionIR) -> Vec<String> {
         let mut segs = Vec::new();
         for block in ir.blocks.values() {
             for instr in &block.instructions {
@@ -134,7 +163,11 @@ mod learned {
     /// with one of `ops` in this function, inline range enforcement
     /// (`if (d < 0 || d > MAX) …`). Walks one BinaryOp hop up from `var`
     /// and one down (comparisons may be written in either order).
-    fn has_range_check(ir: &FunctionIR, var: crate::ir::function::VarId, ops: &[String]) -> bool {
+    pub(crate) fn has_range_check(
+        ir: &FunctionIR,
+        var: crate::ir::function::VarId,
+        ops: &[String],
+    ) -> bool {
         // Collect BinaryOps involving `var` on either side.
         let involved = |lhs: &Operand, rhs: &Operand| {
             matches!(lhs, Operand::Var(v) if *v == var)
@@ -166,14 +199,40 @@ mod learned {
         false
     }
 
+    /// Check whether `var` is guarded by a range check at `block`.
+    /// First evaluates concrete intervals via `ValueInfo::range_at(block, var)`.
+    /// If an interval exists, verifies that it satisfies the bounds implied by `ops`.
+    /// If no interval exists (e.g. non-integer or complex unmodeled flow), falls
+    /// back to syntactic presence `has_range_check`.
+    pub(crate) fn is_range_guarded(
+        ir: &FunctionIR,
+        var: crate::ir::function::VarId,
+        ops: &[String],
+        block: crate::ir::function::BlockId,
+        val_info: &crate::analysis::value::ValueInfo,
+    ) -> bool {
+        if let Some((lo, hi)) = val_info.range_at(block, var) {
+            let requires_upper = ops.iter().any(|op| op == "<" || op == "<=");
+            let requires_lower = ops.iter().any(|op| op == ">" || op == ">=");
+            let satisfies_upper = !requires_upper || hi < i64::MAX;
+            let satisfies_lower = !requires_lower || lo > i64::MIN;
+            if satisfies_upper && satisfies_lower && (requires_upper || requires_lower) {
+                return true;
+            }
+            return false;
+        }
+        has_range_check(ir, var, ops)
+    }
+
     /// Apply every learned check to one function.
     pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
         if facts.learned_checks.is_empty() {
             return Vec::new();
         }
         let segs = call_segments(ir);
+        let val_info = crate::analysis::value::analyze(ir);
         let mut findings = Vec::new();
-        for block in ir.blocks.values() {
+        for (&bid, block) in &ir.blocks {
             for instr in &block.instructions {
                 let (callee, args) = match instr {
                     Instruction::CallStatic { func, args, .. } => (func, args),
@@ -198,7 +257,7 @@ mod learned {
                     // enforcement without a named helper.
                     if let Some(ops) = &fact.unless_range_check {
                         let guarded = args.iter().any(|a| match a {
-                            Operand::Var(v) => has_range_check(ir, *v, ops),
+                            Operand::Var(v) => is_range_guarded(ir, *v, ops, bid, &val_info),
                             _ => false,
                         });
                         if guarded {

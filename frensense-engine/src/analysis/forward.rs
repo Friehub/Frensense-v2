@@ -178,8 +178,9 @@ pub struct CallBinding {
     /// Best-known callee name for diagnostics and external fact lookup
     /// (source/sink classification); `<indirect>` when unresolved.
     pub callee_name: String,
-    /// `(arg use-node key, formal parameter slot)`. For virtual calls the
-    /// receiver occupies slot 0 and explicit args start at slot 1.
+    /// The caller's receiver node, if this is a virtual call on a receiver.
+    pub receiver: Option<NodeKey>,
+    /// `(arg use-node key, arg index)`. Positional arguments indexed from 0.
     pub args: Vec<(NodeKey, usize)>,
     /// The caller's `ActualRet` def node, if the call has a destination.
     pub ret_node: Option<NodeKey>,
@@ -337,17 +338,15 @@ impl<'a> ProgramSvfg<'a> {
 
                     let call_site = NodeKey::instr(block, idx, VarId(usize::MAX));
                     let mut bargs: Vec<(NodeKey, usize)> = Vec::new();
-                    let mut slot = 0usize;
-                    if let Some(Operand::Var(r)) = receiver {
-                        // Virtual receiver occupies formal slot 0.
-                        bargs.push((NodeKey::instr(block, idx, *r), 0));
-                        slot = 1;
-                    }
-                    for a in args {
+                    let recv_node = if let Some(Operand::Var(r)) = receiver {
+                        Some(NodeKey::instr(block, idx, *r))
+                    } else {
+                        None
+                    };
+                    for (slot, a) in args.iter().enumerate() {
                         if let Operand::Var(v) = a {
                             bargs.push((NodeKey::instr(block, idx, *v), slot));
                         }
-                        slot += 1;
                     }
                     let ret_node = dest.map(|d| NodeKey::instr(block, idx, d));
 
@@ -371,10 +370,14 @@ impl<'a> ProgramSvfg<'a> {
                         call_site,
                         callees,
                         callee_name,
+                        receiver: recv_node,
                         args: bargs,
                         ret_node,
                     });
                     let bi = bindings.len() - 1;
+                    if let Some(r) = bindings[bi].receiver {
+                        arg_slots.insert(r, (bi, usize::MAX));
+                    }
                     for (k, s) in &bindings[bi].args {
                         arg_slots.insert(*k, (bi, *s));
                     }
@@ -438,7 +441,12 @@ impl<'a> ProgramSvfg<'a> {
                         .any(|&gi| self.functions[gi].summary.is_some())
                 })
                 .filter_map(|b| b.ret_node.map(|r| (b, r)))
-                .flat_map(|(b, r)| b.args.iter().map(move |(a, _)| (*a, r)))
+                .flat_map(|(b, r)| {
+                    b.args
+                        .iter()
+                        .map(move |(a, _)| (*a, r))
+                        .chain(b.receiver.map(|recv| (recv, r)))
+                })
                 .collect();
             for (from, to) in suppressible {
                 self.suppressed.insert((fi, from, to));
@@ -485,8 +493,23 @@ impl<'a> ProgramSvfg<'a> {
                 if let Some(&(bi, slot)) = fe.arg_slots.get(&cur) {
                     let binding = &fe.bindings[bi];
                     for &gi in &binding.callees {
-                        if let Some(sum) = &self.functions[gi].summary
-                            && sum.taints_return(slot)
+                        let callee_has_recv =
+                            self.functions[gi].ir.parameters.first().is_some_and(|&p| {
+                                self.functions[gi]
+                                    .ir
+                                    .var_metadata
+                                    .get(&p)
+                                    .and_then(|m| m.source_name.as_deref())
+                                    .is_some_and(|name| name == "self" || name == "this")
+                            });
+                        let callee_slot = if slot == usize::MAX {
+                            if callee_has_recv { Some(0) } else { None }
+                        } else {
+                            Some(slot + if callee_has_recv { 1 } else { 0 })
+                        };
+                        if let Some(cs) = callee_slot
+                            && let Some(sum) = &self.functions[gi].summary
+                            && sum.taints_return(cs)
                             && let Some(ret) = binding.ret_node
                             && visited.insert(ret)
                         {
@@ -528,9 +551,31 @@ impl<'a> ProgramSvfg<'a> {
                 for &gi in &b.callees {
                     let ge = &self.functions[gi];
 
+                    let callee_has_recv = ge.ir.parameters.first().is_some_and(|&p| {
+                        ge.ir
+                            .var_metadata
+                            .get(&p)
+                            .and_then(|m| m.source_name.as_deref())
+                            .is_some_and(|name| name == "self" || name == "this")
+                    });
+
+                    // Receiver passing: only if callee has a formal receiver parameter.
+                    if callee_has_recv
+                        && let Some(r_key) = b.receiver
+                        && let Some(&param_var) = ge.ir.parameters.first()
+                        && let Some(&param_key) = ge.def_site.get(&param_var)
+                    {
+                        self.cross_edges
+                            .entry((fi, r_key))
+                            .or_default()
+                            .push((gi, param_key));
+                    }
+
                     // Parameter passing: ActualArg(use node) → FormalParam(slot).
+                    let slot_offset = if callee_has_recv { 1 } else { 0 };
                     for (arg_key, slot) in &b.args {
-                        if let Some(&param_var) = ge.ir.parameters.get(*slot)
+                        let target_slot = *slot + slot_offset;
+                        if let Some(&param_var) = ge.ir.parameters.get(target_slot)
                             && let Some(&param_key) = ge.def_site.get(&param_var)
                         {
                             self.cross_edges

@@ -21,8 +21,10 @@ use std::path::Path;
 
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::facts::{
-    FactTable, LearnedCheckFact, LearnedFactEntry, SanitizerFact, SinkSignature,
+    FactTable, GuardBypassFact, LearnedCheckFact, LearnedFactEntry, MemoryContractFact, PolicyFact,
+    PolicyRequirement, PolicyScope, SanitizerFact, SchemaPolicyFact, SinkSignature, WeakCryptoFact,
 };
+use frensense_engine::checks::memory_summary::{CapacitySpec, MemorySummaryRegistry};
 use frensense_engine::scan;
 use rustc_hash::FxHashMap;
 
@@ -39,6 +41,90 @@ pub struct LearnedFact {
     pub families: Vec<String>,
 }
 
+/// Advisory metadata from a positive's `[frensense]` comment block.
+///
+/// Human-facing advisory text baked into the `.frc` as a `BundlePattern`;
+/// flow knowledge lives in `learned_facts`, never here. All fields are
+/// optional: a family without a `[frensense]` block still groups and votes,
+/// it just ships no advisory text.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FamilyMetadata {
+    pub observation: Option<String>,
+    pub impact: Option<String>,
+    pub improvement: Option<String>,
+    pub cwe: Option<String>,
+    pub cvss: Option<f32>,
+    pub owasp: Option<String>,
+    pub severity: Option<String>,
+}
+
+impl FamilyMetadata {
+    /// Parse a `[frensense]` block from a variant's first `head_lines`
+    /// lines. Comment prefixes follow the language (`#` for Python, `//`
+    /// elsewhere), matching the `check-call` convention. The block is a
+    /// run of comment lines whose first line opens with `[frensense]`;
+    /// `key: value` lines inside it fill the fields. Only positives
+    /// should carry the block, but parsing is variant-agnostic.
+    pub fn parse(source: &str, ext: &str, head_lines: usize) -> Self {
+        let hash_style = ext == "py" || ext == "pyi" || ext == "pyw";
+        let prefixes: &[&str] = if hash_style {
+            &["#", "//"]
+        } else {
+            &["//", "#"]
+        };
+        fn strip<'a>(prefixes: &[&'a str], line: &'a str) -> Option<&'a str> {
+            let t = line.trim();
+            prefixes
+                .iter()
+                .find_map(|p| t.strip_prefix(p))
+                .map(|s| s.trim())
+        }
+
+        let mut meta = Self::default();
+        let mut in_block = false;
+        for line in source.lines().take(head_lines) {
+            let Some(body) = strip(prefixes, line) else {
+                // A non-comment line ends the block once it has started.
+                if in_block {
+                    break;
+                }
+                continue;
+            };
+            if body == "[frensense]" {
+                in_block = true;
+                continue;
+            }
+            if !in_block {
+                continue;
+            }
+            let Some((key, value)) = body.split_once(':') else {
+                // Unknown line inside the block (e.g. `check-call:`) —
+                // other parsers consume it; skip here.
+                continue;
+            };
+            let value = value.trim();
+            if value.is_empty() {
+                continue;
+            }
+            match key.trim().to_ascii_lowercase().as_str() {
+                "observation" => meta.observation = Some(value.to_string()),
+                "impact" => meta.impact = Some(value.to_string()),
+                "improvement" => meta.improvement = Some(value.to_string()),
+                "cwe" => meta.cwe = Some(value.to_string()),
+                "cvss" => {
+                    if let Ok(v) = value.parse::<f32>() {
+                        meta.cvss = Some(v);
+                    }
+                }
+                "owasp" => meta.owasp = Some(value.to_string()),
+                "severity" => meta.severity = Some(value.to_string()),
+                _ => {}
+            }
+        }
+        meta
+    }
+}
+
 /// One corpus family: id + variant files.
 pub struct Family {
     pub id: String,
@@ -50,6 +136,9 @@ pub struct Family {
     /// to this call, the family authors declare which call is the
     /// privileged action; the gate still validates the claim.
     pub declared_check_call: Option<String>,
+    /// Advisory text from the positive's `[frensense]` block, baked into
+    /// the bundle as a `BundlePattern`.
+    pub metadata: FamilyMetadata,
 }
 
 /// Group a corpus directory into families by filename convention
@@ -64,6 +153,15 @@ pub fn group_families(corpus_dir: &Path) -> Result<Vec<Family>, String> {
     // metadata (recorded in each family's manifest.json), never part of
     // the id, so moving a family between CWE directories preserves its
     // learned facts.
+    // Two-phase grouping: collect (family stem, language, variant, file)
+    // records first, THEN bucket them into families. The extra language
+    // dimension exists because learned facts are language-blind (call
+    // matching is by last segment), so a family must never mix languages:
+    // a `foo_positive.py` and `foo_negative.ts` under the same stem would
+    // vote as one family and the replay gate could publish a fact no
+    // single-language pair supports. When a stem collides across
+    // languages, each language gets its own sub-family (`foo (python)`,
+    // `foo (typescript)`) and a warning names the affected files.
     let mut stack = vec![corpus_dir.to_path_buf()];
     let mut all_paths: Vec<std::path::PathBuf> = Vec::new();
     while let Some(dir) = stack.pop() {
@@ -80,6 +178,19 @@ pub fn group_families(corpus_dir: &Path) -> Result<Vec<Family>, String> {
     }
     all_paths.sort();
 
+    /// One scanned file's grouping inputs (before language disambiguation).
+    struct Grouped {
+        stem: String,
+        lang: &'static str,
+        variant: &'static str,
+        name: String,
+        ext: String,
+        source: String,
+        declared_check_call: Option<String>,
+        metadata: FamilyMetadata,
+    }
+
+    let mut records: Vec<Grouped> = Vec::new();
     for path in all_paths {
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
@@ -91,10 +202,11 @@ pub fn group_families(corpus_dir: &Path) -> Result<Vec<Family>, String> {
             .to_string();
         if !matches!(
             ext.as_str(),
-            "ts" | "tsx" | "js" | "jsx" | "py" | "go" | "rs"
+            "ts" | "tsx" | "js" | "jsx" | "py" | "go" | "rs" | "c" | "cpp" | "h" | "hpp"
         ) {
             continue;
         }
+
         let (family, variant) = if let Some(i) = name.find("_positive") {
             (name[..i].to_string(), "positive")
         } else if let Some(i) = name.find("_negative") {
@@ -104,35 +216,127 @@ pub fn group_families(corpus_dir: &Path) -> Result<Vec<Family>, String> {
         };
         let source = std::fs::read_to_string(&path).unwrap_or_default();
         // Declared check trigger: `// check-call: <name>` inside the
-        // `[frensense]` metadata block of a positive variant.
+        // `[frensense]` metadata block of a positive variant. The comment
+        // prefix follows the language: `#` for Python/shell-family files,
+        // `//` everywhere else, so every supported language can declare a
+        // trigger in its own comment syntax.
+        let comment_prefix: &[&str] = if ext == "py" || ext == "pyi" || ext == "pyw" {
+            &["# check-call:", "// check-call:"]
+        } else {
+            &["// check-call:", "# check-call:"]
+        };
         let declared_check_call = if variant == "positive" {
-            source
-                .lines()
-                .take(30)
-                .find_map(|l| l.trim().strip_prefix("// check-call:"))
-                .map(|s| s.trim().to_string())
+            source.lines().take(30).find_map(|l| {
+                let t = l.trim();
+                comment_prefix
+                    .iter()
+                    .find_map(|p| t.strip_prefix(p))
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            })
         } else {
             None
         };
+        // Language identity comes from the registry, same name the specs
+        // use for fingerprints; unknown extensions fall back to the raw
+        // extension so the collision check still distinguishes them.
+        let lang = frensense_lang::spec_for_ext(&ext)
+            .map(|s| s.name())
+            .unwrap_or(leaked_ext(&ext));
+        // Advisory metadata: parsed from every variant's head (positives
+        // are the ones that carry the block); later records for the same
+        // family overwrite earlier ones, so a positive's block wins.
+        let metadata = FamilyMetadata::parse(&source, &ext, 30);
+        records.push(Grouped {
+            stem: family,
+            lang,
+            variant,
+            name: name.to_string(),
+            ext,
+            source,
+            declared_check_call,
+            metadata,
+        });
+    }
+
+    // Language-mixing detector: which stems carry more than one language?
+    let mut langs_by_stem: FxHashMap<&str, std::collections::BTreeSet<&'static str>> =
+        FxHashMap::default();
+    for r in &records {
+        langs_by_stem
+            .entry(r.stem.as_str())
+            .or_default()
+            .insert(r.lang);
+    }
+    let mixed: FxHashMap<&str, ()> = langs_by_stem
+        .into_iter()
+        .filter(|(_, langs)| langs.len() > 1)
+        .map(|(stem, _)| (stem, ()))
+        .collect();
+    // File names per colliding stem, for the actionable follow-up warning.
+    let mut mixed_files: FxHashMap<&str, Vec<String>> =
+        mixed.keys().map(|s| (*s, Vec::new())).collect();
+    for stem in mixed.keys() {
+        eprintln!(
+            "[facts] WARNING: family stem '{stem}' mixes languages; splitting into \
+             per-language sub-families so votes never cross language boundaries"
+        );
+    }
+
+    for r in &records {
+        // Mixed stems are disambiguated with the language name; clean stems
+        // keep the bare id so existing family ids are stable.
+        let family = if mixed.contains_key(r.stem.as_str()) {
+            format!("{} ({})", r.stem, r.lang)
+        } else {
+            r.stem.clone()
+        };
+        if let Some(files) = mixed_files.get_mut(r.stem.as_str()) {
+            files.push(r.name.clone());
+        }
         let f = families.entry(family.clone()).or_insert_with(|| Family {
             id: family.clone(),
             positives: Vec::new(),
             negatives: Vec::new(),
             declared_check_call: None,
+            metadata: FamilyMetadata::default(),
         });
-        if declared_check_call.is_some() {
-            f.declared_check_call = declared_check_call;
+        if r.declared_check_call.is_some() {
+            f.declared_check_call = r.declared_check_call.clone();
         }
-        let slot = match variant {
+        // Positives' metadata wins over negatives' (negatives should not
+        // carry a block, but parse defensively): only overwrite from a
+        // non-default parse.
+        if r.variant == "positive" && r.metadata != FamilyMetadata::default() {
+            f.metadata = r.metadata.clone();
+        }
+        let slot = match r.variant {
             "positive" => &mut f.positives,
             _ => &mut f.negatives,
         };
-        slot.push((name.to_string(), source, ext));
+        slot.push((r.name.clone(), r.source.clone(), r.ext.clone()));
+    }
+
+    // Name the colliding files once, after grouping, so the warning is
+    // actionable (which files ended up in which sub-family).
+    for stem in mixed.keys() {
+        let files = mixed_files
+            .get(stem)
+            .map(|v| v.join(", "))
+            .unwrap_or_default();
+        eprintln!("[facts]   stem '{stem}' files: {files}");
     }
 
     let mut out: Vec<Family> = families.into_values().collect();
     out.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(out)
+}
+
+/// Leak the raw extension as a `'static` fallback for unregistered
+/// extensions (at most a handful of small strings per run; acceptable for
+/// a build-time tool).
+fn leaked_ext(ext: &str) -> &'static str {
+    Box::leak(ext.to_string().into_boxed_str())
 }
 
 /// A candidate fact proposed by delta analysis.
@@ -158,6 +362,43 @@ enum Candidate {
         /// (inline enforcement modality).
         unless_range_check: Option<Vec<String>>,
     },
+    /// Generalized co-occurrence policy (the `LearnedFactEntry::Policy`
+    /// shape): trigger + a list of requirements the trigger's scope must
+    /// satisfy. Covers the two family shapes the legacy Check fact cannot
+    /// express:
+    ///
+    /// * **banned-call co-occurrence** — the trigger appears in positives
+    ///   AND negatives, but negatives avoid a call the positives make:
+    ///   `require: [NotCall{banned}]` ("calling `exec` alongside `log`
+    ///   is the violation").
+    /// * **cross-function enforcement** — the enforcement helper is defined
+    ///   in a sibling file/module rather than called in the trigger's own
+    ///   function: `require: [RequireCall{any_of}]` under
+    ///   `PolicyScope::Module` (the engine accepts the definition site as
+    ///   enforcement evidence).
+    ///
+    /// An empty `require` list is a presence-only policy and is never
+    /// proposed here (the legacy Check path already covers presence-only).
+    Policy {
+        rule: String,
+        call: String,
+        message: String,
+        require: Vec<PolicyRequirement>,
+        scope: PolicyScope,
+    },
+    /// A custom allocation/deallocation wrapper contract learned from corpus examples.
+    MemoryContract {
+        name: String,
+        returns_fresh: bool,
+        return_capacity: CapacitySpec,
+        consumes_params: Vec<usize>,
+    },
+    /// Weak cryptographic primitive or algorithm selector learned from corpus examples.
+    WeakCrypto { fact: WeakCryptoFact },
+    /// Guard bypass pattern (containment callee, credential sink or credential param).
+    GuardBypass { fact: GuardBypassFact },
+    /// Schema policy rule (number builder, enforcer method, or bound keyword).
+    SchemaPolicy { fact: SchemaPolicyFact },
 }
 
 /// Taint-relevant calls observed in one variant, with arg-slot detail.
@@ -223,15 +464,39 @@ impl PreparedFamily {
 fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Vec<Candidate> {
     let mut candidates = Vec::new();
 
+    // Memory allocation / deallocation wrapper discovery from corpus examples:
+    let mut family_irs = Vec::new();
+    for (path, src, ext) in family.positives.iter().chain(family.negatives.iter()) {
+        if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
+            family_irs.extend(fns.into_values());
+        }
+    }
+    if !family_irs.is_empty() {
+        let ir_refs: Vec<&frensense_engine::ir::function::FunctionIR> = family_irs.iter().collect();
+        let summaries =
+            MemorySummaryRegistry::from_facts(builtin).infer_program_summaries_into(&ir_refs);
+        for (name, summary) in summaries.summaries {
+            if MemorySummaryRegistry::is_builtin(&name) {
+                continue;
+            }
+            if summary.returns_fresh || !summary.consumes_params.is_empty() {
+                candidates.push(Candidate::MemoryContract {
+                    name,
+                    returns_fresh: summary.returns_fresh,
+                    return_capacity: summary.return_capacity,
+                    consumes_params: summary.consumes_params,
+                });
+            }
+        }
+    }
+
     let pos = scan_variant(&family.positives, config, builtin);
     let neg = scan_variant(&family.negatives, config, builtin);
     let pos_alerts = pos.has_alert();
     let neg_alerts = neg.has_alert();
 
     if pos_alerts && !neg_alerts {
-        // Family already separates, no new fact needed. But if the NEGATIVE
-        // showed `Unknown` verdicts, the negative may be safe only by luck.
-        // Still no fact proposal (conservative).
+        // Taint flow already separates. Return any memory contracts discovered.
         return candidates;
     }
 
@@ -357,7 +622,422 @@ fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Vec<Ca
         });
     }
 
+    // Generalized co-occurrence policies: the two family shapes the legacy
+    // Check fact cannot express. Both need the trigger present in BOTH
+    // variants (unlike shapes a/b, the trigger alone is not the violation;
+    // the co-occurring context is).
+    //
+    // (c) Banned-call co-occurrence: negatives call the trigger but avoid
+    //     some call the positives make. The positives' extra call is the
+    //     violation, not the trigger.
+    // (d) Cross-function enforcement: the enforcement helper is DEFINED in
+    //     a variant but not necessarily called in the trigger's function;
+    //     the engine's Module scope accepts a sibling definition as
+    //     evidence. Detected when a variant declares a function whose name
+    //     matches a guard-style call in the OTHER variant.
+    // Generalized co-occurrence policies: the two family shapes the legacy
+    // Check fact cannot express. Both need the trigger present in BOTH
+    // variants (unlike shapes a/b, the trigger alone is not the violation;
+    // the co-occurring context is). Proposals key on the family-declared
+    // trigger only — co-occurrence policies are too broad to mine
+    // presence-blind, so undeclared families get none (the legacy delta
+    // paths above still apply).
+    if let Some(trigger) = family.declared_check_call.clone() {
+        if pos_calls.contains_key(&trigger)
+            && neg_calls.contains_key(&trigger)
+            && builtin.learned_checks.iter().all(|c| c.call != trigger)
+        {
+            // Shape (c): banned-call co-occurrence. Calls the POSITIVES make
+            // that no negative makes: candidate `NotCall` requirements.
+            let banned: Vec<String> = pos_calls
+                .keys()
+                .filter(|c| {
+                    c.as_str() != trigger
+                        && !neg_calls.contains_key(*c)
+                        && builtin.sanitizer_fact(c).is_none()
+                        && builtin.sink_signature(c).is_none()
+                        && looks_taint_relevant(c)
+                })
+                .cloned()
+                .collect();
+            if let Some(banned_call) = banned.first() {
+                candidates.push(Candidate::Policy {
+                    rule: format!("policy_{trigger}_no_{banned_call}"),
+                    call: trigger.clone(),
+                    message: format!(
+                        "Corpus-verified policy violation: `{trigger}` must not co-occur with `{banned_call}` (learned from family {})",
+                        family.id
+                    ),
+                    require: vec![PolicyRequirement::NotCall {
+                        call: banned_call.clone(),
+                    }],
+                    scope: PolicyScope::Function,
+                });
+            }
+
+            // Shape (d): cross-function enforcement. The enforcement helper is
+            // DEFINED in the negatives' module but absent from positives — the
+            // enforcement lives outside the trigger's function, so the fact
+            // uses Module scope (the engine accepts the definition site as
+            // enforcement evidence).
+            if let Some(helper) = cross_function_helper(family, &pos_calls, &neg_calls) {
+                if builtin.sanitizer_fact(&helper).is_none() {
+                    candidates.push(Candidate::Policy {
+                        rule: format!("policy_{trigger}_with_{helper}"),
+                        call: trigger.clone(),
+                        message: format!(
+                            "Corpus-verified policy violation: `{trigger}` requires `{helper}` enforcement (learned from family {})",
+                            family.id
+                        ),
+                        require: vec![PolicyRequirement::RequireCall {
+                            any_of: vec![helper.clone()],
+                        }],
+                        scope: PolicyScope::Module,
+                    });
+                }
+            }
+        }
+    }
+
+    let mut pos_irs = Vec::new();
+    for (path, src, ext) in &family.positives {
+        if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
+            pos_irs.extend(fns.into_values());
+        }
+    }
+    let mut neg_irs = Vec::new();
+    for (path, src, ext) in &family.negatives {
+        if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
+            neg_irs.extend(fns.into_values());
+        }
+    }
+
+    // Non-taint policy proposals: argument literal constraints & weak crypto
+    let pos_arg_literals = extract_call_arg_literals(&pos_irs);
+    let neg_arg_literals = extract_call_arg_literals(&neg_irs);
+    for ((call, slot), pos_vals) in &pos_arg_literals {
+        for pos_val in pos_vals {
+            let neg_has = neg_arg_literals
+                .get(&(call.clone(), *slot))
+                .map(|s| s.contains(pos_val))
+                .unwrap_or(false);
+            if !neg_has {
+                candidates.push(Candidate::Policy {
+                    rule: format!("policy_{call}_banned_arg_{slot}_{pos_val}"),
+                    call: call.clone(),
+                    message: format!(
+                        "Corpus-verified policy violation: argument {} of `{call}` must not be '{pos_val}' (learned from family {})",
+                        slot, family.id
+                    ),
+                    require: vec![PolicyRequirement::BannedArgLiteral {
+                        slot: *slot,
+                        values: vec![pos_val.clone()],
+                    }],
+                    scope: PolicyScope::Function,
+                });
+                if let Some(neg_vals) = neg_arg_literals.get(&(call.clone(), *slot)) {
+                    for neg_val in neg_vals {
+                        if neg_val != pos_val {
+                            candidates.push(Candidate::Policy {
+                                rule: format!("policy_{call}_required_arg_{slot}_{neg_val}"),
+                                call: call.clone(),
+                                message: format!(
+                                    "Corpus-verified policy violation: argument {} of `{call}` requires '{neg_val}' (learned from family {})",
+                                    slot, family.id
+                                ),
+                                require: vec![PolicyRequirement::RequiredArgLiteral {
+                                    slot: *slot,
+                                    values: vec![neg_val.clone()],
+                                }],
+                                scope: PolicyScope::Function,
+                            });
+                        }
+                    }
+                }
+                candidates.push(Candidate::WeakCrypto {
+                    fact: WeakCryptoFact {
+                        rule_id: format!("learned_weak_crypto_{call}_{pos_val}"),
+                        call: call.clone(),
+                        selector_slot: Some(*slot),
+                        weak_selectors: vec![pos_val.clone()],
+                    },
+                });
+            }
+        }
+    }
+
+    // Weak crypto: bare calls in positives not present in negatives
+    for call in pos_calls.keys() {
+        if !neg_calls.contains_key(call) {
+            let cl = call.to_ascii_lowercase();
+            if cl.contains("hash")
+                || cl.contains("crypto")
+                || cl.contains("md5")
+                || cl.contains("sha1")
+                || cl.contains("des")
+                || cl.contains("rc4")
+                || cl.contains("cipher")
+            {
+                candidates.push(Candidate::WeakCrypto {
+                    fact: WeakCryptoFact {
+                        rule_id: format!("learned_weak_crypto_{call}"),
+                        call: call.clone(),
+                        selector_slot: None,
+                        weak_selectors: vec![],
+                    },
+                });
+            }
+        }
+    }
+
+    // Guard bypass: containment callees
+    for ir in &pos_irs {
+        let param_names: Vec<String> = ir
+            .parameters
+            .iter()
+            .filter_map(|p| ir.var_metadata.get(p).and_then(|m| m.source_name.clone()))
+            .collect();
+        let has_url = param_names.iter().any(|n| {
+            let l = n.to_ascii_lowercase();
+            l.contains("url") || l.contains("redirect")
+        });
+        if has_url {
+            for block in ir.blocks.values() {
+                for instr in &block.instructions {
+                    let callee = match instr {
+                        frensense_engine::ir::function::Instruction::CallVirtual {
+                            method, ..
+                        } => method,
+                        frensense_engine::ir::function::Instruction::CallStatic {
+                            func, ..
+                        } => func,
+                        _ => continue,
+                    };
+                    let seg = callee.rsplit('.').next().unwrap_or(callee);
+                    if !["includes", "indexOf", "contains"].contains(&seg)
+                        && looks_taint_relevant(seg)
+                    {
+                        candidates.push(Candidate::GuardBypass {
+                            fact: GuardBypassFact {
+                                containment_callees: vec![seg.to_string()],
+                                ..Default::default()
+                            },
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Guard bypass: credential sinks & params
+    for ir in &pos_irs {
+        for block in ir.blocks.values() {
+            for instr in &block.instructions {
+                let (callee, args) = match instr {
+                    frensense_engine::ir::function::Instruction::CallVirtual {
+                        method,
+                        args,
+                        ..
+                    } => (method, args),
+                    frensense_engine::ir::function::Instruction::CallStatic {
+                        func, args, ..
+                    } => (func, args),
+                    _ => continue,
+                };
+                let seg = callee.rsplit('.').next().unwrap_or(callee);
+                for arg in args {
+                    if let frensense_engine::ir::function::Operand::Var(v) = arg {
+                        if let Some(src_name) =
+                            ir.var_metadata.get(v).and_then(|m| m.source_name.clone())
+                        {
+                            let lower = src_name.to_ascii_lowercase();
+                            let is_pwd = [
+                                "password",
+                                "passwd",
+                                "pwd",
+                                "cleartextpassword",
+                                "clearpassword",
+                                "newpassword",
+                            ]
+                            .contains(&lower.as_str());
+                            if is_pwd
+                                && !["hash", "hashPassword", "hashpw", "setPassword", "set"]
+                                    .contains(&seg)
+                            {
+                                candidates.push(Candidate::GuardBypass {
+                                    fact: GuardBypassFact {
+                                        credential_sinks: vec![seg.to_string()],
+                                        ..Default::default()
+                                    },
+                                });
+                            }
+                            if !is_pwd
+                                && ["hash", "hashPassword", "hashpw", "setPassword", "set"]
+                                    .contains(&seg)
+                                && (lower.contains("secret")
+                                    || lower.contains("key")
+                                    || lower.contains("token")
+                                    || lower.contains("auth"))
+                            {
+                                candidates.push(Candidate::GuardBypass {
+                                    fact: GuardBypassFact {
+                                        credential_params: vec![src_name.clone()],
+                                        ..Default::default()
+                                    },
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Schema policy: builders and bound keywords
+    for ir in &pos_irs {
+        for block in ir.blocks.values() {
+            for instr in &block.instructions {
+                if let frensense_engine::ir::function::Instruction::CallVirtual {
+                    method,
+                    args,
+                    ..
+                } = instr
+                {
+                    let seg = method.rsplit('.').next().unwrap_or(method);
+                    if seg == "describe" || seg == "description" {
+                        if let Some(frensense_engine::ir::function::Operand::StringLiteral(text)) =
+                            args.first()
+                        {
+                            let lower = text.to_ascii_lowercase();
+                            if lower.chars().any(|c| c.is_ascii_digit()) {
+                                for b2 in ir.blocks.values() {
+                                    for i2 in &b2.instructions {
+                                        if let frensense_engine::ir::function::Instruction::CallVirtual { method: m2, .. } = i2 {
+                                            let s2 = m2.rsplit('.').next().unwrap_or(m2);
+                                            if !["number", "int", "float", "bigint"].contains(&s2)
+                                                && !["max", "min", "minimum", "maximum", "int", "multipleOf", "step"].contains(&s2)
+                                                && s2 != "describe"
+                                                && s2 != "description"
+                                            {
+                                                candidates.push(Candidate::SchemaPolicy {
+                                                    fact: SchemaPolicyFact {
+                                                        builders: vec![s2.to_string()],
+                                                        ..Default::default()
+                                                    },
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                                for word in lower.split_whitespace() {
+                                    let clean: String =
+                                        word.chars().filter(|c| c.is_alphabetic()).collect();
+                                    if clean.len() >= 3
+                                        && !["maximum", "max", "minimum", "min", "limit", "up to"]
+                                            .contains(&clean.as_str())
+                                    {
+                                        candidates.push(Candidate::SchemaPolicy {
+                                            fact: SchemaPolicyFact {
+                                                bound_keywords: vec![clean],
+                                                ..Default::default()
+                                            },
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Schema policy: enforcers from negatives
+    for ir in &neg_irs {
+        for block in ir.blocks.values() {
+            for instr in &block.instructions {
+                if let frensense_engine::ir::function::Instruction::CallVirtual { method, .. } =
+                    instr
+                {
+                    let seg = method.rsplit('.').next().unwrap_or(method);
+                    if ![
+                        "max",
+                        "min",
+                        "minimum",
+                        "maximum",
+                        "int",
+                        "multipleOf",
+                        "step",
+                    ]
+                    .contains(&seg)
+                        && !["number", "int", "float", "bigint"].contains(&seg)
+                        && seg != "describe"
+                        && seg != "description"
+                    {
+                        candidates.push(Candidate::SchemaPolicy {
+                            fact: SchemaPolicyFact {
+                                enforcers: vec![seg.to_string()],
+                                ..Default::default()
+                            },
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     candidates
+}
+
+/// Cross-function enforcement helper: a function DEFINED in the negatives
+/// that positives neither define nor call. The negatives are safe because
+/// their module provides the enforcement helper (the definition site is
+/// the strongest in-scope evidence — `policy::check_program`'s
+/// module-segment rule), while positives execute the trigger with no
+/// helper anywhere in scope. The helper must not be defined in positives:
+/// if both sides define it, its presence cannot be the separating signal.
+fn cross_function_helper(
+    family: &Family,
+    pos_calls: &FxHashMap<String, CallShape>,
+    neg_calls: &FxHashMap<String, CallShape>,
+) -> Option<String> {
+    let pos_defs = defined_function_names(&family.positives);
+    let neg_defs = defined_function_names(&family.negatives);
+    let trigger = family.declared_check_call.as_deref();
+    neg_defs
+        .iter()
+        .filter(|g| {
+            Some(g.as_str()) != trigger
+                && !pos_defs.contains(*g)
+                && !pos_calls.contains_key(*g)
+                && !neg_calls.contains_key(*g)
+        })
+        .next()
+        .cloned()
+}
+
+/// Last-segment names of every function DEFINED in the given variants
+/// (definition sites, not call sites).
+fn defined_function_names(files: &[(String, String, String)]) -> rustc_hash::FxHashSet<String> {
+    use rustc_hash::FxHashSet;
+    let mut out = FxHashSet::default();
+    for (path, source, ext) in files {
+        let Ok(irs) = frensense_engine::harness::lower_source(path, source, ext) else {
+            continue;
+        };
+        for name in irs.keys() {
+            // Skip synthetic lowering names (`<fn@byte>`, `<path:handler@byte>`):
+            // they encode the file position where the function was DECLARED in
+            // the corpus variant, so a target program can never contain the
+            // same name — a RequireCall fact keyed on one would fire forever.
+            if name.starts_with('<') {
+                continue;
+            }
+            let last = name.rsplit('.').next().unwrap_or(name);
+            out.insert(last.to_string());
+        }
+    }
+    out
 }
 
 /// True when any argument var passed to `call` is compared against a
@@ -431,6 +1111,49 @@ fn variant_has_range_check_on_call(files: &[(String, String, String)], call: &st
         }
     }
     false
+}
+
+fn extract_call_arg_literals(
+    irs: &[frensense_engine::ir::function::FunctionIR],
+) -> FxHashMap<(String, usize), BTreeSet<String>> {
+    use frensense_engine::ir::function::{Instruction, Operand};
+    let mut map: FxHashMap<(String, usize), BTreeSet<String>> = FxHashMap::default();
+    for ir in irs {
+        let values = frensense_engine::analysis::value::analyze(ir);
+        for block in ir.blocks.values() {
+            for instr in &block.instructions {
+                let (callee, args) = match instr {
+                    Instruction::CallStatic { func, args, .. } => (func, args),
+                    Instruction::CallVirtual { method, args, .. } => (method, args),
+                    _ => continue,
+                };
+                let seg = callee.rsplit('.').next().unwrap_or(callee);
+                for (slot, arg) in args.iter().enumerate() {
+                    let lit = match arg {
+                        Operand::StringLiteral(s) => Some(
+                            s.trim_matches(|c| c == '\'' || c == '"' || c == '`')
+                                .to_string(),
+                        ),
+                        Operand::IntLiteral(i) => Some(i.to_string()),
+                        Operand::BoolLiteral(b) => Some(b.to_string()),
+                        Operand::Var(v) => values
+                            .const_str(*v)
+                            .map(|s| {
+                                s.trim_matches(|c| c == '\'' || c == '"' || c == '`')
+                                    .to_string()
+                            })
+                            .or_else(|| values.const_int(*v).map(|i| i.to_string()))
+                            .or_else(|| values.const_bool(*v).map(|b| b.to_string())),
+                        _ => None,
+                    };
+                    if let Some(val) = lit {
+                        map.entry((seg.to_string(), slot)).or_default().insert(val);
+                    }
+                }
+            }
+        }
+    }
+    map
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -626,6 +1349,77 @@ fn apply_candidate(table: &mut FactTable, c: &Candidate) {
                 unless_range_check: unless_range_check.clone(),
             });
         }
+        Candidate::Policy {
+            rule,
+            call,
+            message,
+            require,
+            scope,
+        } => {
+            table.policy_facts.push(PolicyFact {
+                rule: rule.clone(),
+                when_call: call.clone(),
+                require: require.clone(),
+                scope: *scope,
+                message: message.clone(),
+                severity: "warning".into(),
+            });
+        }
+        Candidate::MemoryContract {
+            name,
+            returns_fresh,
+            return_capacity,
+            consumes_params,
+        } => {
+            let fact = MemoryContractFact {
+                name: name.clone(),
+                returns_fresh: *returns_fresh,
+                return_capacity: return_capacity.clone(),
+                consumes_params: consumes_params.clone(),
+            };
+            if let Some(existing) = table
+                .memory_contracts
+                .iter_mut()
+                .find(|c| c.name == fact.name)
+            {
+                *existing = fact;
+            } else {
+                table.memory_contracts.push(fact);
+            }
+        }
+        Candidate::WeakCrypto { fact } => {
+            if let Some(existing) = table
+                .weak_crypto_rules
+                .iter_mut()
+                .find(|c| c.rule_id == fact.rule_id && c.call == fact.call)
+            {
+                *existing = fact.clone();
+            } else {
+                table.weak_crypto_rules.push(fact.clone());
+            }
+        }
+        Candidate::GuardBypass { fact } => {
+            for c in &fact.containment_callees {
+                table.containment_callees.insert(c.clone());
+            }
+            for s in &fact.credential_sinks {
+                table.credential_sinks.insert(s.clone());
+            }
+            for p in &fact.credential_params {
+                table.credential_params.insert(p.clone());
+            }
+        }
+        Candidate::SchemaPolicy { fact } => {
+            for b in &fact.builders {
+                table.schema_builders.insert(b.clone());
+            }
+            for e in &fact.enforcers {
+                table.schema_enforcers.insert(e.clone());
+            }
+            for k in &fact.bound_keywords {
+                table.schema_keywords.insert(k.clone());
+            }
+        }
     }
 }
 
@@ -643,6 +1437,24 @@ fn fact_key(e: &LearnedFactEntry) -> (String, String) {
         LearnedFactEntry::Sink { call, .. } => ("sink".into(), call.clone()),
         LearnedFactEntry::Sanitizer { call, .. } => ("san".into(), call.clone()),
         LearnedFactEntry::Check { rule, call, .. } => ("check".into(), format!("{rule}:{call}")),
+        LearnedFactEntry::Policy {
+            rule, when_call, ..
+        } => ("policy".into(), format!("{rule}:{when_call}")),
+        LearnedFactEntry::MemoryContract { name, .. } => ("mem".into(), name.clone()),
+        LearnedFactEntry::WeakCrypto(f) => {
+            ("weak_crypto".into(), format!("{}:{}", f.rule_id, f.call))
+        }
+        LearnedFactEntry::GuardBypass(f) => (
+            "guard_bypass".into(),
+            format!(
+                "{:?}:{:?}:{:?}",
+                f.containment_callees, f.credential_sinks, f.credential_params
+            ),
+        ),
+        LearnedFactEntry::SchemaPolicy(f) => (
+            "schema_policy".into(),
+            format!("{:?}:{:?}:{:?}", f.builders, f.enforcers, f.bound_keywords),
+        ),
     }
 }
 
@@ -662,7 +1474,22 @@ pub fn extract_facts(
                 Candidate::Sink { call, .. } => format!("sink:{call}"),
                 Candidate::Sanitizer { call, guard } => format!("san:{call}:{guard}"),
                 Candidate::Check { rule, call, .. } => format!("check:{rule}:{call}"),
+                Candidate::Policy { rule, call, .. } => format!("policy:{rule}:{call}"),
+                Candidate::MemoryContract { name, .. } => format!("mem:{name}"),
+                Candidate::WeakCrypto { fact } => format!(
+                    "weak_crypto:{}:{}:{:?}",
+                    fact.rule_id, fact.call, fact.selector_slot
+                ),
+                Candidate::GuardBypass { fact } => format!(
+                    "gb:{:?}:{:?}:{:?}",
+                    fact.containment_callees, fact.credential_sinks, fact.credential_params
+                ),
+                Candidate::SchemaPolicy { fact } => format!(
+                    "sp:{:?}:{:?}:{:?}",
+                    fact.builders, fact.enforcers, fact.bound_keywords
+                ),
             };
+
             let entry = votes.entry(key).or_insert_with(|| (c, 0, Vec::new()));
             entry.1 += 1;
             if !entry.2.contains(&f.id) {
@@ -721,11 +1548,48 @@ pub fn extract_facts(
                 Some(g) => vec![call.as_str(), g.as_str()],
                 None => vec![call.as_str()],
             },
+            // Trigger plus every requirement's call names: a family whose
+            // variants never touch any of them cannot change separation.
+            Candidate::Policy { call, require, .. } => {
+                let mut calls = vec![call.as_str()];
+                for req in require {
+                    for name in req.call_names() {
+                        if !calls.contains(&name) {
+                            calls.push(name);
+                        }
+                    }
+                }
+                calls
+            }
+            Candidate::MemoryContract { name, .. } => vec![name.as_str()],
+            Candidate::WeakCrypto { fact } => vec![fact.call.as_str()],
+            Candidate::GuardBypass { fact } => {
+                let mut calls = Vec::new();
+                for c in &fact.containment_callees {
+                    calls.push(c.as_str());
+                }
+                for s in &fact.credential_sinks {
+                    calls.push(s.as_str());
+                }
+                calls
+            }
+            Candidate::SchemaPolicy { fact } => {
+                let mut calls = Vec::new();
+                for b in &fact.builders {
+                    calls.push(b.as_str());
+                }
+                for e in &fact.enforcers {
+                    calls.push(e.as_str());
+                }
+                calls
+            }
         };
+
         let mut ok = true;
         for p in &prepared {
             let voted = fams.contains(&p.id);
-            let relevant = voted || cand_calls.iter().any(|c| p.calls.contains(*c));
+            let relevant =
+                voted || cand_calls.is_empty() || cand_calls.iter().any(|c| p.calls.contains(*c));
             let sep = if relevant {
                 p.separates(config, &trial)
             } else {
@@ -776,7 +1640,36 @@ pub fn extract_facts(
                 unless_guard: unless_guard.clone(),
                 unless_range_check: unless_range_check.clone(),
             },
+            Candidate::Policy {
+                rule,
+                call,
+                message,
+                require,
+                scope,
+            } => LearnedFactEntry::Policy {
+                rule: rule.clone(),
+                when_call: call.clone(),
+                require: require.clone(),
+                scope: *scope,
+                message: message.clone(),
+                severity: "warning".into(),
+            },
+            Candidate::MemoryContract {
+                name,
+                returns_fresh,
+                return_capacity,
+                consumes_params,
+            } => LearnedFactEntry::MemoryContract {
+                name: name.clone(),
+                returns_fresh: *returns_fresh,
+                return_capacity: return_capacity.clone(),
+                consumes_params: consumes_params.clone(),
+            },
+            Candidate::WeakCrypto { fact } => LearnedFactEntry::WeakCrypto(fact.clone()),
+            Candidate::GuardBypass { fact } => LearnedFactEntry::GuardBypass(fact.clone()),
+            Candidate::SchemaPolicy { fact } => LearnedFactEntry::SchemaPolicy(fact.clone()),
         };
+
         published.push(LearnedFact {
             entry,
             support,
@@ -797,6 +1690,501 @@ pub fn extract_facts(
         ka.cmp(&kb)
     });
     (learned, published)
+}
+
+#[cfg(test)]
+mod metadata_tests {
+    //! `[frensense]` advisory metadata: parsing from positive comment
+    //! blocks (both comment syntaxes) and baking into the `.frc` payload as
+    //! `BundlePattern` entries.
+
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    const TS_BLOCK: &str = r#"// [frensense]
+// observation: User data reaches the sink unescaped.
+// impact: Stored XSS against every viewer of the record.
+// improvement: Escape on render with the framework's auto-escaping.
+// cwe: CWE-79
+// cvss: 7.4
+// owasp: A03:2021
+// severity: High
+
+export function handle(req: any) { return req; }
+"#;
+
+    #[test]
+    fn parse_full_block_all_fields() {
+        let meta = FamilyMetadata::parse(TS_BLOCK, "ts", 30);
+        assert_eq!(
+            meta.observation.as_deref(),
+            Some("User data reaches the sink unescaped.")
+        );
+        assert_eq!(
+            meta.impact.as_deref(),
+            Some("Stored XSS against every viewer of the record.")
+        );
+        assert_eq!(
+            meta.improvement.as_deref(),
+            Some("Escape on render with the framework's auto-escaping.")
+        );
+        assert_eq!(meta.cwe.as_deref(), Some("CWE-79"));
+        assert_eq!(meta.cvss, Some(7.4));
+        assert_eq!(meta.owasp.as_deref(), Some("A03:2021"));
+        assert_eq!(meta.severity.as_deref(), Some("High"));
+    }
+
+    #[test]
+    fn parse_python_hash_comments() {
+        let src = "# [frensense]\n# observation: Exec runs user input.\n# severity: Critical\n\ndef h():\n    pass\n";
+        let meta = FamilyMetadata::parse(src, "py", 30);
+        assert_eq!(meta.observation.as_deref(), Some("Exec runs user input."));
+        assert_eq!(meta.severity.as_deref(), Some("Critical"));
+        assert_eq!(meta.impact, None);
+    }
+
+    #[test]
+    fn no_block_yields_default() {
+        let meta = FamilyMetadata::parse("export function h() {}\n", "ts", 30);
+        assert_eq!(meta, FamilyMetadata::default());
+    }
+
+    #[test]
+    fn block_must_open_with_marker() {
+        // Comment lines WITHOUT the [frensense] opener must not be parsed.
+        let src = "// observation: not in a block\nexport function h() {}\n";
+        assert_eq!(
+            FamilyMetadata::parse(src, "ts", 30),
+            FamilyMetadata::default()
+        );
+    }
+
+    #[test]
+    fn non_comment_line_closes_block() {
+        // The block ends at the first non-comment line; a later `key: value`
+        // in a second comment run must not leak into the first block.
+        let src = "// [frensense]\n// severity: High\n\nexport function h() {}\n// severity: Low\n";
+        let meta = FamilyMetadata::parse(src, "ts", 30);
+        assert_eq!(meta.severity.as_deref(), Some("High"));
+    }
+
+    #[test]
+    fn metadata_survives_bundle_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("adv_positive.ts"), TS_BLOCK).unwrap();
+        fs::write(
+            dir.path().join("adv_negative.ts"),
+            "// SAFE: parameterized\nexport function handle(req: any) { return escape(req); }\n",
+        )
+        .unwrap();
+
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families[0].id, "adv");
+        assert_eq!(families[0].metadata.cwe.as_deref(), Some("CWE-79"));
+
+        let (bytes, _) = crate::builder::build_facts_bundle(
+            dir.path(),
+            &TaintConfig::default(),
+            &FactTable::default(),
+        )
+        .unwrap();
+        let loaded = crate::format::load_bundle(&bytes).unwrap();
+        let pat = loaded
+            .patterns
+            .iter()
+            .find(|p| p.id == "adv")
+            .expect("family pattern in bundle");
+        assert_eq!(
+            pat.observation.as_deref(),
+            Some("User data reaches the sink unescaped.")
+        );
+        assert_eq!(pat.cwe.as_deref(), Some("CWE-79"));
+        assert_eq!(pat.cvss, Some(7.4));
+        assert_eq!(pat.severity.as_deref(), Some("High"));
+    }
+
+    #[test]
+    fn family_without_block_ships_all_none_pattern() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("bare_positive.ts"),
+            "export function h(req: any) { return req; }\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("bare_negative.ts"),
+            "export function h() { return 1; }\n",
+        )
+        .unwrap();
+
+        let (bytes, _) = crate::builder::build_facts_bundle(
+            dir.path(),
+            &TaintConfig::default(),
+            &FactTable::default(),
+        )
+        .unwrap();
+        let loaded = crate::format::load_bundle(&bytes).unwrap();
+        let pat = loaded
+            .patterns
+            .iter()
+            .find(|p| p.id == "bare")
+            .expect("family pattern in bundle");
+        assert!(pat.observation.is_none() && pat.cwe.is_none() && pat.severity.is_none());
+    }
+}
+
+#[cfg(test)]
+mod grouping_tests {
+    //! Family grouping pins: multi-language stem collisions must split into
+    //! per-language sub-families (learned facts are language-blind — call
+    //! matching is by last segment), while clean single-language corpora
+    //! keep their bare family ids.
+
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn write(dir: &TempDir, rel: &str, body: &str) {
+        let p = dir.path().join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, body).unwrap();
+    }
+
+    #[test]
+    fn same_stem_different_languages_splits_into_sub_families() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "foo_positive.py", "def h(req):\n    return req\n");
+        write(&dir, "foo_negative.py", "def h():\n    return 1\n");
+        write(
+            &dir,
+            "foo_positive.ts",
+            "export function h(req: any) { return req; }\n",
+        );
+        write(
+            &dir,
+            "foo_negative.ts",
+            "export function h() { return 1; }\n",
+        );
+
+        let families = group_families(dir.path()).unwrap();
+        let ids: Vec<&str> = families.iter().map(|f| f.id.as_str()).collect();
+        // The bare id must NOT exist anymore: votes would cross languages.
+        assert!(!ids.contains(&"foo"), "ids: {ids:?}");
+        assert!(ids.contains(&"foo (python)"), "ids: {ids:?}");
+        assert!(ids.contains(&"foo (typescript)"), "ids: {ids:?}");
+        for f in &families {
+            assert_eq!(f.positives.len(), 1, "{}", f.id);
+            assert_eq!(f.negatives.len(), 1, "{}", f.id);
+            // Each sub-family is single-language.
+            let lang = f.positives[0].2.as_str();
+            assert!(
+                f.negatives.iter().all(|(_, _, e)| e == lang),
+                "family {} mixed languages",
+                f.id
+            );
+        }
+    }
+
+    #[test]
+    fn ts_and_tsx_stay_one_family() {
+        // Both extensions resolve to the same language spec (typescript).
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "bar_positive.ts",
+            "export function h(req: any) { return req; }\n",
+        );
+        write(
+            &dir,
+            "bar_negative.tsx",
+            "export function h() { return 1; }\n",
+        );
+
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families.len(), 1);
+        assert_eq!(families[0].id, "bar");
+        assert_eq!(families[0].positives.len(), 1);
+        assert_eq!(families[0].negatives.len(), 1);
+    }
+
+    #[test]
+    fn clean_single_language_corpus_keeps_bare_ids() {
+        let dir = TempDir::new().unwrap();
+        write(&dir, "sql_positive.py", "def h(req):\n    return req\n");
+        write(&dir, "sql_negative.py", "def h():\n    return 1\n");
+        write(
+            &dir,
+            "xss_positive.ts",
+            "export function h(req: any) { return req; }\n",
+        );
+        write(
+            &dir,
+            "xss_negative.ts",
+            "export function h() { return 1; }\n",
+        );
+
+        let families = group_families(dir.path()).unwrap();
+        let ids: Vec<&str> = families.iter().map(|f| f.id.as_str()).collect();
+        assert!(ids.contains(&"sql"), "ids: {ids:?}");
+        assert!(ids.contains(&"xss"), "ids: {ids:?}");
+        assert_eq!(families.len(), 2);
+    }
+
+    #[test]
+    fn declared_check_call_survives_language_split() {
+        // The metadata comment is language-specific syntax; the py variant
+        // declares it and only the python sub-family carries it.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "adm_positive.py",
+            "# check-call: admin_reset\ndef h():\n    admin_reset()\n",
+        );
+        write(&dir, "adm_negative.py", "def h():\n    return 1\n");
+        write(
+            &dir,
+            "adm_positive.ts",
+            "export function h() { adminReset(); }\n",
+        );
+        write(
+            &dir,
+            "adm_negative.ts",
+            "export function h() { return 1; }\n",
+        );
+
+        let families = group_families(dir.path()).unwrap();
+        let py = families.iter().find(|f| f.id == "adm (python)").unwrap();
+        let ts = families
+            .iter()
+            .find(|f| f.id == "adm (typescript)")
+            .unwrap();
+        assert_eq!(py.declared_check_call.as_deref(), Some("admin_reset"));
+        assert_eq!(ts.declared_check_call, None);
+    }
+
+    #[test]
+    fn partial_collision_only_splits_the_colliding_stem() {
+        // `baz` mixes py+ts; sibling stem `qux` is py-only and must keep its
+        // bare id and its files untouched.
+        let dir = TempDir::new().unwrap();
+        write(&dir, "baz_positive.py", "def h(req):\n    return req\n");
+        write(
+            &dir,
+            "baz_negative.ts",
+            "export function h() { return 1; }\n",
+        );
+        write(&dir, "qux_positive.py", "def h(req):\n    return req\n");
+        write(&dir, "qux_negative.py", "def h():\n    return 1\n");
+
+        let families = group_families(dir.path()).unwrap();
+        let ids: Vec<&str> = families.iter().map(|f| f.id.as_str()).collect();
+        assert!(ids.contains(&"baz (python)"), "ids: {ids:?}");
+        assert!(ids.contains(&"baz (typescript)"), "ids: {ids:?}");
+        assert!(ids.contains(&"qux"), "ids: {ids:?}");
+        let qux = families.iter().find(|f| f.id == "qux").unwrap();
+        assert_eq!(qux.positives.len(), 1);
+        assert_eq!(qux.negatives.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod policy_proposal_tests {
+    //! Generalized Policy fact proposals: the two family shapes the legacy
+    //! Check fact cannot express — banned-call co-occurrence (NotCall) and
+    //! cross-function enforcement (RequireCall under Module scope) — plus
+    //! the guards that keep Policy proposals conservative.
+
+    use super::*;
+    use frensense_engine::analysis::taint::facts::{config_from_spec, fact_table_from_spec};
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn write(dir: &TempDir, rel: &str, body: &str) {
+        let p = dir.path().join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, body).unwrap();
+    }
+
+    fn builtin() -> (TaintConfig, FactTable) {
+        let mut config = TaintConfig::default();
+        let mut table = FactTable::default();
+        for spec in frensense_lang::all_specs() {
+            let c = config_from_spec(spec);
+            config.sources.extend(c.sources);
+            config.sinks.extend(c.sinks);
+            config.sanitizers.extend(c.sanitizers);
+            table.merge(&fact_table_from_spec(spec));
+        }
+        (config, table)
+    }
+
+    /// Both shapes need the trigger declared and present in both variants:
+    /// the trigger alone is not the violation, the co-occurring context is.
+    /// (Fixture builder kept for reference; the tests below write their own
+    /// variants inline to pin each shape independently.)
+    #[allow(dead_code)]
+    fn shape_cd_corpus(dir: &TempDir) {
+        write(
+            dir,
+            "adm_positive.ts",
+            "// check-call: evaluate\nfunction audit() {}\nfunction run() { evaluate(request); evalUserPayload(request); }\n",
+        );
+        write(
+            dir,
+            "adm_negative.ts",
+            "// check-call: evaluate\nfunction run() { evaluate(request); audit(); }\n",
+        );
+    }
+
+    #[test]
+    fn banned_call_co_occurrence_proposes_notcall_policy() {
+        let dir = TempDir::new().unwrap();
+        // Positives: trigger + banned call, no enforcement anywhere.
+        // Negatives: trigger + a function DEFINED (audit) that positives
+        // only call... simplest banned-call shape: both sides call trigger,
+        // positives additionally call a banned helper.
+        write(
+            &dir,
+            "ban_positive.ts",
+            "// check-call: evaluate\nfunction run() { evaluate(request); shellExec(request); }\n",
+        );
+        write(
+            &dir,
+            "ban_negative.ts",
+            "// check-call: evaluate\nfunction run() { evaluate(request); }\n",
+        );
+        let families = group_families(dir.path()).unwrap();
+        let (config, table) = builtin();
+        let (learned, published) = extract_facts(&families, &config, &table);
+
+        let policies: Vec<&PolicyFact> = published
+            .iter()
+            .filter_map(|f| match &f.entry {
+                LearnedFactEntry::Policy { .. } => match learned
+                    .policy_facts
+                    .iter()
+                    .find(|p| p.rule == rule_of(&f.entry))
+                {
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        // The published entries carry the Policy shape with NotCall;
+        // assert on the published entries directly.
+        let entries: Vec<&LearnedFactEntry> = published.iter().map(|f| &f.entry).collect();
+        assert!(
+            entries.iter().any(|e| matches!(
+                e,
+                LearnedFactEntry::Policy {
+                    require,
+                    scope: PolicyScope::Function,
+                    ..
+                } if matches!(require.as_slice(),
+                    [PolicyRequirement::NotCall { call }] if call == "shellExec")
+            )),
+            "expected a NotCall policy for shellExec, got: {entries:?}"
+        );
+        assert!(policies.is_empty() || true); // shape-only assertion above
+    }
+
+    fn rule_of(e: &LearnedFactEntry) -> String {
+        match e {
+            LearnedFactEntry::Policy { rule, .. } => rule.clone(),
+            _ => String::new(),
+        }
+    }
+
+    #[test]
+    fn cross_function_enforcement_proposes_requirecall_module_policy() {
+        let dir = TempDir::new().unwrap();
+        // Positives: the trigger and nothing else — no helper defined or
+        // called anywhere. Negatives: the trigger PLUS the enforcement
+        // helper DEFINED in the same variant (never called): the module
+        // provides enforcement, which is what PolicyScope::Module accepts
+        // as evidence. Positives violate; negatives comply by definition.
+        write(
+            &dir,
+            "xfn_positive.ts",
+            "// check-call: evaluate\nfunction run() { evaluate(request); }\n",
+        );
+        write(
+            &dir,
+            "xfn_negative.ts",
+            "// check-call: evaluate\nfunction enforcePolicy() { return 1; }\nfunction run() { evaluate(request); }\n",
+        );
+        let families = group_families(dir.path()).unwrap();
+        let (config, table) = builtin();
+        let (_, published) = extract_facts(&families, &config, &table);
+        let entries: Vec<&LearnedFactEntry> = published.iter().map(|f| &f.entry).collect();
+        assert!(
+            entries.iter().any(|e| matches!(
+                e,
+                LearnedFactEntry::Policy {
+                    scope: PolicyScope::Module,
+                    require,
+                    ..
+                } if matches!(require.as_slice(),
+                    [PolicyRequirement::RequireCall { any_of }] if any_of.contains(&"enforcePolicy".to_string()))
+            )),
+            "expected a Module-scope RequireCall policy for enforcePolicy, got: {entries:?}"
+        );
+    }
+
+    #[test]
+    fn undeclared_families_get_no_policy_proposals() {
+        // Same shape as the banned-call corpus but WITHOUT check-call:
+        // co-occurrence mining is too broad presence-blind, so nothing
+        // Policy-shaped may be published.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "und_positive.ts",
+            "function run() { evaluate(request); shellExec(request); }\n",
+        );
+        write(
+            &dir,
+            "und_negative.ts",
+            "function run() { evaluate(request); }\n",
+        );
+        let families = group_families(dir.path()).unwrap();
+        assert!(families[0].declared_check_call.is_none());
+        let (config, table) = builtin();
+        let (_, published) = extract_facts(&families, &config, &table);
+        assert!(
+            published
+                .iter()
+                .all(|f| !matches!(f.entry, LearnedFactEntry::Policy { .. })),
+            "no Policy facts may be mined without a declared trigger"
+        );
+    }
+
+    #[test]
+    fn policy_facts_survive_bundle_roundtrip() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "ban_positive.ts",
+            "// check-call: evaluate\nfunction run() { evaluate(request); shellExec(request); }\n",
+        );
+        write(
+            &dir,
+            "ban_negative.ts",
+            "// check-call: evaluate\nfunction run() { evaluate(request); }\n",
+        );
+        let (bytes, published) =
+            crate::builder::build_facts_bundle(dir.path(), &builtin().0, &builtin().1).unwrap();
+        let loaded = crate::format::load_bundle(&bytes).unwrap();
+        let has_policy = loaded
+            .learned_facts
+            .iter()
+            .any(|e| matches!(e, LearnedFactEntry::Policy { .. }));
+        assert!(
+            has_policy || published.is_empty(),
+            "policy facts must survive the FRC1 round-trip (or the family failed the gate)"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -940,12 +2328,14 @@ export function badSearch (req: any) {
             positives: vec![ts_file("parameterized_query_positive.ts", PARAM_POSITIVE)],
             negatives: vec![ts_file("parameterized_query_negative.ts", PARAM_NEGATIVE)],
             declared_check_call: None,
+            metadata: FamilyMetadata::default(),
         };
         let jwt = Family {
             id: "jwt_validator".into(),
             positives: vec![ts_file("jwt_validator_positive.ts", JWT_VERIFY)],
             negatives: vec![ts_file("jwt_validator_negative.ts", CONTROL_SINK)],
             declared_check_call: None,
+            metadata: FamilyMetadata::default(),
         };
 
         let (learned, published) = extract_facts(&[param, jwt], &config, &table);

@@ -104,7 +104,41 @@ fn run_facts_pipeline(corpus_dir: &Path, output_path: &Path) -> Result<(), Strin
             } => {
                 format!("check:{rule}({call})")
             }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::Policy {
+                rule,
+                when_call,
+                ..
+            } => {
+                format!("policy:{rule}({when_call})")
+            }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::MemoryContract {
+                name,
+                returns_fresh,
+                consumes_params,
+                ..
+            } => {
+                format!("mem:{name}(fresh={returns_fresh},consumes={consumes_params:?})")
+            }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::WeakCrypto(fact) => {
+                format!(
+                    "weak_crypto:{}(call={},slot={:?})",
+                    fact.rule_id, fact.call, fact.selector_slot
+                )
+            }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::GuardBypass(fact) => {
+                format!(
+                    "guard_bypass(callees={:?},sinks={:?},params={:?})",
+                    fact.containment_callees, fact.credential_sinks, fact.credential_params
+                )
+            }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::SchemaPolicy(fact) => {
+                format!(
+                    "schema_policy(builders={:?},enforcers={:?},keywords={:?})",
+                    fact.builders, fact.enforcers, fact.bound_keywords
+                )
+            }
         };
+
         eprintln!("  [{}] {} ← {}", f.status, call, f.families.join(", "));
     }
 

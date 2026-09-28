@@ -157,25 +157,25 @@ jobs:
       - name: Smoke test MCP server
         shell: bash
         run: |
-          mcp="target/${{ matrix.settings.target }}/release/frensense-mcp${{ matrix.settings.ext }}"
+          binary="target/${{ matrix.settings.target }}/release/${{ matrix.settings.bin_name }}"
           printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' |
-            timeout 30 "$mcp" 2>/dev/null |
+            timeout 30 "$binary" mcp 2>/dev/null |
             grep -q 'frensense-mcp'
           printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' |
-            timeout 30 "$mcp" 2>/dev/null |
+            timeout 30 "$binary" mcp 2>/dev/null |
             grep -q 'frensense_scan_file'
           printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}' |
-            timeout 30 "$mcp" 2>/dev/null |
+            timeout 30 "$binary" mcp 2>/dev/null |
             grep -q 'frensense_diff'
           echo "MCP smoke test passed"
 
       - name: Smoke test LSP server
         shell: bash
         run: |
-          lsp="target/${{ matrix.settings.target }}/release/frensense-lsp${{ matrix.settings.ext }}"
-          python3 - "$lsp" <<'PYEOF'
+          binary="target/${{ matrix.settings.target }}/release/${{ matrix.settings.bin_name }}"
+          python3 - "$binary" <<'PYEOF'
           import json, subprocess, sys
-          lsp = sys.argv[1]
+          binary = sys.argv[1]
           def frame(obj):
               body = json.dumps(obj).encode()
               return b"Content-Length: %d\r\n\r\n" % len(body) + body
@@ -183,7 +183,7 @@ jobs:
               frame({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
               frame({"jsonrpc": "2.0", "method": "exit"}),
           ])
-          out = subprocess.run([lsp], input=msgs, capture_output=True, timeout=30).stdout
+          out = subprocess.run([binary, "lsp"], input=msgs, capture_output=True, timeout=30).stdout
           assert b"frensense-lsp" in out, "initialize response missing serverInfo"
           print("LSP smoke test passed")
           PYEOF
@@ -253,24 +253,128 @@ jobs:
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: stable
-      - name: Publish frensense
+      - name: Publish workspace crates in dependency order
         run: |
-          VERSION=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
-          EXISTS=$(curl -sf -H "User-Agent: frensense-release" "https://crates.io/api/v1/crates/frensense" | python3 -c "import json,sys; print(json.load(sys.stdin).get('crate',{}).get('max_version',''))" 2>/dev/null || echo "")
-          if [ "$EXISTS" = "$VERSION" ]; then
-            echo "frensense@$VERSION already published. Skipping."
+          publish_crate() {
+            CRATE=$1
+            if [ -f "$CRATE/Cargo.toml" ]; then
+              CRATE_VER=$(grep '^version' "$CRATE/Cargo.toml" | head -1 | cut -d'"' -f2)
+            else
+              CRATE_VER=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
+            fi
+
+            echo "Checking crates.io for $CRATE@$CRATE_VER..."
+            EXISTS=$(curl -sf -H "User-Agent: frensense-release" "https://crates.io/api/v1/crates/$CRATE" | python3 -c "import json,sys; print(json.load(sys.stdin).get('crate',{}).get('max_version',''))" 2>/dev/null || echo "")
+
+            if [ "$EXISTS" = "$CRATE_VER" ]; then
+              echo "$CRATE@$CRATE_VER is already published. Skipping."
+            else
+              echo "Publishing $CRATE@$CRATE_VER to crates.io..."
+              cargo publish -p "$CRATE" --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --allow-dirty
+              echo "Waiting 35s for crates.io index propagation..."
+              sleep 35
+            fi
+          }
+
+          # 1. Base AST specification crate (0 internal deps)
+          publish_crate frensense-lang
+
+          # 2. Analysis engine core (depends on frensense-lang)
+          publish_crate frensense-engine
+
+          # 3. Knowledge bundler (depends on frensense-lang and frensense-engine)
+          publish_crate frensense-bundler
+
+          # 4. Main scanner CLI/MCP/LSP binary (depends on all workspace crates)
+          publish_crate frensense
+
+  # 5. Publish to NPM
+  publish-npm:
+    name: Publish to NPM (@friehub/frensense)
+    runs-on: ubuntu-latest
+    needs: [prepare, build-native]
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
+        with:
+          egress-policy: audit
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+        with:
+          ref: ${{ needs.prepare.outputs.tag_name }}
+
+      - name: Setup Node
+        uses: actions/setup-node@f1f314fca9dfce2769ece7d933488f076716723e # v4.4.0
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: artifacts
+
+      - name: Prepare NPM package
+        run: |
+          mkdir -p npm/dist/binaries
+          cp artifacts/cli-x86_64-unknown-linux-gnu/frensense    ./npm/dist/binaries/frensense-linux-x64
+          cp artifacts/cli-x86_64-apple-darwin/frensense          ./npm/dist/binaries/frensense-macos-x64
+          cp artifacts/cli-aarch64-apple-darwin/frensense          ./npm/dist/binaries/frensense-macos-arm64
+          cp artifacts/cli-x86_64-pc-windows-msvc/frensense.exe   ./npm/dist/binaries/frensense-windows-x64.exe
+          chmod +x ./npm/dist/binaries/* ./npm/bin/frensense.js
+          cp README.md ./npm/README.md 2>/dev/null || true
+
+      - name: Test NPM package before publish
+        run: |
+          cd npm
+          npm pack
+          TESTDIR=$(mktemp -d)
+          cd "$TESTDIR"
+          npm init -y > /dev/null
+          npm install "$GITHUB_WORKSPACE"/npm/friehub-frensense-*.tgz
+          ./node_modules/.bin/frensense --version
+          echo 'fn main() { let x = 1; }' > test.rs
+          ./node_modules/.bin/frensense test.rs --json > /dev/null
+          echo 'NPM package smoke test passed.'
+
+      - name: Check version and publish tag
+        id: npm_meta
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          cd npm
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://registry.npmjs.org/@friehub/frensense/$VERSION")
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "Version $VERSION already exists on NPM. Skipping."
+            echo "already_published=true" >> $GITHUB_OUTPUT
           else
-            echo "Publishing frensense@$VERSION to crates.io..."
-            cargo publish -p frensense --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --no-default-features --features rust,typescript,fingerprinting --allow-dirty
+            echo "Version $VERSION not found on NPM. Will publish."
+            echo "already_published=false" >> $GITHUB_OUTPUT
           fi
-      - name: Wait for crates.io index
-        run: sleep 60
+
+          if [[ "$VERSION" =~ (alpha|beta|preview|rc) ]]; then
+            echo "npm_tag=preview" >> $GITHUB_OUTPUT
+          else
+            echo "npm_tag=latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish to NPM
+        if: steps.npm_meta.outputs.already_published != 'true'
+        run: |
+          cd npm
+          npm publish --tag ${{ steps.npm_meta.outputs.npm_tag }} --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # 6. Create GitHub Release
   github-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [prepare, build-native, provenance]
+    needs: [prepare, build-native, provenance, publish-cargo, publish-npm]
     environment: production
     permissions:
       contents: write
@@ -302,4 +406,5 @@ jobs:
           tag_name: ${{ needs.prepare.outputs.tag_name }}
           files: release-binaries/*
           generate_release_notes: true
-          prerelease: false
+          prerelease: ${{ contains(needs.prepare.outputs.tag_name, 'preview') || contains(needs.prepare.outputs.tag_name, 'alpha') || contains(needs.prepare.outputs.tag_name, 'beta') || contains(needs.prepare.outputs.tag_name, 'rc') }}
+

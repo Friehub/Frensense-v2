@@ -239,6 +239,21 @@ export function enforcedTool (discount: number) {
             check_with(enforced, &t).is_empty(),
             "inline literal range check on the arg: must stay silent"
         );
+
+        let flawed = r#"
+export function flawedTool (discount: number) {
+  if (discount < 0) {
+    return security.generateCoupon(discount)
+  }
+  return null
+}
+"#;
+        assert!(
+            check_with(flawed, &t)
+                .iter()
+                .any(|(_, r)| r == "policy_generateCoupon"),
+            "trigger call inside flawed/negative branch is not safely guarded and must fire"
+        );
     }
 
     /// A bundle-installed check fires on the trigger call.
@@ -331,6 +346,85 @@ export function hop (req: any, res: any) {
                 .any(|c| c.rule == "policy_open_redirect"),
             "scan must surface learned checker findings, got {:?}",
             result.checker
+        );
+    }
+
+    /// Positive & negative tests for learned weak crypto facts.
+    #[test]
+    fn learned_weak_crypto_with_selector_positive_and_negative() {
+        use crate::analysis::taint::facts::WeakCryptoFact;
+        let mut facts = FactTable::default();
+        facts.weak_crypto_rules.push(WeakCryptoFact {
+            rule_id: "learned_weak_cipher_des".into(),
+            call: "createCipher".into(),
+            selector_slot: Some(0),
+            weak_selectors: vec!["des".into(), "rc4".into()],
+        });
+
+        // Positive sample: 'des' selected
+        let pos_src = r#"
+export function encryptData (data: string, key: string) {
+  return createCipher('des', key).update(data);
+}
+"#;
+        let pos_findings = check_with(pos_src, &facts);
+        assert!(
+            pos_findings
+                .iter()
+                .any(|(_, r)| r == "learned_weak_cipher_des"),
+            "expected learned_weak_cipher_des finding on positive sample, got: {pos_findings:?}"
+        );
+
+        // Negative sample: 'aes-256-gcm' selected
+        let neg_src = r#"
+export function encryptData (data: string, key: string) {
+  return createCipher('aes-256-gcm', key).update(data);
+}
+"#;
+        let neg_findings = check_with(neg_src, &facts);
+        assert!(
+            !neg_findings
+                .iter()
+                .any(|(_, r)| r == "learned_weak_cipher_des"),
+            "negative sample with aes-256-gcm must stay silent, got: {neg_findings:?}"
+        );
+    }
+
+    #[test]
+    fn learned_weak_crypto_bare_call_positive_and_negative() {
+        use crate::analysis::taint::facts::WeakCryptoFact;
+        let mut facts = FactTable::default();
+        facts.weak_crypto_rules.push(WeakCryptoFact {
+            rule_id: "learned_broken_hash_func".into(),
+            call: "brokenCustomHash".into(),
+            selector_slot: None,
+            weak_selectors: vec![],
+        });
+
+        // Positive sample: calls brokenCustomHash
+        let pos_src = r#"
+export function hashToken (token: string) {
+  return brokenCustomHash(token);
+}
+"#;
+        let pos_findings = check_with(pos_src, &facts);
+        assert!(
+            pos_findings
+                .iter()
+                .any(|(_, r)| r == "learned_broken_hash_func"),
+            "expected finding on positive sample, got: {pos_findings:?}"
+        );
+
+        // Negative sample: calls safeCustomHash
+        let neg_src = r#"
+export function hashToken (token: string) {
+  return safeCustomHash(token);
+}
+"#;
+        let neg_findings = check_with(neg_src, &facts);
+        assert!(
+            neg_findings.is_empty(),
+            "negative sample must stay silent, got: {neg_findings:?}"
         );
     }
 }

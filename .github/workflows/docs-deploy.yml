@@ -1,0 +1,75 @@
+name: Deploy Docs (v2 + v1 archive)
+
+# Builds the frensense-v2 docs site and deploys it to the gh-pages branch:
+#   /        -> v2 docs (this repo's docs-site)
+#   /v1/     -> frozen copy of the legacy v1 site (Friehub/Frensense gh-pages)
+#   CNAME    -> frensense.friehub.cloud
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'docs-site/**'
+      - '.github/workflows/docs-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    name: Build and deploy docs to gh-pages
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout v2 code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+
+      - name: Setup Node
+        uses: actions/setup-node@f1f314fca9dfce2769ece7d933488f076716723e # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+
+      - name: Build v2 docs site
+        working-directory: docs-site
+        run: |
+          npm ci
+          npm run build
+
+      - name: Fetch v1 docs archive
+        # Pull the legacy site (Friehub/Frensense gh-pages) and place it
+        # under /v1/ so the v1 documentation stays reachable. The v1 site
+        # is frozen: we only read it here.
+        run: |
+          git clone --depth 1 --branch gh-pages \
+            https://github.com/Friehub/Frensense.git /tmp/v1-site
+          mkdir -p deploy/v1
+          cp -r /tmp/v1-site/. deploy/v1/
+          # Serve the archive with plain relative behavior:
+          rm -rf deploy/v1/.git
+          rm -f deploy/v1/CNAME
+
+      - name: Assemble deployment
+        run: |
+          mkdir -p deploy-root
+          cp -r docs-site/.vitepress/dist/. deploy-root/
+          # v1 archive must not shadow v2 routes; copy it first is fine
+          # because dist never contains a v1/ directory.
+          cp -r deploy/v1 deploy-root/v1
+          echo "frensense.friehub.cloud" > deploy-root/CNAME
+          touch deploy-root/.nojekyll
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@329bcc8f12caed2cefe5a5b80781499a6f3b361b # v4.0.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: deploy-root
+          publish_branch: gh-pages
+          force_orphan: false
+          keep_files: false

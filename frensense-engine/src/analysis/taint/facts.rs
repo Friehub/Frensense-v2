@@ -21,6 +21,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeSet;
 
 use crate::analysis::taint::config::TaintConfig;
+use crate::checks::memory_summary::CapacitySpec;
 
 /// Per-argument classification for one sink API.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,6 +137,182 @@ pub struct LearnedCheckFact {
     pub unless_range_check: Option<Vec<String>>,
 }
 
+/// A requirement that must hold for a policy's trigger to be considered compliant.
+///
+/// Serde representation note: this enum must stay **externally tagged**
+/// (the default; no `serde(tag = ...)`). Internally-tagged enums require
+/// `Deserializer::deserialize_any`, which bincode 1.x — the `.frc` bundle
+/// codec — does not support: any bundle containing such a fact fails to
+/// deserialize at load time. External tagging serializes the variant name
+/// as a prefix, which bincode round-trips losslessly and JSON renders as
+/// `{"GuardCall":{"call":"audit_log"}}`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub enum PolicyRequirement {
+    /// A named guard call must be present in the scope (e.g. `audit_log`,
+    /// `authorize`, `validate_origin`).
+    GuardCall {
+        /// Call name or last segment.
+        call: String,
+    },
+    /// A call must NOT be present in the scope (forbid a deprecated or
+    /// banned alternative from co-occurring with the trigger).
+    NotCall { call: String },
+    /// The trigger's guarded argument must participate in a comparison
+    /// against a literal bound with one of `ops`. Direct generalization
+    /// of `LearnedCheckFact::unless_range_check` (inverted).
+    RangeCheck {
+        /// Comparison operators accepted as the bound check.
+        ops: Vec<String>,
+    },
+    /// One of these call names must appear in the scope, presence-required
+    /// (an audit-log write must accompany the privileged action).
+    RequireCall {
+        /// Last-segment names, any one of which satisfies the requirement.
+        any_of: Vec<String>,
+    },
+    /// The call's argument at `slot` must NOT match any of `values`
+    /// (case-insensitive comparison over string, boolean, or integer literals).
+    BannedArgLiteral { slot: usize, values: Vec<String> },
+    /// The call's argument at `slot` MUST match one of `values`
+    /// (case-insensitive comparison over string, boolean, or integer literals).
+    RequiredArgLiteral { slot: usize, values: Vec<String> },
+}
+
+impl PolicyRequirement {
+    /// Last-segment names this requirement matches on (for diagnostics).
+    pub fn call_names(&self) -> Vec<&str> {
+        match self {
+            PolicyRequirement::GuardCall { call } | PolicyRequirement::NotCall { call } => {
+                vec![call.as_str()]
+            }
+            PolicyRequirement::RequireCall { any_of } => {
+                any_of.iter().map(|s| s.as_str()).collect()
+            }
+            PolicyRequirement::RangeCheck { .. }
+            | PolicyRequirement::BannedArgLiteral { .. }
+            | PolicyRequirement::RequiredArgLiteral { .. } => Vec::new(),
+        }
+    }
+}
+
+/// Where a policy's trigger and requirements are evaluated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyScope {
+    /// Trigger and requirements live in the same function (the default;
+    /// matches the legacy `LearnedCheckFact` semantics exactly).
+    #[default]
+    Function,
+    /// Requirements may be satisfied by ANY function in the scanned program
+    /// (cross-function enforcement: a route handler's guard helper defined
+    /// in a sibling module still counts). More FPs than `Function` when the
+    /// helper is genuinely unrelated; use when the mine loop shows
+    /// cross-file enforcement in the negatives.
+    Module,
+}
+
+/// A corpus-verified co-occurrence policy: WHEN the trigger call appears in
+/// the scope, every requirement must ALSO be satisfiable in the scope, else
+/// the function violates the policy.
+///
+/// The generalization of [`LearnedCheckFact`]: that type's `unless_guard` /
+/// `unless_range_check` fields are exactly `require: [GuardCall{..}]` /
+/// `require: [RangeCheck{..}]` under `PolicyScope::Function`; `to_policy()`
+/// converts losslessly so old bundles keep firing through the new path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub struct PolicyFact {
+    /// Stable rule id, e.g. `"policy_redirect_challenge"`.
+    pub rule: String,
+    /// The trigger call (last segment matched) whose unqualified presence
+    /// raises the policy question.
+    pub when_call: String,
+    /// Requirements that must hold in the scope for the trigger to be
+    /// compliant. Empty = presence-only policy (any trigger fires).
+    #[serde(default)]
+    pub require: Vec<PolicyRequirement>,
+    /// Where trigger and requirements are evaluated.
+    #[serde(default)]
+    pub scope: PolicyScope,
+    /// Advisory text shown to the user (bundle-authored).
+    pub message: String,
+    /// Advisory severity hint: "warning" or "critical".
+    pub severity: String,
+}
+
+impl PolicyFact {
+    /// Convert a legacy [`LearnedCheckFact`] into the generalized form.
+    /// `unless_guard` and `unless_range_check` become requirements; scope is
+    /// always [`PolicyScope::Function`], matching the legacy semantics.
+    pub fn from_legacy(f: &LearnedCheckFact) -> Self {
+        let mut require = Vec::new();
+        if let Some(g) = &f.unless_guard {
+            require.push(PolicyRequirement::GuardCall { call: g.clone() });
+        }
+        if let Some(ops) = &f.unless_range_check {
+            require.push(PolicyRequirement::RangeCheck { ops: ops.clone() });
+        }
+        Self {
+            rule: f.rule.clone(),
+            when_call: f.call.clone(),
+            require,
+            scope: PolicyScope::Function,
+            message: f.message.clone(),
+            severity: f.severity.clone(),
+        }
+    }
+}
+
+/// One corpus-verified memory allocation or deallocation contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub struct MemoryContractFact {
+    /// Function or method name.
+    pub name: String,
+    /// Whether calling this function returns fresh heap memory.
+    pub returns_fresh: bool,
+    /// Capacity specification for the allocated buffer.
+    pub return_capacity: CapacitySpec,
+    /// Parameter indices consumed/deallocated by this call.
+    pub consumes_params: Vec<usize>,
+}
+
+/// One corpus-verified weak cryptography rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub struct WeakCryptoFact {
+    pub rule_id: String,
+    pub call: String,
+    pub selector_slot: Option<usize>,
+    pub weak_selectors: Vec<String>,
+}
+
+/// One corpus-verified guard bypass fact (containment callee or credential sink).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub struct GuardBypassFact {
+    #[serde(default)]
+    pub containment_callees: Vec<String>,
+    #[serde(default)]
+    pub credential_sinks: Vec<String>,
+    #[serde(default)]
+    pub credential_params: Vec<String>,
+}
+
+/// One corpus-verified tool/API schema policy fact.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub struct SchemaPolicyFact {
+    #[serde(default)]
+    pub builders: Vec<String>,
+    #[serde(default)]
+    pub enforcers: Vec<String>,
+    #[serde(default)]
+    pub bound_keywords: Vec<String>,
+}
+
 /// The merged fact table: built-in language tables + bundle-learned facts.
 ///
 /// Built from a [`TaintConfig`] (name sets, backward compatible) plus
@@ -150,6 +327,27 @@ pub struct FactTable {
     /// Corpus-verified non-dataflow checks (order-preserving; dedup on
     /// `(rule, call)` at merge time).
     pub learned_checks: Vec<LearnedCheckFact>,
+    /// Corpus-verified co-occurrence policies (the generalized check fact).
+    /// Evaluated by `checks::policy`; legacy `learned_checks` entries ALSO
+    /// evaluate there after `PolicyFact::from_legacy` conversion, so bundles
+    /// never need to migrate to keep firing.
+    pub policy_facts: Vec<PolicyFact>,
+    /// Corpus-verified interprocedural memory contracts (allocators / deallocators).
+    pub memory_contracts: Vec<MemoryContractFact>,
+    /// Corpus-verified weak cryptography rules.
+    pub weak_crypto_rules: Vec<WeakCryptoFact>,
+    /// Corpus-verified containment callees (for allowlist bypass checks).
+    pub containment_callees: FxHashSet<String>,
+    /// Corpus-verified credential setter/hasher sinks.
+    pub credential_sinks: FxHashSet<String>,
+    /// Corpus-verified parameter names identifying credentials.
+    pub credential_params: FxHashSet<String>,
+    /// Corpus-verified schema builder methods.
+    pub schema_builders: FxHashSet<String>,
+    /// Corpus-verified schema enforcer methods.
+    pub schema_enforcers: FxHashSet<String>,
+    /// Corpus-verified bound keywords.
+    pub schema_keywords: FxHashSet<String>,
     /// Last segments that come ONLY from dotted client sinks (`got.get`,
     /// `axios.post`, ...). These verbs are ambiguous, `Map.get`, router
     /// `app.post`, LRU `.put` all share the names, so they match
@@ -241,6 +439,49 @@ impl FactTable {
                 self.learned_checks.push(c.clone());
             }
         }
+        // Policy facts accumulate the same way, dedup on (rule, when_call):
+        // the same policy arriving twice must not duplicate findings.
+        for p in &other.policy_facts {
+            if !self
+                .policy_facts
+                .iter()
+                .any(|e| e.rule == p.rule && e.when_call == p.when_call)
+            {
+                self.policy_facts.push(p.clone());
+            }
+        }
+        // Memory contracts accumulate, with newer/learned contracts replacing older ones on collision.
+        for mc in &other.memory_contracts {
+            if let Some(existing) = self.memory_contracts.iter_mut().find(|c| c.name == mc.name) {
+                *existing = mc.clone();
+            } else {
+                self.memory_contracts.push(mc.clone());
+            }
+        }
+        for wc in &other.weak_crypto_rules {
+            if let Some(existing) = self
+                .weak_crypto_rules
+                .iter_mut()
+                .find(|r| r.rule_id == wc.rule_id && r.call == wc.call)
+            {
+                *existing = wc.clone();
+            } else {
+                self.weak_crypto_rules.push(wc.clone());
+            }
+        }
+        self.containment_callees
+            .extend(other.containment_callees.iter().cloned());
+        self.credential_sinks
+            .extend(other.credential_sinks.iter().cloned());
+        self.credential_params
+            .extend(other.credential_params.iter().cloned());
+        self.schema_builders
+            .extend(other.schema_builders.iter().cloned());
+        self.schema_enforcers
+            .extend(other.schema_enforcers.iter().cloned());
+        self.schema_keywords
+            .extend(other.schema_keywords.iter().cloned());
+
         // Verb-sink bookkeeping accumulates too: dotted client entries
         // (`got.get`, `axios.post`) from any merged spec/bundle widen the
         // receiver-aware sets.
@@ -432,6 +673,16 @@ impl FactTable {
             .filter(|c| c.call.rsplit('.').next() == Some(seg))
             .collect()
     }
+
+    /// Co-occurrence policies whose trigger call's last segment matches
+    /// `call` (same last-segment matching as [`Self::learned_checks_for`]).
+    pub fn policies_for(&self, call: &str) -> Vec<&PolicyFact> {
+        let seg = call.rsplit('.').next().unwrap_or(call);
+        self.policy_facts
+            .iter()
+            .filter(|p| p.when_call.rsplit('.').next() == Some(seg))
+            .collect()
+    }
 }
 
 /// One learned fact as persisted in a `.frc` bundle. A tagged union over the
@@ -457,6 +708,19 @@ pub enum LearnedFactEntry {
         kind: String,
         guard_style: bool,
     },
+    /// Install a corpus-verified co-occurrence policy (the generalized
+    /// check fact; see [`PolicyFact`]).
+    Policy {
+        rule: String,
+        when_call: String,
+        /// Requirements that must hold for the trigger to be compliant.
+        #[serde(default)]
+        require: Vec<PolicyRequirement>,
+        #[serde(default)]
+        scope: PolicyScope,
+        message: String,
+        severity: String,
+    },
     /// Install a corpus-verified non-dataflow check.
     Check {
         rule: String,
@@ -473,6 +737,19 @@ pub enum LearnedFactEntry {
         #[serde(default)]
         unless_range_check: Option<Vec<String>>,
     },
+    /// Install a corpus-verified memory allocation or deallocation contract.
+    MemoryContract {
+        name: String,
+        returns_fresh: bool,
+        return_capacity: CapacitySpec,
+        consumes_params: Vec<usize>,
+    },
+    /// A weak cryptographic primitive or selector rule.
+    WeakCrypto(WeakCryptoFact),
+    /// Guard bypass parameters (containment check helpers or credential sinks).
+    GuardBypass(GuardBypassFact),
+    /// Schema validation builders, enforcers, or keywords.
+    SchemaPolicy(SchemaPolicyFact),
 }
 
 impl LearnedFactEntry {
@@ -521,6 +798,30 @@ impl LearnedFactEntry {
                     },
                 );
             }
+            LearnedFactEntry::Policy {
+                rule,
+                when_call,
+                require,
+                scope,
+                message,
+                severity,
+            } => {
+                let fact = PolicyFact {
+                    rule: rule.clone(),
+                    when_call: when_call.clone(),
+                    require: require.clone(),
+                    scope: *scope,
+                    message: message.clone(),
+                    severity: severity.clone(),
+                };
+                if !table
+                    .policy_facts
+                    .iter()
+                    .any(|e| e.rule == fact.rule && e.when_call == fact.when_call)
+                {
+                    table.policy_facts.push(fact);
+                }
+            }
             LearnedFactEntry::Check {
                 rule,
                 call,
@@ -544,6 +845,59 @@ impl LearnedFactEntry {
                 {
                     table.learned_checks.push(fact);
                 }
+            }
+            LearnedFactEntry::MemoryContract {
+                name,
+                returns_fresh,
+                return_capacity,
+                consumes_params,
+            } => {
+                let fact = MemoryContractFact {
+                    name: name.clone(),
+                    returns_fresh: *returns_fresh,
+                    return_capacity: return_capacity.clone(),
+                    consumes_params: consumes_params.clone(),
+                };
+                if let Some(existing) = table
+                    .memory_contracts
+                    .iter_mut()
+                    .find(|c| c.name == fact.name)
+                {
+                    *existing = fact;
+                } else {
+                    table.memory_contracts.push(fact);
+                }
+            }
+            LearnedFactEntry::WeakCrypto(fact) => {
+                if let Some(existing) = table
+                    .weak_crypto_rules
+                    .iter_mut()
+                    .find(|r| r.rule_id == fact.rule_id && r.call == fact.call)
+                {
+                    *existing = fact.clone();
+                } else {
+                    table.weak_crypto_rules.push(fact.clone());
+                }
+            }
+            LearnedFactEntry::GuardBypass(fact) => {
+                table
+                    .containment_callees
+                    .extend(fact.containment_callees.iter().cloned());
+                table
+                    .credential_sinks
+                    .extend(fact.credential_sinks.iter().cloned());
+                table
+                    .credential_params
+                    .extend(fact.credential_params.iter().cloned());
+            }
+            LearnedFactEntry::SchemaPolicy(fact) => {
+                table.schema_builders.extend(fact.builders.iter().cloned());
+                table
+                    .schema_enforcers
+                    .extend(fact.enforcers.iter().cloned());
+                table
+                    .schema_keywords
+                    .extend(fact.bound_keywords.iter().cloned());
             }
         }
     }

@@ -12,8 +12,11 @@
 
 pub mod forward;
 pub mod taint;
+pub mod value;
 
 #[cfg(test)]
 mod forward_tests;
 #[cfg(test)]
 mod svfg_tests;
+#[cfg(test)]
+mod value_tests;

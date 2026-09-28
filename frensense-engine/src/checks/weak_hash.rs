@@ -17,6 +17,7 @@
 //! checker immune to taint-config drift and free to run per function in
 //! parallel.
 
+use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
@@ -72,6 +73,38 @@ static INSECURE_CONFIG_SELECTORS: &[(&str, &[&str], &str)] = &[
     ("jwt", &["none", "hs1"], "insecure_jwt_algorithm"),
 ];
 
+/// A key-size rule: a generation call whose constant bit-length argument
+/// falls below the security floor. Value-aware: the argument may be a var
+/// whose lattice value is a provable constant, not just a bare literal.
+struct KeySizeRule {
+    rule_id: &'static str,
+    /// Callee last segment (case-insensitive match).
+    call: &'static str,
+    /// Argument slot carrying the bit length.
+    slot: usize,
+    /// Minimum acceptable bits.
+    min_bits: i64,
+    /// Human label of what the key protects.
+    kind: &'static str,
+}
+
+static KEY_SIZE_RULES: &[KeySizeRule] = &[
+    KeySizeRule {
+        rule_id: "weak_rsa_key_size",
+        call: "generateKeyPair",
+        slot: 0,
+        min_bits: 2048,
+        kind: "RSA",
+    },
+    KeySizeRule {
+        rule_id: "weak_rsa_key_size",
+        call: "generateKey",
+        slot: 0,
+        min_bits: 128,
+        kind: "symmetric keys",
+    },
+];
+
 /// Known *wrapper* names whose entire purpose is hashing: a weak selector
 /// inside the wrapper (checked cross-function by the corpus replay gate) or
 /// a suspicious receiver qualification makes these worth flagging. Bare
@@ -110,21 +143,21 @@ fn receiver_path(ir: &FunctionIR, _args: &[Operand], _callee: &str) -> Option<St
     None
 }
 
-fn operand_literal(op: &Operand) -> Option<&str> {
-    match op {
-        Operand::StringLiteral(s) => Some(strip_quotes(s)),
-        _ => None,
-    }
-}
-
 /// Run every policy rule over one lowered function.
 /// The weak-hash / weak-crypto rule: scan one function for security-weak
 /// primitives.
-pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
-    check_function(ir)
+/// Run every policy rule over one lowered function.
+/// The weak-hash / weak-crypto rule: scan one function for security-weak
+/// primitives.
+pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
+    check_function(ir, facts)
 }
 
-pub fn check_function(ir: &FunctionIR) -> Vec<CheckerFinding> {
+pub fn check_function(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
+    // The value lattice lets selector rules see through constant
+    // assignments: `const alg = 'none'; jwt.sign(payload, secret, alg)`
+    // must fire even though the selector operand is a var, not a literal.
+    let values = crate::analysis::value::analyze(ir);
     let mut findings = Vec::new();
     for block in ir.blocks.values() {
         for instr in &block.instructions {
@@ -133,11 +166,45 @@ pub fn check_function(ir: &FunctionIR) -> Vec<CheckerFinding> {
                 method: func, args, ..
             } = instr
             {
-                check_call(ir, func, args, instr_span(ir, instr), &mut findings);
+                check_call(
+                    ir,
+                    func,
+                    args,
+                    instr_span(ir, instr),
+                    &values,
+                    facts,
+                    &mut findings,
+                );
             }
         }
     }
     findings
+}
+
+/// Resolve an argument operand to its string-literal value: direct literal,
+/// or a var whose lattice value is a provable string constant.
+fn arg_str_literal<'a>(
+    arg: &'a Operand,
+    values: &'a crate::analysis::value::ValueInfo,
+) -> Option<&'a str> {
+    match arg {
+        Operand::StringLiteral(s) => Some(strip_quotes(s)),
+        // Lattice constants carry the lowering's raw quote characters, same
+        // as direct string literals: strip before matching.
+        Operand::Var(v) => values.const_str(*v).map(strip_quotes),
+        _ => None,
+    }
+}
+
+/// Resolve an argument operand to its integer-literal value: direct literal,
+/// or a var whose lattice value is a provable integer constant.
+#[allow(dead_code)] // consumed by value-aware rules added incrementally
+fn arg_int_literal(arg: &Operand, values: &crate::analysis::value::ValueInfo) -> Option<i64> {
+    match arg {
+        Operand::IntLiteral(n) => Some(*n),
+        Operand::Var(v) => values.const_int(*v),
+        _ => None,
+    }
 }
 
 fn instr_span(ir: &FunctionIR, instr: &Instruction) -> Option<(usize, usize)> {
@@ -157,6 +224,8 @@ fn check_call(
     callee: &str,
     args: &[Operand],
     span: Option<(usize, usize)>,
+    values: &crate::analysis::value::ValueInfo,
+    facts: &FactTable,
     out: &mut Vec<CheckerFinding>,
 ) {
     // Receiver chains are matched by last segment: `security.hash` and bare
@@ -174,7 +243,7 @@ fn check_call(
             c == callee_lower
         }) && let Some(sel) = args
             .get(rule.selector_slot)
-            .and_then(operand_literal)
+            .and_then(|a| arg_str_literal(a, values))
             .map(str::to_ascii_lowercase)
             && rule.weak_selectors.contains(&sel.as_str())
         {
@@ -214,6 +283,48 @@ fn check_call(
         }
     }
 
+    // Evaluate corpus-learned weak crypto rules
+    for fact in &facts.weak_crypto_rules {
+        let fact_call_seg = last_segment(&fact.call).to_ascii_lowercase();
+        if fact_call_seg == callee_lower {
+            if let Some(slot) = fact.selector_slot {
+                if let Some(sel) = args
+                    .get(slot)
+                    .and_then(|a| arg_str_literal(a, values))
+                    .map(str::to_ascii_lowercase)
+                    && fact
+                        .weak_selectors
+                        .iter()
+                        .any(|ws| ws.to_ascii_lowercase() == sel)
+                {
+                    out.push(CheckerFinding {
+                        learned: true,
+                        function: ir.name.clone(),
+                        rule: fact.rule_id.clone(),
+                        message: format!(
+                            "Weak cryptographic primitive '{}' selected by `{}`, not acceptable for security-sensitive operations",
+                            sel, callee_seg
+                        ),
+                        span,
+                    });
+                    return;
+                }
+            } else {
+                out.push(CheckerFinding {
+                    learned: true,
+                    function: ir.name.clone(),
+                    rule: fact.rule_id.clone(),
+                    message: format!(
+                        "Weak cryptographic call `{}`, not acceptable for security-sensitive operations",
+                        callee_seg
+                    ),
+                    span,
+                });
+                return;
+            }
+        }
+    }
+
     // Hash-wrapper heuristic: a call named `hash`/`hashPassword` whose
     // receiver is a security-ish namespace. Matched by last segment of the
     // receiver chain when available; bare `hash(x)` is too generic to flag
@@ -233,6 +344,37 @@ fn check_call(
         });
     }
 
+    // Weak key size: a key-generation/parameter call whose bit-length
+    // argument is a PROVABLE CONSTANT below the security floor. The value
+    // lattice resolves `const bits = 512; generateKey(bits)` the same as a
+    // direct literal, so wrapper indirection doesn't hide the weakness.
+    for rule in KEY_SIZE_RULES {
+        if last_segment(rule.call).to_ascii_lowercase() != callee_lower {
+            continue;
+        }
+        if let Some(slot) = args.get(rule.slot) {
+            let weak = arg_int_literal(slot, values)
+                .map(|bits| bits < rule.min_bits)
+                .unwrap_or(false);
+            if weak {
+                out.push(CheckerFinding {
+                    learned: false,
+                    function: ir.name.clone(),
+                    rule: rule.rule_id.to_string(),
+                    message: format!(
+                        "Weak key size passed to `{}`: provably below {} bits (use >= {} bits for {})",
+                        callee_seg,
+                        rule.min_bits,
+                        rule.min_bits,
+                        rule.kind
+                    ),
+                    span,
+                });
+                return;
+            }
+        }
+    }
+
     // Insecure literal selectors (`{ algorithm: 'none' }` shapes land here
     // once object literals are flattened; for now the string form).
     for (prefix, selectors, rule_id) in INSECURE_CONFIG_SELECTORS {
@@ -240,7 +382,7 @@ fn check_call(
             continue;
         }
         for arg in args {
-            if let Some(lit) = operand_literal(arg)
+            if let Some(lit) = arg_str_literal(arg, values)
                 && selectors.contains(&lit.to_ascii_lowercase().as_str())
             {
                 out.push(CheckerFinding {

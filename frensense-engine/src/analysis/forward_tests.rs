@@ -8,7 +8,7 @@
 pub mod interprocedural_tests {
     use crate::analysis::forward::{InterproceduralTaintEngine, ProgramSvfg};
     use crate::analysis::taint::config::TaintConfig;
-    use crate::graph::svfg::{NodeKind, SvfgBuilder};
+    use crate::graph::svfg::{NodeKey, NodeKind, SvfgBuilder};
     use crate::ir::function::*;
     use rustc_hash::FxHashMap;
 
@@ -1003,5 +1003,165 @@ pub mod interprocedural_tests {
             .flat_map(|(_, targets)| targets.iter().filter(|(tf, _)| *tf == ri))
             .count();
         assert_eq!(count, 1, "only the matching field should be linked");
+    }
+
+    #[test]
+    fn test_call_virtual_with_explicit_self_binds_correctly() {
+        // Callee: method(self, arg)
+        let mut callee = FunctionIR::new("MyClass.method".into());
+        let self_param = add_param(&mut callee, "self");
+        let arg_param = add_param(&mut callee, "arg");
+        {
+            let b = callee.entry_block;
+            callee.set_terminator(b, Terminator::Return { src: None });
+        }
+
+        // Caller: obj.method(val)
+        let mut caller = FunctionIR::new("caller".into());
+        let (obj_key, val_key) = {
+            let b = caller.entry_block;
+            let obj = caller.new_var(dummy_meta("obj"));
+            let val = caller.new_var(dummy_meta("val"));
+            let m0 = caller.new_var(mem_meta("m0"));
+            let m1 = caller.new_var(mem_meta("m1"));
+            caller.push_instruction(
+                b,
+                Instruction::Allocate {
+                    dest: obj,
+                    mem_out: m0,
+                    mem_in: caller.initial_memory_state,
+                    kind: AllocationKind::ClassInstance("MyClass".into()),
+                },
+            );
+            caller.push_instruction(
+                b,
+                Instruction::CallVirtual {
+                    dest: None,
+                    mem_out: m1,
+                    mem_in: m0,
+                    receiver: Operand::Var(obj),
+                    method: "method".into(),
+                    args: vec![Operand::Var(val)],
+                },
+            );
+            caller.set_terminator(b, Terminator::Return { src: None });
+            (NodeKey::instr(b, 1, obj), NodeKey::instr(b, 1, val))
+        };
+
+        let prog = ProgramSvfg::new(
+            &[
+                ("MyClass.method".into(), &callee),
+                ("caller".into(), &caller),
+            ]
+            .into_iter()
+            .collect(),
+            &TaintConfig::default(),
+        );
+
+        let caller_idx = prog.function_index("caller").unwrap();
+        let callee_idx = prog.function_index("MyClass.method").unwrap();
+
+        let self_node = *prog.functions[callee_idx]
+            .def_site
+            .get(&self_param)
+            .unwrap();
+        let arg_node = *prog.functions[callee_idx].def_site.get(&arg_param).unwrap();
+
+        // Verify receiver `obj` connects to `self`
+        let obj_edges = prog
+            .cross_edges
+            .get(&(caller_idx, obj_key))
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            obj_edges.contains(&(callee_idx, self_node)),
+            "obj must connect to self"
+        );
+        assert!(
+            !obj_edges.contains(&(callee_idx, arg_node)),
+            "obj must NOT connect to arg"
+        );
+
+        // Verify `val` connects to `arg`
+        let val_edges = prog
+            .cross_edges
+            .get(&(caller_idx, val_key))
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            val_edges.contains(&(callee_idx, arg_node)),
+            "val must connect to arg"
+        );
+        assert!(
+            !val_edges.contains(&(callee_idx, self_node)),
+            "val must NOT connect to self"
+        );
+    }
+
+    #[test]
+    fn test_call_virtual_without_explicit_self_binds_positional_args() {
+        // Callee: method(arg) without self (JS/TS style)
+        let mut callee = FunctionIR::new("method".into());
+        let arg_param = add_param(&mut callee, "arg");
+        {
+            let b = callee.entry_block;
+            callee.set_terminator(b, Terminator::Return { src: None });
+        }
+
+        // Caller: obj.method(val)
+        let mut caller = FunctionIR::new("caller".into());
+        let (obj_key, val_key) = {
+            let b = caller.entry_block;
+            let obj = caller.new_var(dummy_meta("obj"));
+            let val = caller.new_var(dummy_meta("val"));
+            let m1 = caller.new_var(mem_meta("m1"));
+            caller.push_instruction(
+                b,
+                Instruction::CallVirtual {
+                    dest: None,
+                    mem_out: m1,
+                    mem_in: caller.initial_memory_state,
+                    receiver: Operand::Var(obj),
+                    method: "method".into(),
+                    args: vec![Operand::Var(val)],
+                },
+            );
+            caller.set_terminator(b, Terminator::Return { src: None });
+            (NodeKey::instr(b, 0, obj), NodeKey::instr(b, 0, val))
+        };
+
+        let prog = ProgramSvfg::new(
+            &[("method".into(), &callee), ("caller".into(), &caller)]
+                .into_iter()
+                .collect(),
+            &TaintConfig::default(),
+        );
+
+        let caller_idx = prog.function_index("caller").unwrap();
+        let callee_idx = prog.function_index("method").unwrap();
+
+        let arg_node = *prog.functions[callee_idx].def_site.get(&arg_param).unwrap();
+
+        // Receiver `obj` must NOT bind to positional parameter `arg`
+        let obj_edges = prog
+            .cross_edges
+            .get(&(caller_idx, obj_key))
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            !obj_edges.contains(&(callee_idx, arg_node)),
+            "obj must NOT bleed into arg"
+        );
+
+        // `val` MUST bind to `arg`
+        let val_edges = prog
+            .cross_edges
+            .get(&(caller_idx, val_key))
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            val_edges.contains(&(callee_idx, arg_node)),
+            "val must connect to arg"
+        );
     }
 }

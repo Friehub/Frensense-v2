@@ -14,6 +14,7 @@
 //!    credential setter/hasher guarded by nothing but a fast digest wrapper.
 //!    Mechanism: "hash-named call in a password-setting function".
 
+use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
@@ -46,7 +47,7 @@ static CREDENTIAL_PARAM_NAMES: &[&str] = &[
 /// where the receiver OR the argument is a function parameter named like a
 /// URL/redirect target (`url`, `toUrl`, `redirect`, ...), the shape of an
 /// allowlist validation over attacker input.
-pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
+pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     let mut findings = Vec::new();
     let param_names: Vec<String> = ir
         .parameters
@@ -73,7 +74,12 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
                 _ => continue,
             };
             let seg = last_segment(callee);
-            if !CONTAINMENT_CALLEES.contains(&seg) {
+            let is_builtin = CONTAINMENT_CALLEES.contains(&seg);
+            let is_learned = facts
+                .containment_callees
+                .iter()
+                .any(|c| c.eq_ignore_ascii_case(seg));
+            if !is_builtin && !is_learned {
                 continue;
             }
             // URL-ish receiver (`url.includes(x)`) or URL-ish argument in a
@@ -106,7 +112,7 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
                     .and_then(|d| ir.var_metadata.get(d))
                     .and_then(|m| m.byte_range);
                 findings.push(CheckerFinding {
-                    learned: false,
+                    learned: is_learned,
                     function: ir.name.clone(),
                     rule: "substring_allowlist_guard".to_string(),
                     message: format!(
@@ -128,7 +134,7 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
 /// fires the weak-credential-storage rule. Mechanism only: whether the
 /// wrapped implementation is acceptable is exactly what corpus facts
 /// (wrapper→primitive mappings) refine.
-pub fn check_credentials(ir: &FunctionIR) -> Vec<CheckerFinding> {
+pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     let mut findings = Vec::new();
     for block in ir.blocks.values() {
         for instr in &block.instructions {
@@ -145,9 +151,15 @@ pub fn check_credentials(ir: &FunctionIR) -> Vec<CheckerFinding> {
                 _ => continue,
             };
             let seg = last_segment(callee);
-            if !CREDENTIAL_SINKS.contains(&seg) {
+            let is_builtin_sink = CREDENTIAL_SINKS.contains(&seg);
+            let is_learned_sink = facts
+                .credential_sinks
+                .iter()
+                .any(|s| s.eq_ignore_ascii_case(seg));
+            if !is_builtin_sink && !is_learned_sink {
                 continue;
             }
+            let mut matched_learned = is_learned_sink;
             let cred_arg = args.iter().any(|a| match a {
                 Operand::Var(v) => ir
                     .var_metadata
@@ -155,9 +167,17 @@ pub fn check_credentials(ir: &FunctionIR) -> Vec<CheckerFinding> {
                     .and_then(|m| m.source_name.clone())
                     .map(|n| {
                         let l = n.to_ascii_lowercase();
-                        CREDENTIAL_PARAM_NAMES
+                        let builtin = CREDENTIAL_PARAM_NAMES
                             .iter()
-                            .any(|c| l == c.to_ascii_lowercase())
+                            .any(|c| l == c.to_ascii_lowercase());
+                        let learned = facts
+                            .credential_params
+                            .iter()
+                            .any(|c| l == c.to_ascii_lowercase());
+                        if learned {
+                            matched_learned = true;
+                        }
+                        builtin || learned
                     })
                     .unwrap_or(false),
                 _ => false,
@@ -167,7 +187,7 @@ pub fn check_credentials(ir: &FunctionIR) -> Vec<CheckerFinding> {
                     .and_then(|d| ir.var_metadata.get(d))
                     .and_then(|m| m.byte_range);
                 findings.push(CheckerFinding {
-                    learned: false,
+                    learned: matched_learned,
                     function: ir.name.clone(),
                     rule: "credential_kdf_policy".to_string(),
                     message: format!(
@@ -189,8 +209,8 @@ pub fn check_credentials(ir: &FunctionIR) -> Vec<CheckerFinding> {
 /// itself is part of the vulnerability, attacker URLs embed allowed
 /// entries. One finding per allowlist definition, spanned at the
 /// definition.
-pub fn check_allowlist_definitions(irs: &[&FunctionIR]) -> Vec<CheckerFinding> {
-    let guard_exists = irs.iter().any(|ir| !check(ir).is_empty());
+pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFinding> {
+    let guard_exists = irs.iter().any(|ir| !check(ir, facts).is_empty());
     if !guard_exists {
         return Vec::new();
     }

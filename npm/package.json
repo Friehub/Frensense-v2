@@ -1,0 +1,35 @@
+{
+  "name": "@friehub/frensense",
+  "version": "0.7.0-preview.3",
+  "description": "Frensense: deterministic compiler-mode dataflow security scanner",
+  "main": "bin/frensense.js",
+  "bin": {
+    "frensense": "bin/frensense.js"
+  },
+  "files": [
+    "bin",
+    "dist/binaries",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Friehub/frensense"
+  },
+  "homepage": "https://friehub.github.io/frensense/",
+  "license": "GPL-3.0-only",
+  "keywords": [
+    "security",
+    "static-analysis",
+    "vulnerability-scanner",
+    "taint-analysis",
+    "sast",
+    "mcp",
+    "lsp"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

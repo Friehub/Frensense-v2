@@ -53,6 +53,21 @@ pub fn lower_source(
         if spec.is_function_node(node.kind()) {
             let name = node
                 .child_by_field_name("name")
+                .or_else(|| {
+                    let mut decl = node.child_by_field_name("declarator");
+                    while let Some(d) = decl {
+                        if d.kind() == "identifier" {
+                            return Some(d);
+                        }
+                        if let Some(inner) = d.child_by_field_name("declarator") {
+                            decl = Some(inner);
+                        } else {
+                            let mut c = d.walk();
+                            return d.children(&mut c).find(|k| k.kind() == "identifier");
+                        }
+                    }
+                    None
+                })
                 .map(|n| source[n.start_byte()..n.end_byte()].to_string())
                 .unwrap_or_else(|| format!("<fn@{}>", node.start_byte()));
             let ir = lower_one(&name, node, source, spec);
@@ -134,7 +149,16 @@ fn lower_one(
 ) -> FunctionIR {
     let mut ctx = LoweringContext::new(spec, source, name.to_string());
 
-    let params = fn_node.child_by_field_name("parameters");
+    // First try the direct `parameters` field (JS/TS/Python/Rust/Go).
+    // For C, the function_definition has no direct `parameters` field; instead
+    // the shape is: function_definition → declarator (function_declarator) →
+    //   parameters (parameter_list).  Walk that chain as a fallback.
+    let params = fn_node.child_by_field_name("parameters").or_else(|| {
+        fn_node
+            .child_by_field_name("declarator")
+            .and_then(|decl| find_function_declarator(decl))
+            .and_then(|fd| fd.child_by_field_name("parameters"))
+    });
     if let Some(params) = params {
         bind_params(&mut ctx, params, source);
     }
@@ -142,6 +166,17 @@ fn lower_one(
         ctx.visit_node(body);
     }
     SSABuilder::new(ctx.ir).build()
+}
+
+/// Walk a declarator chain until we find a `function_declarator` node.
+/// Handles C shapes like: pointer_declarator → function_declarator.
+fn find_function_declarator(node: tree_sitter::Node<'_>) -> Option<tree_sitter::Node<'_>> {
+    if node.kind() == "function_declarator" {
+        return Some(node);
+    }
+    // pointer_declarator, abstract_declarator, etc. may wrap it
+    node.child_by_field_name("declarator")
+        .and_then(find_function_declarator)
 }
 
 /// Lower a top-level non-function initializer (`const x = new Set([...])`,
@@ -168,12 +203,34 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
         // - Python: plain `identifier` children of `parameters`
         // - Rust: `parameter` node wrapping the name identifier as first child
         // - Go: `parameter_declaration` with the name as first child
+        if p.kind() == "self_parameter" {
+            let name = "self".to_string();
+            let v = ctx.ir.new_var(VarMetadata {
+                source_name: Some(name.clone()),
+                type_name: None,
+                byte_range: Some((p.start_byte(), p.end_byte())),
+                is_memory_state: false,
+                object_keys: Vec::new(),
+            });
+            ctx.ir.parameters.push(v);
+            ctx.env.last_mut().unwrap().insert(name, v);
+            continue;
+        }
         let id = match p.kind() {
             "required_parameter" | "optional_parameter" => {
                 p.child_by_field_name("pattern").or_else(|| p.child(0))
             }
             "identifier" => Some(p),
-            "parameter" | "parameter_declaration" | "variadic_parameter" => p.child(0),
+            // C `parameter_declaration`: shape is `type declarator`, where the
+            // declarator may be pointer_declarator → identifier (e.g. `char *p`).
+            // child(0) returns the type specifier, not the name — use the
+            // `declarator` field and walk it to find the leaf identifier.
+            "parameter_declaration" => p
+                .child_by_field_name("declarator")
+                .and_then(|d| find_param_identifier(d)),
+            // Rust `parameter`, Go `parameter_declaration` (handled above),
+            // variadic_parameter: first child is the identifier or pattern.
+            "parameter" | "variadic_parameter" => p.child(0),
             _ => None,
         };
         if let Some(id) = id {
@@ -188,5 +245,16 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             ctx.ir.parameters.push(v);
             ctx.env.last_mut().unwrap().insert(name, v);
         }
+    }
+}
+
+/// Walk a C declarator chain to find the leaf `identifier`.
+/// Handles pointer_declarator, array_declarator, etc.
+fn find_param_identifier(node: tree_sitter::Node<'_>) -> Option<tree_sitter::Node<'_>> {
+    match node.kind() {
+        "identifier" => Some(node),
+        _ => node
+            .child_by_field_name("declarator")
+            .and_then(find_param_identifier),
     }
 }

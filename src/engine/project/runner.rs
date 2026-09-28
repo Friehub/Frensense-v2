@@ -222,23 +222,63 @@ fn advisory_from_checker(
     file_id: crate::FileId,
 ) -> Advisory {
     let path = Path::new(file);
-    let title = format!("Policy violation: {} ({})", c.rule, c.function);
-    let mut advisory = Advisory::bare(title, Severity::Warning, file_id, path, c.message.clone())
+    let is_temporal_memory_safety = c.rule == "use_after_free" || c.rule == "double_free";
+    let is_spatial_memory_safety = c.rule == "buffer_overflow"
+        || c.rule == "out_of_bounds_read"
+        || c.rule == "out_of_bounds_access";
+    let (severity, title, impact, improvement, tag) = if is_temporal_memory_safety {
+        (
+            Severity::Critical,
+            format!("Memory safety violation: {} ({})", c.rule, c.function),
+            format!(
+                "{} at {}:{}, dangerous temporal memory safety defect leading to memory corruption or arbitrary code execution.",
+                c.rule, file, line
+            ),
+            format!(
+                "Ensure memory is not used after free or freed multiple times in `{}`. Zero or null pointer variables after free.",
+                c.function
+            ),
+            "memory-safety",
+        )
+    } else if is_spatial_memory_safety {
+        (
+            Severity::Critical,
+            format!("Memory safety violation: {} ({})", c.rule, c.function),
+            format!(
+                "{} at {}:{}, dangerous spatial memory safety defect leading to memory corruption, out-of-bounds access, or arbitrary code execution.",
+                c.rule, file, line
+            ),
+            format!(
+                "Ensure buffer bounds and subscript indices are strictly validated before access in `{}`. Guard index against buffer capacity.",
+                c.function
+            ),
+            "memory-safety",
+        )
+    } else {
+        (
+            Severity::Warning,
+            format!("Policy violation: {} ({})", c.rule, c.function),
+            format!(
+                "{} at {}:{}, insecure cryptographic/configuration choice.",
+                c.rule, file, line
+            ),
+            format!(
+                "Replace the weak primitive in `{}` with a modern alternative \
+                 (bcrypt/argon2 for passwords, SHA-256+ for digests).",
+                c.function
+            ),
+            "policy",
+        )
+    };
+    let mut advisory = Advisory::bare(title, severity, file_id, path, c.message.clone())
         .with_confidence(1.0)
         .with_line(line)
         .with_column(column)
         .with_content(c.function.clone())
         .with_enclosing_symbol(c.function.clone())
-        .with_impact(format!(
-            "{} at {}:{}, insecure cryptographic/configuration choice.",
-            c.rule, file, line
-        ))
-        .with_improvement(format!(
-            "Replace the weak primitive in `{}` with a modern alternative \
-             (bcrypt/argon2 for passwords, SHA-256+ for digests).",
-            c.function
-        ))
-        .with_tags(["checker", &c.rule]);
+        .with_impact(impact)
+        .with_improvement(improvement)
+        .with_tags(["checker", &c.rule, tag]);
     advisory.requires_human = false;
     advisory.fingerprint = stable_fingerprint(&[file, &c.rule, &c.function]);
     advisory
