@@ -26,14 +26,15 @@
 //! block-level `Phi` merge; every other definition (calls, loads, externals)
 //! yields `Top` for its destination, which is the sound over-approximation.
 //!
-//! The analysis runs a standard worklist fixpoint over the CFG (blocks in
-//! RPO, per-var state joined at block entry), so loops reach a stable state
-//! via the monotone join without unrolling.
+//! The analysis runs a standard worklist fixpoint over the CFG with edge-state
+//! branch sharpening: conditional branches narrow numeric intervals along
+//! true and false paths (e.g. `x < 10` refines `x` to `[MIN, 9]` on true and
+//! `[10, MAX]` on false).
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
-use crate::ir::function::{FunctionIR, Instruction, Operand, Terminator};
+use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand, Terminator, VarId};
 
 /// One variable's abstract value at a program point.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,14 +70,10 @@ impl Value {
         use Value::*;
         match (self, other) {
             (IntConst(a), IntConst(b)) if a == b => IntConst(*a),
-            // Two different int constants join to their hull — the interval
-            // domain's answer (join must over-approximate both).
             (IntConst(a), IntConst(b)) => Range((*a).min(*b), (*a).max(*b)),
             (StrConst(a), StrConst(b)) if a == b => StrConst(a.clone()),
             (BoolConst(a), BoolConst(b)) if a == b => BoolConst(*a),
             (Range(a, b), Range(c, d)) => Range((*a).min(*c), (*b).max(*d)),
-            // Const ↔ Range unify to the Range form (Const is the degenerate
-            // point interval; a point inside a range joins to that range).
             (IntConst(a), Range(c, d)) | (Range(c, d), IntConst(a)) => {
                 Range((*c).min(*a), (*d).max(*a))
             }
@@ -91,10 +88,57 @@ impl Value {
             Value::IntConst(_) | Value::StrConst(_) | Value::BoolConst(_)
         )
     }
+
+    /// Intersect an integer value/range with an inclusive interval `[min_lo, max_hi]`.
+    pub fn intersect_interval(&self, min_lo: Option<i64>, max_hi: Option<i64>) -> Value {
+        match self {
+            Value::IntConst(n) => {
+                if min_lo.map_or(true, |lo| *n >= lo) && max_hi.map_or(true, |hi| *n <= hi) {
+                    Value::IntConst(*n)
+                } else {
+                    self.clone()
+                }
+            }
+            Value::Range(lo, hi) => {
+                let new_lo = min_lo.map_or(*lo, |m| (*lo).max(m));
+                let new_hi = max_hi.map_or(*hi, |m| (*hi).min(m));
+                if new_lo > new_hi {
+                    self.clone()
+                } else if new_lo == new_hi {
+                    Value::IntConst(new_lo)
+                } else {
+                    Value::Range(new_lo, new_hi)
+                }
+            }
+            Value::Top => match (min_lo, max_hi) {
+                (Some(lo), Some(hi)) if lo == hi => Value::IntConst(lo),
+                (Some(lo), Some(hi)) if lo <= hi => Value::Range(lo, hi),
+                (Some(lo), None) => Value::Range(lo, i64::MAX),
+                (None, Some(hi)) => Value::Range(i64::MIN, hi),
+                _ => Value::Top,
+            },
+            _ => self.clone(),
+        }
+    }
 }
 
 /// Abstract state: one entry per var that has a non-`Top` value.
-pub type AbsState = FxHashMap<crate::ir::function::VarId, Value>;
+pub type AbsState = FxHashMap<VarId, Value>;
+
+/// Merge state `b` into `a` using the lattice join operation.
+fn merge_states(a: &mut AbsState, b: &AbsState) {
+    for (v, val) in b {
+        let merged = match a.get(v) {
+            None => val.clone(),
+            Some(cur) => cur.join(val),
+        };
+        if merged == Value::Top {
+            a.remove(v);
+        } else {
+            a.insert(*v, merged);
+        }
+    }
+}
 
 /// Evaluate one `Operand` under a state.
 fn operand_value(state: &AbsState, op: &Operand) -> Value {
@@ -107,97 +151,54 @@ fn operand_value(state: &AbsState, op: &Operand) -> Value {
     }
 }
 
-/// Apply a binary operator to two integer intervals. Non-integer inputs and
-/// unsupported operators yield `Top`.
-fn binary_interval(op: &str, a: (i64, i64), b: (i64, i64)) -> Value {
-    let (al, ah) = a;
-    let (bl, bh) = b;
+/// Apply a binary operator to two integer intervals.
+fn binary_interval(op: &str, (al, ah): (i64, i64), (bl, bh): (i64, i64)) -> Value {
     let add = |x: i64, y: i64| x.saturating_add(y);
     match op {
-        // The TS lowering emits `concat` for `+` (string bias), but the
-        // operation is numeric addition when both operands are integer values.
         "+" | "concat" => Value::Range(add(al, bl), add(ah, bh)),
         "-" => Value::Range(add(al, -bh), add(ah, -bl)),
         "*" => {
-            let products = [al * bl, al * bh, ah * bl, ah * bh];
-            Value::Range(
-                products.iter().copied().min().unwrap_or(al),
-                products.iter().copied().max().unwrap_or(ah),
-            )
+            let p = [al * bl, al * bh, ah * bl, ah * bh];
+            Value::Range(*p.iter().min().unwrap_or(&al), *p.iter().max().unwrap_or(&ah))
         }
-        "<<" => {
-            if (0..=32).contains(&bl) && bl == bh {
-                Value::Range(al << bl, ah << bh)
-            } else {
-                Value::Top
-            }
-        }
-        ">>" => {
-            if (0..=63).contains(&bl) && bl == bh {
-                Value::Range(al >> bl, ah >> bh)
-            } else {
-                Value::Top
-            }
-        }
+        "<<" if bl == bh && (0..=32).contains(&bl) => Value::Range(al << bl, ah << bh),
+        ">>" if bl == bh && (0..=63).contains(&bl) => Value::Range(al >> bl, ah >> bh),
         _ => Value::Top,
     }
 }
 
-/// Transfer function for one instruction: the (dest, value) it defines, if
-/// the instruction defines a var we can model.
-fn transfer(state: &AbsState, instr: &Instruction) -> Option<(crate::ir::function::VarId, Value)> {
+/// Transfer function for one instruction.
+fn transfer(state: &AbsState, instr: &Instruction) -> Option<(VarId, Value)> {
     match instr {
         Instruction::Assign { dest, src } => Some((*dest, operand_value(state, src))),
         Instruction::BinaryOp { dest, op, lhs, rhs } => {
             let lv = operand_value(state, lhs);
             let rv = operand_value(state, rhs);
             let out = match op.as_str() {
-                // Boolean-valued comparisons: precise only between consts.
-                "==" | "===" => match (&lv, &rv) {
-                    (Value::IntConst(a), Value::IntConst(b)) => Value::BoolConst(a == b),
-                    (Value::StrConst(a), Value::StrConst(b)) => Value::BoolConst(a == b),
-                    (Value::BoolConst(a), Value::BoolConst(b)) => Value::BoolConst(a == b),
-                    _ => Value::Top,
-                },
-                "!=" | "!==" => match (&lv, &rv) {
-                    (Value::IntConst(a), Value::IntConst(b)) => Value::BoolConst(a != b),
-                    (Value::StrConst(a), Value::StrConst(b)) => Value::BoolConst(a != b),
-                    (Value::BoolConst(a), Value::BoolConst(b)) => Value::BoolConst(a != b),
-                    _ => Value::Top,
-                },
-                "<" | ">" | "<=" | ">=" => {
-                    match (lv.interval(), rv.interval()) {
-                        (Some((al, ah)), Some((bl, bh))) => {
-                            // Interval comparison: definite only when the
-                            // whole ranges are ordered.
-                            let definite = match op.as_str() {
-                                "<" => ah < bl,
-                                ">" => al > bh,
-                                "<=" => ah <= bl,
-                                ">=" => al >= bh,
-                                _ => false,
-                            };
-                            if definite {
-                                Value::BoolConst(true)
-                            } else {
-                                // May or may not hold: still possibly false.
-                                let impossible = match op.as_str() {
-                                    "<" => al >= bh,
-                                    ">" => ah <= bl,
-                                    "<=" => al > bh,
-                                    ">=" => ah < bl,
-                                    _ => false,
-                                };
-                                if impossible {
-                                    Value::BoolConst(false)
-                                } else {
-                                    Value::Top
-                                }
-                            }
-                        }
-                        _ => Value::Top,
-                    }
+                "==" | "===" | "!=" | "!==" => {
+                    let eq = match (&lv, &rv) {
+                        (Value::IntConst(a), Value::IntConst(b)) => Some(a == b),
+                        (Value::StrConst(a), Value::StrConst(b)) => Some(a == b),
+                        (Value::BoolConst(a), Value::BoolConst(b)) => Some(a == b),
+                        _ => None,
+                    };
+                    eq.map(|e| Value::BoolConst(if op.starts_with('!') { !e } else { e }))
+                        .unwrap_or(Value::Top)
                 }
+                "<" | ">" | "<=" | ">=" => match (lv.interval(), rv.interval()) {
+                    (Some((al, ah)), Some((bl, bh))) => match op.as_str() {
+                        "<" if ah < bl => Value::BoolConst(true),
+                        "<" if al >= bh => Value::BoolConst(false),
+                        "<=" if ah <= bl => Value::BoolConst(true),
+                        "<=" if al > bh => Value::BoolConst(false),
+                        ">" if al > bh => Value::BoolConst(true),
+                        ">" if ah <= bl => Value::BoolConst(false),
+                        ">=" if al >= bh => Value::BoolConst(true),
+                        ">=" if ah < bl => Value::BoolConst(false),
+                        _ => Value::Top,
+                    },
+                    _ => Value::Top,
+                },
                 _ => match (lv.interval(), rv.interval()) {
                     (Some(a), Some(b)) => binary_interval(op, a, b),
                     _ => Value::Top,
@@ -208,10 +209,7 @@ fn transfer(state: &AbsState, instr: &Instruction) -> Option<(crate::ir::functio
         Instruction::UnaryOp { dest, op, src } => {
             let v = operand_value(state, src);
             let out = match op.as_str() {
-                "-" => match v.interval() {
-                    Some((lo, hi)) => Value::Range(-hi, -lo),
-                    None => Value::Top,
-                },
+                "-" => v.interval().map_or(Value::Top, |(lo, hi)| Value::Range(-hi, -lo)),
                 "!" => match v {
                     Value::BoolConst(b) => Value::BoolConst(!b),
                     _ => Value::Top,
@@ -229,21 +227,96 @@ fn transfer(state: &AbsState, instr: &Instruction) -> Option<(crate::ir::functio
     }
 }
 
-/// A single forward pass over the CFG in reverse-postorder. Returns the
-/// block-entry state for every block. Monotone: joining at CFG merges only
-/// ever widens, so iterating to a fixpoint (needed for loops) terminates;
-/// one RPO pass + loop re-visits via worklist reaches it.
-fn fixpoint(ir: &FunctionIR) -> FxHashMap<crate::ir::function::BlockId, AbsState> {
-    use crate::ir::function::BlockId;
+/// Sharpen variable bounds along a branch condition.
+fn sharpen_branch(
+    mut state: AbsState,
+    cond: &Operand,
+    is_true: bool,
+    defs: &FxHashMap<VarId, &Instruction>,
+) -> AbsState {
+    let mut cur = cond;
+    let mut sense = is_true;
+    loop {
+        match cur {
+            Operand::Var(c) => {
+                state.insert(*c, Value::BoolConst(sense));
+                match defs.get(c) {
+                    Some(Instruction::UnaryOp { op, src, .. }) if op == "!" => {
+                        cur = src;
+                        sense = !sense;
+                    }
+                    Some(Instruction::Assign { src, .. }) => cur = src,
+                    Some(Instruction::BinaryOp { op, lhs, rhs, .. }) => {
+                        let (var, norm_op, bound) = match (lhs, rhs) {
+                            (Operand::Var(v), r) => match operand_value(&state, r) {
+                                Value::IntConst(k) => (*v, op.as_str(), k),
+                                _ => return state,
+                            },
+                            (l, Operand::Var(v)) => match operand_value(&state, l) {
+                                Value::IntConst(k) => {
+                                    let inv = match op.as_str() {
+                                        "<" => ">",
+                                        "<=" => ">=",
+                                        ">" => "<",
+                                        ">=" => "<=",
+                                        eq => eq,
+                                    };
+                                    (*v, inv, k)
+                                }
+                                _ => return state,
+                            },
+                            _ => return state,
+                        };
 
-    // Successors per block (branch shape determines successor states: at a
-    // Branch both arms inherit the same state — branch sharpening is a
-    // refinement this pass deliberately does not do, keeping the lattice
-    // decoupled from condition evaluation).
-    let mut order: Vec<BlockId> = ir.blocks.keys().copied().collect();
-    order.sort_by_key(|b| b.0);
+                        let (lo, hi) = match (norm_op, sense) {
+                            ("<", true) | (">=", false) => (None, bound.checked_sub(1)),
+                            ("<=", true) | (">", false) => (None, Some(bound)),
+                            (">", true) | ("<=", false) => (bound.checked_add(1), None),
+                            (">=", true) | ("<", false) => (Some(bound), None),
+                            ("==" | "===", true) | ("!=" | "!==", false) => {
+                                (Some(bound), Some(bound))
+                            }
+                            _ => (None, None),
+                        };
 
-    // Reverse postorder from entry (mirrors the guard map's traversal).
+                        if lo.is_some() || hi.is_some() {
+                            let cur_val = state.get(&var).cloned().unwrap_or(Value::Top);
+                            let narrowed = cur_val.intersect_interval(lo, hi);
+                            if narrowed == Value::Top {
+                                state.remove(&var);
+                            } else {
+                                state.insert(var, narrowed);
+                            }
+                        }
+                        return state;
+                    }
+                    _ => return state,
+                }
+            }
+            _ => return state,
+        }
+    }
+}
+
+/// Compute fixpoint abstract states with edge-sensitive branch sharpening.
+fn fixpoint(ir: &FunctionIR) -> FxHashMap<BlockId, AbsState> {
+    // Pre-index definition instructions for fast predicate inspection.
+    let mut defs: FxHashMap<VarId, &Instruction> = FxHashMap::default();
+    for blk in ir.blocks.values() {
+        for instr in &blk.instructions {
+            match instr {
+                Instruction::Assign { dest, .. }
+                | Instruction::BinaryOp { dest, .. }
+                | Instruction::UnaryOp { dest, .. }
+                | Instruction::Cast { dest, .. } => {
+                    defs.insert(*dest, instr);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Reverse postorder from entry block.
     let mut po = Vec::new();
     let mut seen: FxHashSet<BlockId> = FxHashSet::default();
     let mut stack = vec![(ir.entry_block, 0usize)];
@@ -262,16 +335,15 @@ fn fixpoint(ir: &FunctionIR) -> FxHashMap<crate::ir::function::BlockId, AbsState
             po.push(b);
         }
     }
-    let rpo: Vec<BlockId> = po.iter().rev().copied().collect();
+    let rpo: Vec<BlockId> = po.into_iter().rev().collect();
 
     let mut in_state: FxHashMap<BlockId, AbsState> = FxHashMap::default();
-    let mut exit_state: FxHashMap<BlockId, AbsState> = FxHashMap::default();
+    let mut edge_state: FxHashMap<(BlockId, BlockId), AbsState> = FxHashMap::default();
 
-    // Worklist: (block) — reprocess blocks whose entry state widened.
     let mut queue: VecDeque<BlockId> = VecDeque::new();
     let mut queued: FxHashSet<BlockId> = FxHashSet::default();
     let mut iterations: usize = 0;
-    const MAX_ITERATIONS: usize = 64; // soundness unaffected: we only ever JOIN
+    const MAX_ITERATIONS: usize = 64;
 
     for &b in &rpo {
         queue.push_back(b);
@@ -280,125 +352,101 @@ fn fixpoint(ir: &FunctionIR) -> FxHashMap<crate::ir::function::BlockId, AbsState
 
     while let Some(bid) = queue.pop_front() {
         iterations += 1;
-        if iterations > MAX_ITERATIONS * (order.len() + 1) {
-            // Pathological CFG: stop widening; states are sound (joins only).
+        if iterations > MAX_ITERATIONS * (ir.blocks.len() + 1) {
             break;
         }
         queued.remove(&bid);
 
-        // 1. Entry state = join of predecessors' exit states.
-        let mut entry: AbsState = AbsState::default();
-        let preds: Vec<BlockId> = ir
+        // 1. Entry state = join of incoming predecessor edge states.
+        let mut entry = AbsState::default();
+        let preds = ir
             .blocks
             .get(&bid)
-            .map(|b| b.predecessors.clone())
-            .unwrap_or_default();
+            .map(|b| b.predecessors.as_slice())
+            .unwrap_or(&[]);
         let mut first = true;
-        for &p in &preds {
-            let pstate = match exit_state.get(&p) {
-                // Predecessor not yet processed contributes nothing yet
-                // (its contribution joins in when it is processed).
-                Some(s) => s.clone(),
-                None => continue,
-            };
-            if first {
-                entry = pstate;
-                first = false;
-            } else {
-                for (v, val) in &pstate {
-                    let merged = match entry.get(v) {
-                        // Absent on either side = the var simply isn't
-                        // constrained there; the join keeps the present
-                        // value (Top only when BOTH sides are present and
-                        // incompatible).
-                        None => val.clone(),
-                        Some(cur) => cur.join(val),
-                    };
-                    if merged == Value::Top {
-                        entry.remove(v);
-                    } else {
-                        entry.insert(*v, merged);
-                    }
+        for &p in preds {
+            if let Some(pstate) = edge_state.get(&(p, bid)) {
+                if first {
+                    entry = pstate.clone();
+                    first = false;
+                } else {
+                    merge_states(&mut entry, pstate);
                 }
             }
         }
-        // Phi merges: an SSA phi is a join over its incoming values.
+
+        // Phi merges: join over incoming operands.
         if let Some(blk) = ir.blocks.get(&bid) {
             for phi in &blk.phis {
                 let mut acc: Option<Value> = None;
                 for (_, v) in &phi.incoming {
                     let val = entry.get(v).cloned().unwrap_or(Value::Top);
-                    acc = Some(match acc {
-                        None => val,
-                        Some(a) => a.join(&val),
-                    });
+                    acc = Some(acc.map_or(val.clone(), |a| a.join(&val)));
                 }
-                let val = acc.unwrap_or(Value::Top);
-                if val == Value::Top {
-                    entry.remove(&phi.dest);
-                } else {
-                    entry.insert(phi.dest, val);
-                }
+                match acc.unwrap_or(Value::Top) {
+                    Value::Top => entry.remove(&phi.dest),
+                    v => entry.insert(phi.dest, v),
+                };
             }
         }
         in_state.insert(bid, entry.clone());
 
         // 2. Transfer through the block's instructions.
+        let mut exit = entry;
         if let Some(blk) = ir.blocks.get(&bid) {
             for instr in &blk.instructions {
-                if let Some((dest, val)) = transfer(&entry, instr) {
+                if let Some((dest, val)) = transfer(&exit, instr) {
                     if val == Value::Top {
-                        entry.remove(&dest);
+                        exit.remove(&dest);
                     } else {
-                        entry.insert(dest, val);
+                        exit.insert(dest, val);
                     }
                 }
             }
         }
-        // The block-exit state is what successors join.
-        exit_state.insert(bid, entry.clone());
 
-        // 3. Propagate the block-exit state to successors: requeue a
-        // successor when its entry state would widen.
+        // 3. Propagate refined edge states to CFG successors.
         if let Some(blk) = ir.blocks.get(&bid) {
-            let mut succs: Vec<BlockId> = Vec::new();
-            match &blk.terminator {
-                Terminator::Jump(s) => succs.push(*s),
+            let edges: Vec<(BlockId, AbsState)> = match &blk.terminator {
+                Terminator::Jump(s) => vec![(*s, exit)],
                 Terminator::Branch {
+                    cond,
                     true_block,
                     false_block,
-                    ..
                 } => {
-                    succs.push(*true_block);
-                    succs.push(*false_block);
+                    if true_block == false_block {
+                        vec![(*true_block, exit)]
+                    } else {
+                        vec![
+                            (*true_block, sharpen_branch(exit.clone(), cond, true, &defs)),
+                            (*false_block, sharpen_branch(exit, cond, false, &defs)),
+                        ]
+                    }
                 }
                 Terminator::Switch {
                     cases,
                     default_block,
                     ..
                 } => {
-                    succs.extend(cases.iter().map(|(_, b)| *b));
-                    succs.push(*default_block);
+                    let mut e: Vec<_> = cases.iter().map(|(_, b)| (*b, exit.clone())).collect();
+                    e.push((*default_block, exit));
+                    e
                 }
-                _ => {}
-            }
-            for s in succs {
-                let changed = match in_state.get(&s) {
+                _ => vec![],
+            };
+
+            for (succ, new_state) in edges {
+                let edge_key = (bid, succ);
+                let changed = match edge_state.get(&edge_key) {
                     None => true,
-                    Some(old) => {
-                        // Would joining the new exit state into s's entry
-                        // change anything? (Conservative: requeue on any
-                        // potential widening.)
-                        entry.iter().any(|(v, val)| match old.get(v) {
-                            Some(cur) => cur.join(val) != *cur,
-                            // A brand-new key reaching the successor is a
-                            // widening too (its state didn't know the var).
-                            None => *val != Value::Top,
-                        })
-                    }
+                    Some(old) => old != &new_state,
                 };
-                if changed && queued.insert(s) {
-                    queue.push_back(s);
+                if changed {
+                    edge_state.insert(edge_key, new_state);
+                    if queued.insert(succ) {
+                        queue.push_back(succ);
+                    }
                 }
             }
         }
@@ -408,33 +456,25 @@ fn fixpoint(ir: &FunctionIR) -> FxHashMap<crate::ir::function::BlockId, AbsState
 }
 
 /// The per-function analysis result: each variable's value at the point
-/// where its *defining instruction* executes (the natural consumer view:
-/// checkers ask "what is this variable here?").
+/// where its defining instruction executes, plus block-entry states.
 pub struct ValueInfo {
     /// var → abstract value (only non-`Top` entries).
-    pub values: FxHashMap<crate::ir::function::VarId, Value>,
+    pub values: FxHashMap<VarId, Value>,
     /// Number of CFG blocks analysed (diagnostics).
     pub blocks: usize,
+    /// Block-entry abstract states (keyed by block ID).
+    pub block_entry_states: FxHashMap<BlockId, AbsState>,
 }
 
-/// Analyse one function. Constants propagate through assignments, binary/
-/// unary ops, casts and phis; calls, memory ops and externals yield `Top`
-/// for their destinations. Terminates on any CFG (monotone joins, bounded
-/// worklist).
+/// Analyse one function.
 pub fn analyze(ir: &FunctionIR) -> ValueInfo {
     let in_states = fixpoint(ir);
 
-    // Per-def view: run the transfer for each defining instruction under its
-    // block's ENTRY state plus the effects of preceding instructions in the
-    // same block (already done by the fixpoint's local replay; we redo it
-    // here to collect the value at each def site).
-    let mut values: FxHashMap<crate::ir::function::VarId, Value> = FxHashMap::default();
-    for (bid, mut state) in in_states {
+    let mut values: FxHashMap<VarId, Value> = FxHashMap::default();
+    for (bid, mut state) in in_states.clone() {
         let Some(blk) = ir.blocks.get(&bid) else {
             continue;
         };
-        // Phi results are part of the block-entry state (the fixpoint
-        // merged them in); record them as def-site values.
         for phi in &blk.phis {
             if let Some(val) = state.get(&phi.dest) {
                 values.insert(phi.dest, val.clone());
@@ -455,12 +495,13 @@ pub fn analyze(ir: &FunctionIR) -> ValueInfo {
     ValueInfo {
         values,
         blocks: ir.blocks.len(),
+        block_entry_states: in_states,
     }
 }
 
 impl ValueInfo {
     /// The constant value of `var`, if provably constant.
-    pub fn const_int(&self, var: crate::ir::function::VarId) -> Option<i64> {
+    pub fn const_int(&self, var: VarId) -> Option<i64> {
         match self.values.get(&var)? {
             Value::IntConst(n) => Some(*n),
             Value::Range(lo, hi) if lo == hi => Some(*lo),
@@ -469,7 +510,7 @@ impl ValueInfo {
     }
 
     /// The string constant of `var`, if provably constant.
-    pub fn const_str(&self, var: crate::ir::function::VarId) -> Option<&str> {
+    pub fn const_str(&self, var: VarId) -> Option<&str> {
         match self.values.get(&var)? {
             Value::StrConst(s) => Some(s.as_str()),
             _ => None,
@@ -477,7 +518,24 @@ impl ValueInfo {
     }
 
     /// The interval of `var`, if an integer with a known range.
-    pub fn range(&self, var: crate::ir::function::VarId) -> Option<(i64, i64)> {
+    pub fn range(&self, var: VarId) -> Option<(i64, i64)> {
         self.values.get(&var).and_then(Value::interval)
+    }
+
+    /// The constant integer value of `var` at the entry of `block`.
+    pub fn const_int_at(&self, block: BlockId, var: VarId) -> Option<i64> {
+        match self.block_entry_states.get(&block)?.get(&var)? {
+            Value::IntConst(n) => Some(*n),
+            Value::Range(lo, hi) if lo == hi => Some(*lo),
+            _ => None,
+        }
+    }
+
+    /// The interval of `var` at the entry of `block`.
+    pub fn range_at(&self, block: BlockId, var: VarId) -> Option<(i64, i64)> {
+        self.block_entry_states
+            .get(&block)?
+            .get(&var)
+            .and_then(Value::interval)
     }
 }

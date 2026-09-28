@@ -484,4 +484,70 @@ export function runQuery () {
             Value::Range(3, 3)
         );
     }
+
+    /// Branch sharpening: conditional branch narrows integer intervals along true and false arms.
+    #[test]
+    fn branch_sharpening_narrows_intervals_on_true_and_false_arms() {
+        let src = r#"
+export function f (x: number) {
+  if (x < 10) {
+    return 1
+  } else {
+    return 2
+  }
 }
+"#;
+        let ir = ir_of(src);
+        let info = analyze(&ir);
+        let x = var_of(&info, &ir, "x");
+
+        let entry_blk = ir.blocks.get(&ir.entry_block).unwrap();
+        if let crate::ir::function::Terminator::Branch {
+            true_block,
+            false_block,
+            ..
+        } = &entry_blk.terminator
+        {
+            assert_eq!(
+                info.range_at(*true_block, x),
+                Some((i64::MIN, 9)),
+                "x < 10 true block must have upper bound 9"
+            );
+            assert_eq!(
+                info.range_at(*false_block, x),
+                Some((10, i64::MAX)),
+                "x < 10 false block must have lower bound 10"
+            );
+        } else {
+            panic!("expected entry block terminator to be a Branch");
+        }
+    }
+
+    /// Branch sharpening: equality check refines to exact constant on true arm.
+    #[test]
+    fn branch_sharpening_equality_refines_to_exact_constant() {
+        let src = r#"
+export function f (k: number) {
+  if (k === 42) {
+    return 100
+  }
+  return 200
+}
+"#;
+        let ir = ir_of(src);
+        let info = analyze(&ir);
+        let k = var_of(&info, &ir, "k");
+
+        let entry_blk = ir.blocks.get(&ir.entry_block).unwrap();
+        if let crate::ir::function::Terminator::Branch { true_block, .. } = &entry_blk.terminator {
+            assert_eq!(
+                info.const_int_at(*true_block, k),
+                Some(42),
+                "k === 42 true branch must narrow to exact constant 42"
+            );
+        } else {
+            panic!("expected entry block terminator to be a Branch");
+        }
+    }
+}
+
