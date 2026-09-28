@@ -239,6 +239,21 @@ export function enforcedTool (discount: number) {
             check_with(enforced, &t).is_empty(),
             "inline literal range check on the arg: must stay silent"
         );
+
+        let flawed = r#"
+export function flawedTool (discount: number) {
+  if (discount < 0) {
+    return security.generateCoupon(discount)
+  }
+  return null
+}
+"#;
+        assert!(
+            check_with(flawed, &t)
+                .iter()
+                .any(|(_, r)| r == "policy_generateCoupon"),
+            "trigger call inside flawed/negative branch is not safely guarded and must fire"
+        );
     }
 
     /// A bundle-installed check fires on the trigger call.

@@ -18,9 +18,9 @@
 use rustc_hash::FxHashMap;
 
 use super::CheckerFinding;
-use super::learned::{call_segments, has_range_check};
+use super::learned::{call_segments, is_range_guarded};
 use crate::analysis::taint::facts::{FactTable, PolicyFact, PolicyRequirement, PolicyScope};
-use crate::ir::function::{FunctionIR, Instruction, Operand};
+use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand};
 
 /// Evaluate every policy fact in `facts` over the scanned program.
 ///
@@ -79,12 +79,21 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
             if !segs.iter().any(|s| s == trigger_seg) {
                 continue;
             }
+            let val_info = crate::analysis::value::analyze(ir);
             // Collect every trigger call site in this function with its args.
-            for (args, span) in trigger_sites(ir, trigger_seg) {
-                let satisfied = policy
-                    .require
-                    .iter()
-                    .all(|req| requirement_holds(req, ir, args, segs, &module_segs, policy.scope));
+            for (bid, args, span) in trigger_sites(ir, trigger_seg) {
+                let satisfied = policy.require.iter().all(|req| {
+                    requirement_holds(
+                        req,
+                        ir,
+                        bid,
+                        &val_info,
+                        args,
+                        segs,
+                        &module_segs,
+                        policy.scope,
+                    )
+                });
                 if !satisfied {
                     findings.push(CheckerFinding {
                         function: ir.name.clone(),
@@ -101,12 +110,12 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
 }
 
 /// Every call instruction in `ir` whose callee's last segment is `seg`,
-/// as (args, span) pairs.
-type TriggerSite<'a> = (&'a [Operand], Option<(usize, usize)>);
+/// as (bid, args, span) tuples.
+type TriggerSite<'a> = (BlockId, &'a [Operand], Option<(usize, usize)>);
 
 fn trigger_sites<'a>(ir: &'a FunctionIR, seg: &str) -> Vec<TriggerSite<'a>> {
     let mut out = Vec::new();
-    for block in ir.blocks.values() {
+    for (&bid, block) in &ir.blocks {
         for instr in &block.instructions {
             let (name, args) = match instr {
                 Instruction::CallStatic { func, args, .. } => (func, args),
@@ -117,7 +126,7 @@ fn trigger_sites<'a>(ir: &'a FunctionIR, seg: &str) -> Vec<TriggerSite<'a>> {
             if last != seg {
                 continue;
             }
-            out.push((args.as_slice(), instr_span(ir, instr)));
+            out.push((bid, args.as_slice(), instr_span(ir, instr)));
         }
     }
     out
@@ -127,6 +136,8 @@ fn trigger_sites<'a>(ir: &'a FunctionIR, seg: &str) -> Vec<TriggerSite<'a>> {
 fn requirement_holds(
     req: &PolicyRequirement,
     ir: &FunctionIR,
+    block: BlockId,
+    val_info: &crate::analysis::value::ValueInfo,
     args: &[Operand],
     fn_segs: &[String],
     module_segs: &[String],
@@ -158,7 +169,7 @@ fn requirement_holds(
                 .any(|s| s == seg)
         }
         PolicyRequirement::RangeCheck { ops } => args.iter().any(|a| match a {
-            Operand::Var(v) => has_range_check(ir, *v, ops),
+            Operand::Var(v) => is_range_guarded(ir, *v, ops, block, val_info),
             _ => false,
         }),
     }

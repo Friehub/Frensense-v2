@@ -246,6 +246,12 @@ fn sharpen_branch(
                         sense = !sense;
                     }
                     Some(Instruction::Assign { src, .. }) => cur = src,
+                    Some(Instruction::BinaryOp { op, lhs, rhs, .. })
+                        if (op == "||" && !sense) || (op == "&&" && sense) =>
+                    {
+                        state = sharpen_branch(state, lhs, sense, defs);
+                        return sharpen_branch(state, rhs, sense, defs);
+                    }
                     Some(Instruction::BinaryOp { op, lhs, rhs, .. }) => {
                         let (var, norm_op, bound) = match (lhs, rhs) {
                             (Operand::Var(v), r) => match operand_value(&state, r) {

@@ -137,9 +137,16 @@ pub struct LearnedCheckFact {
 }
 
 /// A requirement that must hold for a policy's trigger to be considered compliant.
+///
+/// Serde representation note: this enum must stay **externally tagged**
+/// (the default; no `serde(tag = ...)`). Internally-tagged enums require
+/// `Deserializer::deserialize_any`, which bincode 1.x — the `.frc` bundle
+/// codec — does not support: any bundle containing such a fact fails to
+/// deserialize at load time. External tagging serializes the variant name
+/// as a prefix, which bincode round-trips losslessly and JSON renders as
+/// `{"GuardCall":{"call":"audit_log"}}`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
-#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PolicyRequirement {
     /// A named guard call must be present in the scope (e.g. `audit_log`,
     /// `authorize`, `validate_origin`).

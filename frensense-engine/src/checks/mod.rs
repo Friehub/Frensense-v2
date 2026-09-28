@@ -190,14 +190,40 @@ pub(crate) mod learned {
         false
     }
 
+    /// Check whether `var` is guarded by a range check at `block`.
+    /// First evaluates concrete intervals via `ValueInfo::range_at(block, var)`.
+    /// If an interval exists, verifies that it satisfies the bounds implied by `ops`.
+    /// If no interval exists (e.g. non-integer or complex unmodeled flow), falls
+    /// back to syntactic presence `has_range_check`.
+    pub(crate) fn is_range_guarded(
+        ir: &FunctionIR,
+        var: crate::ir::function::VarId,
+        ops: &[String],
+        block: crate::ir::function::BlockId,
+        val_info: &crate::analysis::value::ValueInfo,
+    ) -> bool {
+        if let Some((lo, hi)) = val_info.range_at(block, var) {
+            let requires_upper = ops.iter().any(|op| op == "<" || op == "<=");
+            let requires_lower = ops.iter().any(|op| op == ">" || op == ">=");
+            let satisfies_upper = !requires_upper || hi < i64::MAX;
+            let satisfies_lower = !requires_lower || lo > i64::MIN;
+            if satisfies_upper && satisfies_lower && (requires_upper || requires_lower) {
+                return true;
+            }
+            return false;
+        }
+        has_range_check(ir, var, ops)
+    }
+
     /// Apply every learned check to one function.
     pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
         if facts.learned_checks.is_empty() {
             return Vec::new();
         }
         let segs = call_segments(ir);
+        let val_info = crate::analysis::value::analyze(ir);
         let mut findings = Vec::new();
-        for block in ir.blocks.values() {
+        for (&bid, block) in &ir.blocks {
             for instr in &block.instructions {
                 let (callee, args) = match instr {
                     Instruction::CallStatic { func, args, .. } => (func, args),
@@ -222,7 +248,7 @@ pub(crate) mod learned {
                     // enforcement without a named helper.
                     if let Some(ops) = &fact.unless_range_check {
                         let guarded = args.iter().any(|a| match a {
-                            Operand::Var(v) => has_range_check(ir, *v, ops),
+                            Operand::Var(v) => is_range_guarded(ir, *v, ops, bid, &val_info),
                             _ => false,
                         });
                         if guarded {

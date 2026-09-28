@@ -525,46 +525,39 @@ impl GuardMap {
         block_ids.sort_by_key(|b| b.0);
         for &bid in &block_ids {
             let blk = &ir.blocks[&bid];
-            let cond_var = match &blk.terminator {
+            let (cond_var, true_block, false_block) = match &blk.terminator {
                 Terminator::Branch {
                     cond: Operand::Var(c),
-                    ..
-                } => Some(*c),
-                Terminator::Branch { .. } => None,
+                    true_block,
+                    false_block,
+                } => (Some(*c), *true_block, *false_block),
                 _ => continue,
             };
             let Some(cond_var) = cond_var else { continue };
-            // Hop 0..3 up the def chain from the condition.
-            let mut frontier = vec![cond_var];
+            // Hop 0..3 up the def chain from the condition, tracking polarity/sense.
+            let mut frontier = vec![(cond_var, true)];
             for _hop in 0..3 {
                 let mut next = Vec::new();
-                for v in &frontier {
+                for (v, sense) in &frontier {
                     let Some(instr) = def_site_of(ir, *v) else {
                         continue;
                     };
                     match instr {
                         Instruction::CallStatic { .. } | Instruction::CallVirtual { .. } => {
                             for cv in checked_vars(instr) {
-                                guards.entry(cv).or_default().push(bid);
+                                let safe_block = if *sense { true_block } else { false_block };
+                                guards.entry(cv).or_default().push(safe_block);
                             }
                         }
                         Instruction::UnaryOp {
+                            op,
                             src: Operand::Var(u),
                             ..
                         } => {
-                            next.push(*u);
+                            let new_sense = if op == "!" { !*sense } else { *sense };
+                            next.push((*u, new_sense));
                         }
                         Instruction::BinaryOp { op, lhs, rhs, .. } => {
-                            // Containment / equality guard: `if needle in x:`,
-                            // `if x == ALLOWED:` where the sibling operand is a
-                            // literal. The var side is *checked* by this branch:
-                            // values flowing past the guarded region were
-                            // compared against a literal allow/deny list. The
-                            // comparison itself does not transform the value,
-                            // so it is invisible to the value-flow walk (the
-                            // guard is a sibling use of the var, never a link
-                            // in the chain) and must be registered here
-                            // structurally, same as guard-style calls.
                             let literal_sibling = matches!(
                                 (lhs, rhs),
                                 (Operand::StringLiteral(_), _)
@@ -575,18 +568,28 @@ impl GuardMap {
                             let is_comparison =
                                 op.contains("in") || op == "==" || op == "!=" || op == "not";
                             if literal_sibling && is_comparison {
+                                let is_inverted = op == "!=" || op == "!==" || op == "not in";
+                                let is_denylist = match (lhs, rhs) {
+                                    (Operand::StringLiteral(s), _) if s.contains("..") => true,
+                                    (_, Operand::StringLiteral(s)) if s.contains("..") => true,
+                                    _ => false,
+                                };
+                                let effective_sense = if is_inverted ^ is_denylist {
+                                    !*sense
+                                } else {
+                                    *sense
+                                };
+                                let safe_block =
+                                    if effective_sense { true_block } else { false_block };
                                 for op in [lhs, rhs] {
                                     if let Operand::Var(u) = op {
-                                        guards.entry(*u).or_default().push(bid);
+                                        guards.entry(*u).or_default().push(safe_block);
                                     }
                                 }
                             }
-                            // Keep walking: boolean chains
-                            // (`if x == A or x == B:`) nest BinaryOps, so the
-                            // var side may itself be a deeper comparison.
                             for op in [lhs, rhs] {
                                 if let Operand::Var(u) = op {
-                                    next.push(*u);
+                                    next.push((*u, *sense));
                                 }
                             }
                         }

@@ -922,6 +922,108 @@ pub mod demand_tests {
             findings
         );
     }
+
+    #[test]
+    fn test_containment_guard_on_wrong_branch_still_vulnerable() {
+        let mut handler = FunctionIR::new("handler".into());
+        {
+            let b0 = handler.entry_block;
+            let mem0 = handler.initial_memory_state;
+
+            let req = handler.new_var(dummy_meta("request"));
+            let form = handler.new_var(dummy_meta("request.form"));
+            handler.push_instruction(
+                b0,
+                Instruction::LoadField {
+                    dest: form,
+                    mem_in: mem0,
+                    base: req,
+                    field: "form".into(),
+                },
+            );
+            let got = handler.new_var(dummy_meta("got"));
+            let m1 = handler.new_var(mem_meta("m1"));
+            handler.push_instruction(
+                b0,
+                Instruction::CallVirtual {
+                    dest: Some(got),
+                    mem_out: m1,
+                    mem_in: mem0,
+                    method: "get".into(),
+                    receiver: Operand::Var(form),
+                    args: vec![Operand::StringLiteral("\"p\"".into())],
+                },
+            );
+            let bar = handler.new_var(dummy_meta("bar"));
+            handler.push_instruction(
+                b0,
+                Instruction::Assign {
+                    dest: bar,
+                    src: Operand::Var(got),
+                },
+            );
+            let cond = handler.new_var(dummy_meta("cond"));
+            handler.push_instruction(
+                b0,
+                Instruction::BinaryOp {
+                    dest: cond,
+                    op: "in".into(),
+                    lhs: Operand::StringLiteral("\"../\"".into()),
+                    rhs: Operand::Var(bar),
+                },
+            );
+
+            let flawed_sink_block = handler.new_block();
+            let safe_exit = handler.new_block();
+            // Call is on the TRUE arm of ("../" in bar), so it is vulnerable!
+            handler.set_terminator(
+                b0,
+                Terminator::Branch {
+                    cond: Operand::Var(cond),
+                    true_block: flawed_sink_block,
+                    false_block: safe_exit,
+                },
+            );
+            handler.add_edge(b0, flawed_sink_block);
+            handler.add_edge(b0, safe_exit);
+
+            let m2 = handler.new_var(mem_meta("m2"));
+            handler.push_instruction(
+                flawed_sink_block,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m2,
+                    mem_in: m1,
+                    func: "open".into(),
+                    args: vec![Operand::Var(bar)],
+                },
+            );
+            handler.set_terminator(flawed_sink_block, Terminator::Return { src: None });
+            handler.set_terminator(safe_exit, Terminator::Return { src: None });
+        }
+
+        let cfg = TaintConfig {
+            sources: [
+                "request.form.get".to_string(),
+                "request.form".to_string(),
+                "request".to_string(),
+            ]
+            .into_iter()
+            .collect(),
+            sinks: ["open".to_string()].into_iter().collect(),
+            sanitizers: [].into_iter().collect(),
+        };
+        let prog = build_program(vec![handler]);
+        let (findings, _stats) = run_backward(&cfg, &prog);
+
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.verdict == BackwardVerdict::Vulnerable),
+            "sink on flawed branch of denylist guard must stay Vulnerable, got {:?}",
+            findings
+        );
+    }
     // -----------------------------------------------------------------------
     // Branch feasibility: `bar = "safe" if const_true else param` — the
     // tainted else arm is dead, so the flow through the phi is not
