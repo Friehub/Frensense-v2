@@ -1,6 +1,7 @@
 <div align="left">
   <h1>Frensense</h1>
   <p><strong>A deterministic, dataflow-driven security scanner for TypeScript, JavaScript, Python, Go, and Rust.</strong></p>
+  <p><a href="https://frensense.blueprint.cloud">Documentation</a> | <a href="https://github.com/Friehub/Frensense-v2/releases">Releases</a></p>
 </div>
 
 <br />

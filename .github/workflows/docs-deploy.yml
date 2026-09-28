@@ -3,7 +3,7 @@ name: Deploy Docs (v2 + v1 archive)
 # Builds the frensense-v2 docs site and deploys it to the gh-pages branch:
 #   /        -> v2 docs (this repo's docs-site)
 #   /v1/     -> frozen copy of the legacy v1 site (Friehub/Frensense gh-pages)
-#   CNAME    -> frensense.friehub.cloud
+#   CNAME    -> frensense.blueprint.cloud
 on:
   push:
     branches:
@@ -68,7 +68,7 @@ jobs:
           # v1 archive must not shadow v2 routes; copy it first is fine
           # because dist never contains a v1/ directory.
           cp -r deploy/v1 deploy-root/v1
-          echo "frensense.friehub.cloud" > deploy-root/CNAME
+          echo "frensense.blueprint.cloud" > deploy-root/CNAME
           touch deploy-root/.nojekyll
 
       - name: Deploy to GitHub Pages (branch archive)

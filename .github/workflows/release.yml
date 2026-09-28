@@ -236,7 +236,7 @@ jobs:
     uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a # v2.1.0
     with:
       base64-subjects: ${{ needs.generate-hashes.outputs.hashes }}
-      upload-assets: true
+      upload-assets: false
 
   # 4. Publish to Crates.io
   publish-cargo:
@@ -259,6 +259,8 @@ jobs:
         with:
           toolchain: stable
       - name: Publish workspace crates in dependency order
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           publish_crate() {
             CRATE=$1
@@ -275,7 +277,7 @@ jobs:
               echo "$CRATE@$CRATE_VER is already published. Skipping."
             else
               echo "Publishing $CRATE@$CRATE_VER to crates.io..."
-              cargo publish -p "$CRATE" --token ${{ secrets.CARGO_REGISTRY_TOKEN }} --allow-dirty
+              cargo publish -p "$CRATE" --allow-dirty
               echo "Waiting 35s for crates.io index propagation..."
               sleep 35
             fi
@@ -405,6 +407,8 @@ jobs:
             if [[ "$target" == *"windows"* ]]; then ext=".exe"; fi
             cp "${dir}frensense${ext}" "release-binaries/frensense-${target}${ext}"
           done
+          # Include SLSA provenance attestation if generated
+          find artifacts -name "*.intoto.jsonl" -exec cp {} release-binaries/ \; 2>/dev/null || true
       - name: Release
         uses: softprops/action-gh-release@26994186c0ac3ef5cae75ac16aa32e8153525f77 # v2.4.2
         with:
