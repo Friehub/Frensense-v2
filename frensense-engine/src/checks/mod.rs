@@ -20,6 +20,7 @@
 //! Line drawn: **built-in = how to look; learned = what to conclude.**
 
 pub mod guard_bypass;
+pub mod oob;
 pub mod policy;
 pub mod schema_policy;
 pub mod uaf;
@@ -27,6 +28,8 @@ pub mod weak_hash;
 
 #[cfg(test)]
 mod guard_bypass_tests;
+#[cfg(test)]
+mod oob_tests;
 #[cfg(test)]
 mod policy_tests;
 #[cfg(test)]
@@ -102,6 +105,7 @@ pub fn check_all<'a>(
             .chain(guard_bypass::check_credentials(ir))
             .chain(schema_policy::check(ir))
             .chain(uaf::check(ir))
+            .chain(oob::check(ir))
             .chain(learned::check(ir, facts));
         for f in findings {
             let key = (

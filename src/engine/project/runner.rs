@@ -222,8 +222,11 @@ fn advisory_from_checker(
     file_id: crate::FileId,
 ) -> Advisory {
     let path = Path::new(file);
-    let is_memory_safety = c.rule == "use_after_free" || c.rule == "double_free";
-    let (severity, title, impact, improvement, tag) = if is_memory_safety {
+    let is_temporal_memory_safety = c.rule == "use_after_free" || c.rule == "double_free";
+    let is_spatial_memory_safety = c.rule == "buffer_overflow"
+        || c.rule == "out_of_bounds_read"
+        || c.rule == "out_of_bounds_access";
+    let (severity, title, impact, improvement, tag) = if is_temporal_memory_safety {
         (
             Severity::Critical,
             format!("Memory safety violation: {} ({})", c.rule, c.function),
@@ -233,6 +236,20 @@ fn advisory_from_checker(
             ),
             format!(
                 "Ensure memory is not used after free or freed multiple times in `{}`. Zero or null pointer variables after free.",
+                c.function
+            ),
+            "memory-safety",
+        )
+    } else if is_spatial_memory_safety {
+        (
+            Severity::Critical,
+            format!("Memory safety violation: {} ({})", c.rule, c.function),
+            format!(
+                "{} at {}:{}, dangerous spatial memory safety defect leading to memory corruption, out-of-bounds access, or arbitrary code execution.",
+                c.rule, file, line
+            ),
+            format!(
+                "Ensure buffer bounds and subscript indices are strictly validated before access in `{}`. Guard index against buffer capacity.",
                 c.function
             ),
             "memory-safety",
