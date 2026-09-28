@@ -7,8 +7,8 @@ description = "Frensense engine core - structural code analysis primitives (fing
 license = "GPL-3.0-only"
 readme = "../README.md"
 repository = "https://github.com/Friehub/Frensense-v2"
-homepage = "https://frensense.blueprint.cloud"
-documentation = "https://frensense.blueprint.cloud"
+homepage = "https://friehub.github.io/Frensense-v2/"
+documentation = "https://friehub.github.io/Frensense-v2/"
 rust-version = "1.95"
 
 [lib]
