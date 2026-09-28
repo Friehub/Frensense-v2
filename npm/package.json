@@ -15,7 +15,7 @@
     "type": "git",
     "url": "git+https://github.com/Friehub/Frensense-v2.git"
   },
-  "homepage": "https://friehub.github.io/Frensense-v2/",
+  "homepage": "https://frensense.friehub.cloud",
   "license": "GPL-3.0-only",
   "keywords": [
     "security",

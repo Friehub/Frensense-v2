@@ -68,8 +68,7 @@ jobs:
           # v1 archive must not shadow v2 routes; copy it first is fine
           # because dist never contains a v1/ directory.
           cp -r deploy/v1 deploy-root/v1
-          # Explicitly remove CNAME so GitHub Pages serves from https://friehub.github.io/Frensense-v2/ directly without redirecting
-          rm -f deploy-root/CNAME
+          echo "frensense.friehub.cloud" > deploy-root/CNAME
           touch deploy-root/.nojekyll
 
       - name: Deploy to GitHub Pages (branch archive)
