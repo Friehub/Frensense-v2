@@ -187,13 +187,20 @@ jobs:
 
       - name: MCP Server Smoke Test
         run: |
-          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' |
-            timeout 30 ./target/release/frensense mcp 2>/dev/null | grep -q 'frensense-mcp'
-          printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' |
-            timeout 30 ./target/release/frensense mcp 2>/dev/null | grep -q 'frensense_scan_file'
-          printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}' |
-            timeout 30 ./target/release/frensense mcp 2>/dev/null | grep -q 'frensense_diff'
-          echo "MCP smoke test passed"
+          python3 - <<'PYEOF'
+          import json, subprocess
+          reqs = "\n".join([
+              json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
+              json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}),
+              json.dumps({"jsonrpc": "2.0", "id": 3, "method": "exit"}),
+          ]) + "\n"
+          proc = subprocess.run(["./target/release/frensense", "mcp"], input=reqs.encode(), capture_output=True, timeout=30)
+          out = proc.stdout.decode("utf-8", errors="replace")
+          assert "frensense-mcp" in out, f"initialize response missing serverInfo: {out}"
+          assert "frensense_scan_file" in out, f"tools/list missing frensense_scan_file: {out}"
+          assert "frensense_diff" in out, f"tools/list missing frensense_diff: {out}"
+          print("MCP smoke test passed")
+          PYEOF
 
       - name: LSP Server Smoke Test
         run: |
@@ -219,7 +226,7 @@ jobs:
           printf 'import hashlib\n\n\ndef digest(data):\n    return hashlib.md5(data).hexdigest()\n' > /tmp/frensense-consistency/app.py
           ./target/release/frensense /tmp/frensense-consistency/app.py --json 2>/dev/null | grep -q 'weak_hash'
           echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"frensense_scan_file","arguments":{"path":"/tmp/frensense-consistency/app.py"}}}' |
-            timeout 30 ./target/release/frensense mcp 2>/dev/null | grep -q 'weak_hash'
+            ./target/release/frensense mcp 2>/dev/null | grep -q 'weak_hash'
           echo "Delivery surface consistency OK"
 
       - name: Baseline Regression Check
