@@ -173,6 +173,18 @@ pub enum PolicyRequirement {
         /// Last-segment names, any one of which satisfies the requirement.
         any_of: Vec<String>,
     },
+    /// The call's argument at `slot` must NOT match any of `values`
+    /// (case-insensitive comparison over string, boolean, or integer literals).
+    BannedArgLiteral {
+        slot: usize,
+        values: Vec<String>,
+    },
+    /// The call's argument at `slot` MUST match one of `values`
+    /// (case-insensitive comparison over string, boolean, or integer literals).
+    RequiredArgLiteral {
+        slot: usize,
+        values: Vec<String>,
+    },
 }
 
 impl PolicyRequirement {
@@ -185,10 +197,13 @@ impl PolicyRequirement {
             PolicyRequirement::RequireCall { any_of } => {
                 any_of.iter().map(|s| s.as_str()).collect()
             }
-            PolicyRequirement::RangeCheck { .. } => Vec::new(),
+            PolicyRequirement::RangeCheck { .. }
+            | PolicyRequirement::BannedArgLiteral { .. }
+            | PolicyRequirement::RequiredArgLiteral { .. } => Vec::new(),
         }
     }
 }
+
 
 /// Where a policy's trigger and requirements are evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -273,6 +288,40 @@ pub struct MemoryContractFact {
     pub consumes_params: Vec<usize>,
 }
 
+/// One corpus-verified weak cryptography rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub struct WeakCryptoFact {
+    pub rule_id: String,
+    pub call: String,
+    pub selector_slot: Option<usize>,
+    pub weak_selectors: Vec<String>,
+}
+
+/// One corpus-verified guard bypass fact (containment callee or credential sink).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub struct GuardBypassFact {
+    #[serde(default)]
+    pub containment_callees: Vec<String>,
+    #[serde(default)]
+    pub credential_sinks: Vec<String>,
+    #[serde(default)]
+    pub credential_params: Vec<String>,
+}
+
+/// One corpus-verified tool/API schema policy fact.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub struct SchemaPolicyFact {
+    #[serde(default)]
+    pub builders: Vec<String>,
+    #[serde(default)]
+    pub enforcers: Vec<String>,
+    #[serde(default)]
+    pub bound_keywords: Vec<String>,
+}
+
 /// The merged fact table: built-in language tables + bundle-learned facts.
 ///
 /// Built from a [`TaintConfig`] (name sets, backward compatible) plus
@@ -294,6 +343,20 @@ pub struct FactTable {
     pub policy_facts: Vec<PolicyFact>,
     /// Corpus-verified interprocedural memory contracts (allocators / deallocators).
     pub memory_contracts: Vec<MemoryContractFact>,
+    /// Corpus-verified weak cryptography rules.
+    pub weak_crypto_rules: Vec<WeakCryptoFact>,
+    /// Corpus-verified containment callees (for allowlist bypass checks).
+    pub containment_callees: FxHashSet<String>,
+    /// Corpus-verified credential setter/hasher sinks.
+    pub credential_sinks: FxHashSet<String>,
+    /// Corpus-verified parameter names identifying credentials.
+    pub credential_params: FxHashSet<String>,
+    /// Corpus-verified schema builder methods.
+    pub schema_builders: FxHashSet<String>,
+    /// Corpus-verified schema enforcer methods.
+    pub schema_enforcers: FxHashSet<String>,
+    /// Corpus-verified bound keywords.
+    pub schema_keywords: FxHashSet<String>,
     /// Last segments that come ONLY from dotted client sinks (`got.get`,
     /// `axios.post`, ...). These verbs are ambiguous, `Map.get`, router
     /// `app.post`, LRU `.put` all share the names, so they match
@@ -324,6 +387,7 @@ pub struct FactTable {
     /// bundles teach new frameworks without touching the built-in tables.
     pub learned_sources: FxHashSet<String>,
 }
+
 
 
 impl FactTable {
@@ -405,6 +469,30 @@ impl FactTable {
                 self.memory_contracts.push(mc.clone());
             }
         }
+        for wc in &other.weak_crypto_rules {
+            if let Some(existing) = self
+                .weak_crypto_rules
+                .iter_mut()
+                .find(|r| r.rule_id == wc.rule_id && r.call == wc.call)
+            {
+                *existing = wc.clone();
+            } else {
+                self.weak_crypto_rules.push(wc.clone());
+            }
+        }
+        self.containment_callees
+            .extend(other.containment_callees.iter().cloned());
+        self.credential_sinks
+            .extend(other.credential_sinks.iter().cloned());
+        self.credential_params
+            .extend(other.credential_params.iter().cloned());
+        self.schema_builders
+            .extend(other.schema_builders.iter().cloned());
+        self.schema_enforcers
+            .extend(other.schema_enforcers.iter().cloned());
+        self.schema_keywords
+            .extend(other.schema_keywords.iter().cloned());
+
         // Verb-sink bookkeeping accumulates too: dotted client entries
         // (`got.get`, `axios.post`) from any merged spec/bundle widen the
         // receiver-aware sets.
@@ -667,6 +755,12 @@ pub enum LearnedFactEntry {
         return_capacity: CapacitySpec,
         consumes_params: Vec<usize>,
     },
+    /// A weak cryptographic primitive or selector rule.
+    WeakCrypto(WeakCryptoFact),
+    /// Guard bypass parameters (containment check helpers or credential sinks).
+    GuardBypass(GuardBypassFact),
+    /// Schema validation builders, enforcers, or keywords.
+    SchemaPolicy(SchemaPolicyFact),
 }
 
 impl LearnedFactEntry {
@@ -781,9 +875,39 @@ impl LearnedFactEntry {
                     table.memory_contracts.push(fact);
                 }
             }
+            LearnedFactEntry::WeakCrypto(fact) => {
+                if let Some(existing) = table
+                    .weak_crypto_rules
+                    .iter_mut()
+                    .find(|r| r.rule_id == fact.rule_id && r.call == fact.call)
+                {
+                    *existing = fact.clone();
+                } else {
+                    table.weak_crypto_rules.push(fact.clone());
+                }
+            }
+            LearnedFactEntry::GuardBypass(fact) => {
+                table
+                    .containment_callees
+                    .extend(fact.containment_callees.iter().cloned());
+                table
+                    .credential_sinks
+                    .extend(fact.credential_sinks.iter().cloned());
+                table
+                    .credential_params
+                    .extend(fact.credential_params.iter().cloned());
+            }
+            LearnedFactEntry::SchemaPolicy(fact) => {
+                table.schema_builders.extend(fact.builders.iter().cloned());
+                table.schema_enforcers.extend(fact.enforcers.iter().cloned());
+                table
+                    .schema_keywords
+                    .extend(fact.bound_keywords.iter().cloned());
+            }
         }
     }
 }
+
 
 /// Build a [`FactTable`] from a list of learned bundle facts.
 pub fn fact_table_from_entries(entries: &[LearnedFactEntry]) -> FactTable {

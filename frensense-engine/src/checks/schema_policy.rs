@@ -14,6 +14,7 @@
 //! Mechanism only: which schema builders (`z.number`, `number`, ...) and
 //! which bounds matter is corpus-refinable via learned checks.
 
+use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
@@ -36,12 +37,12 @@ static ENFORCERS: &[&str] = &[
     "step",
 ];
 
-pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
+pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     let mut findings = Vec::new();
     // Collect describe/description string args keyed by their receiver chain,
     // and builder+enforcer method calls with their spans.
     let mut described: Vec<(String, Option<(usize, usize)>)> = Vec::new();
-    let mut builders: Vec<(String, Option<(usize, usize)>)> = Vec::new();
+    let mut builders: Vec<(String, bool, Option<(usize, usize)>)> = Vec::new();
     let mut enforcers: Vec<&str> = Vec::new();
     for block in ir.blocks.values() {
         for instr in &block.instructions {
@@ -73,27 +74,41 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
                             });
                         described.push((text, span));
                     }
-                } else if ENFORCERS.contains(&seg) {
+                } else if ENFORCERS.contains(&seg)
+                    || facts.schema_enforcers.iter().any(|e| e.eq_ignore_ascii_case(seg))
+                {
                     enforcers.push(seg);
-                } else if NUMBER_BUILDERS.contains(&seg) {
-                    let span = dest
-                        .as_ref()
-                        .and_then(|d| ir.var_metadata.get(d))
-                        .and_then(|m| m.byte_range);
-                    builders.push((seg.to_string(), span));
+                } else {
+                    let is_builtin_builder = NUMBER_BUILDERS.contains(&seg);
+                    let is_learned_builder = facts
+                        .schema_builders
+                        .iter()
+                        .any(|b| b.eq_ignore_ascii_case(seg));
+                    if is_builtin_builder || is_learned_builder {
+                        let span = dest
+                            .as_ref()
+                            .and_then(|d| ir.var_metadata.get(d))
+                            .and_then(|m| m.byte_range);
+                        builders.push((seg.to_string(), is_learned_builder, span));
+                    }
                 }
             }
         }
     }
     if enforcers.is_empty() && !described.is_empty() && !builders.is_empty() {
-        for (_builder, span) in &builders {
+        for (_builder, builder_learned, span) in &builders {
             for (text, _dspan) in &described {
                 let lower = text.to_ascii_lowercase();
-                if BOUND_KEYWORDS.iter().any(|k| lower.contains(k))
+                let is_builtin_keyword = BOUND_KEYWORDS.iter().any(|k| lower.contains(k));
+                let is_learned_keyword = facts
+                    .schema_keywords
+                    .iter()
+                    .any(|k| lower.contains(&k.to_ascii_lowercase()));
+                if (is_builtin_keyword || is_learned_keyword)
                     && lower.chars().any(|c| c.is_ascii_digit())
                 {
                     findings.push(CheckerFinding {
-                        learned: false,
+                        learned: *builder_learned || is_learned_keyword,
                         function: ir.name.clone(),
                         rule: "unbounded_number_schema".to_string(),
                         message: format!(

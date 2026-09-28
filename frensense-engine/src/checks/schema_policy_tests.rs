@@ -128,4 +128,109 @@ export const isRedirectAllowed = (url: string) => redirectAllowlist.has(url)
             "no containment guard, no definition finding"
         );
     }
+
+    /// Learned schema builder positive & negative test.
+    #[test]
+    fn learned_schema_builder_positive_and_negative() {
+        let mut facts = FactTable::default();
+        facts.schema_builders.insert("customQuantity".into());
+
+        // Positive sample: custom builder with prose bound without enforcement
+        let pos_src = r#"
+export const schema = {
+  qty: builder.customQuantity().describe('maximum 50 items')
+}
+"#;
+        let pos_irs = lower_source("t.ts", pos_src, "ts").expect("lower");
+        let pos_findings = check_all(pos_irs.values(), &facts);
+        let f = pos_findings
+            .iter()
+            .find(|f| f.rule == "unbounded_number_schema")
+            .expect("learned builder must fire on positive sample");
+        assert!(f.learned);
+
+        // Negative sample: custom builder with enforcement
+        let neg_src = r#"
+export const schema = {
+  qty: builder.customQuantity().max(50).describe('maximum 50 items')
+}
+"#;
+        let neg_irs = lower_source("t.ts", neg_src, "ts").expect("lower");
+        let neg_findings = check_all(neg_irs.values(), &facts);
+        assert!(
+            neg_findings.iter().all(|f| f.rule != "unbounded_number_schema"),
+            "enforced builder must stay silent"
+        );
+    }
+
+    /// Learned schema enforcer positive & negative test.
+    #[test]
+    fn learned_schema_enforcer_positive_and_negative() {
+        let mut facts = FactTable::default();
+        facts.schema_enforcers.insert("customClamp".into());
+
+        // Positive sample: standard number builder with prose bound, but lacking customClamp
+        let pos_src = r#"
+import { z } from 'zod'
+export const schema = {
+  count: z.number().describe('limit 20')
+}
+"#;
+        let pos_irs = lower_source("t.ts", pos_src, "ts").expect("lower");
+        let pos_findings = check_all(pos_irs.values(), &facts);
+        assert!(
+            pos_findings.iter().any(|f| f.rule == "unbounded_number_schema"),
+            "unenforced schema must fire on positive sample"
+        );
+
+        // Negative sample: uses customClamp to enforce the bound
+        let neg_src = r#"
+import { z } from 'zod'
+export const schema = {
+  count: z.number().customClamp(20).describe('limit 20')
+}
+"#;
+        let neg_irs = lower_source("t.ts", neg_src, "ts").expect("lower");
+        let neg_findings = check_all(neg_irs.values(), &facts);
+        assert!(
+            neg_findings.iter().all(|f| f.rule != "unbounded_number_schema"),
+            "schema enforced with customClamp must stay silent"
+        );
+    }
+
+    /// Learned bound keyword positive & negative test.
+    #[test]
+    fn learned_bound_keyword_positive_and_negative() {
+        let mut facts = FactTable::default();
+        facts.schema_keywords.insert("ceiling".into());
+
+        // Positive sample: description uses 'ceiling 100' without enforcer
+        let pos_src = r#"
+import { z } from 'zod'
+export const schema = {
+  val: z.number().describe('ceiling 100')
+}
+"#;
+        let pos_irs = lower_source("t.ts", pos_src, "ts").expect("lower");
+        let pos_findings = check_all(pos_irs.values(), &facts);
+        let f = pos_findings
+            .iter()
+            .find(|f| f.rule == "unbounded_number_schema")
+            .expect("learned keyword must trigger on positive sample");
+        assert!(f.learned);
+
+        // Negative sample: description uses 'ceiling 100' with .max(100) enforcer
+        let neg_src = r#"
+import { z } from 'zod'
+export const schema = {
+  val: z.number().max(100).describe('ceiling 100')
+}
+"#;
+        let neg_irs = lower_source("t.ts", neg_src, "ts").expect("lower");
+        let neg_findings = check_all(neg_irs.values(), &facts);
+        assert!(
+            neg_findings.iter().all(|f| f.rule != "unbounded_number_schema"),
+            "enforced schema with learned keyword must stay silent"
+        );
+    }
 }

@@ -17,6 +17,7 @@
 //! checker immune to taint-config drift and free to run per function in
 //! parallel.
 
+use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
@@ -145,11 +146,14 @@ fn receiver_path(ir: &FunctionIR, _args: &[Operand], _callee: &str) -> Option<St
 /// Run every policy rule over one lowered function.
 /// The weak-hash / weak-crypto rule: scan one function for security-weak
 /// primitives.
-pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
-    check_function(ir)
+/// Run every policy rule over one lowered function.
+/// The weak-hash / weak-crypto rule: scan one function for security-weak
+/// primitives.
+pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
+    check_function(ir, facts)
 }
 
-pub fn check_function(ir: &FunctionIR) -> Vec<CheckerFinding> {
+pub fn check_function(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     // The value lattice lets selector rules see through constant
     // assignments: `const alg = 'none'; jwt.sign(payload, secret, alg)`
     // must fire even though the selector operand is a var, not a literal.
@@ -168,6 +172,7 @@ pub fn check_function(ir: &FunctionIR) -> Vec<CheckerFinding> {
                     args,
                     instr_span(ir, instr),
                     &values,
+                    facts,
                     &mut findings,
                 );
             }
@@ -220,6 +225,7 @@ fn check_call(
     args: &[Operand],
     span: Option<(usize, usize)>,
     values: &crate::analysis::value::ValueInfo,
+    facts: &FactTable,
     out: &mut Vec<CheckerFinding>,
 ) {
     // Receiver chains are matched by last segment: `security.hash` and bare
@@ -276,6 +282,46 @@ fn check_call(
             return;
         }
     }
+
+    // Evaluate corpus-learned weak crypto rules
+    for fact in &facts.weak_crypto_rules {
+        let fact_call_seg = last_segment(&fact.call).to_ascii_lowercase();
+        if fact_call_seg == callee_lower {
+            if let Some(slot) = fact.selector_slot {
+                if let Some(sel) = args
+                    .get(slot)
+                    .and_then(|a| arg_str_literal(a, values))
+                    .map(str::to_ascii_lowercase)
+                    && fact.weak_selectors.iter().any(|ws| ws.to_ascii_lowercase() == sel)
+                {
+                    out.push(CheckerFinding {
+                        learned: true,
+                        function: ir.name.clone(),
+                        rule: fact.rule_id.clone(),
+                        message: format!(
+                            "Weak cryptographic primitive '{}' selected by `{}`, not acceptable for security-sensitive operations",
+                            sel, callee_seg
+                        ),
+                        span,
+                    });
+                    return;
+                }
+            } else {
+                out.push(CheckerFinding {
+                    learned: true,
+                    function: ir.name.clone(),
+                    rule: fact.rule_id.clone(),
+                    message: format!(
+                        "Weak cryptographic call `{}`, not acceptable for security-sensitive operations",
+                        callee_seg
+                    ),
+                    span,
+                });
+                return;
+            }
+        }
+    }
+
 
     // Hash-wrapper heuristic: a call named `hash`/`hashPassword` whose
     // receiver is a security-ish namespace. Matched by last segment of the

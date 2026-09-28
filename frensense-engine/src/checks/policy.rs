@@ -172,8 +172,79 @@ fn requirement_holds(
             Operand::Var(v) => is_range_guarded(ir, *v, ops, block, val_info),
             _ => false,
         }),
+        PolicyRequirement::BannedArgLiteral { slot, values } => {
+            if let Some(arg) = args.get(*slot) {
+                if let Some(s) = extract_literal_string(arg, ir, val_info) {
+                    let s_lower = s.to_ascii_lowercase();
+                    return !values.iter().any(|v| v.to_ascii_lowercase() == s_lower);
+                }
+            }
+            true
+        }
+        PolicyRequirement::RequiredArgLiteral { slot, values } => {
+            if let Some(arg) = args.get(*slot) {
+                if let Some(s) = extract_literal_string(arg, ir, val_info) {
+                    let s_lower = s.to_ascii_lowercase();
+                    return values.iter().any(|v| v.to_ascii_lowercase() == s_lower);
+                }
+            }
+            false
+        }
     }
 }
+
+fn strip_quotes(lit: &str) -> &str {
+    let lit = lit.trim();
+    let bytes = lit.as_bytes();
+    let (core, _) = match bytes.first() {
+        Some(b'\'') | Some(b'"') | Some(b'`') => {
+            let end = bytes.len().saturating_sub(1);
+            (&lit[1..end], true)
+        }
+        _ => (lit, false),
+    };
+    core
+}
+
+/// Extract constant literal string/bool/int representation from an operand.
+fn extract_literal_string(
+    op: &Operand,
+    ir: &FunctionIR,
+    val_info: &crate::analysis::value::ValueInfo,
+) -> Option<String> {
+    match op {
+        Operand::StringLiteral(s) => Some(strip_quotes(s).to_string()),
+        Operand::IntLiteral(i) => Some(i.to_string()),
+        Operand::BoolLiteral(b) => Some(b.to_string()),
+        Operand::Var(v) => {
+            if let Some(s) = val_info.const_str(*v) {
+                return Some(strip_quotes(s).to_string());
+            }
+            if let Some(c) = val_info.const_int(*v) {
+                return Some(c.to_string());
+            }
+            if let Some(b) = val_info.const_bool(*v) {
+                return Some(b.to_string());
+            }
+            for block in ir.blocks.values() {
+                for instr in &block.instructions {
+                    match instr {
+                        Instruction::Assign { dest, src } if dest == v => {
+                            return extract_literal_string(src, ir, val_info);
+                        }
+                        Instruction::Cast { dest, src, .. } if dest == v => {
+                            return extract_literal_string(src, ir, val_info);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 
 /// The segment set a requirement is evaluated against.
 fn scope_segs<'a>(

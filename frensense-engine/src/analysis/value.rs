@@ -523,6 +523,14 @@ impl ValueInfo {
         }
     }
 
+    /// The boolean constant of `var`, if provably constant.
+    pub fn const_bool(&self, var: VarId) -> Option<bool> {
+        match self.values.get(&var)? {
+            Value::BoolConst(b) => Some(*b),
+            _ => None,
+        }
+    }
+
     /// The interval of `var`, if an integer with a known range.
     pub fn range(&self, var: VarId) -> Option<(i64, i64)> {
         self.values.get(&var).and_then(Value::interval)

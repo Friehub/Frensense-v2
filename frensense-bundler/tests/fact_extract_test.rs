@@ -2,7 +2,7 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-use frensense_bundler::fact_extract::{extract_facts, group_families};
+use frensense_bundler::fact_extract::{extract_facts, group_families, Family, FamilyMetadata};
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::facts::{FactTable, LearnedFactEntry};
 
@@ -204,6 +204,170 @@ void test_app() {
     assert!(
         !scan_neg.has_alert(),
         "consumer negative sample MUST stay silent with learned contract; findings: {:?}",
+        scan_neg.checker
+    );
+}
+
+#[test]
+fn test_learn_arg_literal_policy_from_corpus() {
+    let cfg = TaintConfig::default();
+    let builtin = FactTable::default();
+
+    // 1. Training corpus family with positive and negative variants
+    let family = Family {
+        id: "tls_verification_policy".to_string(),
+        positives: vec![(
+            "tls_pos.ts".to_string(),
+            r#"
+export function createSession(host: string) {
+    return configureTls(host, "insecure");
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )],
+        negatives: vec![(
+            "tls_neg.ts".to_string(),
+            r#"
+export function createSession(host: string) {
+    return configureTls(host, "secure");
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )],
+        declared_check_call: None,
+        metadata: FamilyMetadata::default(),
+    };
+
+    // 2. Extract facts via the bundler replay gate:
+    let (learned, published) = extract_facts(&[family], &cfg, &builtin);
+    assert!(
+        !published.is_empty(),
+        "must publish learned facts from separating variants; published: {:?}",
+        published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+    );
+
+    // 3. Test on consumer project with positive (vulnerable) and negative (safe) samples:
+    let consumer_pos = vec![(
+        "app_pos.ts".to_string(),
+        r#"
+export function connect() {
+    return configureTls("api.internal", "insecure");
+}
+"#
+        .to_string(),
+        "ts".to_string(),
+    )];
+
+    let consumer_neg = vec![(
+        "app_neg.ts".to_string(),
+        r#"
+export function connect() {
+    return configureTls("api.internal", "secure");
+}
+"#
+        .to_string(),
+        "ts".to_string(),
+    )];
+
+    // At baseline: does not alert
+    let baseline_res = frensense_engine::scan::scan(&consumer_pos, &cfg, &builtin);
+    assert!(!baseline_res.has_alert());
+
+    // With learned bundle facts:
+    // Positive sample must alert
+    let scan_pos = frensense_engine::scan::scan(&consumer_pos, &cfg, &learned);
+    assert!(
+        scan_pos.has_alert(),
+        "consumer positive MUST alert with learned policy: {:?}",
+        scan_pos.checker
+    );
+
+    // Negative sample must stay completely silent
+    let scan_neg = frensense_engine::scan::scan(&consumer_neg, &cfg, &learned);
+    assert!(
+        !scan_neg.has_alert(),
+        "consumer negative MUST stay silent: {:?}",
+        scan_neg.checker
+    );
+}
+
+#[test]
+fn test_learn_guard_bypass_containment_from_corpus() {
+    let cfg = TaintConfig::default();
+    let builtin = FactTable::default();
+
+    // 1. Training corpus family for custom containment callee
+    let family = Family {
+        id: "url_allowlist_bypass".to_string(),
+        positives: vec![(
+            "redirect_pos.ts".to_string(),
+            r#"
+export function isAllowedUrl(targetUrl: string, allowedHost: string) {
+    return targetUrl.fuzzyMatch(allowedHost);
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )],
+        negatives: vec![(
+            "redirect_neg.ts".to_string(),
+            r#"
+export function isAllowedUrl(targetUrl: string, allowedHost: string) {
+    return parseDomain(targetUrl) === allowedHost;
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )],
+        declared_check_call: None,
+        metadata: FamilyMetadata::default(),
+    };
+
+    // 2. Extract facts via the bundler replay gate:
+    let (learned, published) = extract_facts(&[family], &cfg, &builtin);
+    assert!(
+        !published.is_empty(),
+        "must publish learned facts; published: {:?}",
+        published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+    );
+
+    // 3. Test on consumer project:
+    let consumer_pos = vec![(
+        "client_pos.ts".to_string(),
+        r#"
+export function validateRedirect(url: string) {
+    return url.fuzzyMatch("https://good.com");
+}
+"#
+        .to_string(),
+        "ts".to_string(),
+    )];
+
+    let consumer_neg = vec![(
+        "client_neg.ts".to_string(),
+        r#"
+export function validateRedirect(url: string) {
+    return getHost(url) === "https://good.com";
+}
+"#
+        .to_string(),
+        "ts".to_string(),
+    )];
+
+    // With learned bundle facts:
+    let scan_pos = frensense_engine::scan::scan(&consumer_pos, &cfg, &learned);
+    assert!(
+        scan_pos.has_alert(),
+        "consumer positive with fuzzyMatch MUST alert on guard bypass: {:?}",
+        scan_pos.checker
+    );
+
+    let scan_neg = frensense_engine::scan::scan(&consumer_neg, &cfg, &learned);
+    assert!(
+        !scan_neg.has_alert(),
+        "consumer negative MUST stay silent: {:?}",
         scan_neg.checker
     );
 }

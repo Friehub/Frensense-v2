@@ -265,7 +265,6 @@ export function checkPermission (cmd: string) {
         }
         .apply(&mut table);
         assert_eq!(table.policy_facts.len(), 1);
-        // Re-applying must not duplicate (dedup on rule+trigger).
         LearnedFactEntry::Policy {
             rule: "policy_run_tool".into(),
             when_call: "runTool".into(),
@@ -276,5 +275,77 @@ export function checkPermission (cmd: string) {
         }
         .apply(&mut table);
         assert_eq!(table.policy_facts.len(), 1, "dedup on (rule, when_call)");
+    }
+
+    /// Positive & negative test for PolicyRequirement::BannedArgLiteral.
+    #[test]
+    fn policy_banned_arg_literal_positive_and_negative() {
+        let mut facts = FactTable::default();
+        facts.policy_facts.push(PolicyFact {
+            rule: "policy_banned_insecure_transport".into(),
+            when_call: "initConnection".into(),
+            require: vec![PolicyRequirement::BannedArgLiteral {
+                slot: 1,
+                values: vec!["false".into(), "insecure".into()],
+            }],
+            scope: PolicyScope::Function,
+            message: "Insecure transport option used".into(),
+            severity: "critical".into(),
+        });
+
+        // Positive sample: slot 1 is banned literal "false"
+        let pos_src = r#"
+export function connectClient (host: string) {
+  return initConnection(host, false);
+}
+"#;
+        let hits_pos = policy::check_program(&lower(pos_src), &facts);
+        assert_eq!(hits_pos.len(), 1, "banned arg literal must fire on positive sample");
+        assert_eq!(hits_pos[0].rule, "policy_banned_insecure_transport");
+
+        // Negative sample: slot 1 is safe literal "true"
+        let neg_src = r#"
+export function connectClient (host: string) {
+  return initConnection(host, true);
+}
+"#;
+        let hits_neg = policy::check_program(&lower(neg_src), &facts);
+        assert!(hits_neg.is_empty(), "safe arg literal must stay silent on negative sample");
+    }
+
+    /// Positive & negative test for PolicyRequirement::RequiredArgLiteral.
+    #[test]
+    fn policy_required_arg_literal_positive_and_negative() {
+        let mut facts = FactTable::default();
+        facts.policy_facts.push(PolicyFact {
+            rule: "policy_require_secure_algorithm".into(),
+            when_call: "signToken".into(),
+            require: vec![PolicyRequirement::RequiredArgLiteral {
+                slot: 2,
+                values: vec!["RS256".into(), "ES256".into()],
+            }],
+            scope: PolicyScope::Function,
+            message: "Must use approved asymmetric signature algorithm".into(),
+            severity: "critical".into(),
+        });
+
+        // Positive sample: slot 2 uses unapproved algorithm "HS256"
+        let pos_src = r#"
+export function generateToken (payload: string, key: string) {
+  return signToken(payload, key, "HS256");
+}
+"#;
+        let hits_pos = policy::check_program(&lower(pos_src), &facts);
+        assert_eq!(hits_pos.len(), 1, "unapproved arg literal must violate required arg policy");
+        assert_eq!(hits_pos[0].rule, "policy_require_secure_algorithm");
+
+        // Negative sample: slot 2 uses approved algorithm "RS256"
+        let neg_src = r#"
+export function generateToken (payload: string, key: string) {
+  return signToken(payload, key, "RS256");
+}
+"#;
+        let hits_neg = policy::check_program(&lower(neg_src), &facts);
+        assert!(hits_neg.is_empty(), "approved required literal must stay silent on negative sample");
     }
 }

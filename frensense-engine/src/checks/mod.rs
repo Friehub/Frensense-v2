@@ -78,7 +78,7 @@ pub fn check_all<'a>(
     let irs: Vec<&FunctionIR> = irs.into_iter().collect();
     // Program-level rules run once over the whole IR set (they correlate
     // guards in one function with definitions in another).
-    for f in guard_bypass::check_allowlist_definitions(&irs) {
+    for f in guard_bypass::check_allowlist_definitions(&irs, facts) {
         let key = (
             f.function.clone(),
             f.rule.clone(),
@@ -104,11 +104,11 @@ pub fn check_all<'a>(
     let mem_summaries = memory_summary::MemorySummaryRegistry::from_facts(facts)
         .infer_program_summaries_into(&irs);
     for ir in &irs {
-        let findings = weak_hash::check(ir)
+        let findings = weak_hash::check(ir, facts)
             .into_iter()
-            .chain(guard_bypass::check(ir))
-            .chain(guard_bypass::check_credentials(ir))
-            .chain(schema_policy::check(ir))
+            .chain(guard_bypass::check(ir, facts))
+            .chain(guard_bypass::check_credentials(ir, facts))
+            .chain(schema_policy::check(ir, facts))
             .chain(uaf::check_with_summaries(ir, &mem_summaries))
             .chain(oob::check_with_summaries(ir, &mem_summaries))
             .chain(learned::check(ir, facts));

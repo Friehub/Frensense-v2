@@ -21,8 +21,8 @@ use std::path::Path;
 
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::facts::{
-    FactTable, LearnedCheckFact, LearnedFactEntry, MemoryContractFact, PolicyFact, PolicyRequirement, PolicyScope,
-    SanitizerFact, SinkSignature,
+    FactTable, GuardBypassFact, LearnedCheckFact, LearnedFactEntry, MemoryContractFact, PolicyFact,
+    PolicyRequirement, PolicyScope, SanitizerFact, SchemaPolicyFact, SinkSignature, WeakCryptoFact,
 };
 use frensense_engine::checks::memory_summary::{CapacitySpec, MemorySummaryRegistry};
 use frensense_engine::scan;
@@ -393,6 +393,18 @@ enum Candidate {
         return_capacity: CapacitySpec,
         consumes_params: Vec<usize>,
     },
+    /// Weak cryptographic primitive or algorithm selector learned from corpus examples.
+    WeakCrypto {
+        fact: WeakCryptoFact,
+    },
+    /// Guard bypass pattern (containment callee, credential sink or credential param).
+    GuardBypass {
+        fact: GuardBypassFact,
+    },
+    /// Schema policy rule (number builder, enforcer method, or bound keyword).
+    SchemaPolicy {
+        fact: SchemaPolicyFact,
+    },
 }
 
 
@@ -638,59 +650,302 @@ fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Vec<Ca
     // presence-blind, so undeclared families get none (the legacy delta
     // paths above still apply).
     if let Some(trigger) = family.declared_check_call.clone() {
-        if !(pos_calls.contains_key(&trigger)
+        if pos_calls.contains_key(&trigger)
             && neg_calls.contains_key(&trigger)
-            && builtin.learned_checks.iter().all(|c| c.call != trigger))
+            && builtin.learned_checks.iter().all(|c| c.call != trigger)
         {
-            return candidates;
-        }
-        // Shape (c): banned-call co-occurrence. Calls the POSITIVES make
-        // that no negative makes: candidate `NotCall` requirements.
-        let banned: Vec<String> = pos_calls
-            .keys()
-            .filter(|c| {
-                c.as_str() != trigger
-                    && !neg_calls.contains_key(*c)
-                    && builtin.sanitizer_fact(c).is_none()
-                    && builtin.sink_signature(c).is_none()
-                    && looks_taint_relevant(c)
-            })
-            .cloned()
-            .collect();
-        if let Some(banned_call) = banned.first() {
-            candidates.push(Candidate::Policy {
-                rule: format!("policy_{trigger}_no_{banned_call}"),
-                call: trigger.clone(),
-                message: format!(
-                    "Corpus-verified policy violation: `{trigger}` must not co-occur with `{banned_call}` (learned from family {})",
-                    family.id
-                ),
-                require: vec![PolicyRequirement::NotCall {
-                    call: banned_call.clone(),
-                }],
-                scope: PolicyScope::Function,
-            });
-        }
+            // Shape (c): banned-call co-occurrence. Calls the POSITIVES make
+            // that no negative makes: candidate `NotCall` requirements.
+            let banned: Vec<String> = pos_calls
+                .keys()
+                .filter(|c| {
+                    c.as_str() != trigger
+                        && !neg_calls.contains_key(*c)
+                        && builtin.sanitizer_fact(c).is_none()
+                        && builtin.sink_signature(c).is_none()
+                        && looks_taint_relevant(c)
+                })
+                .cloned()
+                .collect();
+            if let Some(banned_call) = banned.first() {
+                candidates.push(Candidate::Policy {
+                    rule: format!("policy_{trigger}_no_{banned_call}"),
+                    call: trigger.clone(),
+                    message: format!(
+                        "Corpus-verified policy violation: `{trigger}` must not co-occur with `{banned_call}` (learned from family {})",
+                        family.id
+                    ),
+                    require: vec![PolicyRequirement::NotCall {
+                        call: banned_call.clone(),
+                    }],
+                    scope: PolicyScope::Function,
+                });
+            }
 
-        // Shape (d): cross-function enforcement. The enforcement helper is
-        // DEFINED in the negatives' module but absent from positives — the
-        // enforcement lives outside the trigger's function, so the fact
-        // uses Module scope (the engine accepts the definition site as
-        // enforcement evidence).
-        if let Some(helper) = cross_function_helper(family, &pos_calls, &neg_calls) {
-            if builtin.sanitizer_fact(&helper).is_none() {
-            candidates.push(Candidate::Policy {
-                rule: format!("policy_{trigger}_with_{helper}"),
-                call: trigger.clone(),
-                message: format!(
-                    "Corpus-verified policy violation: `{trigger}` requires `{helper}` enforcement (learned from family {})",
-                    family.id
-                ),
-                require: vec![PolicyRequirement::RequireCall {
-                    any_of: vec![helper.clone()],
-                }],
-                scope: PolicyScope::Module,
-            });
+            // Shape (d): cross-function enforcement. The enforcement helper is
+            // DEFINED in the negatives' module but absent from positives — the
+            // enforcement lives outside the trigger's function, so the fact
+            // uses Module scope (the engine accepts the definition site as
+            // enforcement evidence).
+            if let Some(helper) = cross_function_helper(family, &pos_calls, &neg_calls) {
+                if builtin.sanitizer_fact(&helper).is_none() {
+                    candidates.push(Candidate::Policy {
+                        rule: format!("policy_{trigger}_with_{helper}"),
+                        call: trigger.clone(),
+                        message: format!(
+                            "Corpus-verified policy violation: `{trigger}` requires `{helper}` enforcement (learned from family {})",
+                            family.id
+                        ),
+                        require: vec![PolicyRequirement::RequireCall {
+                            any_of: vec![helper.clone()],
+                        }],
+                        scope: PolicyScope::Module,
+                    });
+                }
+            }
+        }
+    }
+
+    let mut pos_irs = Vec::new();
+    for (path, src, ext) in &family.positives {
+        if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
+            pos_irs.extend(fns.into_values());
+        }
+    }
+    let mut neg_irs = Vec::new();
+    for (path, src, ext) in &family.negatives {
+        if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
+            neg_irs.extend(fns.into_values());
+        }
+    }
+
+    // Non-taint policy proposals: argument literal constraints & weak crypto
+    let pos_arg_literals = extract_call_arg_literals(&pos_irs);
+    let neg_arg_literals = extract_call_arg_literals(&neg_irs);
+    for ((call, slot), pos_vals) in &pos_arg_literals {
+        for pos_val in pos_vals {
+            let neg_has = neg_arg_literals
+                .get(&(call.clone(), *slot))
+                .map(|s| s.contains(pos_val))
+                .unwrap_or(false);
+            if !neg_has {
+                candidates.push(Candidate::Policy {
+                    rule: format!("policy_{call}_banned_arg_{slot}_{pos_val}"),
+                    call: call.clone(),
+                    message: format!(
+                        "Corpus-verified policy violation: argument {} of `{call}` must not be '{pos_val}' (learned from family {})",
+                        slot, family.id
+                    ),
+                    require: vec![PolicyRequirement::BannedArgLiteral {
+                        slot: *slot,
+                        values: vec![pos_val.clone()],
+                    }],
+                    scope: PolicyScope::Function,
+                });
+                if let Some(neg_vals) = neg_arg_literals.get(&(call.clone(), *slot)) {
+                    for neg_val in neg_vals {
+                        if neg_val != pos_val {
+                            candidates.push(Candidate::Policy {
+                                rule: format!("policy_{call}_required_arg_{slot}_{neg_val}"),
+                                call: call.clone(),
+                                message: format!(
+                                    "Corpus-verified policy violation: argument {} of `{call}` requires '{neg_val}' (learned from family {})",
+                                    slot, family.id
+                                ),
+                                require: vec![PolicyRequirement::RequiredArgLiteral {
+                                    slot: *slot,
+                                    values: vec![neg_val.clone()],
+                                }],
+                                scope: PolicyScope::Function,
+                            });
+                        }
+                    }
+                }
+                candidates.push(Candidate::WeakCrypto {
+                    fact: WeakCryptoFact {
+                        rule_id: format!("learned_weak_crypto_{call}_{pos_val}"),
+                        call: call.clone(),
+                        selector_slot: Some(*slot),
+                        weak_selectors: vec![pos_val.clone()],
+                    },
+                });
+            }
+        }
+    }
+
+    // Weak crypto: bare calls in positives not present in negatives
+    for call in pos_calls.keys() {
+        if !neg_calls.contains_key(call) {
+            let cl = call.to_ascii_lowercase();
+            if cl.contains("hash")
+                || cl.contains("crypto")
+                || cl.contains("md5")
+                || cl.contains("sha1")
+                || cl.contains("des")
+                || cl.contains("rc4")
+                || cl.contains("cipher")
+            {
+                candidates.push(Candidate::WeakCrypto {
+                    fact: WeakCryptoFact {
+                        rule_id: format!("learned_weak_crypto_{call}"),
+                        call: call.clone(),
+                        selector_slot: None,
+                        weak_selectors: vec![],
+                    },
+                });
+            }
+        }
+    }
+
+    // Guard bypass: containment callees
+    for ir in &pos_irs {
+        let param_names: Vec<String> = ir
+            .parameters
+            .iter()
+            .filter_map(|p| ir.var_metadata.get(p).and_then(|m| m.source_name.clone()))
+            .collect();
+        let has_url = param_names.iter().any(|n| {
+            let l = n.to_ascii_lowercase();
+            l.contains("url") || l.contains("redirect")
+        });
+        if has_url {
+            for block in ir.blocks.values() {
+                for instr in &block.instructions {
+                    let callee = match instr {
+                        frensense_engine::ir::function::Instruction::CallVirtual { method, .. } => method,
+                        frensense_engine::ir::function::Instruction::CallStatic { func, .. } => func,
+                        _ => continue,
+                    };
+                    let seg = callee.rsplit('.').next().unwrap_or(callee);
+                    if !["includes", "indexOf", "contains"].contains(&seg) && looks_taint_relevant(seg) {
+                        candidates.push(Candidate::GuardBypass {
+                            fact: GuardBypassFact {
+                                containment_callees: vec![seg.to_string()],
+                                ..Default::default()
+                            },
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Guard bypass: credential sinks & params
+    for ir in &pos_irs {
+        for block in ir.blocks.values() {
+            for instr in &block.instructions {
+                let (callee, args) = match instr {
+                    frensense_engine::ir::function::Instruction::CallVirtual { method, args, .. } => (method, args),
+                    frensense_engine::ir::function::Instruction::CallStatic { func, args, .. } => (func, args),
+                    _ => continue,
+                };
+                let seg = callee.rsplit('.').next().unwrap_or(callee);
+                for arg in args {
+                    if let frensense_engine::ir::function::Operand::Var(v) = arg {
+                        if let Some(src_name) = ir.var_metadata.get(v).and_then(|m| m.source_name.clone()) {
+                            let lower = src_name.to_ascii_lowercase();
+                            let is_pwd = [
+                                "password",
+                                "passwd",
+                                "pwd",
+                                "cleartextpassword",
+                                "clearpassword",
+                                "newpassword",
+                            ]
+                            .contains(&lower.as_str());
+                            if is_pwd && !["hash", "hashPassword", "hashpw", "setPassword", "set"].contains(&seg) {
+                                candidates.push(Candidate::GuardBypass {
+                                    fact: GuardBypassFact {
+                                        credential_sinks: vec![seg.to_string()],
+                                        ..Default::default()
+                                    },
+                                });
+                            }
+                            if !is_pwd
+                                && ["hash", "hashPassword", "hashpw", "setPassword", "set"].contains(&seg)
+                                && (lower.contains("secret") || lower.contains("key") || lower.contains("token") || lower.contains("auth"))
+                            {
+                                candidates.push(Candidate::GuardBypass {
+                                    fact: GuardBypassFact {
+                                        credential_params: vec![src_name.clone()],
+                                        ..Default::default()
+                                    },
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Schema policy: builders and bound keywords
+    for ir in &pos_irs {
+        for block in ir.blocks.values() {
+            for instr in &block.instructions {
+                if let frensense_engine::ir::function::Instruction::CallVirtual { method, args, .. } = instr {
+                    let seg = method.rsplit('.').next().unwrap_or(method);
+                    if seg == "describe" || seg == "description" {
+                        if let Some(frensense_engine::ir::function::Operand::StringLiteral(text)) = args.first() {
+                            let lower = text.to_ascii_lowercase();
+                            if lower.chars().any(|c| c.is_ascii_digit()) {
+                                for b2 in ir.blocks.values() {
+                                    for i2 in &b2.instructions {
+                                        if let frensense_engine::ir::function::Instruction::CallVirtual { method: m2, .. } = i2 {
+                                            let s2 = m2.rsplit('.').next().unwrap_or(m2);
+                                            if !["number", "int", "float", "bigint"].contains(&s2)
+                                                && !["max", "min", "minimum", "maximum", "int", "multipleOf", "step"].contains(&s2)
+                                                && s2 != "describe"
+                                                && s2 != "description"
+                                            {
+                                                candidates.push(Candidate::SchemaPolicy {
+                                                    fact: SchemaPolicyFact {
+                                                        builders: vec![s2.to_string()],
+                                                        ..Default::default()
+                                                    },
+                                                });
+                                            }
+                                        }
+                                    }
+                                }
+                                for word in lower.split_whitespace() {
+                                    let clean: String = word.chars().filter(|c| c.is_alphabetic()).collect();
+                                    if clean.len() >= 3 && !["maximum", "max", "minimum", "min", "limit", "up to"].contains(&clean.as_str()) {
+                                        candidates.push(Candidate::SchemaPolicy {
+                                            fact: SchemaPolicyFact {
+                                                bound_keywords: vec![clean],
+                                                ..Default::default()
+                                            },
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Schema policy: enforcers from negatives
+    for ir in &neg_irs {
+        for block in ir.blocks.values() {
+            for instr in &block.instructions {
+                if let frensense_engine::ir::function::Instruction::CallVirtual { method, .. } = instr {
+                    let seg = method.rsplit('.').next().unwrap_or(method);
+                    if !["max", "min", "minimum", "maximum", "int", "multipleOf", "step"].contains(&seg)
+                        && !["number", "int", "float", "bigint"].contains(&seg)
+                        && seg != "describe"
+                        && seg != "description"
+                    {
+                        candidates.push(Candidate::SchemaPolicy {
+                            fact: SchemaPolicyFact {
+                                enforcers: vec![seg.to_string()],
+                                ..Default::default()
+                            },
+                        });
+                    }
+                }
             }
         }
     }
@@ -820,6 +1075,43 @@ fn variant_has_range_check_on_call(files: &[(String, String, String)], call: &st
         }
     }
     false
+}
+
+fn extract_call_arg_literals(
+    irs: &[frensense_engine::ir::function::FunctionIR],
+) -> FxHashMap<(String, usize), BTreeSet<String>> {
+    use frensense_engine::ir::function::{Instruction, Operand};
+    let mut map: FxHashMap<(String, usize), BTreeSet<String>> = FxHashMap::default();
+    for ir in irs {
+        let values = frensense_engine::analysis::value::analyze(ir);
+        for block in ir.blocks.values() {
+            for instr in &block.instructions {
+                let (callee, args) = match instr {
+                    Instruction::CallStatic { func, args, .. } => (func, args),
+                    Instruction::CallVirtual { method, args, .. } => (method, args),
+                    _ => continue,
+                };
+                let seg = callee.rsplit('.').next().unwrap_or(callee);
+                for (slot, arg) in args.iter().enumerate() {
+                    let lit = match arg {
+                        Operand::StringLiteral(s) => Some(s.trim_matches(|c| c == '\'' || c == '"' || c == '`').to_string()),
+                        Operand::IntLiteral(i) => Some(i.to_string()),
+                        Operand::BoolLiteral(b) => Some(b.to_string()),
+                        Operand::Var(v) => values
+                            .const_str(*v)
+                            .map(|s| s.trim_matches(|c| c == '\'' || c == '"' || c == '`').to_string())
+                            .or_else(|| values.const_int(*v).map(|i| i.to_string()))
+                            .or_else(|| values.const_bool(*v).map(|b| b.to_string())),
+                        _ => None,
+                    };
+                    if let Some(val) = lit {
+                        map.entry((seg.to_string(), slot)).or_default().insert(val);
+                    }
+                }
+            }
+        }
+    }
+    map
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1049,6 +1341,35 @@ fn apply_candidate(table: &mut FactTable, c: &Candidate) {
                 table.memory_contracts.push(fact);
             }
         }
+        Candidate::WeakCrypto { fact } => {
+            if let Some(existing) = table.weak_crypto_rules.iter_mut().find(|c| c.rule_id == fact.rule_id && c.call == fact.call) {
+                *existing = fact.clone();
+            } else {
+                table.weak_crypto_rules.push(fact.clone());
+            }
+        }
+        Candidate::GuardBypass { fact } => {
+            for c in &fact.containment_callees {
+                table.containment_callees.insert(c.clone());
+            }
+            for s in &fact.credential_sinks {
+                table.credential_sinks.insert(s.clone());
+            }
+            for p in &fact.credential_params {
+                table.credential_params.insert(p.clone());
+            }
+        }
+        Candidate::SchemaPolicy { fact } => {
+            for b in &fact.builders {
+                table.schema_builders.insert(b.clone());
+            }
+            for e in &fact.enforcers {
+                table.schema_enforcers.insert(e.clone());
+            }
+            for k in &fact.bound_keywords {
+                table.schema_keywords.insert(k.clone());
+            }
+        }
     }
 }
 
@@ -1070,6 +1391,18 @@ fn fact_key(e: &LearnedFactEntry) -> (String, String) {
             rule, when_call, ..
         } => ("policy".into(), format!("{rule}:{when_call}")),
         LearnedFactEntry::MemoryContract { name, .. } => ("mem".into(), name.clone()),
+        LearnedFactEntry::WeakCrypto(f) => ("weak_crypto".into(), format!("{}:{}", f.rule_id, f.call)),
+        LearnedFactEntry::GuardBypass(f) => (
+            "guard_bypass".into(),
+            format!(
+                "{:?}:{:?}:{:?}",
+                f.containment_callees, f.credential_sinks, f.credential_params
+            ),
+        ),
+        LearnedFactEntry::SchemaPolicy(f) => (
+            "schema_policy".into(),
+            format!("{:?}:{:?}:{:?}", f.builders, f.enforcers, f.bound_keywords),
+        ),
     }
 }
 
@@ -1092,6 +1425,15 @@ pub fn extract_facts(
                 Candidate::Check { rule, call, .. } => format!("check:{rule}:{call}"),
                 Candidate::Policy { rule, call, .. } => format!("policy:{rule}:{call}"),
                 Candidate::MemoryContract { name, .. } => format!("mem:{name}"),
+                Candidate::WeakCrypto { fact } => format!("weak_crypto:{}:{}:{:?}", fact.rule_id, fact.call, fact.selector_slot),
+                Candidate::GuardBypass { fact } => format!(
+                    "gb:{:?}:{:?}:{:?}",
+                    fact.containment_callees, fact.credential_sinks, fact.credential_params
+                ),
+                Candidate::SchemaPolicy { fact } => format!(
+                    "sp:{:?}:{:?}:{:?}",
+                    fact.builders, fact.enforcers, fact.bound_keywords
+                ),
             };
 
 
@@ -1167,12 +1509,33 @@ pub fn extract_facts(
                 calls
             }
             Candidate::MemoryContract { name, .. } => vec![name.as_str()],
+            Candidate::WeakCrypto { fact } => vec![fact.call.as_str()],
+            Candidate::GuardBypass { fact } => {
+                let mut calls = Vec::new();
+                for c in &fact.containment_callees {
+                    calls.push(c.as_str());
+                }
+                for s in &fact.credential_sinks {
+                    calls.push(s.as_str());
+                }
+                calls
+            }
+            Candidate::SchemaPolicy { fact } => {
+                let mut calls = Vec::new();
+                for b in &fact.builders {
+                    calls.push(b.as_str());
+                }
+                for e in &fact.enforcers {
+                    calls.push(e.as_str());
+                }
+                calls
+            }
         };
 
         let mut ok = true;
         for p in &prepared {
             let voted = fams.contains(&p.id);
-            let relevant = voted || cand_calls.iter().any(|c| p.calls.contains(*c));
+            let relevant = voted || cand_calls.is_empty() || cand_calls.iter().any(|c| p.calls.contains(*c));
             let sep = if relevant {
                 p.separates(config, &trial)
             } else {
@@ -1248,6 +1611,9 @@ pub fn extract_facts(
                 return_capacity: return_capacity.clone(),
                 consumes_params: consumes_params.clone(),
             },
+            Candidate::WeakCrypto { fact } => LearnedFactEntry::WeakCrypto(fact.clone()),
+            Candidate::GuardBypass { fact } => LearnedFactEntry::GuardBypass(fact.clone()),
+            Candidate::SchemaPolicy { fact } => LearnedFactEntry::SchemaPolicy(fact.clone()),
         };
 
         published.push(LearnedFact {
