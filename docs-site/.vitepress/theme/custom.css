@@ -1,0 +1,127 @@
+/* frensense v2 docs — v1-matched theme (green brand, Urbanist/Inter, glow bg) */
+
+@import url('https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --vp-font-family-base: "Urbanist", "Inter", "Geist", "SF Pro Display",
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  /* v1 brand: green */
+  --vp-c-brand-1: #1cc858;
+  --vp-c-brand-2: #1ab44f;
+  --vp-c-brand-3: #17a046;
+  --vp-c-brand-soft: rgba(28, 200, 88, 0.14);
+
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-bg: #1cc858;
+  --vp-button-brand-hover-bg: #1ab44f;
+  --vp-button-brand-active-bg: #17a046;
+  --vp-button-brand-text: #04120a;
+  --vp-button-brand-hover-text: #04120a;
+  --vp-button-brand-active-text: #04120a;
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #1cc858, #7ee2a4);
+}
+
+/* v1 dark palette */
+.dark {
+  --vp-c-bg: #0a0a0a;
+  --vp-c-bg-alt: #111111;
+  --vp-c-bg-elv: #161616;
+  --vp-c-bg-soft: #161616;
+  --vp-c-divider: #222222;
+  --vp-c-border: #333333;
+  --vp-c-gutter: #222222;
+}
+
+/* v1 body: near-black with fixed green radial glows */
+.dark body {
+  background-color: #0a0a0a;
+  background-image:
+    radial-gradient(circle at 15% 50%, rgba(28, 200, 88, 0.06), transparent 25%),
+    radial-gradient(circle at 85% 30%, rgba(28, 200, 88, 0.06), transparent 25%);
+  background-attachment: fixed;
+}
+
+/* nav: dark translucent bar like v1 */
+.dark .VPNavBar:not(.home) {
+  background-color: rgba(10, 10, 10, 0.45) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+/* hero: centered, tight tracking like v1 */
+.VPHomeHero .name,
+.VPHomeHero .text {
+  letter-spacing: -0.4px;
+}
+.VPHomeHero .container {
+  text-align: center;
+}
+.VPHomeHero .main {
+  max-width: 592px;
+  margin: 0 auto;
+}
+.VPHomeHero .actions {
+  justify-content: center;
+}
+
+/* doc headings tracking */
+.vp-doc h1 {
+  letter-spacing: -0.02em;
+}
+
+/* v1 "showcase" sections (used on landing page) */
+.showcase-container {
+  max-width: 900px;
+  margin: 2rem auto 4rem;
+  padding: 0 1.5rem;
+}
+.showcase-title {
+  font-size: 2.2rem;
+  font-weight: 700;
+  text-align: left;
+  margin-bottom: 1.5rem;
+  letter-spacing: -0.02em;
+}
+.showcase-subtitle {
+  text-align: left;
+  color: var(--vp-c-text-2);
+  margin-bottom: 3rem;
+  font-size: 1.1rem;
+}
+.about-section {
+  margin-bottom: 4rem;
+}
+.about-section p {
+  color: var(--vp-c-text-2);
+  font-size: 1.15rem;
+  line-height: 1.7;
+  margin-bottom: 1.5rem;
+  text-align: left;
+}
+.about-section strong {
+  color: var(--vp-c-text-1);
+}
+
+/* features: v1 uses flat soft-bg cards with 12px radius */
+.VPFeature {
+  border: 1px solid var(--vp-c-bg-soft);
+  border-radius: 12px;
+  background-color: var(--vp-c-bg-soft);
+  transition: border-color 0.25s, background-color 0.25s;
+}
+.VPFeature:hover {
+  border-color: var(--vp-c-brand-1);
+}
+
+/* v1 archive callout */
+.v1-note {
+  border: 1px solid var(--vp-c-brand-1);
+  border-radius: 8px;
+  padding: 12px 16px;
+  background: var(--vp-c-brand-soft);
+}

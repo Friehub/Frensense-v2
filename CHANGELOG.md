@@ -6,55 +6,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.1-preview.1] - 2026-09-28
+## [0.7.0-preview.3] - 2026-09-28
 
-Preview release adding memory-safety checkers, value-aware guard
-validation, corpus policy facts, and bundler hardening on top of
+Preview release adding interprocedural memory safety contracts,
+bundle-learned non-taint analyses, value-aware guard validation,
+spatial memory safety, and CallVirtual receiver-binding fixes on top of
 0.7.0-preview.2.
 
 ### Added
 
 #### Engine
 
+- **Corpus-learned non-taint analyses from `.frc` bundles**: all remaining
+  non-taint security analyses can now be learned autonomously from positive
+  and negative examples in corpus bundles without user-managed JSON or engine
+  recompilation:
+  - **Argument-literal & selector policy constraints**: `PolicyRequirement::BannedArgLiteral`
+    and `PolicyRequirement::RequiredArgLiteral` evaluated using lattice constants.
+  - **Weak cryptography rules**: `WeakCryptoFact` enabling bundle-driven detection
+    of weak cryptographic primitives and method selectors in `weak_hash.rs`.
+  - **Guard bypass allowlists & credential sinks**: `GuardBypassFact` enabling
+    bundle-driven allowlist containment callees and credential setter
+    sinks/parameters in `guard_bypass.rs`, marked with `learned: true`.
+  - **Tool schema policies**: `SchemaPolicyFact` enabling bundle-driven tool
+    registration builders, enforcers, and unbounded numeric parameter keywords
+    in `schema_policy.rs`.
+  - **Memory contracts**: `MemoryContractFact` enabling bundle-driven custom
+    allocators and deallocation wrappers in spatial and temporal checkers.
+- **Interprocedural allocation and deallocation wrapper summaries (Limitation M1)**:
+  bottom-up interprocedural analysis (`checks/memory_summary.rs`) computing
+  memory lifecycle contracts (`returns_fresh`, `return_capacity`, `consumes_params`)
+  across arbitrary call chains (`outer_free -> inner_free -> free`), preserving
+  allocation provenance across factory and deallocator wrappers.
+- **Buffer overflow / out-of-bounds checker (Limitation M3)**: spatial
+  memory-safety checker (`checks/oob.rs`) tracking pointer allocation capacities
+  and indexed dereferences (`LoadElement` / `StoreElement`) against the interval
+  value lattice.
 - **Use-after-free and double-free checkers**: ported from the legacy
-  analysis tree, including interprocedural allocation/deallocation wrapper
-  summaries so a `free`/`drop` hiding behind one or two wrapper functions
-  still kills the allocation record (Limitation M1 from the research
-  notes).
+  analysis tree (`checks/uaf.rs`), featuring a forward path-sensitive finite-state
+  machine (`Allocated` -> `Freed` -> `UseAfterFree` / `DoubleFree`) over
+  Steensgaard points-to equivalence classes with C declarator unwrapping.
 - **Abstract-interpretation value lattice**: constants, string/number
   ranges, and join/meet over branches now flow through the analysis,
-  powering a co-occurrence policy checker and sharper guard decisions.
-- **Branch sharpening**: predicate narrowing on `if`/`match` arms so each
-  branch is analysed under the constraints its guard implies (e.g. inside
-  `if x < 10`, `x` is known to be in range).
+  powering a co-occurrence policy checker, weak crypto key size checks,
+  and sharper guard decisions.
+- **Branch sharpening (Limitation B1)**: predicate narrowing on conditional
+  branches (`Terminator::Branch`), refining interval bounds and constant equality
+  along true and false successor edges.
 - **Value-based range guard validation with GuardMap**: guards such as
   `if len(x) > 0` or `if i < arr.len()` are checked against the value
   lattice; a learned `unless_range_check` requirement is satisfied by a
   guard that provably dominates the sink, not merely by textual
   presence of a call.
-- **Buffer overflow / out-of-bounds checker**: spatial memory-safety
-  checker built on the new value lattice and the interprocedural summaries,
-  reporting indexed accesses that escape every bounding guard.
+- **Co-occurrence policy checker**: generalized `PolicyFact` engine evaluating
+  `GuardCall`, `RequireCall`, `NotCall`, and `RangeCheck` across `Function` and
+  `Module` scopes.
 - **Corpus Source facts for bundles**: `.frc` bundles can now teach the
   engine new taint sources (e.g. framework request properties) that merge
   into the fact table at load time; Python subscript expressions also
   lower correctly so tuple/dict-indexed sources participate in flows.
-- **Policy fact consumption**: learned `Policy` facts from corpus bundles
-  are enforced by the engine's program-level policy checker (`PolicyFact`
-  with `RequireCall`/`NotCall` and `Function`/`Module` scope, honouring
-  `unless_guard`/`unless_range_check` exceptions). `PolicyRequirement`
-  serialisation fixed to externally tagged form — previously any bundle
-  containing a Policy fact silently failed to load.
 
 #### Bundler (`frensense-bundler`)
 
-- **Policy fact proposals**: the corpus learner now proposes `Policy`
-  facts from labelled check-call families. Two shapes are learned:
-  `NotCall` (calls present in positives but absent from every negative,
-  excluding builtin sinks/sanitisers) and `RequireCall` + `Module` scope
-  (guard helpers *defined* in every negative and absent from positives).
-  Proposals replay-verify like other facts and are published as
-  `LearnedFactEntry::Policy` in the bundle.
+- **Differential non-taint fact extraction**: the corpus learner now derives
+  `WeakCrypto`, `GuardBypass`, `SchemaPolicy`, `MemoryContract`, and arg-literal
+  policy candidates from positive vs. negative IR deltas.
+- **Zero-regression replay gate validation**: every candidate fact is replayed
+  against ground-truth positive and negative corpus families; only facts achieving
+  clean separation without false-positive regressions are published into `.frc` bundles.
+- **Policy fact proposals**: the corpus learner proposes `Policy` facts
+  from labelled check-call families (`NotCall` and `RequireCall` with `Module`
+  scope).
 - **Family metadata in bundles**: a `[frensense]` comment block
   (observation / impact / improvement / cwe / cvss / owasp / severity)
   in the first 30 lines of a positive example is parsed and written into
@@ -76,6 +98,24 @@ validation, corpus policy facts, and bundler hardening on top of
   naming conventions, the metadata block, policy authoring, verification
   workflow, and common mistakes.
 
+### Fixed
+
+- **Receiver-parameter slot binding in `CallVirtual`**: decoupled caller
+  `receiver` from positional `args` in `analysis/forward.rs`. For receiver-less
+  callees (JS/TS/Go methods), arguments bind directly starting at positional
+  slot 0 without false taint offset. For Rust methods with explicit `self_parameter`,
+  receiver binds to `parameters[0]` and positional arguments map to `parameters[i+1]`.
+- **Spurious Rust taint rules**: cleaned up `frensense-lang/src/providers/rust_lang.rs`
+  by removing bare `"var"`, eliminating spurious JS sinks (`setItem`, `Object.assign`,
+  `DOMParser`), and scoping database query sinks (`"find_one"`, `"Collection::find"`)
+  so standard Rust `Iterator::find` is not misclassified as a database injection sink.
+- **C declarator lowering**: recursive unwrapping of `pointer_declarator`,
+  `array_declarator`, and `cast_expression` in `lowering.rs`, ensuring pointer
+  allocations in C declarations are correctly assigned to variables instead of
+  being dropped as bare expression statements.
+- **Policy requirement serialization**: fixed `PolicyRequirement` serialization
+  to externally tagged format so bundles containing Policy facts load cleanly.
+
 ### Changed
 
 - Engine: guard recognition now consults the value lattice (see
@@ -83,6 +123,7 @@ validation, corpus policy facts, and bundler hardening on top of
   purely call/textual.
 - Bundler: check-call comment syntax is language-aware (`#` for
   Python-family files, `//` otherwise).
+
 
 ## [0.7.0-preview.2] - 2026-09-27
 

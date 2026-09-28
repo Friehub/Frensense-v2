@@ -9,12 +9,14 @@ yarn-error.log*
 
 # Build artifacts (NAPI)
 *.node
-frensense
-frensense.exe
-frensense.d.ts
-frensense.js
-index.js
-index.d.ts
+/frensense
+/frensense.exe
+/frensense.d.ts
+/frensense.js
+/index.js
+/index.d.ts
+!npm/bin/
+!npm/bin/**
 
 # Frensense caches
 .frensense/
@@ -104,6 +106,10 @@ corpus-facts.frc
 !docs/MCP_USAGE.md
 !docs/LSP_USAGE.md
 !docs/AGENT_INTEGRATION.md
+!docs/FRENSENSE_CORPUS_GUIDE.md
+!docs-site/**
+docs-site/node_modules/
+**/node_modules/
 
 # Frensense attribution policy: no bot trailers in commit messages.
 
@@ -120,6 +126,7 @@ juice-shop/
 # Agent workspace
 .freebuff/
 dist/binaries/
+npm/dist/binaries/
 
 # Ground-truth label sets (private benchmark knowledge)
 scripts/juiceshop-ground-truth.json
@@ -146,3 +153,7 @@ frensense-bench/runners/run_juiceshop.sh
 
 # Benchmark internals (scorecards, OWASP baselines, cases)
 benchmark/
+
+# VitePress build/cache
+docs-site/.vitepress/dist/
+docs-site/.vitepress/cache/
