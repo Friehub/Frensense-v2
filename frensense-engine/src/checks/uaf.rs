@@ -44,6 +44,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::checks::memory_summary::MemorySummaryRegistry;
 use crate::checks::CheckerFinding;
 use crate::graph::steensgaard::{ClassId, Steensgaard};
 use crate::ir::function::{FunctionIR, Instruction, Operand};
@@ -78,8 +79,16 @@ enum Violation {
     DoubleFree,
 }
 
-/// Run the UAF / double-free check over one function.
+/// Run the UAF / double-free check over one function with default summaries.
 pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
+    check_with_summaries(ir, &MemorySummaryRegistry::default())
+}
+
+/// Run the UAF / double-free check over one function with an interprocedural memory summary registry.
+pub fn check_with_summaries(
+    ir: &FunctionIR,
+    summaries: &MemorySummaryRegistry,
+) -> Vec<CheckerFinding> {
     let pts = Steensgaard::analyze(ir);
     let mut findings: Vec<CheckerFinding> = Vec::new();
 
@@ -121,6 +130,7 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
     fn visit(
         ir: &FunctionIR,
         pts: &Steensgaard,
+        summaries: &MemorySummaryRegistry,
         findings: &mut Vec<CheckerFinding>,
         mut ps: PathState,
         block: &crate::ir::function::BasicBlock,
@@ -138,7 +148,7 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
                     func,
                     dest: Some(d),
                     ..
-                } if ALLOC_CALLS.contains(&last_segment(func)) => {
+                } if ALLOC_CALLS.contains(&last_segment(func)) || summaries.returns_fresh(func) => {
                     // Fresh generation: pin this var to a fresh
                     // generation id, un-merging it from its old class.
                     let fresh = ClassId(pts.members.len() + ps.generation.len() + d.0);
@@ -146,20 +156,39 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
                     ps.generation.insert(*d, fresh);
                 }
 
-                // --- Free ---
-                Instruction::CallStatic { func, args, .. }
-                    if FREE_CALLS.contains(&last_segment(func)) =>
-                {
-                    // free(ptr): the first Var arg is the object.
-                    if let Some(Operand::Var(v)) = args.first()
-                        && let Some(c) = ps.class_for(pts, *v)
-                    {
-                        if ps.state.get(&c) == Some(&ObjectState::Freed) {
-                            // Second free of the same object on THIS path:
-                            // definite double-free regardless of joins.
-                            findings.push(finding(ir, Violation::DoubleFree, v, None));
+                // --- Free / Consumed parameters ---
+                Instruction::CallStatic {
+                    func, args, dest, ..
+                } => {
+                    let consumed_slots = if FREE_CALLS.contains(&last_segment(func)) {
+                        vec![0]
+                    } else {
+                        summaries.consumes_params(func)
+                    };
+                    for slot in consumed_slots {
+                        if let Some(Operand::Var(v)) = args.get(slot)
+                            && let Some(c) = ps.class_for(pts, *v)
+                        {
+                            match ps.state.get(&c) {
+                                Some(&ObjectState::Freed) => {
+                                    // Second free of the same object on THIS path:
+                                    // definite double-free regardless of joins.
+                                    findings.push(finding(ir, Violation::DoubleFree, v, None));
+                                }
+                                Some(&ObjectState::Allocated) => {
+                                    // We have provable provenance — mark freed.
+                                    ps.state.insert(c, ObjectState::Freed);
+                                }
+                                None => {
+                                    // No provable in-function allocation for this class
+                                    // (parameter or unknown source) — skip to keep zero-FP.
+                                }
+                            }
                         }
-                        ps.state.insert(c, ObjectState::Freed);
+                    }
+                    if let Some(d) = dest {
+                        ps.generation.remove(d);
+                        ps.dead.insert(*d);
                     }
                 }
 
@@ -189,9 +218,6 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
                 // (non-alloc call result, unknown, literal) kills the
                 // destination var's provenance.
                 Instruction::Assign { dest, .. }
-                | Instruction::CallStatic {
-                    dest: Some(dest), ..
-                }
                 | Instruction::CallVirtual {
                     dest: Some(dest), ..
                 }
@@ -295,7 +321,7 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
         FxHashMap::default();
 
     if let Some(entry) = ir.blocks.get(&ir.entry_block)
-        && let Some(out) = visit(ir, &pts, &mut findings, PathState::default(), entry)
+        && let Some(out) = visit(ir, &pts, summaries, &mut findings, PathState::default(), entry)
     {
         for &s in &entry.successors {
             in_states.entry(s).or_default().push(out.clone());
@@ -314,7 +340,7 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
             continue;
         };
         let joined = it.fold(first, |acc, ps| join(&acc, &ps));
-        if let Some(out) = visit(ir, &pts, &mut findings, joined, block) {
+        if let Some(out) = visit(ir, &pts, summaries, &mut findings, joined, block) {
             for &s in &block.successors {
                 in_states.entry(s).or_default().push(out.clone());
             }

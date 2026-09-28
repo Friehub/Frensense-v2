@@ -19,6 +19,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::analysis::value::{self, ValueInfo};
+use crate::checks::memory_summary::{CapacitySpec, MemorySummaryRegistry};
 use crate::checks::CheckerFinding;
 use crate::graph::steensgaard::{ClassId, Steensgaard};
 use crate::ir::function::{BasicBlock, BlockId, FunctionIR, Instruction, Operand, VarId};
@@ -171,6 +172,7 @@ fn eval_alloc_capacity(
     args: &[Operand],
     block: BlockId,
     val_info: &ValueInfo,
+    summaries: &MemorySummaryRegistry,
 ) -> Option<(i64, i64)> {
     let seg = last_segment(func);
     match seg {
@@ -199,7 +201,33 @@ fn eval_alloc_capacity(
                 None
             }
         }
-        _ => None,
+        _ => {
+            if let Some(spec) = summaries.return_capacity(func) {
+                match spec {
+                    CapacitySpec::Exact(k) => Some((*k, *k)),
+                    CapacitySpec::Param(p_idx) => {
+                        let (lo, hi) = eval_range(args.get(*p_idx)?, block, val_info)?;
+                        if lo >= 0 {
+                            Some((lo, hi))
+                        } else {
+                            None
+                        }
+                    }
+                    CapacitySpec::ParamProduct(p1, p2) => {
+                        let (n_lo, n_hi) = eval_range(args.get(*p1)?, block, val_info)?;
+                        let (sz_lo, sz_hi) = eval_range(args.get(*p2)?, block, val_info)?;
+                        if n_lo >= 0 && sz_lo >= 0 {
+                            Some((n_lo.saturating_mul(sz_lo), n_hi.saturating_mul(sz_hi)))
+                        } else {
+                            None
+                        }
+                    }
+                    CapacitySpec::Unknown => None,
+                }
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -249,8 +277,16 @@ fn finding(
     }
 }
 
-/// Run spatial memory safety checks over one function.
+/// Run spatial memory safety checks over one function with default summaries.
 pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
+    check_with_summaries(ir, &MemorySummaryRegistry::default())
+}
+
+/// Run spatial memory safety checks over one function with an interprocedural memory summary registry.
+pub fn check_with_summaries(
+    ir: &FunctionIR,
+    summaries: &MemorySummaryRegistry,
+) -> Vec<CheckerFinding> {
     let pts = Steensgaard::analyze(ir);
     let val_info = value::analyze(ir);
     let mut findings: Vec<CheckerFinding> = Vec::new();
@@ -302,6 +338,7 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
         ir: &FunctionIR,
         pts: &Steensgaard,
         val_info: &ValueInfo,
+        summaries: &MemorySummaryRegistry,
         findings: &mut Vec<CheckerFinding>,
         mut ps: PathState,
         block_id: BlockId,
@@ -315,11 +352,11 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
                     dest: Some(d),
                     args,
                     ..
-                } if ALLOC_CALLS.contains(&last_segment(func)) => {
+                } if ALLOC_CALLS.contains(&last_segment(func)) || summaries.returns_fresh(func) => {
+                    let fresh = ClassId(pts.members.len() + ps.generation.len() + d.0 + 1000);
                     if let Some((cap_lo, cap_hi)) =
-                        eval_alloc_capacity(func, args, block_id, val_info)
+                        eval_alloc_capacity(func, args, block_id, val_info, summaries)
                     {
-                        let fresh = ClassId(pts.members.len() + ps.generation.len() + d.0 + 1000);
                         ps.buffers.insert(
                             fresh,
                             BufferInfo {
@@ -328,23 +365,26 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
                                 span: var_span(ir, *d),
                             },
                         );
-                        ps.generation.insert(*d, fresh);
-                        ps.dead.remove(d);
                     }
+                    ps.generation.insert(*d, fresh);
+                    ps.dead.remove(d);
                 }
 
-                // --- Freeing a buffer ---
-                Instruction::CallStatic { func, args, .. } if last_segment(func) == "free" => {
-                    if let Some(Operand::Var(v)) = args.first() {
-                        if let Some(c) = ps.class_for(pts, *v) {
-                            ps.buffers.remove(&c);
-                            ps.dead.insert(*v);
+                // --- Freeing a buffer / Consumed parameters ---
+                Instruction::CallStatic { func, args, .. } => {
+                    let consumed_slots = if last_segment(func) == "free" {
+                        vec![0]
+                    } else {
+                        summaries.consumes_params(func)
+                    };
+                    for slot in consumed_slots {
+                        if let Some(Operand::Var(v)) = args.get(slot) {
+                            if let Some(c) = ps.class_for(pts, *v) {
+                                ps.buffers.remove(&c);
+                                ps.dead.insert(*v);
+                            }
                         }
                     }
-                }
-
-                // --- Memory manipulation builtins ---
-                Instruction::CallStatic { func, args, .. } => {
                     let seg = last_segment(func);
                     if let Some(spec) = BUILTINS.iter().find(|b| b.name == seg) {
                         // Check destination write bounds
@@ -569,6 +609,7 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
             ir,
             &pts,
             &val_info,
+            summaries,
             &mut findings,
             PathState::default(),
             ir.entry_block,
@@ -592,7 +633,16 @@ pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
             continue;
         };
         let joined = it.fold(first, |acc, ps| join_states(&acc, &ps));
-        if let Some(out) = visit_block(ir, &pts, &val_info, &mut findings, joined, b, block) {
+        if let Some(out) = visit_block(
+            ir,
+            &pts,
+            &val_info,
+            summaries,
+            &mut findings,
+            joined,
+            b,
+            block,
+        ) {
             for &s in &block.successors {
                 in_states.entry(s).or_default().push(out.clone());
             }

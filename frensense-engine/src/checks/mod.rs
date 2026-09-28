@@ -20,6 +20,7 @@
 //! Line drawn: **built-in = how to look; learned = what to conclude.**
 
 pub mod guard_bypass;
+pub mod memory_summary;
 pub mod oob;
 pub mod policy;
 pub mod schema_policy;
@@ -28,6 +29,8 @@ pub mod weak_hash;
 
 #[cfg(test)]
 mod guard_bypass_tests;
+#[cfg(test)]
+mod memory_summary_tests;
 #[cfg(test)]
 mod oob_tests;
 #[cfg(test)]
@@ -98,14 +101,15 @@ pub fn check_all<'a>(
             all.push(f);
         }
     }
+    let mem_summaries = memory_summary::MemorySummaryRegistry::infer_program_summaries(&irs);
     for ir in &irs {
         let findings = weak_hash::check(ir)
             .into_iter()
             .chain(guard_bypass::check(ir))
             .chain(guard_bypass::check_credentials(ir))
             .chain(schema_policy::check(ir))
-            .chain(uaf::check(ir))
-            .chain(oob::check(ir))
+            .chain(uaf::check_with_summaries(ir, &mem_summaries))
+            .chain(oob::check_with_summaries(ir, &mem_summaries))
             .chain(learned::check(ir, facts));
         for f in findings {
             let key = (
