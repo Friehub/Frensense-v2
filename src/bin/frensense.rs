@@ -18,6 +18,10 @@ fn print_help() {
     println!(
         "       frensense watch [path] [options]   Re-scan on file changes, print new findings"
     );
+    println!("       frensense mcp                      Run the Model Context Protocol (MCP) server");
+    println!("       frensense lsp                      Run the Language Server Protocol (LSP) server");
+    println!(
+    );
     println!();
     println!("Options:");
     println!("  --json                     Output findings as JSON");
@@ -110,11 +114,77 @@ fn run_watch(args: Vec<String>) -> Result<()> {
     )
 }
 
+
+fn run_mcp() -> Result<()> {
+    use frensense::mcp::handler::handle_request;
+    use frensense::mcp::protocol::{JsonRpcRequest, RequestId, rpc_error, write_response};
+    use std::io::{self, BufRead};
+
+    eprintln!("frensense-mcp v{FRENSENSE_VERSION} starting");
+    eprintln!("frensense-mcp: cwd={:?}", std::env::current_dir().ok());
+
+    let stdin = io::stdin();
+    let reader = stdin.lock();
+
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("frensense-mcp: stdin read error: {e}");
+                break;
+            }
+        };
+
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let req: JsonRpcRequest = match serde_json::from_str(&line) {
+            Ok(r) => r,
+            Err(e) => {
+                let err_resp = rpc_error(RequestId::Absent, -32700, format!("parse error: {e}"));
+                write_response(&err_resp);
+                continue;
+            }
+        };
+
+        if req.method == "exit" {
+            break;
+        }
+
+        let resp = handle_request(req);
+        if resp.id.is_some() {
+            write_response(&resp);
+        }
+    }
+
+    eprintln!("frensense-mcp: exiting");
+    Ok(())
+}
+
+fn run_lsp() -> Result<()> {
+    let bundle = std::env::var("FRENSENSE_CORPUS_BUNDLE")
+        .ok()
+        .filter(|p| !p.is_empty());
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    let mut reader = stdin.lock();
+    let mut writer = stdout.lock();
+    if let Err(e) = frensense::lsp::server::run_server(&mut reader, &mut writer, bundle.as_deref())
+    {
+        eprintln!("frensense-lsp: fatal transport error: {e}");
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
+
     let args: Vec<String> = std::env::args().collect();
     if handle_early_args(&args) {
         return Ok(());
     }
+
 
     // Watch subcommand: poll-loop delivery mode, everything else shared
     // with the one-shot path (same options, same engine config).
@@ -126,6 +196,15 @@ fn main() -> Result<()> {
                 .collect::<Vec<_>>(),
         );
     }
+
+    if args.iter().any(|a| a == "mcp") {
+        return run_mcp();
+    }
+
+    if args.iter().any(|a| a == "lsp") {
+        return run_lsp();
+    }
+
 
     let input_paths = get_input_paths(&args);
     let input_path = input_paths

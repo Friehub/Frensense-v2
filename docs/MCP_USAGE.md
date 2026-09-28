@@ -24,7 +24,7 @@ curl -L https://github.com/Friehub/frensense-v2/releases/latest/download/frensen
 **Or install from source** (requires a Rust toolchain):
 
 ```bash
-cargo install frensense   # installs frensense, frensense-mcp, frensense-lsp
+cargo install frensense   # installs the unified frensense binary
 ```
 
 The MCP binary is always built alongside the CLI and the LSP server — one
@@ -39,7 +39,7 @@ absolute path.
 **Claude Code:**
 
 ```bash
-claude mcp add frensense -- frensense-mcp
+claude mcp add frensense -- frensense mcp
 ```
 
 **Claude Desktop** (`claude_desktop_config.json`):
@@ -48,7 +48,8 @@ claude mcp add frensense -- frensense-mcp
 {
   "mcpServers": {
     "frensense": {
-      "command": "frensense-mcp",
+      "command": "frensense",
+      "args": ["mcp"],
       "env": {
         "FRENSENSE_CORPUS_BUNDLE": "/path/to/frensense-corpus.frc"
       }

@@ -124,13 +124,11 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.settings.target }}
 
-      - name: Install dependencies
-        run: npm install
 
       - name: Build binaries (CLI + MCP + LSP)
         run: |
           cargo build --release --target ${{ matrix.settings.target }} \
-            --bin frensense --bin frensense-mcp --bin frensense-lsp
+            --bin frensense
 
       - name: Build FRC Bundle
         # The corpus is proprietary and not in the public repo; skip unless
@@ -196,17 +194,7 @@ jobs:
           name: cli-${{ matrix.settings.target }}
           path: target/${{ matrix.settings.target }}/release/${{ matrix.settings.bin_name }}
 
-      - name: Upload MCP Artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: mcp-${{ matrix.settings.target }}
-          path: target/${{ matrix.settings.target }}/release/frensense-mcp${{ matrix.settings.ext }}
 
-      - name: Upload LSP Artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: lsp-${{ matrix.settings.target }}
-          path: target/${{ matrix.settings.target }}/release/frensense-lsp${{ matrix.settings.ext }}
 
   # 2. Generate Hashes for SLSA
   generate-hashes:
@@ -278,83 +266,6 @@ jobs:
       - name: Wait for crates.io index
         run: sleep 60
 
-  # 5. Publish to NPM
-  publish-npm:
-    name: Publish to NPM
-    runs-on: ubuntu-latest
-    needs: [prepare, build-native]
-    environment: production
-    permissions:
-      contents: read
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
-        with:
-          ref: ${{ needs.prepare.outputs.tag_name }}
-      - name: Setup Node
-        uses: actions/setup-node@f1f314fca9dfce2769ece7d933488f076716723e # v4.4.0
-        with:
-          node-version: 22
-          registry-url: 'https://registry.npmjs.org'
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
-        with:
-          toolchain: stable
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          path: artifacts
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Prepare NPM package
-        run: |
-          mkdir -p dist/binaries
-
-          # CLI binaries (platform-named for the postinstall resolver)
-          # The .frc corpus is embedded in the binary via include_bytes!, no need to ship it
-          cp artifacts/cli-x86_64-unknown-linux-gnu/frensense    ./dist/binaries/frensense-linux-x64
-          cp artifacts/cli-x86_64-apple-darwin/frensense          ./dist/binaries/frensense-macos-x64
-          cp artifacts/cli-aarch64-apple-darwin/frensense          ./dist/binaries/frensense-macos-arm64
-          cp artifacts/cli-x86_64-pc-windows-msvc/frensense.exe   ./dist/binaries/frensense-windows-x64.exe
-
-      - name: Test NPM package before publish
-        run: |
-          npm pack
-          TESTDIR=$(mktemp -d)
-          cd "$TESTDIR"
-          npm init -y > /dev/null
-          echo "registry=https://registry.npmjs.org/" > .npmrc
-          npm install "$GITHUB_WORKSPACE"/friehub-frensense-*.tgz
-          ./node_modules/.bin/frensense --version
-          echo 'fn main() { let x = 1; }' > test.rs
-          ./node_modules/.bin/frensense test.rs --json > /dev/null
-          echo 'NPM package OK'
-
-      - name: Check version not already published
-        run: |
-          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://registry.npmjs.org/@friehub/frensense/$VERSION")
-          if [ "$HTTP_STATUS" = "200" ]; then
-            echo "Version $VERSION already exists on NPM. Skipping."
-            echo "already_published=true" >> $GITHUB_OUTPUT
-          else
-            echo "Version $VERSION not found on NPM. Will publish."
-            echo "already_published=false" >> $GITHUB_OUTPUT
-          fi
-        id: npm_check
-
-      - name: Publish to NPM
-        if: steps.npm_check.outputs.already_published != 'true'
-        run: npm publish --tag latest --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
   # 6. Create GitHub Release
   github-release:
     name: Create GitHub Release
@@ -384,20 +295,6 @@ jobs:
             ext=""
             if [[ "$target" == *"windows"* ]]; then ext=".exe"; fi
             cp "${dir}frensense${ext}" "release-binaries/frensense-${target}${ext}"
-          done
-          # MCP server (AI agents)
-          for dir in artifacts/mcp-*/; do
-            target=$(basename "$dir" | sed 's/mcp-//')
-            ext=""
-            if [[ "$target" == *"windows"* ]]; then ext=".exe"; fi
-            cp "${dir}frensense-mcp${ext}" "release-binaries/frensense-mcp-${target}${ext}"
-          done
-          # LSP server (editors)
-          for dir in artifacts/lsp-*/; do
-            target=$(basename "$dir" | sed 's/lsp-//')
-            ext=""
-            if [[ "$target" == *"windows"* ]]; then ext=".exe"; fi
-            cp "${dir}frensense-lsp${ext}" "release-binaries/frensense-lsp-${target}${ext}"
           done
       - name: Release
         uses: softprops/action-gh-release@26994186c0ac3ef5cae75ac16aa32e8153525f77 # v2.4.2

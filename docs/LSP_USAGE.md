@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 <!-- Copyright (c) 2024-2026 Friehub. All rights reserved. -->
 
-# frensense-lsp: Usage Guide
+# frensense lsp: Usage Guide
 
-`frensense-lsp` puts the Frensense engine inside your editor: findings
+`frensense lsp` puts the Frensense engine inside your editor: findings
 appear as diagnostics when you open or save a file, with the same severity
 mapping, messages, and stable IDs as the CLI and MCP server. It speaks the
 standard Language Server Protocol over stdio and ships in the same
@@ -11,21 +11,21 @@ standard Language Server Protocol over stdio and ships in the same
 
 ## Installation
 
-`frensense-lsp` is a self-contained binary — no Node.js runtime, no VS
+`frensense lsp` is a self-contained binary — no Node.js runtime, no VS
 Code extension marketplace step. Get it and put it on `PATH`:
 
 **Download a release binary** (recommended):
 
 ```bash
 # Linux x86_64 — replace the tag with the latest release
-curl -L https://github.com/Friehub/frensense-v2/releases/latest/download/frensense-lsp-x86_64-unknown-linux-gnu \
-  -o /usr/local/bin/frensense-lsp && chmod +x /usr/local/bin/frensense-lsp
+curl -L https://github.com/Friehub/frensense-v2/releases/latest/download/frensense-x86_64-unknown-linux-gnu \
+  -o /usr/local/bin/frensense && chmod +x /usr/local/bin/frensense
 ```
 
 **Or install from source** (requires a Rust toolchain):
 
 ```bash
-cargo install frensense   # installs frensense, frensense-mcp, frensense-lsp
+cargo install frensense   # installs the unified frensense binary
 ```
 
 ## What it does (and deliberately doesn't)
@@ -57,7 +57,7 @@ to the subprocess, not a shell export after the fact.
 
 ```lua
 vim.lsp.config('frensense', {
-  cmd = { 'frensense-lsp' },
+  cmd = { 'frensense', 'lsp' },
   filetypes = { 'python', 'javascript', 'typescript', 'rust', 'go' },
 })
 vim.lsp.enable('frensense')
@@ -67,7 +67,7 @@ With a corpus bundle:
 
 ```lua
 vim.lsp.config('frensense', {
-  cmd = { 'frensense-lsp' },
+  cmd = { 'frensense', 'lsp' },
   filetypes = { 'python', 'javascript', 'typescript', 'rust', 'go' },
   on_new_config = function(config)
     config.cmd_env = { FRENSENSE_CORPUS_BUNDLE = '/path/to/frensense-corpus.frc' }
@@ -85,7 +85,8 @@ name = "python"
 language-servers = ["frensense"]
 
 [language-server.frensense]
-command = "frensense-lsp"
+command = "frensense"
+args = ["lsp"]
 environment = { "FRENSENSE_CORPUS_BUNDLE" = "/path/to/frensense-corpus.frc" }
 ```
 
@@ -96,8 +97,8 @@ Point any LSP client extension at the binary:
 ```json
 {
   "frensense.server": {
-    "command": "frensense-lsp",
-    "args": [],
+    "command": "frensense",
+    "args": ["lsp"],
     "env": {
       "FRENSENSE_CORPUS_BUNDLE": "/path/to/frensense-corpus.frc"
     }
@@ -106,7 +107,7 @@ Point any LSP client extension at the binary:
 ```
 
 If the binary isn't on `PATH`, use the absolute path (e.g.
-`/opt/frensense/frensense-lsp`).
+`/opt/frensense/frensense`).
 
 ## Protocol walkthrough
 
@@ -136,7 +137,7 @@ Content-Length: 63
 {"jsonrpc":"2.0","id":1,"result":{"capabilities":
   {"textDocumentSync":{"openClose":true,"change":1,"save":true},
    "positionEncoding":"utf-16"},
- "serverInfo":{"name":"frensense-lsp","version":"0.7.0-preview.2"}}}
+ "serverInfo":{"name":"frensense lsp","version":"0.7.0-preview.2"}}}
 ```
 
 **2. Client → server:** `initialized`, then open the document:
@@ -204,13 +205,13 @@ seeing a regression.
   language (Python, JavaScript/TypeScript, Rust, Go). Unsupported files
   publish empty diagnostics by design.
 - **Client logs**: most editors show the server's stderr in an output
-  panel (VS Code: *Output → your LSP client*). `frensense-lsp` writes scan
+  panel (VS Code: *Output → your LSP client*). `frensense lsp` writes scan
   failures there; stdout is protocol-only.
 - **Findings differ from the CLI**: make sure both use the same
   `.frc` bundle (`FRENSENSE_CORPUS_BUNDLE` / `--corpus-bundle`); learned
   facts change what the engine can see.
 - **`FRENSENSE_CORPUS_BUNDLE` has no effect**: the variable must be set in
-  the environment the editor passes when it spawns the `frensense-lsp`
+  the environment the editor passes when it spawns the `frensense lsp`
   subprocess, not in a shell that is already running.
 
 ## Related
