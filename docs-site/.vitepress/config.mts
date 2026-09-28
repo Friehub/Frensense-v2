@@ -4,6 +4,7 @@ import { createContentLoader } from 'vitepress'
 // frensense v2 documentation site.
 // Deployed at the domain root; the legacy v1 site is served under /v1/.
 export default defineConfig({
+  base: process.env.VITEPRESS_BASE || '/Frensense-v2/',
   lang: 'en-US',
   title: 'Frensense',
   description:

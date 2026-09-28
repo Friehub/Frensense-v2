@@ -5,7 +5,10 @@ authors = ["Friehub Developers"]
 edition = "2024"
 description = "Frensense engine core - structural code analysis primitives (fingerprints, profiles, semantic graph, taint, temporal events)"
 license = "GPL-3.0-only"
-repository = "https://github.com/Friehub/frensense"
+readme = "../README.md"
+repository = "https://github.com/Friehub/Frensense-v2"
+homepage = "https://friehub.github.io/Frensense-v2/"
+documentation = "https://friehub.github.io/Frensense-v2/"
 rust-version = "1.95"
 
 [lib]

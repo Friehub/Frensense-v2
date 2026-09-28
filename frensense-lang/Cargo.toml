@@ -4,6 +4,10 @@ version     = "0.7.0-preview.3"
 edition     = "2021"
 description = "Per-language AST specs for the frensense engine - eliminates all hardcoded node-kind strings"
 license     = "GPL-3.0-only"
+readme      = "../README.md"
+repository  = "https://github.com/Friehub/Frensense-v2"
+homepage    = "https://friehub.github.io/Frensense-v2/"
+documentation = "https://friehub.github.io/Frensense-v2/"
 
 # ── Tree-sitter grammars are optional so the crate compiles even when only a
 #    subset of languages is needed. Enable every language you want to scan. ──
