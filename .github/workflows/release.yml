@@ -125,10 +125,9 @@ jobs:
           targets: ${{ matrix.settings.target }}
 
 
-      - name: Build binaries (CLI + MCP + LSP)
-        run: |
-          cargo build --release --target ${{ matrix.settings.target }} \
-            --bin frensense
+      - name: Build binary (CLI + MCP + LSP unified)
+        shell: bash
+        run: cargo build --release --target ${{ matrix.settings.target }} --bin frensense
 
       - name: Build FRC Bundle
         # The corpus is proprietary and not in the public repo; skip unless

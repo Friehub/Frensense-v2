@@ -2,7 +2,7 @@
 
 "use strict";
 
-const { spawnSync } = require("child_process");
+const { spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -51,18 +51,20 @@ if (platform !== "win32") {
   }
 }
 
-const result = spawnSync(binaryPath, process.argv.slice(2), {
+const child = spawn(binaryPath, process.argv.slice(2), {
   stdio: "inherit",
   windowsHide: true,
 });
 
-if (result.error) {
-  console.error(`[frensense] Failed to execute binary:`, result.error);
+child.on("error", (err) => {
+  console.error(`[frensense] Failed to execute binary:`, err);
   process.exit(1);
-}
+});
 
-if (result.signal) {
-  process.kill(process.pid, result.signal);
-} else {
-  process.exit(result.status ?? 0);
-}
+child.on("close", (code, signal) => {
+  if (signal) {
+    process.kill(process.pid, signal);
+  } else {
+    process.exit(code ?? 0);
+  }
+});

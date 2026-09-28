@@ -36,6 +36,20 @@ always `frensense lsp`:
 }
 ```
 
+Or zero-install via `npx` (Node.js users):
+
+```json
+{
+  "languageserver": {
+    "frensense": {
+      "command": "npx",
+      "args": ["-y", "@friehub/frensense", "lsp"],
+      "filetypes": ["python", "javascript", "typescript", "go", "rust"]
+    }
+  }
+}
+```
+
 For Neovim (nvim-lspconfig):
 
 ```lua

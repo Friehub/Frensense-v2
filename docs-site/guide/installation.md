@@ -16,15 +16,19 @@ This compiles and installs the `frensense` binary into `~/.cargo/bin`.
 
 ## Install from npm
 
-If you are a Node.js user, the npm package downloads the prebuilt binary for
-your platform during install (no compiler needed):
+If you are a Node.js user, the npm package packages prebuilt binaries for
+your platform (no Rust compiler needed):
 
 ```bash
-npm install -g frensense
+# Global install
+npm install -g @friehub/frensense
+
+# Or run instantly without installing
+npx @friehub/frensense .
 ```
 
-The npm launcher (`frensense`) wraps the native binary, so all commands work
-identically to the direct binary.
+The npm launcher (`frensense`) wraps the native binary, so all commands and
+subcommands (`mcp`, `lsp`, `watch`) work identically to the direct binary.
 
 ## Prebuilt binaries
 
