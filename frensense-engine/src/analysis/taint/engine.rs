@@ -579,8 +579,11 @@ impl GuardMap {
                                 } else {
                                     *sense
                                 };
-                                let safe_block =
-                                    if effective_sense { true_block } else { false_block };
+                                let safe_block = if effective_sense {
+                                    true_block
+                                } else {
+                                    false_block
+                                };
                                 for op in [lhs, rhs] {
                                     if let Operand::Var(u) = op {
                                         guards.entry(*u).or_default().push(safe_block);

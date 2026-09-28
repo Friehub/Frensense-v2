@@ -292,7 +292,10 @@ fn check_call(
                     .get(slot)
                     .and_then(|a| arg_str_literal(a, values))
                     .map(str::to_ascii_lowercase)
-                    && fact.weak_selectors.iter().any(|ws| ws.to_ascii_lowercase() == sel)
+                    && fact
+                        .weak_selectors
+                        .iter()
+                        .any(|ws| ws.to_ascii_lowercase() == sel)
                 {
                     out.push(CheckerFinding {
                         learned: true,
@@ -321,7 +324,6 @@ fn check_call(
             }
         }
     }
-
 
     // Hash-wrapper heuristic: a call named `hash`/`hashPassword` whose
     // receiver is a security-ish namespace. Matched by last segment of the
@@ -399,4 +401,3 @@ fn check_call(
         }
     }
 }
-

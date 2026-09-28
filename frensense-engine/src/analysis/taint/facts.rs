@@ -157,9 +157,7 @@ pub enum PolicyRequirement {
     },
     /// A call must NOT be present in the scope (forbid a deprecated or
     /// banned alternative from co-occurring with the trigger).
-    NotCall {
-        call: String,
-    },
+    NotCall { call: String },
     /// The trigger's guarded argument must participate in a comparison
     /// against a literal bound with one of `ops`. Direct generalization
     /// of `LearnedCheckFact::unless_range_check` (inverted).
@@ -175,16 +173,10 @@ pub enum PolicyRequirement {
     },
     /// The call's argument at `slot` must NOT match any of `values`
     /// (case-insensitive comparison over string, boolean, or integer literals).
-    BannedArgLiteral {
-        slot: usize,
-        values: Vec<String>,
-    },
+    BannedArgLiteral { slot: usize, values: Vec<String> },
     /// The call's argument at `slot` MUST match one of `values`
     /// (case-insensitive comparison over string, boolean, or integer literals).
-    RequiredArgLiteral {
-        slot: usize,
-        values: Vec<String>,
-    },
+    RequiredArgLiteral { slot: usize, values: Vec<String> },
 }
 
 impl PolicyRequirement {
@@ -203,7 +195,6 @@ impl PolicyRequirement {
         }
     }
 }
-
 
 /// Where a policy's trigger and requirements are evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -387,8 +378,6 @@ pub struct FactTable {
     /// bundles teach new frameworks without touching the built-in tables.
     pub learned_sources: FxHashSet<String>,
 }
-
-
 
 impl FactTable {
     /// Build from a plain [`TaintConfig`]: every configured sink gets the
@@ -869,7 +858,11 @@ impl LearnedFactEntry {
                     return_capacity: return_capacity.clone(),
                     consumes_params: consumes_params.clone(),
                 };
-                if let Some(existing) = table.memory_contracts.iter_mut().find(|c| c.name == fact.name) {
+                if let Some(existing) = table
+                    .memory_contracts
+                    .iter_mut()
+                    .find(|c| c.name == fact.name)
+                {
                     *existing = fact;
                 } else {
                     table.memory_contracts.push(fact);
@@ -899,7 +892,9 @@ impl LearnedFactEntry {
             }
             LearnedFactEntry::SchemaPolicy(fact) => {
                 table.schema_builders.extend(fact.builders.iter().cloned());
-                table.schema_enforcers.extend(fact.enforcers.iter().cloned());
+                table
+                    .schema_enforcers
+                    .extend(fact.enforcers.iter().cloned());
                 table
                     .schema_keywords
                     .extend(fact.bound_keywords.iter().cloned());
@@ -907,7 +902,6 @@ impl LearnedFactEntry {
         }
     }
 }
-
 
 /// Build a [`FactTable`] from a list of learned bundle facts.
 pub fn fact_table_from_entries(entries: &[LearnedFactEntry]) -> FactTable {

@@ -37,12 +37,14 @@ static ENFORCERS: &[&str] = &[
     "step",
 ];
 
+type BuilderEntry = (String, bool, Option<(usize, usize)>);
+
 pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     let mut findings = Vec::new();
     // Collect describe/description string args keyed by their receiver chain,
     // and builder+enforcer method calls with their spans.
     let mut described: Vec<(String, Option<(usize, usize)>)> = Vec::new();
-    let mut builders: Vec<(String, bool, Option<(usize, usize)>)> = Vec::new();
+    let mut builders: Vec<BuilderEntry> = Vec::new();
     let mut enforcers: Vec<&str> = Vec::new();
     for block in ir.blocks.values() {
         for instr in &block.instructions {
@@ -75,7 +77,10 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                         described.push((text, span));
                     }
                 } else if ENFORCERS.contains(&seg)
-                    || facts.schema_enforcers.iter().any(|e| e.eq_ignore_ascii_case(seg))
+                    || facts
+                        .schema_enforcers
+                        .iter()
+                        .any(|e| e.eq_ignore_ascii_case(seg))
                 {
                     enforcers.push(seg);
                 } else {

@@ -394,19 +394,12 @@ enum Candidate {
         consumes_params: Vec<usize>,
     },
     /// Weak cryptographic primitive or algorithm selector learned from corpus examples.
-    WeakCrypto {
-        fact: WeakCryptoFact,
-    },
+    WeakCrypto { fact: WeakCryptoFact },
     /// Guard bypass pattern (containment callee, credential sink or credential param).
-    GuardBypass {
-        fact: GuardBypassFact,
-    },
+    GuardBypass { fact: GuardBypassFact },
     /// Schema policy rule (number builder, enforcer method, or bound keyword).
-    SchemaPolicy {
-        fact: SchemaPolicyFact,
-    },
+    SchemaPolicy { fact: SchemaPolicyFact },
 }
-
 
 /// Taint-relevant calls observed in one variant, with arg-slot detail.
 /// Uses the engine's scan; the deltas come from comparing what taint reached.
@@ -480,8 +473,8 @@ fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Vec<Ca
     }
     if !family_irs.is_empty() {
         let ir_refs: Vec<&frensense_engine::ir::function::FunctionIR> = family_irs.iter().collect();
-        let summaries = MemorySummaryRegistry::from_facts(builtin)
-            .infer_program_summaries_into(&ir_refs);
+        let summaries =
+            MemorySummaryRegistry::from_facts(builtin).infer_program_summaries_into(&ir_refs);
         for (name, summary) in summaries.summaries {
             if MemorySummaryRegistry::is_builtin(&name) {
                 continue;
@@ -812,12 +805,18 @@ fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Vec<Ca
             for block in ir.blocks.values() {
                 for instr in &block.instructions {
                     let callee = match instr {
-                        frensense_engine::ir::function::Instruction::CallVirtual { method, .. } => method,
-                        frensense_engine::ir::function::Instruction::CallStatic { func, .. } => func,
+                        frensense_engine::ir::function::Instruction::CallVirtual {
+                            method, ..
+                        } => method,
+                        frensense_engine::ir::function::Instruction::CallStatic {
+                            func, ..
+                        } => func,
                         _ => continue,
                     };
                     let seg = callee.rsplit('.').next().unwrap_or(callee);
-                    if !["includes", "indexOf", "contains"].contains(&seg) && looks_taint_relevant(seg) {
+                    if !["includes", "indexOf", "contains"].contains(&seg)
+                        && looks_taint_relevant(seg)
+                    {
                         candidates.push(Candidate::GuardBypass {
                             fact: GuardBypassFact {
                                 containment_callees: vec![seg.to_string()],
@@ -835,14 +834,22 @@ fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Vec<Ca
         for block in ir.blocks.values() {
             for instr in &block.instructions {
                 let (callee, args) = match instr {
-                    frensense_engine::ir::function::Instruction::CallVirtual { method, args, .. } => (method, args),
-                    frensense_engine::ir::function::Instruction::CallStatic { func, args, .. } => (func, args),
+                    frensense_engine::ir::function::Instruction::CallVirtual {
+                        method,
+                        args,
+                        ..
+                    } => (method, args),
+                    frensense_engine::ir::function::Instruction::CallStatic {
+                        func, args, ..
+                    } => (func, args),
                     _ => continue,
                 };
                 let seg = callee.rsplit('.').next().unwrap_or(callee);
                 for arg in args {
                     if let frensense_engine::ir::function::Operand::Var(v) = arg {
-                        if let Some(src_name) = ir.var_metadata.get(v).and_then(|m| m.source_name.clone()) {
+                        if let Some(src_name) =
+                            ir.var_metadata.get(v).and_then(|m| m.source_name.clone())
+                        {
                             let lower = src_name.to_ascii_lowercase();
                             let is_pwd = [
                                 "password",
@@ -853,7 +860,10 @@ fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Vec<Ca
                                 "newpassword",
                             ]
                             .contains(&lower.as_str());
-                            if is_pwd && !["hash", "hashPassword", "hashpw", "setPassword", "set"].contains(&seg) {
+                            if is_pwd
+                                && !["hash", "hashPassword", "hashpw", "setPassword", "set"]
+                                    .contains(&seg)
+                            {
                                 candidates.push(Candidate::GuardBypass {
                                     fact: GuardBypassFact {
                                         credential_sinks: vec![seg.to_string()],
@@ -862,8 +872,12 @@ fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Vec<Ca
                                 });
                             }
                             if !is_pwd
-                                && ["hash", "hashPassword", "hashpw", "setPassword", "set"].contains(&seg)
-                                && (lower.contains("secret") || lower.contains("key") || lower.contains("token") || lower.contains("auth"))
+                                && ["hash", "hashPassword", "hashpw", "setPassword", "set"]
+                                    .contains(&seg)
+                                && (lower.contains("secret")
+                                    || lower.contains("key")
+                                    || lower.contains("token")
+                                    || lower.contains("auth"))
                             {
                                 candidates.push(Candidate::GuardBypass {
                                     fact: GuardBypassFact {
@@ -883,10 +897,17 @@ fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Vec<Ca
     for ir in &pos_irs {
         for block in ir.blocks.values() {
             for instr in &block.instructions {
-                if let frensense_engine::ir::function::Instruction::CallVirtual { method, args, .. } = instr {
+                if let frensense_engine::ir::function::Instruction::CallVirtual {
+                    method,
+                    args,
+                    ..
+                } = instr
+                {
                     let seg = method.rsplit('.').next().unwrap_or(method);
                     if seg == "describe" || seg == "description" {
-                        if let Some(frensense_engine::ir::function::Operand::StringLiteral(text)) = args.first() {
+                        if let Some(frensense_engine::ir::function::Operand::StringLiteral(text)) =
+                            args.first()
+                        {
                             let lower = text.to_ascii_lowercase();
                             if lower.chars().any(|c| c.is_ascii_digit()) {
                                 for b2 in ir.blocks.values() {
@@ -909,8 +930,12 @@ fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Vec<Ca
                                     }
                                 }
                                 for word in lower.split_whitespace() {
-                                    let clean: String = word.chars().filter(|c| c.is_alphabetic()).collect();
-                                    if clean.len() >= 3 && !["maximum", "max", "minimum", "min", "limit", "up to"].contains(&clean.as_str()) {
+                                    let clean: String =
+                                        word.chars().filter(|c| c.is_alphabetic()).collect();
+                                    if clean.len() >= 3
+                                        && !["maximum", "max", "minimum", "min", "limit", "up to"]
+                                            .contains(&clean.as_str())
+                                    {
                                         candidates.push(Candidate::SchemaPolicy {
                                             fact: SchemaPolicyFact {
                                                 bound_keywords: vec![clean],
@@ -931,9 +956,20 @@ fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Vec<Ca
     for ir in &neg_irs {
         for block in ir.blocks.values() {
             for instr in &block.instructions {
-                if let frensense_engine::ir::function::Instruction::CallVirtual { method, .. } = instr {
+                if let frensense_engine::ir::function::Instruction::CallVirtual { method, .. } =
+                    instr
+                {
                     let seg = method.rsplit('.').next().unwrap_or(method);
-                    if !["max", "min", "minimum", "maximum", "int", "multipleOf", "step"].contains(&seg)
+                    if ![
+                        "max",
+                        "min",
+                        "minimum",
+                        "maximum",
+                        "int",
+                        "multipleOf",
+                        "step",
+                    ]
+                    .contains(&seg)
                         && !["number", "int", "float", "bigint"].contains(&seg)
                         && seg != "describe"
                         && seg != "description"
@@ -1094,12 +1130,18 @@ fn extract_call_arg_literals(
                 let seg = callee.rsplit('.').next().unwrap_or(callee);
                 for (slot, arg) in args.iter().enumerate() {
                     let lit = match arg {
-                        Operand::StringLiteral(s) => Some(s.trim_matches(|c| c == '\'' || c == '"' || c == '`').to_string()),
+                        Operand::StringLiteral(s) => Some(
+                            s.trim_matches(|c| c == '\'' || c == '"' || c == '`')
+                                .to_string(),
+                        ),
                         Operand::IntLiteral(i) => Some(i.to_string()),
                         Operand::BoolLiteral(b) => Some(b.to_string()),
                         Operand::Var(v) => values
                             .const_str(*v)
-                            .map(|s| s.trim_matches(|c| c == '\'' || c == '"' || c == '`').to_string())
+                            .map(|s| {
+                                s.trim_matches(|c| c == '\'' || c == '"' || c == '`')
+                                    .to_string()
+                            })
                             .or_else(|| values.const_int(*v).map(|i| i.to_string()))
                             .or_else(|| values.const_bool(*v).map(|b| b.to_string())),
                         _ => None,
@@ -1335,14 +1377,22 @@ fn apply_candidate(table: &mut FactTable, c: &Candidate) {
                 return_capacity: return_capacity.clone(),
                 consumes_params: consumes_params.clone(),
             };
-            if let Some(existing) = table.memory_contracts.iter_mut().find(|c| c.name == fact.name) {
+            if let Some(existing) = table
+                .memory_contracts
+                .iter_mut()
+                .find(|c| c.name == fact.name)
+            {
                 *existing = fact;
             } else {
                 table.memory_contracts.push(fact);
             }
         }
         Candidate::WeakCrypto { fact } => {
-            if let Some(existing) = table.weak_crypto_rules.iter_mut().find(|c| c.rule_id == fact.rule_id && c.call == fact.call) {
+            if let Some(existing) = table
+                .weak_crypto_rules
+                .iter_mut()
+                .find(|c| c.rule_id == fact.rule_id && c.call == fact.call)
+            {
                 *existing = fact.clone();
             } else {
                 table.weak_crypto_rules.push(fact.clone());
@@ -1391,7 +1441,9 @@ fn fact_key(e: &LearnedFactEntry) -> (String, String) {
             rule, when_call, ..
         } => ("policy".into(), format!("{rule}:{when_call}")),
         LearnedFactEntry::MemoryContract { name, .. } => ("mem".into(), name.clone()),
-        LearnedFactEntry::WeakCrypto(f) => ("weak_crypto".into(), format!("{}:{}", f.rule_id, f.call)),
+        LearnedFactEntry::WeakCrypto(f) => {
+            ("weak_crypto".into(), format!("{}:{}", f.rule_id, f.call))
+        }
         LearnedFactEntry::GuardBypass(f) => (
             "guard_bypass".into(),
             format!(
@@ -1405,7 +1457,6 @@ fn fact_key(e: &LearnedFactEntry) -> (String, String) {
         ),
     }
 }
-
 
 /// Full extraction: propose per family → replay-gate → merged learned table.
 pub fn extract_facts(
@@ -1425,7 +1476,10 @@ pub fn extract_facts(
                 Candidate::Check { rule, call, .. } => format!("check:{rule}:{call}"),
                 Candidate::Policy { rule, call, .. } => format!("policy:{rule}:{call}"),
                 Candidate::MemoryContract { name, .. } => format!("mem:{name}"),
-                Candidate::WeakCrypto { fact } => format!("weak_crypto:{}:{}:{:?}", fact.rule_id, fact.call, fact.selector_slot),
+                Candidate::WeakCrypto { fact } => format!(
+                    "weak_crypto:{}:{}:{:?}",
+                    fact.rule_id, fact.call, fact.selector_slot
+                ),
                 Candidate::GuardBypass { fact } => format!(
                     "gb:{:?}:{:?}:{:?}",
                     fact.containment_callees, fact.credential_sinks, fact.credential_params
@@ -1435,7 +1489,6 @@ pub fn extract_facts(
                     fact.builders, fact.enforcers, fact.bound_keywords
                 ),
             };
-
 
             let entry = votes.entry(key).or_insert_with(|| (c, 0, Vec::new()));
             entry.1 += 1;
@@ -1535,7 +1588,8 @@ pub fn extract_facts(
         let mut ok = true;
         for p in &prepared {
             let voted = fams.contains(&p.id);
-            let relevant = voted || cand_calls.is_empty() || cand_calls.iter().any(|c| p.calls.contains(*c));
+            let relevant =
+                voted || cand_calls.is_empty() || cand_calls.iter().any(|c| p.calls.contains(*c));
             let sep = if relevant {
                 p.separates(config, &trial)
             } else {
@@ -1700,7 +1754,10 @@ export function handle(req: any) { return req; }
     fn block_must_open_with_marker() {
         // Comment lines WITHOUT the [frensense] opener must not be parsed.
         let src = "// observation: not in a block\nexport function h() {}\n";
-        assert_eq!(FamilyMetadata::parse(src, "ts", 30), FamilyMetadata::default());
+        assert_eq!(
+            FamilyMetadata::parse(src, "ts", 30),
+            FamilyMetadata::default()
+        );
     }
 
     #[test]
@@ -1715,11 +1772,7 @@ export function handle(req: any) { return req; }
     #[test]
     fn metadata_survives_bundle_roundtrip() {
         let dir = TempDir::new().unwrap();
-        fs::write(
-            dir.path().join("adv_positive.ts"),
-            TS_BLOCK,
-        )
-        .unwrap();
+        fs::write(dir.path().join("adv_positive.ts"), TS_BLOCK).unwrap();
         fs::write(
             dir.path().join("adv_negative.ts"),
             "// SAFE: parameterized\nexport function handle(req: any) { return escape(req); }\n",
@@ -1742,7 +1795,10 @@ export function handle(req: any) { return req; }
             .iter()
             .find(|p| p.id == "adv")
             .expect("family pattern in bundle");
-        assert_eq!(pat.observation.as_deref(), Some("User data reaches the sink unescaped."));
+        assert_eq!(
+            pat.observation.as_deref(),
+            Some("User data reaches the sink unescaped.")
+        );
         assert_eq!(pat.cwe.as_deref(), Some("CWE-79"));
         assert_eq!(pat.cvss, Some(7.4));
         assert_eq!(pat.severity.as_deref(), Some("High"));
@@ -1751,8 +1807,16 @@ export function handle(req: any) { return req; }
     #[test]
     fn family_without_block_ships_all_none_pattern() {
         let dir = TempDir::new().unwrap();
-        fs::write(dir.path().join("bare_positive.ts"), "export function h(req: any) { return req; }\n").unwrap();
-        fs::write(dir.path().join("bare_negative.ts"), "export function h() { return 1; }\n").unwrap();
+        fs::write(
+            dir.path().join("bare_positive.ts"),
+            "export function h(req: any) { return req; }\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("bare_negative.ts"),
+            "export function h() { return 1; }\n",
+        )
+        .unwrap();
 
         let (bytes, _) = crate::builder::build_facts_bundle(
             dir.path(),
@@ -1792,8 +1856,16 @@ mod grouping_tests {
         let dir = TempDir::new().unwrap();
         write(&dir, "foo_positive.py", "def h(req):\n    return req\n");
         write(&dir, "foo_negative.py", "def h():\n    return 1\n");
-        write(&dir, "foo_positive.ts", "export function h(req: any) { return req; }\n");
-        write(&dir, "foo_negative.ts", "export function h() { return 1; }\n");
+        write(
+            &dir,
+            "foo_positive.ts",
+            "export function h(req: any) { return req; }\n",
+        );
+        write(
+            &dir,
+            "foo_negative.ts",
+            "export function h() { return 1; }\n",
+        );
 
         let families = group_families(dir.path()).unwrap();
         let ids: Vec<&str> = families.iter().map(|f| f.id.as_str()).collect();
@@ -1818,8 +1890,16 @@ mod grouping_tests {
     fn ts_and_tsx_stay_one_family() {
         // Both extensions resolve to the same language spec (typescript).
         let dir = TempDir::new().unwrap();
-        write(&dir, "bar_positive.ts", "export function h(req: any) { return req; }\n");
-        write(&dir, "bar_negative.tsx", "export function h() { return 1; }\n");
+        write(
+            &dir,
+            "bar_positive.ts",
+            "export function h(req: any) { return req; }\n",
+        );
+        write(
+            &dir,
+            "bar_negative.tsx",
+            "export function h() { return 1; }\n",
+        );
 
         let families = group_families(dir.path()).unwrap();
         assert_eq!(families.len(), 1);
@@ -1833,8 +1913,16 @@ mod grouping_tests {
         let dir = TempDir::new().unwrap();
         write(&dir, "sql_positive.py", "def h(req):\n    return req\n");
         write(&dir, "sql_negative.py", "def h():\n    return 1\n");
-        write(&dir, "xss_positive.ts", "export function h(req: any) { return req; }\n");
-        write(&dir, "xss_negative.ts", "export function h() { return 1; }\n");
+        write(
+            &dir,
+            "xss_positive.ts",
+            "export function h(req: any) { return req; }\n",
+        );
+        write(
+            &dir,
+            "xss_negative.ts",
+            "export function h() { return 1; }\n",
+        );
 
         let families = group_families(dir.path()).unwrap();
         let ids: Vec<&str> = families.iter().map(|f| f.id.as_str()).collect();
@@ -1854,8 +1942,16 @@ mod grouping_tests {
             "# check-call: admin_reset\ndef h():\n    admin_reset()\n",
         );
         write(&dir, "adm_negative.py", "def h():\n    return 1\n");
-        write(&dir, "adm_positive.ts", "export function h() { adminReset(); }\n");
-        write(&dir, "adm_negative.ts", "export function h() { return 1; }\n");
+        write(
+            &dir,
+            "adm_positive.ts",
+            "export function h() { adminReset(); }\n",
+        );
+        write(
+            &dir,
+            "adm_negative.ts",
+            "export function h() { return 1; }\n",
+        );
 
         let families = group_families(dir.path()).unwrap();
         let py = families.iter().find(|f| f.id == "adm (python)").unwrap();
@@ -1873,7 +1969,11 @@ mod grouping_tests {
         // bare id and its files untouched.
         let dir = TempDir::new().unwrap();
         write(&dir, "baz_positive.py", "def h(req):\n    return req\n");
-        write(&dir, "baz_negative.ts", "export function h() { return 1; }\n");
+        write(
+            &dir,
+            "baz_negative.ts",
+            "export function h() { return 1; }\n",
+        );
         write(&dir, "qux_positive.py", "def h(req):\n    return req\n");
         write(&dir, "qux_negative.py", "def h():\n    return 1\n");
 
@@ -2038,8 +2138,16 @@ mod policy_proposal_tests {
         // co-occurrence mining is too broad presence-blind, so nothing
         // Policy-shaped may be published.
         let dir = TempDir::new().unwrap();
-        write(&dir, "und_positive.ts", "function run() { evaluate(request); shellExec(request); }\n");
-        write(&dir, "und_negative.ts", "function run() { evaluate(request); }\n");
+        write(
+            &dir,
+            "und_positive.ts",
+            "function run() { evaluate(request); shellExec(request); }\n",
+        );
+        write(
+            &dir,
+            "und_negative.ts",
+            "function run() { evaluate(request); }\n",
+        );
         let families = group_families(dir.path()).unwrap();
         assert!(families[0].declared_check_call.is_none());
         let (config, table) = builtin();

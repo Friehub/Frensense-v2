@@ -40,6 +40,7 @@ fn last_segment(call: &str) -> &str {
 /// Derives serde so it can travel inside a `.frc` bundle's bincode payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Default)]
 pub enum CapacitySpec {
     /// Exact constant byte/element capacity (e.g. malloc(64)).
     Exact(i64),
@@ -48,13 +49,8 @@ pub enum CapacitySpec {
     /// Capacity matches `args[p1] * args[p2]` (e.g. calloc(n, sz)).
     ParamProduct(usize, usize),
     /// Fresh allocation, but capacity is dynamic or unconstrained.
+    #[default]
     Unknown,
-}
-
-impl Default for CapacitySpec {
-    fn default() -> Self {
-        CapacitySpec::Unknown
-    }
 }
 
 /// Summary contract describing a function's memory semantics.
@@ -100,12 +96,32 @@ impl MemorySummaryRegistry {
     /// (they're already in the hardcoded bootstrap, no need to inflate bundle size).
     pub fn is_builtin(name: &str) -> bool {
         const BUILTIN_NAMES: &[&str] = &[
-            "free", "malloc", "calloc", "realloc", "aligned_alloc", "valloc", "alloca",
-            "g_free", "g_malloc", "g_malloc0", "g_realloc", "g_strdup",
-            "kfree", "kmalloc", "kzalloc", "kcalloc",
-            "sqlite3_free", "sqlite3_malloc", "sqlite3_malloc64", "sqlite3_realloc",
-            "CRYPTO_free", "apr_palloc", "xmlFree", "cJSON_Delete",
-            "strdup", "strndup",
+            "free",
+            "malloc",
+            "calloc",
+            "realloc",
+            "aligned_alloc",
+            "valloc",
+            "alloca",
+            "g_free",
+            "g_malloc",
+            "g_malloc0",
+            "g_realloc",
+            "g_strdup",
+            "kfree",
+            "kmalloc",
+            "kzalloc",
+            "kcalloc",
+            "sqlite3_free",
+            "sqlite3_malloc",
+            "sqlite3_malloc64",
+            "sqlite3_realloc",
+            "CRYPTO_free",
+            "apr_palloc",
+            "xmlFree",
+            "cJSON_Delete",
+            "strdup",
+            "strndup",
         ];
         BUILTIN_NAMES.contains(&name)
     }
@@ -150,8 +166,6 @@ impl MemorySummaryRegistry {
         registry.run_fixpoint(irs);
         registry
     }
-
-
 
     fn register_builtins(&mut self) {
         // Standard deallocators (consumes param 0)
@@ -256,7 +270,7 @@ impl MemorySummaryRegistry {
         if DIRECT_ALLOC_CALLS.contains(&seg) {
             return true;
         }
-        self.get(name).map_or(false, |s| s.returns_fresh)
+        self.get(name).is_some_and(|s| s.returns_fresh)
     }
 
     /// Returns the capacity specification for a fresh allocation returned by `name`.
@@ -271,8 +285,13 @@ impl MemorySummaryRegistry {
         if seg == "realloc" || seg == "aligned_alloc" {
             return Some(&CapacitySpec::Param(1));
         }
-        self.get(name)
-            .and_then(|s| if s.returns_fresh { Some(&s.return_capacity) } else { None })
+        self.get(name).and_then(|s| {
+            if s.returns_fresh {
+                Some(&s.return_capacity)
+            } else {
+                None
+            }
+        })
     }
 
     /// Returns the indices of parameters consumed (deallocated) by `name`.
@@ -301,10 +320,15 @@ impl MemorySummaryRegistry {
                 for blk in ir.blocks.values() {
                     for instr in &blk.instructions {
                         match instr {
-                            Instruction::Assign { dest, src: Operand::Var(src) }
-                            | Instruction::Cast { dest, src: Operand::Var(src), .. }
-                                if *dest == cur =>
-                            {
+                            Instruction::Assign {
+                                dest,
+                                src: Operand::Var(src),
+                            }
+                            | Instruction::Cast {
+                                dest,
+                                src: Operand::Var(src),
+                                ..
+                            } if *dest == cur => {
                                 if let Some(pos) = ir.parameters.iter().position(|&p| p == *src) {
                                     return Some(pos);
                                 }
@@ -327,13 +351,15 @@ impl MemorySummaryRegistry {
         }
 
         // Trace a variable back to its defining instruction.
-        fn find_definition<'b>(ir: &'b FunctionIR, var: VarId) -> Option<&'b Instruction> {
+        fn find_definition(ir: &FunctionIR, var: VarId) -> Option<&Instruction> {
             for blk in ir.blocks.values() {
                 for instr in &blk.instructions {
                     match instr {
                         Instruction::Assign { dest, .. }
                         | Instruction::Cast { dest, .. }
-                        | Instruction::CallStatic { dest: Some(dest), .. }
+                        | Instruction::CallStatic {
+                            dest: Some(dest), ..
+                        }
                         | Instruction::Allocate { dest, .. }
                         | Instruction::BinaryOp { dest, .. }
                         | Instruction::UnaryOp { dest, .. }
@@ -366,12 +392,11 @@ impl MemorySummaryRegistry {
                         if let Instruction::CallStatic { func, args, .. } = instr {
                             let consumed_slots = self.consumes_params(func.as_str());
                             for slot in consumed_slots {
-                                if let Some(Operand::Var(v)) = args.get(slot) {
-                                    if let Some(param_idx) = trace_to_param(ir, *v) {
-                                        if !consumes.contains(&param_idx) {
-                                            consumes.push(param_idx);
-                                        }
-                                    }
+                                if let Some(Operand::Var(v)) = args.get(slot)
+                                    && let Some(param_idx) = trace_to_param(ir, *v)
+                                    && !consumes.contains(&param_idx)
+                                {
+                                    consumes.push(param_idx);
                                 }
                             }
                         }
@@ -382,8 +407,11 @@ impl MemorySummaryRegistry {
                 // 2. Infer returned allocation provenance
                 let mut return_vars: Vec<VarId> = Vec::new();
                 for blk in ir.blocks.values() {
-                    if let Terminator::Return { src: Some(Operand::Var(v)) } = &blk.terminator {
-                        return_vars.push(v.clone());
+                    if let Terminator::Return {
+                        src: Some(Operand::Var(v)),
+                    } = &blk.terminator
+                    {
+                        return_vars.push(*v);
                     }
                 }
 
@@ -424,46 +452,56 @@ impl MemorySummaryRegistry {
                     for ret_var in return_vars {
                         if let Some(def) = find_alloc_root(ret_var) {
                             match def {
-                                Instruction::CallStatic { func, args, .. } => {
-                                    if self.returns_fresh(func) {
-                                        returns_fresh = true;
-                                        if let Some(cap_spec) = self.return_capacity(func) {
-                                            match cap_spec {
-                                                CapacitySpec::Param(p_idx) => {
-                                                    if let Some(arg_op) = args.get(*p_idx) {
-                                                        match arg_op {
-                                                            Operand::IntLiteral(k) => {
-                                                                return_capacity = CapacitySpec::Exact(*k);
-                                                            }
-                                                            Operand::Var(v) => {
-                                                                if let Some(param_idx) = trace_to_param(ir, *v) {
-                                                                    return_capacity = CapacitySpec::Param(param_idx);
-                                                                } else if let Some(c) = val_info.const_int(*v) {
-                                                                    return_capacity = CapacitySpec::Exact(c);
-                                                                }
-                                                            }
-                                                            _ => {}
+                                Instruction::CallStatic { func, args, .. }
+                                    if self.returns_fresh(func) =>
+                                {
+                                    returns_fresh = true;
+                                    if let Some(cap_spec) = self.return_capacity(func) {
+                                        match cap_spec {
+                                            CapacitySpec::Param(p_idx) => {
+                                                if let Some(arg_op) = args.get(*p_idx) {
+                                                    match arg_op {
+                                                        Operand::IntLiteral(k) => {
+                                                            return_capacity =
+                                                                CapacitySpec::Exact(*k);
                                                         }
+                                                        Operand::Var(v) => {
+                                                            if let Some(param_idx) =
+                                                                trace_to_param(ir, *v)
+                                                            {
+                                                                return_capacity =
+                                                                    CapacitySpec::Param(param_idx);
+                                                            } else if let Some(c) =
+                                                                val_info.const_int(*v)
+                                                            {
+                                                                return_capacity =
+                                                                    CapacitySpec::Exact(c);
+                                                            }
+                                                        }
+                                                        _ => {}
                                                     }
                                                 }
-                                                CapacitySpec::ParamProduct(p1, p2) => {
-                                                    let param1 = args.get(*p1).and_then(|op| match op {
-                                                        Operand::Var(v) => trace_to_param(ir, *v),
-                                                        _ => None,
-                                                    });
-                                                    let param2 = args.get(*p2).and_then(|op| match op {
-                                                        Operand::Var(v) => trace_to_param(ir, *v),
-                                                        _ => None,
-                                                    });
-                                                    if let (Some(a), Some(b)) = (param1, param2) {
-                                                        return_capacity = CapacitySpec::ParamProduct(a, b);
-                                                    }
-                                                }
-                                                CapacitySpec::Exact(k) => {
-                                                    return_capacity = CapacitySpec::Exact(*k);
-                                                }
-                                                CapacitySpec::Unknown => {}
                                             }
+                                            CapacitySpec::ParamProduct(p1, p2) => {
+                                                let param1 =
+                                                    args.get(*p1).and_then(|op| match op {
+                                                        Operand::Var(v) => trace_to_param(ir, *v),
+                                                        _ => None,
+                                                    });
+                                                let param2 =
+                                                    args.get(*p2).and_then(|op| match op {
+                                                        Operand::Var(v) => trace_to_param(ir, *v),
+                                                        _ => None,
+                                                    });
+                                                if let (Some(a), Some(b)) = (param1, param2) {
+                                                    return_capacity =
+                                                        CapacitySpec::ParamProduct(a, b);
+                                                }
+                                            }
+                                            CapacitySpec::Exact(k) => {
+                                                return_capacity = CapacitySpec::Exact(*k);
+                                            }
+                                            CapacitySpec::Unknown => {}
                                         }
                                     }
                                 }
@@ -494,4 +532,3 @@ impl MemorySummaryRegistry {
         }
     }
 }
-

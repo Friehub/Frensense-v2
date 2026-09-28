@@ -158,7 +158,9 @@ export const schema = {
         let neg_irs = lower_source("t.ts", neg_src, "ts").expect("lower");
         let neg_findings = check_all(neg_irs.values(), &facts);
         assert!(
-            neg_findings.iter().all(|f| f.rule != "unbounded_number_schema"),
+            neg_findings
+                .iter()
+                .all(|f| f.rule != "unbounded_number_schema"),
             "enforced builder must stay silent"
         );
     }
@@ -179,7 +181,9 @@ export const schema = {
         let pos_irs = lower_source("t.ts", pos_src, "ts").expect("lower");
         let pos_findings = check_all(pos_irs.values(), &facts);
         assert!(
-            pos_findings.iter().any(|f| f.rule == "unbounded_number_schema"),
+            pos_findings
+                .iter()
+                .any(|f| f.rule == "unbounded_number_schema"),
             "unenforced schema must fire on positive sample"
         );
 
@@ -193,7 +197,9 @@ export const schema = {
         let neg_irs = lower_source("t.ts", neg_src, "ts").expect("lower");
         let neg_findings = check_all(neg_irs.values(), &facts);
         assert!(
-            neg_findings.iter().all(|f| f.rule != "unbounded_number_schema"),
+            neg_findings
+                .iter()
+                .all(|f| f.rule != "unbounded_number_schema"),
             "schema enforced with customClamp must stay silent"
         );
     }
@@ -229,7 +235,9 @@ export const schema = {
         let neg_irs = lower_source("t.ts", neg_src, "ts").expect("lower");
         let neg_findings = check_all(neg_irs.values(), &facts);
         assert!(
-            neg_findings.iter().all(|f| f.rule != "unbounded_number_schema"),
+            neg_findings
+                .iter()
+                .all(|f| f.rule != "unbounded_number_schema"),
             "enforced schema with learned keyword must stay silent"
         );
     }

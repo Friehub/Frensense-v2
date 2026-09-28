@@ -369,7 +369,9 @@ export function encryptData (data: string, key: string) {
 "#;
         let pos_findings = check_with(pos_src, &facts);
         assert!(
-            pos_findings.iter().any(|(_, r)| r == "learned_weak_cipher_des"),
+            pos_findings
+                .iter()
+                .any(|(_, r)| r == "learned_weak_cipher_des"),
             "expected learned_weak_cipher_des finding on positive sample, got: {pos_findings:?}"
         );
 
@@ -381,7 +383,9 @@ export function encryptData (data: string, key: string) {
 "#;
         let neg_findings = check_with(neg_src, &facts);
         assert!(
-            !neg_findings.iter().any(|(_, r)| r == "learned_weak_cipher_des"),
+            !neg_findings
+                .iter()
+                .any(|(_, r)| r == "learned_weak_cipher_des"),
             "negative sample with aes-256-gcm must stay silent, got: {neg_findings:?}"
         );
     }
@@ -405,7 +409,9 @@ export function hashToken (token: string) {
 "#;
         let pos_findings = check_with(pos_src, &facts);
         assert!(
-            pos_findings.iter().any(|(_, r)| r == "learned_broken_hash_func"),
+            pos_findings
+                .iter()
+                .any(|(_, r)| r == "learned_broken_hash_func"),
             "expected finding on positive sample, got: {pos_findings:?}"
         );
 

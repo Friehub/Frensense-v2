@@ -105,9 +105,15 @@ export const isRedirectAllowed = (url: string) => {
             .values()
             .flat_map(|ir| guard_bypass::check(ir, &facts))
             .collect();
-        assert!(!pos_hits.is_empty(), "custom containment callee must fire on positive");
+        assert!(
+            !pos_hits.is_empty(),
+            "custom containment callee must fire on positive"
+        );
         assert_eq!(pos_hits[0].rule, "substring_allowlist_guard");
-        assert!(pos_hits.iter().any(|h| h.learned), "finding must be marked learned");
+        assert!(
+            pos_hits.iter().any(|h| h.learned),
+            "finding must be marked learned"
+        );
 
         // Negative sample: uses exact origin equality comparison
         let neg_src = r#"
@@ -120,7 +126,10 @@ export const isRedirectAllowed = (url: string) => {
             .values()
             .flat_map(|ir| guard_bypass::check(ir, &facts))
             .collect();
-        assert!(neg_hits.is_empty(), "exact match on negative must stay silent");
+        assert!(
+            neg_hits.is_empty(),
+            "exact match on negative must stay silent"
+        );
     }
 
     /// Learned credential sink & param positive & negative test.
@@ -172,6 +181,9 @@ export function cacheTag (tagName: string) {
             .values()
             .flat_map(|ir| guard_bypass::check_credentials(ir, &facts))
             .collect();
-        assert!(neg_hits.is_empty(), "safe KDF and non-credential hash must stay silent");
+        assert!(
+            neg_hits.is_empty(),
+            "safe KDF and non-credential hash must stay silent"
+        );
     }
 }

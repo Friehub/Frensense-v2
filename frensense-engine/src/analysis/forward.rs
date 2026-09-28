@@ -493,11 +493,15 @@ impl<'a> ProgramSvfg<'a> {
                 if let Some(&(bi, slot)) = fe.arg_slots.get(&cur) {
                     let binding = &fe.bindings[bi];
                     for &gi in &binding.callees {
-                        let callee_has_recv = self.functions[gi].ir.parameters.first().map_or(false, |&p| {
-                            self.functions[gi].ir.var_metadata.get(&p)
-                                .and_then(|m| m.source_name.as_deref())
-                                .map_or(false, |name| name == "self" || name == "this")
-                        });
+                        let callee_has_recv =
+                            self.functions[gi].ir.parameters.first().is_some_and(|&p| {
+                                self.functions[gi]
+                                    .ir
+                                    .var_metadata
+                                    .get(&p)
+                                    .and_then(|m| m.source_name.as_deref())
+                                    .is_some_and(|name| name == "self" || name == "this")
+                            });
                         let callee_slot = if slot == usize::MAX {
                             if callee_has_recv { Some(0) } else { None }
                         } else {
@@ -547,10 +551,12 @@ impl<'a> ProgramSvfg<'a> {
                 for &gi in &b.callees {
                     let ge = &self.functions[gi];
 
-                    let callee_has_recv = ge.ir.parameters.first().map_or(false, |&p| {
-                        ge.ir.var_metadata.get(&p)
+                    let callee_has_recv = ge.ir.parameters.first().is_some_and(|&p| {
+                        ge.ir
+                            .var_metadata
+                            .get(&p)
                             .and_then(|m| m.source_name.as_deref())
-                            .map_or(false, |name| name == "self" || name == "this")
+                            .is_some_and(|name| name == "self" || name == "this")
                     });
 
                     // Receiver passing: only if callee has a formal receiver parameter.

@@ -120,7 +120,10 @@ fn run_facts_pipeline(corpus_dir: &Path, output_path: &Path) -> Result<(), Strin
                 format!("mem:{name}(fresh={returns_fresh},consumes={consumes_params:?})")
             }
             frensense_engine::analysis::taint::facts::LearnedFactEntry::WeakCrypto(fact) => {
-                format!("weak_crypto:{}(call={},slot={:?})", fact.rule_id, fact.call, fact.selector_slot)
+                format!(
+                    "weak_crypto:{}(call={},slot={:?})",
+                    fact.rule_id, fact.call, fact.selector_slot
+                )
             }
             frensense_engine::analysis::taint::facts::LearnedFactEntry::GuardBypass(fact) => {
                 format!(

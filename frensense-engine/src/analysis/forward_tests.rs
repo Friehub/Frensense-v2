@@ -1045,34 +1045,57 @@ pub mod interprocedural_tests {
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
-            (
-                NodeKey::instr(b, 1, obj),
-                NodeKey::instr(b, 1, val),
-            )
+            (NodeKey::instr(b, 1, obj), NodeKey::instr(b, 1, val))
         };
 
         let prog = ProgramSvfg::new(
-            &[("MyClass.method".into(), &callee), ("caller".into(), &caller)]
-                .into_iter()
-                .collect(),
+            &[
+                ("MyClass.method".into(), &callee),
+                ("caller".into(), &caller),
+            ]
+            .into_iter()
+            .collect(),
             &TaintConfig::default(),
         );
 
         let caller_idx = prog.function_index("caller").unwrap();
         let callee_idx = prog.function_index("MyClass.method").unwrap();
 
-        let self_node = *prog.functions[callee_idx].def_site.get(&self_param).unwrap();
+        let self_node = *prog.functions[callee_idx]
+            .def_site
+            .get(&self_param)
+            .unwrap();
         let arg_node = *prog.functions[callee_idx].def_site.get(&arg_param).unwrap();
 
         // Verify receiver `obj` connects to `self`
-        let obj_edges = prog.cross_edges.get(&(caller_idx, obj_key)).cloned().unwrap_or_default();
-        assert!(obj_edges.contains(&(callee_idx, self_node)), "obj must connect to self");
-        assert!(!obj_edges.contains(&(callee_idx, arg_node)), "obj must NOT connect to arg");
+        let obj_edges = prog
+            .cross_edges
+            .get(&(caller_idx, obj_key))
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            obj_edges.contains(&(callee_idx, self_node)),
+            "obj must connect to self"
+        );
+        assert!(
+            !obj_edges.contains(&(callee_idx, arg_node)),
+            "obj must NOT connect to arg"
+        );
 
         // Verify `val` connects to `arg`
-        let val_edges = prog.cross_edges.get(&(caller_idx, val_key)).cloned().unwrap_or_default();
-        assert!(val_edges.contains(&(callee_idx, arg_node)), "val must connect to arg");
-        assert!(!val_edges.contains(&(callee_idx, self_node)), "val must NOT connect to self");
+        let val_edges = prog
+            .cross_edges
+            .get(&(caller_idx, val_key))
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            val_edges.contains(&(callee_idx, arg_node)),
+            "val must connect to arg"
+        );
+        assert!(
+            !val_edges.contains(&(callee_idx, self_node)),
+            "val must NOT connect to self"
+        );
     }
 
     #[test]
@@ -1104,10 +1127,7 @@ pub mod interprocedural_tests {
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
-            (
-                NodeKey::instr(b, 0, obj),
-                NodeKey::instr(b, 0, val),
-            )
+            (NodeKey::instr(b, 0, obj), NodeKey::instr(b, 0, val))
         };
 
         let prog = ProgramSvfg::new(
@@ -1123,11 +1143,25 @@ pub mod interprocedural_tests {
         let arg_node = *prog.functions[callee_idx].def_site.get(&arg_param).unwrap();
 
         // Receiver `obj` must NOT bind to positional parameter `arg`
-        let obj_edges = prog.cross_edges.get(&(caller_idx, obj_key)).cloned().unwrap_or_default();
-        assert!(!obj_edges.contains(&(callee_idx, arg_node)), "obj must NOT bleed into arg");
+        let obj_edges = prog
+            .cross_edges
+            .get(&(caller_idx, obj_key))
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            !obj_edges.contains(&(callee_idx, arg_node)),
+            "obj must NOT bleed into arg"
+        );
 
         // `val` MUST bind to `arg`
-        let val_edges = prog.cross_edges.get(&(caller_idx, val_key)).cloned().unwrap_or_default();
-        assert!(val_edges.contains(&(callee_idx, arg_node)), "val must connect to arg");
+        let val_edges = prog
+            .cross_edges
+            .get(&(caller_idx, val_key))
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            val_edges.contains(&(callee_idx, arg_node)),
+            "val must connect to arg"
+        );
     }
 }

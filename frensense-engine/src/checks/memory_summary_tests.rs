@@ -319,7 +319,6 @@ void caller_negative() {
         );
     }
 
-
     /// LearnedFactEntry::MemoryContract round-trips losslessly through bincode.
     #[test]
     fn bundle_contract_roundtrip_bincode() {
@@ -334,9 +333,9 @@ void caller_negative() {
         };
 
         let encoded = bincode::serialize(&original).expect("serialize MemoryContract");
-        let decoded: LearnedFactEntry = bincode::deserialize(&encoded).expect("deserialize MemoryContract");
+        let decoded: LearnedFactEntry =
+            bincode::deserialize(&encoded).expect("deserialize MemoryContract");
 
         assert_eq!(original, decoded);
     }
 }
-

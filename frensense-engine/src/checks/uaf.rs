@@ -44,8 +44,8 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::checks::memory_summary::MemorySummaryRegistry;
 use crate::checks::CheckerFinding;
+use crate::checks::memory_summary::MemorySummaryRegistry;
 use crate::graph::steensgaard::{ClassId, Steensgaard};
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
@@ -321,7 +321,14 @@ pub fn check_with_summaries(
         FxHashMap::default();
 
     if let Some(entry) = ir.blocks.get(&ir.entry_block)
-        && let Some(out) = visit(ir, &pts, summaries, &mut findings, PathState::default(), entry)
+        && let Some(out) = visit(
+            ir,
+            &pts,
+            summaries,
+            &mut findings,
+            PathState::default(),
+            entry,
+        )
     {
         for &s in &entry.successors {
             in_states.entry(s).or_default().push(out.clone());

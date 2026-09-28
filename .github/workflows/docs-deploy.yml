@@ -8,7 +8,6 @@ on:
   push:
     branches:
       - main
-      - fix/engine-receiver-param-binding
     paths:
       - 'docs-site/**'
       - '.github/workflows/docs-deploy.yml'
@@ -53,7 +52,8 @@ jobs:
           mkdir -p deploy/v1
           cp -r /tmp/v1-site/. deploy/v1/
           # Serve the archive with plain relative behavior:
-          rm -f deploy/v1/.git deploy/v1/CNAME
+          rm -rf deploy/v1/.git
+          rm -f deploy/v1/CNAME
 
       - name: Assemble deployment
         run: |

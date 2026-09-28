@@ -19,8 +19,8 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::analysis::value::{self, ValueInfo};
-use crate::checks::memory_summary::{CapacitySpec, MemorySummaryRegistry};
 use crate::checks::CheckerFinding;
+use crate::checks::memory_summary::{CapacitySpec, MemorySummaryRegistry};
 use crate::graph::steensgaard::{ClassId, Steensgaard};
 use crate::ir::function::{BasicBlock, BlockId, FunctionIR, Instruction, Operand, VarId};
 
@@ -178,14 +178,10 @@ fn eval_alloc_capacity(
     match seg {
         "malloc" | "valloc" | "alloca" => {
             let (lo, hi) = eval_range(args.first()?, block, val_info)?;
-            if lo >= 0 {
-                Some((lo, hi))
-            } else {
-                None
-            }
+            if lo >= 0 { Some((lo, hi)) } else { None }
         }
         "calloc" => {
-            let (n_lo, n_hi) = eval_range(args.get(0)?, block, val_info)?;
+            let (n_lo, n_hi) = eval_range(args.first()?, block, val_info)?;
             let (sz_lo, sz_hi) = eval_range(args.get(1)?, block, val_info)?;
             if n_lo >= 0 && sz_lo >= 0 {
                 Some((n_lo.saturating_mul(sz_lo), n_hi.saturating_mul(sz_hi)))
@@ -195,11 +191,7 @@ fn eval_alloc_capacity(
         }
         "realloc" | "aligned_alloc" => {
             let (lo, hi) = eval_range(args.get(1)?, block, val_info)?;
-            if lo >= 0 {
-                Some((lo, hi))
-            } else {
-                None
-            }
+            if lo >= 0 { Some((lo, hi)) } else { None }
         }
         _ => {
             if let Some(spec) = summaries.return_capacity(func) {
@@ -207,11 +199,7 @@ fn eval_alloc_capacity(
                     CapacitySpec::Exact(k) => Some((*k, *k)),
                     CapacitySpec::Param(p_idx) => {
                         let (lo, hi) = eval_range(args.get(*p_idx)?, block, val_info)?;
-                        if lo >= 0 {
-                            Some((lo, hi))
-                        } else {
-                            None
-                        }
+                        if lo >= 0 { Some((lo, hi)) } else { None }
                     }
                     CapacitySpec::ParamProduct(p1, p2) => {
                         let (n_lo, n_hi) = eval_range(args.get(*p1)?, block, val_info)?;
@@ -291,6 +279,7 @@ pub fn check_with_summaries(
     let val_info = value::analyze(ir);
     let mut findings: Vec<CheckerFinding> = Vec::new();
 
+    #[allow(clippy::too_many_arguments)]
     fn check_access(
         ir: &FunctionIR,
         findings: &mut Vec<CheckerFinding>,
@@ -334,6 +323,7 @@ pub fn check_with_summaries(
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn visit_block(
         ir: &FunctionIR,
         pts: &Steensgaard,
@@ -378,34 +368,29 @@ pub fn check_with_summaries(
                         summaries.consumes_params(func)
                     };
                     for slot in consumed_slots {
-                        if let Some(Operand::Var(v)) = args.get(slot) {
-                            if let Some(c) = ps.class_for(pts, *v) {
-                                ps.buffers.remove(&c);
-                                ps.dead.insert(*v);
-                            }
+                        if let Some(Operand::Var(v)) = args.get(slot)
+                            && let Some(c) = ps.class_for(pts, *v)
+                        {
+                            ps.buffers.remove(&c);
+                            ps.dead.insert(*v);
                         }
                     }
                     let seg = last_segment(func);
                     if let Some(spec) = BUILTINS.iter().find(|b| b.name == seg) {
                         // Check destination write bounds
-                        if let Some(dst_idx) = spec.dst_arg {
-                            if let Some(Operand::Var(dst_var)) = args.get(dst_idx) {
-                                if let Some(c) = ps.class_for(pts, *dst_var) {
-                                    if let Some(buf) = ps.buffers.get(&c) {
-                                        if let Some(len_op) = args.get(spec.len_arg) {
-                                            if let Some((len_lo, len_hi)) =
-                                                eval_range(len_op, block_id, val_info)
-                                            {
-                                                if len_hi > buf.capacity_lo {
-                                                    let name = var_name(ir, *dst_var);
-                                                    let size_desc = format_range(len_lo, len_hi);
-                                                    let cap_desc = format_range(
-                                                        buf.capacity_lo,
-                                                        buf.capacity_hi,
-                                                    );
-                                                    let span = var_span(ir, *dst_var)
-                                                        .or_else(|| operand_span(ir, len_op));
-                                                    findings.push(finding(
+                        if let Some(dst_idx) = spec.dst_arg
+                            && let Some(Operand::Var(dst_var)) = args.get(dst_idx)
+                            && let Some(c) = ps.class_for(pts, *dst_var)
+                            && let Some(buf) = ps.buffers.get(&c)
+                            && let Some(len_op) = args.get(spec.len_arg)
+                            && let Some((len_lo, len_hi)) = eval_range(len_op, block_id, val_info)
+                            && len_hi > buf.capacity_lo
+                        {
+                            let name = var_name(ir, *dst_var);
+                            let size_desc = format_range(len_lo, len_hi);
+                            let cap_desc = format_range(buf.capacity_lo, buf.capacity_hi);
+                            let span = var_span(ir, *dst_var).or_else(|| operand_span(ir, len_op));
+                            findings.push(finding(
                                                         ir,
                                                         Violation::BufferOverflow,
                                                         format!(
@@ -414,33 +399,22 @@ pub fn check_with_summaries(
                                                         ),
                                                         span,
                                                     ));
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
 
                         // Check source read bounds
-                        if let Some(src_idx) = spec.src_arg {
-                            if let Some(Operand::Var(src_var)) = args.get(src_idx) {
-                                if let Some(c) = ps.class_for(pts, *src_var) {
-                                    if let Some(buf) = ps.buffers.get(&c) {
-                                        if let Some(len_op) = args.get(spec.len_arg) {
-                                            if let Some((len_lo, len_hi)) =
-                                                eval_range(len_op, block_id, val_info)
-                                            {
-                                                if len_hi > buf.capacity_lo {
-                                                    let name = var_name(ir, *src_var);
-                                                    let size_desc = format_range(len_lo, len_hi);
-                                                    let cap_desc = format_range(
-                                                        buf.capacity_lo,
-                                                        buf.capacity_hi,
-                                                    );
-                                                    let span = var_span(ir, *src_var)
-                                                        .or_else(|| operand_span(ir, len_op));
-                                                    findings.push(finding(
+                        if let Some(src_idx) = spec.src_arg
+                            && let Some(Operand::Var(src_var)) = args.get(src_idx)
+                            && let Some(c) = ps.class_for(pts, *src_var)
+                            && let Some(buf) = ps.buffers.get(&c)
+                            && let Some(len_op) = args.get(spec.len_arg)
+                            && let Some((len_lo, len_hi)) = eval_range(len_op, block_id, val_info)
+                            && len_hi > buf.capacity_lo
+                        {
+                            let name = var_name(ir, *src_var);
+                            let size_desc = format_range(len_lo, len_hi);
+                            let cap_desc = format_range(buf.capacity_lo, buf.capacity_hi);
+                            let span = var_span(ir, *src_var).or_else(|| operand_span(ir, len_op));
+                            findings.push(finding(
                                                         ir,
                                                         Violation::OutOfBoundsRead,
                                                         format!(
@@ -449,12 +423,6 @@ pub fn check_with_summaries(
                                                         ),
                                                         span,
                                                     ));
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -463,28 +431,26 @@ pub fn check_with_summaries(
                 Instruction::StoreElement {
                     base, index, src, ..
                 } => {
-                    if let Some(c) = ps.class_for(pts, *base) {
-                        if let Some(buf) = ps.buffers.get(&c) {
-                            if let Some((idx_lo, idx_hi)) = eval_range(index, block_id, val_info) {
-                                let span = operand_span(ir, index)
-                                    .or_else(|| var_span(ir, *base))
-                                    .or_else(|| operand_span(ir, src));
-                                check_access(ir, findings, *base, buf, idx_lo, idx_hi, true, span);
-                            }
-                        }
+                    if let Some(c) = ps.class_for(pts, *base)
+                        && let Some(buf) = ps.buffers.get(&c)
+                        && let Some((idx_lo, idx_hi)) = eval_range(index, block_id, val_info)
+                    {
+                        let span = operand_span(ir, index)
+                            .or_else(|| var_span(ir, *base))
+                            .or_else(|| operand_span(ir, src));
+                        check_access(ir, findings, *base, buf, idx_lo, idx_hi, true, span);
                     }
                 }
 
                 Instruction::StoreField {
                     base, field, src, ..
                 } => {
-                    if let Ok(idx) = field.parse::<i64>() {
-                        if let Some(c) = ps.class_for(pts, *base) {
-                            if let Some(buf) = ps.buffers.get(&c) {
-                                let span = var_span(ir, *base).or_else(|| operand_span(ir, src));
-                                check_access(ir, findings, *base, buf, idx, idx, true, span);
-                            }
-                        }
+                    if let Ok(idx) = field.parse::<i64>()
+                        && let Some(c) = ps.class_for(pts, *base)
+                        && let Some(buf) = ps.buffers.get(&c)
+                    {
+                        let span = var_span(ir, *base).or_else(|| operand_span(ir, src));
+                        check_access(ir, findings, *base, buf, idx, idx, true, span);
                     }
                 }
 
@@ -492,28 +458,26 @@ pub fn check_with_summaries(
                 Instruction::LoadElement {
                     dest, base, index, ..
                 } => {
-                    if let Some(c) = ps.class_for(pts, *base) {
-                        if let Some(buf) = ps.buffers.get(&c) {
-                            if let Some((idx_lo, idx_hi)) = eval_range(index, block_id, val_info) {
-                                let span = operand_span(ir, index)
-                                    .or_else(|| var_span(ir, *base))
-                                    .or_else(|| var_span(ir, *dest));
-                                check_access(ir, findings, *base, buf, idx_lo, idx_hi, false, span);
-                            }
-                        }
+                    if let Some(c) = ps.class_for(pts, *base)
+                        && let Some(buf) = ps.buffers.get(&c)
+                        && let Some((idx_lo, idx_hi)) = eval_range(index, block_id, val_info)
+                    {
+                        let span = operand_span(ir, index)
+                            .or_else(|| var_span(ir, *base))
+                            .or_else(|| var_span(ir, *dest));
+                        check_access(ir, findings, *base, buf, idx_lo, idx_hi, false, span);
                     }
                 }
 
                 Instruction::LoadField {
                     dest, base, field, ..
                 } => {
-                    if let Ok(idx) = field.parse::<i64>() {
-                        if let Some(c) = ps.class_for(pts, *base) {
-                            if let Some(buf) = ps.buffers.get(&c) {
-                                let span = var_span(ir, *base).or_else(|| var_span(ir, *dest));
-                                check_access(ir, findings, *base, buf, idx, idx, false, span);
-                            }
-                        }
+                    if let Ok(idx) = field.parse::<i64>()
+                        && let Some(c) = ps.class_for(pts, *base)
+                        && let Some(buf) = ps.buffers.get(&c)
+                    {
+                        let span = var_span(ir, *base).or_else(|| var_span(ir, *dest));
+                        check_access(ir, findings, *base, buf, idx, idx, false, span);
                     }
                 }
 
@@ -604,8 +568,8 @@ pub fn check_with_summaries(
 
     let mut in_states: FxHashMap<BlockId, Vec<PathState>> = FxHashMap::default();
 
-    if let Some(entry) = ir.blocks.get(&ir.entry_block) {
-        if let Some(out) = visit_block(
+    if let Some(entry) = ir.blocks.get(&ir.entry_block)
+        && let Some(out) = visit_block(
             ir,
             &pts,
             &val_info,
@@ -614,10 +578,10 @@ pub fn check_with_summaries(
             PathState::default(),
             ir.entry_block,
             entry,
-        ) {
-            for &s in &entry.successors {
-                in_states.entry(s).or_default().push(out.clone());
-            }
+        )
+    {
+        for &s in &entry.successors {
+            in_states.entry(s).or_default().push(out.clone());
         }
     }
 

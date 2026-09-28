@@ -194,7 +194,10 @@ export function makeKey () {
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
         let facts = crate::analysis::taint::facts::FactTable::default();
-        let hits: Vec<_> = fns.values().flat_map(|ir| weak_hash::check(ir, &facts)).collect();
+        let hits: Vec<_> = fns
+            .values()
+            .flat_map(|ir| weak_hash::check(ir, &facts))
+            .collect();
         assert_eq!(hits.len(), 1, "512-bit key must fire: {:?}", hits);
         assert_eq!(hits[0].rule, "weak_rsa_key_size");
     }
@@ -210,7 +213,10 @@ export function makeKey () {
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
         let facts = crate::analysis::taint::facts::FactTable::default();
-        let hits: Vec<_> = fns.values().flat_map(|ir| weak_hash::check(ir, &facts)).collect();
+        let hits: Vec<_> = fns
+            .values()
+            .flat_map(|ir| weak_hash::check(ir, &facts))
+            .collect();
         assert!(hits.is_empty(), "4096-bit key is fine: {:?}", hits);
     }
 
@@ -224,7 +230,10 @@ export function makeKey (bits: number) {
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
         let facts = crate::analysis::taint::facts::FactTable::default();
-        let hits: Vec<_> = fns.values().flat_map(|ir| weak_hash::check(ir, &facts)).collect();
+        let hits: Vec<_> = fns
+            .values()
+            .flat_map(|ir| weak_hash::check(ir, &facts))
+            .collect();
         assert!(
             hits.is_empty(),
             "unknown size must stay silent (soundness): {:?}",
@@ -248,7 +257,10 @@ export function signToken (payload: string, secret: string) {
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
         let facts = crate::analysis::taint::facts::FactTable::default();
-        let hits: Vec<_> = fns.values().flat_map(|ir| weak_hash::check(ir, &facts)).collect();
+        let hits: Vec<_> = fns
+            .values()
+            .flat_map(|ir| weak_hash::check(ir, &facts))
+            .collect();
         assert!(
             hits.iter().any(|h| h.rule == "insecure_jwt_algorithm"),
             "jwt 'none' via const var must fire: {:?}",
@@ -554,4 +566,3 @@ export function f (k: number) {
         }
     }
 }
-

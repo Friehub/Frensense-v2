@@ -371,5 +371,3 @@ export function validateRedirect(url: string) {
         scan_neg.checker
     );
 }
-
-

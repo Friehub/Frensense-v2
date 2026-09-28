@@ -93,7 +93,7 @@ impl Value {
     pub fn intersect_interval(&self, min_lo: Option<i64>, max_hi: Option<i64>) -> Value {
         match self {
             Value::IntConst(n) => {
-                if min_lo.map_or(true, |lo| *n >= lo) && max_hi.map_or(true, |hi| *n <= hi) {
+                if min_lo.is_none_or(|lo| *n >= lo) && max_hi.is_none_or(|hi| *n <= hi) {
                     Value::IntConst(*n)
                 } else {
                     self.clone()
@@ -159,7 +159,10 @@ fn binary_interval(op: &str, (al, ah): (i64, i64), (bl, bh): (i64, i64)) -> Valu
         "-" => Value::Range(add(al, -bh), add(ah, -bl)),
         "*" => {
             let p = [al * bl, al * bh, ah * bl, ah * bh];
-            Value::Range(*p.iter().min().unwrap_or(&al), *p.iter().max().unwrap_or(&ah))
+            Value::Range(
+                *p.iter().min().unwrap_or(&al),
+                *p.iter().max().unwrap_or(&ah),
+            )
         }
         "<<" if bl == bh && (0..=32).contains(&bl) => Value::Range(al << bl, ah << bh),
         ">>" if bl == bh && (0..=63).contains(&bl) => Value::Range(al >> bl, ah >> bh),
@@ -209,7 +212,9 @@ fn transfer(state: &AbsState, instr: &Instruction) -> Option<(VarId, Value)> {
         Instruction::UnaryOp { dest, op, src } => {
             let v = operand_value(state, src);
             let out = match op.as_str() {
-                "-" => v.interval().map_or(Value::Top, |(lo, hi)| Value::Range(-hi, -lo)),
+                "-" => v
+                    .interval()
+                    .map_or(Value::Top, |(lo, hi)| Value::Range(-hi, -lo)),
                 "!" => match v {
                     Value::BoolConst(b) => Value::BoolConst(!b),
                     _ => Value::Top,

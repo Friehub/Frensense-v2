@@ -133,6 +133,7 @@ fn trigger_sites<'a>(ir: &'a FunctionIR, seg: &str) -> Vec<TriggerSite<'a>> {
 }
 
 /// Does one requirement hold for this trigger site?
+#[allow(clippy::too_many_arguments)]
 fn requirement_holds(
     req: &PolicyRequirement,
     ir: &FunctionIR,
@@ -173,20 +174,20 @@ fn requirement_holds(
             _ => false,
         }),
         PolicyRequirement::BannedArgLiteral { slot, values } => {
-            if let Some(arg) = args.get(*slot) {
-                if let Some(s) = extract_literal_string(arg, ir, val_info) {
-                    let s_lower = s.to_ascii_lowercase();
-                    return !values.iter().any(|v| v.to_ascii_lowercase() == s_lower);
-                }
+            if let Some(arg) = args.get(*slot)
+                && let Some(s) = extract_literal_string(arg, ir, val_info)
+            {
+                let s_lower = s.to_ascii_lowercase();
+                return !values.iter().any(|v| v.to_ascii_lowercase() == s_lower);
             }
             true
         }
         PolicyRequirement::RequiredArgLiteral { slot, values } => {
-            if let Some(arg) = args.get(*slot) {
-                if let Some(s) = extract_literal_string(arg, ir, val_info) {
-                    let s_lower = s.to_ascii_lowercase();
-                    return values.iter().any(|v| v.to_ascii_lowercase() == s_lower);
-                }
+            if let Some(arg) = args.get(*slot)
+                && let Some(s) = extract_literal_string(arg, ir, val_info)
+            {
+                let s_lower = s.to_ascii_lowercase();
+                return values.iter().any(|v| v.to_ascii_lowercase() == s_lower);
             }
             false
         }
@@ -244,7 +245,6 @@ fn extract_literal_string(
         _ => None,
     }
 }
-
 
 /// The segment set a requirement is evaluated against.
 fn scope_segs<'a>(

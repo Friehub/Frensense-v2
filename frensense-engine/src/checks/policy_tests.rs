@@ -300,7 +300,11 @@ export function connectClient (host: string) {
 }
 "#;
         let hits_pos = policy::check_program(&lower(pos_src), &facts);
-        assert_eq!(hits_pos.len(), 1, "banned arg literal must fire on positive sample");
+        assert_eq!(
+            hits_pos.len(),
+            1,
+            "banned arg literal must fire on positive sample"
+        );
         assert_eq!(hits_pos[0].rule, "policy_banned_insecure_transport");
 
         // Negative sample: slot 1 is safe literal "true"
@@ -310,7 +314,10 @@ export function connectClient (host: string) {
 }
 "#;
         let hits_neg = policy::check_program(&lower(neg_src), &facts);
-        assert!(hits_neg.is_empty(), "safe arg literal must stay silent on negative sample");
+        assert!(
+            hits_neg.is_empty(),
+            "safe arg literal must stay silent on negative sample"
+        );
     }
 
     /// Positive & negative test for PolicyRequirement::RequiredArgLiteral.
@@ -336,7 +343,11 @@ export function generateToken (payload: string, key: string) {
 }
 "#;
         let hits_pos = policy::check_program(&lower(pos_src), &facts);
-        assert_eq!(hits_pos.len(), 1, "unapproved arg literal must violate required arg policy");
+        assert_eq!(
+            hits_pos.len(),
+            1,
+            "unapproved arg literal must violate required arg policy"
+        );
         assert_eq!(hits_pos[0].rule, "policy_require_secure_algorithm");
 
         // Negative sample: slot 2 uses approved algorithm "RS256"
@@ -346,6 +357,9 @@ export function generateToken (payload: string, key: string) {
 }
 "#;
         let hits_neg = policy::check_program(&lower(neg_src), &facts);
-        assert!(hits_neg.is_empty(), "approved required literal must stay silent on negative sample");
+        assert!(
+            hits_neg.is_empty(),
+            "approved required literal must stay silent on negative sample"
+        );
     }
 }
