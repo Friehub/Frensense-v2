@@ -211,7 +211,7 @@ void caller() {
         );
     }
 
-    /// Corpus/bundle-learned allocation contract seeds registry and detects OOB.
+    /// Corpus/bundle-learned allocation contract: positive sample fires OOB, negative sample stays silent.
     #[test]
     fn bundle_learned_allocator_fires_oob() {
         use crate::analysis::taint::facts::{FactTable, MemoryContractFact};
@@ -225,26 +225,45 @@ void caller() {
             consumes_params: vec![],
         });
 
-        let src = r#"
+        // Positive sample: access beyond allocated capacity (p[20] on size 10) must alert
+        let pos_src = r#"
 extern void *custom_kalloc(int size);
 
-void caller() {
+void caller_positive() {
     char *p = custom_kalloc(10);
     p[20] = 1;
 }
 "#;
-        let fns = lower_source("t.c", src, "c").unwrap();
-        let ir_refs: Vec<_> = fns.values().collect();
-        let findings = check_all(ir_refs, &facts);
-        let rules: Vec<String> = findings.into_iter().map(|f| f.rule).collect();
+        let pos_fns = lower_source("pos.c", pos_src, "c").unwrap();
+        let pos_irs: Vec<_> = pos_fns.values().collect();
+        let pos_findings = check_all(pos_irs, &facts);
+        let pos_rules: Vec<String> = pos_findings.into_iter().map(|f| f.rule).collect();
         assert!(
-            rules.iter().any(|r| r == "buffer_overflow"),
-            "custom_kalloc(10) from bundle must fire buffer_overflow on p[20]: {:?}",
-            rules
+            pos_rules.iter().any(|r| r == "buffer_overflow"),
+            "positive sample: custom_kalloc(10) with p[20] = 1 must fire buffer_overflow: {:?}",
+            pos_rules
+        );
+
+        // Negative sample: in-bounds access within allocated capacity (p[5] on size 10) must stay silent
+        let neg_src = r#"
+extern void *custom_kalloc(int size);
+
+void caller_negative() {
+    char *p = custom_kalloc(10);
+    p[5] = 1;
+}
+"#;
+        let neg_fns = lower_source("neg.c", neg_src, "c").unwrap();
+        let neg_irs: Vec<_> = neg_fns.values().collect();
+        let neg_findings = check_all(neg_irs, &facts);
+        assert!(
+            neg_findings.is_empty(),
+            "negative sample: custom_kalloc(10) with in-bounds access p[5] = 1 must stay silent: {:?}",
+            neg_findings
         );
     }
 
-    /// Corpus/bundle-learned deallocator contract seeds registry and detects UAF.
+    /// Corpus/bundle-learned deallocator contract: positive sample fires UAF, negative sample stays silent.
     #[test]
     fn bundle_learned_deallocator_fires_uaf() {
         use crate::analysis::taint::facts::{FactTable, MemoryContractFact};
@@ -258,26 +277,48 @@ void caller() {
             consumes_params: vec![0],
         });
 
-        let src = r#"
+        // Positive sample: use after custom release must alert
+        let pos_src = r#"
 #include <stdlib.h>
 extern void external_release(void *ptr);
 
-void caller() {
+void caller_positive() {
     char *p = malloc(16);
     external_release(p);
     p[0] = 1;
 }
 "#;
-        let fns = lower_source("t.c", src, "c").unwrap();
-        let ir_refs: Vec<_> = fns.values().collect();
-        let findings = check_all(ir_refs, &facts);
-        let rules: Vec<String> = findings.into_iter().map(|f| f.rule).collect();
+        let pos_fns = lower_source("pos.c", pos_src, "c").unwrap();
+        let pos_irs: Vec<_> = pos_fns.values().collect();
+        let pos_findings = check_all(pos_irs, &facts);
+        let pos_rules: Vec<String> = pos_findings.into_iter().map(|f| f.rule).collect();
         assert!(
-            rules.iter().any(|r| r == "use_after_free"),
-            "external_release(p) from bundle must fire use_after_free on p[0]: {:?}",
-            rules
+            pos_rules.iter().any(|r| r == "use_after_free"),
+            "positive sample: external_release(p) then p[0] = 1 must fire use_after_free: {:?}",
+            pos_rules
+        );
+
+        // Negative sample: proper deallocation without post-release use must stay silent
+        let neg_src = r#"
+#include <stdlib.h>
+extern void external_release(void *ptr);
+
+void caller_negative() {
+    char *p = malloc(16);
+    p[0] = 1;
+    external_release(p);
+}
+"#;
+        let neg_fns = lower_source("neg.c", neg_src, "c").unwrap();
+        let neg_irs: Vec<_> = neg_fns.values().collect();
+        let neg_findings = check_all(neg_irs, &facts);
+        assert!(
+            neg_findings.is_empty(),
+            "negative sample: use before external_release(p) must stay silent: {:?}",
+            neg_findings
         );
     }
+
 
     /// LearnedFactEntry::MemoryContract round-trips losslessly through bincode.
     #[test]

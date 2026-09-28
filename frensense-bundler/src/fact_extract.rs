@@ -202,10 +202,11 @@ pub fn group_families(corpus_dir: &Path) -> Result<Vec<Family>, String> {
             .to_string();
         if !matches!(
             ext.as_str(),
-            "ts" | "tsx" | "js" | "jsx" | "py" | "go" | "rs"
+            "ts" | "tsx" | "js" | "jsx" | "py" | "go" | "rs" | "c" | "cpp" | "h" | "hpp"
         ) {
             continue;
         }
+
         let (family, variant) = if let Some(i) = name.find("_positive") {
             (name[..i].to_string(), "positive")
         } else if let Some(i) = name.find("_negative") {
