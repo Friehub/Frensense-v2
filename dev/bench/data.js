@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790624783719,
+  "lastUpdate": 1790626746450,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -319,6 +319,80 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/bb6a75119736f8ddd6d1f0e63adc2801663e97e7"
         },
         "date": 1790624781970,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "Juice Shop v18.0.0",
+            "value": 108,
+            "unit": "advisories"
+          },
+          {
+            "name": "Juice Shop v19.0.0",
+            "value": 108,
+            "unit": "advisories"
+          },
+          {
+            "name": "Juice Shop v19.1.0",
+            "value": 108,
+            "unit": "advisories"
+          },
+          {
+            "name": "Juice Shop v19.1.1",
+            "value": 108,
+            "unit": "advisories"
+          },
+          {
+            "name": "Juice Shop v19.2.0",
+            "value": 112,
+            "unit": "advisories"
+          },
+          {
+            "name": "Juice Shop v19.2.1",
+            "value": 112,
+            "unit": "advisories"
+          },
+          {
+            "name": "Juice Shop v20.0.0",
+            "value": 104,
+            "unit": "advisories"
+          },
+          {
+            "name": "Juice Shop v20.1.0",
+            "value": 100,
+            "unit": "advisories"
+          },
+          {
+            "name": "Juice Shop v20.1.1",
+            "value": 100,
+            "unit": "advisories"
+          },
+          {
+            "name": "Juice Shop v20.2.0",
+            "value": 99,
+            "unit": "advisories"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "dbba1181f707809e486acf17f0be2ce07c81f511",
+          "message": "Merge pull request #21 from Friehub/fix/provenance-and-crates-metadata\n\ndocs: restore frensense.friehub.cloud custom domain in manifests and …",
+          "timestamp": "2026-09-28T20:17:50Z",
+          "tree_id": "16bf8cded8782266051d9e46f0407182460913fa",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/dbba1181f707809e486acf17f0be2ce07c81f511"
+        },
+        "date": 1790626745225,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
