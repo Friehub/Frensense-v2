@@ -27,8 +27,12 @@ dangerous sink.
 ## Quick Start
 
 ```bash
-# Install (one crate, one binary; also on npm: `npm install -g @friehub/frensense`)
+# Install (Cargo or npm)
 cargo install frensense
+npm install -g @friehub/frensense
+
+# Or run instantly without installing
+npx @friehub/frensense .
 
 # Scan a project
 frensense .
@@ -142,7 +146,20 @@ stdio, so you only tell them the command. In Claude Desktop's
 }
 ```
 
-If the binary is not on PATH, use the absolute path as `"command"`; clients
+Or run zero-install via `npx` (no manual download or PATH setup required):
+
+```json
+{
+  "mcpServers": {
+    "frensense": {
+      "command": "npx",
+      "args": ["-y", "@friehub/frensense", "mcp"]
+    }
+  }
+}
+```
+
+If using a local binary not on PATH, use the absolute path as `"command"`; clients
 accept both. In Claude Code, the equivalent one-liner is:
 
 ```bash

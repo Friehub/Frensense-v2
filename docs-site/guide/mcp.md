@@ -9,7 +9,9 @@ frensense mcp
 ```
 
 The server speaks newline-delimited JSON-RPC over stdio, so it plugs straight
-into any MCP client (Claude Desktop, Cursor, Claude Code, your own agent):
+into any MCP client (Claude Desktop, Cursor, Cline, Windsurf, Claude Code):
+
+### Option A: Using the installed binary (Cargo, npm, or GitHub release)
 
 ```json
 {
@@ -17,6 +19,21 @@ into any MCP client (Claude Desktop, Cursor, Claude Code, your own agent):
     "frensense": {
       "command": "frensense",
       "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Option B: Zero-install via npx (Node.js users)
+
+No manual install or PATH setup required:
+
+```json
+{
+  "mcpServers": {
+    "frensense": {
+      "command": "npx",
+      "args": ["-y", "@friehub/frensense", "mcp"]
     }
   }
 }

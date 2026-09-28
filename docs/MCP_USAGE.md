@@ -13,28 +13,55 @@ lowering, same fact tables, same stable finding IDs.
 `frensense-mcp` is a self-contained binary — no runtime, no daemon, no
 plugin step. Get it and put it on `PATH`:
 
-**Download a release binary** (recommended):
+**Via npm (Node.js users, prebuilt binaries):**
 
 ```bash
-# Linux x86_64 — replace the tag with the latest release
-curl -L https://github.com/Friehub/frensense-v2/releases/latest/download/frensense-mcp-x86_64-unknown-linux-gnu \
-  -o /usr/local/bin/frensense-mcp && chmod +x /usr/local/bin/frensense-mcp
+npm install -g @friehub/frensense
 ```
 
-**Or install from source** (requires a Rust toolchain):
+**Or zero-install with npx (no install needed):**
+
+```bash
+npx @friehub/frensense mcp
+```
+
+**Download a release binary:**
+
+```bash
+# Linux x86_64 — replace with latest release
+curl -L https://github.com/Friehub/frensense-v2/releases/latest/download/frensense-linux-x64 \
+  -o /usr/local/bin/frensense && chmod +x /usr/local/bin/frensense
+```
+
+**Or install from source via Cargo:**
 
 ```bash
 cargo install frensense   # installs the unified frensense binary
 ```
 
-The MCP binary is always built alongside the CLI and the LSP server — one
-crate, one `cargo install`, three binaries.
+The MCP server is built into the same binary as the CLI and the LSP server — one
+unified binary (`frensense mcp`).
 
 ## Registering with your MCP client
 
 MCP clients launch the server themselves as a subprocess over stdio; you
-only tell them the command. The binary must be on `PATH` or referenced by
-absolute path.
+only tell them the command. The binary must be on `PATH`, referenced by
+absolute path, or invoked via `npx`.
+
+**Option A: Zero-install via npx (Claude Desktop / Cursor / Cline):**
+
+```json
+{
+  "mcpServers": {
+    "frensense": {
+      "command": "npx",
+      "args": ["-y", "@friehub/frensense", "mcp"]
+    }
+  }
+}
+```
+
+**Option B: Installed binary (Claude Desktop):**
 
 **Claude Code:**
 
