@@ -6,6 +6,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1-preview.1] - 2026-09-28
+
+Preview release adding memory-safety checkers, value-aware guard
+validation, corpus policy facts, and bundler hardening on top of
+0.7.0-preview.2.
+
+### Added
+
+#### Engine
+
+- **Use-after-free and double-free checkers**: ported from the legacy
+  analysis tree, including interprocedural allocation/deallocation wrapper
+  summaries so a `free`/`drop` hiding behind one or two wrapper functions
+  still kills the allocation record (Limitation M1 from the research
+  notes).
+- **Abstract-interpretation value lattice**: constants, string/number
+  ranges, and join/meet over branches now flow through the analysis,
+  powering a co-occurrence policy checker and sharper guard decisions.
+- **Branch sharpening**: predicate narrowing on `if`/`match` arms so each
+  branch is analysed under the constraints its guard implies (e.g. inside
+  `if x < 10`, `x` is known to be in range).
+- **Value-based range guard validation with GuardMap**: guards such as
+  `if len(x) > 0` or `if i < arr.len()` are checked against the value
+  lattice; a learned `unless_range_check` requirement is satisfied by a
+  guard that provably dominates the sink, not merely by textual
+  presence of a call.
+- **Buffer overflow / out-of-bounds checker**: spatial memory-safety
+  checker built on the new value lattice and the interprocedural summaries,
+  reporting indexed accesses that escape every bounding guard.
+- **Corpus Source facts for bundles**: `.frc` bundles can now teach the
+  engine new taint sources (e.g. framework request properties) that merge
+  into the fact table at load time; Python subscript expressions also
+  lower correctly so tuple/dict-indexed sources participate in flows.
+- **Policy fact consumption**: learned `Policy` facts from corpus bundles
+  are enforced by the engine's program-level policy checker (`PolicyFact`
+  with `RequireCall`/`NotCall` and `Function`/`Module` scope, honouring
+  `unless_guard`/`unless_range_check` exceptions). `PolicyRequirement`
+  serialisation fixed to externally tagged form — previously any bundle
+  containing a Policy fact silently failed to load.
+
+#### Bundler (`frensense-bundler`)
+
+- **Policy fact proposals**: the corpus learner now proposes `Policy`
+  facts from labelled check-call families. Two shapes are learned:
+  `NotCall` (calls present in positives but absent from every negative,
+  excluding builtin sinks/sanitisers) and `RequireCall` + `Module` scope
+  (guard helpers *defined* in every negative and absent from positives).
+  Proposals replay-verify like other facts and are published as
+  `LearnedFactEntry::Policy` in the bundle.
+- **Family metadata in bundles**: a `[frensense]` comment block
+  (observation / impact / improvement / cwe / cvss / owasp / severity)
+  in the first 30 lines of a positive example is parsed and written into
+  the bundle's pattern entries, so corpus documentation travels with the
+  learned facts.
+- **Multi-language stem-collision guard**: families whose stem exists in
+  more than one language (e.g. `foo.py` and `foo.ts`) are split into
+  `<stem> (<lang>)` sub-families with a warning listing the affected
+  files, instead of silently mixing languages in one replay.
+- **Synthetic-name leak fix**: lowering-internal function names
+  (`<fn@byte>`, file-position-dependent) are excluded from learned
+  `RequireCall` requirements, so bundles no longer encode requirements
+  that can only ever fire on the training corpus.
+
+#### Docs
+
+- **Public corpus authoring guide**: `docs/FRENSENSE_CORPUS_GUIDE.md`
+  rewritten as the reference for writing corpus families — quick start,
+  naming conventions, the metadata block, policy authoring, verification
+  workflow, and common mistakes.
+
+### Changed
+
+- Engine: guard recognition now consults the value lattice (see
+  value-based range guards above); previously guard satisfaction was
+  purely call/textual.
+- Bundler: check-call comment syntax is language-aware (`#` for
+  Python-family files, `//` otherwise).
+
 ## [0.7.0-preview.2] - 2026-09-27
 
 ### Added

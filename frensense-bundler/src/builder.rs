@@ -28,23 +28,25 @@ pub fn build_facts_bundle(
     let entries: Vec<frensense_engine::analysis::taint::facts::LearnedFactEntry> =
         published.iter().map(|f| f.entry.clone()).collect();
 
-    let mut families_iter = families.iter();
-    let mut patterns: Vec<BundlePattern> = Vec::new();
+    // One advisory pattern per family, sorted by id for a deterministic
+    // payload. Metadata comes from the family's `[frensense]` comment block
+    // (parsed during grouping); families without a block ship all-None.
     let mut family_ids: Vec<String> = families.iter().map(|f| f.id.clone()).collect();
     family_ids.sort();
+    let mut patterns: Vec<BundlePattern> = Vec::with_capacity(family_ids.len());
+    let empty = crate::fact_extract::FamilyMetadata::default();
     for id in &family_ids {
-        // Metadata comes from the family's [frensense] block when present;
-        // family lookup keeps the mapping stable across the two passes.
-        let _ = &mut families_iter;
+        let family = families.iter().find(|f| f.id == *id);
+        let meta = family.map(|f| &f.metadata).unwrap_or(&empty);
         patterns.push(BundlePattern {
             id: id.clone(),
-            observation: None,
-            impact: None,
-            improvement: None,
-            cwe: None,
-            cvss: None,
-            owasp: None,
-            severity: None,
+            observation: meta.observation.clone(),
+            impact: meta.impact.clone(),
+            improvement: meta.improvement.clone(),
+            cwe: meta.cwe.clone(),
+            cvss: meta.cvss,
+            owasp: meta.owasp.clone(),
+            severity: meta.severity.clone(),
         });
     }
 
@@ -56,20 +58,4 @@ pub fn build_facts_bundle(
     let _ = learned_table;
     let bytes = write_bundle(&payload, count)?;
     Ok((bytes, published))
-}
-
-/// Metadata for one family, extracted from the positive file's
-/// `[frensense]` comment block if present.
-#[allow(dead_code)]
-fn family_metadata(_corpus_dir: &std::path::Path, family_id: &str) -> BundlePattern {
-    BundlePattern {
-        id: family_id.to_string(),
-        observation: None,
-        impact: None,
-        improvement: None,
-        cwe: None,
-        cvss: None,
-        owasp: None,
-        severity: None,
-    }
 }

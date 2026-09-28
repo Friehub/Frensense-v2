@@ -111,7 +111,16 @@ fn run_facts_pipeline(corpus_dir: &Path, output_path: &Path) -> Result<(), Strin
             } => {
                 format!("policy:{rule}({when_call})")
             }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::MemoryContract {
+                name,
+                returns_fresh,
+                consumes_params,
+                ..
+            } => {
+                format!("mem:{name}(fresh={returns_fresh},consumes={consumes_params:?})")
+            }
         };
+
         eprintln!("  [{}] {} ← {}", f.status, call, f.families.join(", "));
     }
 

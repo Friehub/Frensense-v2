@@ -21,6 +21,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeSet;
 
 use crate::analysis::taint::config::TaintConfig;
+use crate::checks::memory_summary::CapacitySpec;
 
 /// Per-argument classification for one sink API.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,6 +259,20 @@ impl PolicyFact {
     }
 }
 
+/// One corpus-verified memory allocation or deallocation contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub struct MemoryContractFact {
+    /// Function or method name.
+    pub name: String,
+    /// Whether calling this function returns fresh heap memory.
+    pub returns_fresh: bool,
+    /// Capacity specification for the allocated buffer.
+    pub return_capacity: CapacitySpec,
+    /// Parameter indices consumed/deallocated by this call.
+    pub consumes_params: Vec<usize>,
+}
+
 /// The merged fact table: built-in language tables + bundle-learned facts.
 ///
 /// Built from a [`TaintConfig`] (name sets, backward compatible) plus
@@ -277,6 +292,8 @@ pub struct FactTable {
     /// evaluate there after `PolicyFact::from_legacy` conversion, so bundles
     /// never need to migrate to keep firing.
     pub policy_facts: Vec<PolicyFact>,
+    /// Corpus-verified interprocedural memory contracts (allocators / deallocators).
+    pub memory_contracts: Vec<MemoryContractFact>,
     /// Last segments that come ONLY from dotted client sinks (`got.get`,
     /// `axios.post`, ...). These verbs are ambiguous, `Map.get`, router
     /// `app.post`, LRU `.put` all share the names, so they match
@@ -307,6 +324,7 @@ pub struct FactTable {
     /// bundles teach new frameworks without touching the built-in tables.
     pub learned_sources: FxHashSet<String>,
 }
+
 
 impl FactTable {
     /// Build from a plain [`TaintConfig`]: every configured sink gets the
@@ -377,6 +395,14 @@ impl FactTable {
                 .any(|e| e.rule == p.rule && e.when_call == p.when_call)
             {
                 self.policy_facts.push(p.clone());
+            }
+        }
+        // Memory contracts accumulate, with newer/learned contracts replacing older ones on collision.
+        for mc in &other.memory_contracts {
+            if let Some(existing) = self.memory_contracts.iter_mut().find(|c| c.name == mc.name) {
+                *existing = mc.clone();
+            } else {
+                self.memory_contracts.push(mc.clone());
             }
         }
         // Verb-sink bookkeeping accumulates too: dotted client entries
@@ -634,6 +660,13 @@ pub enum LearnedFactEntry {
         #[serde(default)]
         unless_range_check: Option<Vec<String>>,
     },
+    /// Install a corpus-verified memory allocation or deallocation contract.
+    MemoryContract {
+        name: String,
+        returns_fresh: bool,
+        return_capacity: CapacitySpec,
+        consumes_params: Vec<usize>,
+    },
 }
 
 impl LearnedFactEntry {
@@ -728,6 +761,24 @@ impl LearnedFactEntry {
                     .any(|e| e.rule == fact.rule && e.call == fact.call)
                 {
                     table.learned_checks.push(fact);
+                }
+            }
+            LearnedFactEntry::MemoryContract {
+                name,
+                returns_fresh,
+                return_capacity,
+                consumes_params,
+            } => {
+                let fact = MemoryContractFact {
+                    name: name.clone(),
+                    returns_fresh: *returns_fresh,
+                    return_capacity: return_capacity.clone(),
+                    consumes_params: consumes_params.clone(),
+                };
+                if let Some(existing) = table.memory_contracts.iter_mut().find(|c| c.name == fact.name) {
+                    *existing = fact;
+                } else {
+                    table.memory_contracts.push(fact);
                 }
             }
         }

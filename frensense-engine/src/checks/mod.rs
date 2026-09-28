@@ -101,7 +101,8 @@ pub fn check_all<'a>(
             all.push(f);
         }
     }
-    let mem_summaries = memory_summary::MemorySummaryRegistry::infer_program_summaries(&irs);
+    let mem_summaries = memory_summary::MemorySummaryRegistry::from_facts(facts)
+        .infer_program_summaries_into(&irs);
     for ir in &irs {
         let findings = weak_hash::check(ir)
             .into_iter()

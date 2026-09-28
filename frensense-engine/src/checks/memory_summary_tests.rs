@@ -210,4 +210,92 @@ void caller() {
             rules
         );
     }
+
+    /// Corpus/bundle-learned allocation contract seeds registry and detects OOB.
+    #[test]
+    fn bundle_learned_allocator_fires_oob() {
+        use crate::analysis::taint::facts::{FactTable, MemoryContractFact};
+        use crate::checks::memory_summary::CapacitySpec;
+
+        let mut facts = FactTable::default();
+        facts.memory_contracts.push(MemoryContractFact {
+            name: "custom_kalloc".to_string(),
+            returns_fresh: true,
+            return_capacity: CapacitySpec::Param(0),
+            consumes_params: vec![],
+        });
+
+        let src = r#"
+extern void *custom_kalloc(int size);
+
+void caller() {
+    char *p = custom_kalloc(10);
+    p[20] = 1;
 }
+"#;
+        let fns = lower_source("t.c", src, "c").unwrap();
+        let ir_refs: Vec<_> = fns.values().collect();
+        let findings = check_all(ir_refs, &facts);
+        let rules: Vec<String> = findings.into_iter().map(|f| f.rule).collect();
+        assert!(
+            rules.iter().any(|r| r == "buffer_overflow"),
+            "custom_kalloc(10) from bundle must fire buffer_overflow on p[20]: {:?}",
+            rules
+        );
+    }
+
+    /// Corpus/bundle-learned deallocator contract seeds registry and detects UAF.
+    #[test]
+    fn bundle_learned_deallocator_fires_uaf() {
+        use crate::analysis::taint::facts::{FactTable, MemoryContractFact};
+        use crate::checks::memory_summary::CapacitySpec;
+
+        let mut facts = FactTable::default();
+        facts.memory_contracts.push(MemoryContractFact {
+            name: "external_release".to_string(),
+            returns_fresh: false,
+            return_capacity: CapacitySpec::Unknown,
+            consumes_params: vec![0],
+        });
+
+        let src = r#"
+#include <stdlib.h>
+extern void external_release(void *ptr);
+
+void caller() {
+    char *p = malloc(16);
+    external_release(p);
+    p[0] = 1;
+}
+"#;
+        let fns = lower_source("t.c", src, "c").unwrap();
+        let ir_refs: Vec<_> = fns.values().collect();
+        let findings = check_all(ir_refs, &facts);
+        let rules: Vec<String> = findings.into_iter().map(|f| f.rule).collect();
+        assert!(
+            rules.iter().any(|r| r == "use_after_free"),
+            "external_release(p) from bundle must fire use_after_free on p[0]: {:?}",
+            rules
+        );
+    }
+
+    /// LearnedFactEntry::MemoryContract round-trips losslessly through bincode.
+    #[test]
+    fn bundle_contract_roundtrip_bincode() {
+        use crate::analysis::taint::facts::LearnedFactEntry;
+        use crate::checks::memory_summary::CapacitySpec;
+
+        let original = LearnedFactEntry::MemoryContract {
+            name: "my_pool_alloc".to_string(),
+            returns_fresh: true,
+            return_capacity: CapacitySpec::ParamProduct(0, 1),
+            consumes_params: vec![2],
+        };
+
+        let encoded = bincode::serialize(&original).expect("serialize MemoryContract");
+        let decoded: LearnedFactEntry = bincode::deserialize(&encoded).expect("deserialize MemoryContract");
+
+        assert_eq!(original, decoded);
+    }
+}
+

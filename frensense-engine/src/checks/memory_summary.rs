@@ -36,7 +36,10 @@ fn last_segment(call: &str) -> &str {
 }
 
 /// Buffer capacity specification for an allocation contract.
+///
+/// Derives serde so it can travel inside a `.frc` bundle's bincode payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub enum CapacitySpec {
     /// Exact constant byte/element capacity (e.g. malloc(64)).
     Exact(i64),
@@ -55,7 +58,10 @@ impl Default for CapacitySpec {
 }
 
 /// Summary contract describing a function's memory semantics.
+///
+/// Derives serde so it can travel inside a `.frc` bundle's bincode payload.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct MemorySummary {
     /// True if the function returns a newly allocated object.
     pub returns_fresh: bool,
@@ -88,7 +94,65 @@ impl MemorySummaryRegistry {
         Self::default()
     }
 
-    /// Register well-known standard and runtime library memory functions.
+    /// Returns true if `name` is one of the built-in bootstrap contracts.
+    ///
+    /// The bundler uses this to skip re-emitting builtins into the `.frc`
+    /// (they're already in the hardcoded bootstrap, no need to inflate bundle size).
+    pub fn is_builtin(name: &str) -> bool {
+        const BUILTIN_NAMES: &[&str] = &[
+            "free", "malloc", "calloc", "realloc", "aligned_alloc", "valloc", "alloca",
+            "g_free", "g_malloc", "g_malloc0", "g_realloc", "g_strdup",
+            "kfree", "kmalloc", "kzalloc", "kcalloc",
+            "sqlite3_free", "sqlite3_malloc", "sqlite3_malloc64", "sqlite3_realloc",
+            "CRYPTO_free", "apr_palloc", "xmlFree", "cJSON_Delete",
+            "strdup", "strndup",
+        ];
+        BUILTIN_NAMES.contains(&name)
+    }
+
+    /// Seed a registry from bundle-learned memory contracts, then add the
+    /// built-in bootstrap.  Bundle-learned contracts override builtins on
+    /// name collision (more specific corpus knowledge wins).
+    ///
+    /// Call this instead of `default()` when a `.frc` bundle is loaded, then
+    /// follow up with `infer_program_summaries_into` for the current project's
+    /// per-file fixpoint.
+    pub fn from_facts(facts: &crate::analysis::taint::facts::FactTable) -> Self {
+        // Start with the hardcoded bootstrap so the engine always works even
+        // without a bundle, then merge bundle-learned contracts on top.
+        let mut reg = Self::default();
+        for contract in &facts.memory_contracts {
+            reg.summaries.insert(
+                contract.name.clone(),
+                MemorySummary {
+                    returns_fresh: contract.returns_fresh,
+                    return_capacity: contract.return_capacity.clone(),
+                    consumes_params: contract.consumes_params.clone(),
+                },
+            );
+        }
+        reg
+    }
+
+    /// Run the fixpoint inference in-place on `self` (which was already seeded
+    /// from the bundle via `from_facts`).  This is the per-project pass: it
+    /// discovers project-specific wrapper chains on top of whatever the bundle
+    /// already taught.
+    pub fn infer_program_summaries_into(mut self, irs: &[&FunctionIR]) -> Self {
+        self.run_fixpoint(irs);
+        self
+    }
+
+    /// Static entry point that starts from a fresh default registry and runs
+    /// fixpoint inference.  Kept for call-sites that have no bundle.
+    pub fn infer_program_summaries(irs: &[&FunctionIR]) -> Self {
+        let mut registry = Self::default();
+        registry.run_fixpoint(irs);
+        registry
+    }
+
+
+
     fn register_builtins(&mut self) {
         // Standard deallocators (consumes param 0)
         let deallocs = &[
@@ -222,11 +286,9 @@ impl MemorySummaryRegistry {
             .unwrap_or_default()
     }
 
-    /// Automatically infer interprocedural memory contracts across all functions
-    /// in the scanned project.
-    pub fn infer_program_summaries(irs: &[&FunctionIR]) -> Self {
-        let mut registry = Self::default();
-
+    /// Internal fixpoint pass shared by `infer_program_summaries` and
+    /// `infer_program_summaries_into`. Mutates `self` in place.
+    fn run_fixpoint(&mut self, irs: &[&FunctionIR]) {
         // Trace a variable back to a parameter index through SSA assignments / casts.
         fn trace_to_param(ir: &FunctionIR, var: VarId) -> Option<usize> {
             if let Some(pos) = ir.parameters.iter().position(|&p| p == var) {
@@ -286,7 +348,7 @@ impl MemorySummaryRegistry {
             None
         }
 
-        // Fixed-point inference loop over program functions
+        // Fixed-point inference loop over program functions.
         let mut changed = true;
         let mut iterations = 0;
         while changed && iterations < 10 {
@@ -302,7 +364,7 @@ impl MemorySummaryRegistry {
                 for blk in ir.blocks.values() {
                     for instr in &blk.instructions {
                         if let Instruction::CallStatic { func, args, .. } = instr {
-                            let consumed_slots = registry.consumes_params(func.as_str());
+                            let consumed_slots = self.consumes_params(func.as_str());
                             for slot in consumed_slots {
                                 if let Some(Operand::Var(v)) = args.get(slot) {
                                     if let Some(param_idx) = trace_to_param(ir, *v) {
@@ -326,7 +388,6 @@ impl MemorySummaryRegistry {
                 }
 
                 if !return_vars.is_empty() {
-                    // Precompute value info if needed for constant sizes
                     let val_info = value::analyze(ir);
 
                     // Chase through Assign/Cast chains to find the root allocation
@@ -364,9 +425,9 @@ impl MemorySummaryRegistry {
                         if let Some(def) = find_alloc_root(ret_var) {
                             match def {
                                 Instruction::CallStatic { func, args, .. } => {
-                                    if registry.returns_fresh(func) {
+                                    if self.returns_fresh(func) {
                                         returns_fresh = true;
-                                        if let Some(cap_spec) = registry.return_capacity(func) {
+                                        if let Some(cap_spec) = self.return_capacity(func) {
                                             match cap_spec {
                                                 CapacitySpec::Param(p_idx) => {
                                                     if let Some(arg_op) = args.get(*p_idx) {
@@ -416,22 +477,21 @@ impl MemorySummaryRegistry {
                     }
                 }
 
-                // If any contract was discovered, register it
+                // If any contract was discovered, register it.
                 if returns_fresh || !consumes.is_empty() {
                     let summary = MemorySummary {
                         returns_fresh,
                         return_capacity,
                         consumes_params: consumes,
                     };
-                    let prev = registry.summaries.get(&ir.name);
+                    let prev = self.summaries.get(&ir.name);
                     if prev != Some(&summary) {
-                        registry.summaries.insert(ir.name.clone(), summary);
+                        self.summaries.insert(ir.name.clone(), summary);
                         changed = true;
                     }
                 }
             }
         }
-
-        registry
     }
 }
+

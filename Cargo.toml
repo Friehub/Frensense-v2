@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "frensense"
-version = "0.7.0-preview.2"
+version = "0.7.1-preview.1"
 authors = ["Friehub Developers"]
 edition = "2024"
 description = "Frensense: deterministic dataflow security scanner."
@@ -24,8 +24,8 @@ name = "frensense"
 path = "src/bin/frensense.rs"
 
 [dependencies]
-frensense-engine = { path = "frensense-engine", version = "0.7.0-preview.2", features = ["serialize"] }
-frensense-lang = { path = "frensense-lang", version = "0.7.0-preview.2" }
+frensense-engine = { path = "frensense-engine", version = "0.7.1-preview.1", features = ["serialize"] }
+frensense-lang = { path = "frensense-lang", version = "0.7.1-preview.1" }
 thiserror = "1.0"
 tracing = { version = "0.1", features = ["attributes"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -34,7 +34,7 @@ serde_json = "1.0"
 walkdir = "2"
 rustc-hash = "1.1"
 
-frensense-bundler = { version = "0.7.0-preview.2", path = "frensense-bundler" }
+frensense-bundler = { version = "0.7.1-preview.1", path = "frensense-bundler" }
 
 [dev-dependencies]
 tempfile = "3"
