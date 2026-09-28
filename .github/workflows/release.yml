@@ -157,25 +157,25 @@ jobs:
       - name: Smoke test MCP server
         shell: bash
         run: |
-          mcp="target/${{ matrix.settings.target }}/release/frensense-mcp${{ matrix.settings.ext }}"
+          binary="target/${{ matrix.settings.target }}/release/${{ matrix.settings.bin_name }}"
           printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' |
-            timeout 30 "$mcp" 2>/dev/null |
+            timeout 30 "$binary" mcp 2>/dev/null |
             grep -q 'frensense-mcp'
           printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' |
-            timeout 30 "$mcp" 2>/dev/null |
+            timeout 30 "$binary" mcp 2>/dev/null |
             grep -q 'frensense_scan_file'
           printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}' |
-            timeout 30 "$mcp" 2>/dev/null |
+            timeout 30 "$binary" mcp 2>/dev/null |
             grep -q 'frensense_diff'
           echo "MCP smoke test passed"
 
       - name: Smoke test LSP server
         shell: bash
         run: |
-          lsp="target/${{ matrix.settings.target }}/release/frensense-lsp${{ matrix.settings.ext }}"
-          python3 - "$lsp" <<'PYEOF'
+          binary="target/${{ matrix.settings.target }}/release/${{ matrix.settings.bin_name }}"
+          python3 - "$binary" <<'PYEOF'
           import json, subprocess, sys
-          lsp = sys.argv[1]
+          binary = sys.argv[1]
           def frame(obj):
               body = json.dumps(obj).encode()
               return b"Content-Length: %d\r\n\r\n" % len(body) + body
@@ -183,7 +183,7 @@ jobs:
               frame({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
               frame({"jsonrpc": "2.0", "method": "exit"}),
           ])
-          out = subprocess.run([lsp], input=msgs, capture_output=True, timeout=30).stdout
+          out = subprocess.run([binary, "lsp"], input=msgs, capture_output=True, timeout=30).stdout
           assert b"frensense-lsp" in out, "initialize response missing serverInfo"
           print("LSP smoke test passed")
           PYEOF

@@ -173,8 +173,8 @@ jobs:
       - name: Run Full Regression Suite
         run: cargo test --workspace --all-features
 
-      - name: Build Release Binaries (CLI + MCP + LSP)
-        run: cargo build --release --bin frensense --bin frensense-mcp --bin frensense-lsp
+      - name: Build Release Binary (CLI + MCP + LSP unified)
+        run: cargo build --release --bin frensense
 
       - name: CLI Binary Smoke Test
         run: |
@@ -187,21 +187,18 @@ jobs:
 
       - name: MCP Server Smoke Test
         run: |
-          mcp="./target/release/frensense-mcp"
           printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' |
-            timeout 30 "$mcp" 2>/dev/null | grep -q 'frensense-mcp'
+            timeout 30 ./target/release/frensense mcp 2>/dev/null | grep -q 'frensense-mcp'
           printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' |
-            timeout 30 "$mcp" 2>/dev/null | grep -q 'frensense_scan_file'
+            timeout 30 ./target/release/frensense mcp 2>/dev/null | grep -q 'frensense_scan_file'
           printf '%s\n' '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}' |
-            timeout 30 "$mcp" 2>/dev/null | grep -q 'frensense_diff'
+            timeout 30 ./target/release/frensense mcp 2>/dev/null | grep -q 'frensense_diff'
           echo "MCP smoke test passed"
 
       - name: LSP Server Smoke Test
         run: |
-          lsp="./target/release/frensense-lsp"
-          python3 - "$lsp" <<'PYEOF'
+          python3 - <<'PYEOF'
           import json, subprocess, sys
-          lsp = sys.argv[1]
           def frame(obj):
               body = json.dumps(obj).encode()
               return b"Content-Length: %d\r\n\r\n" % len(body) + body
@@ -209,7 +206,7 @@ jobs:
               frame({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}),
               frame({"jsonrpc": "2.0", "method": "exit"}),
           ])
-          out = subprocess.run([lsp], input=msgs, capture_output=True, timeout=30).stdout
+          out = subprocess.run(["./target/release/frensense", "lsp"], input=msgs, capture_output=True, timeout=30).stdout
           assert b"frensense-lsp" in out, "initialize response missing serverInfo"
           print("LSP smoke test passed")
           PYEOF
@@ -222,7 +219,7 @@ jobs:
           printf 'import hashlib\n\n\ndef digest(data):\n    return hashlib.md5(data).hexdigest()\n' > /tmp/frensense-consistency/app.py
           ./target/release/frensense /tmp/frensense-consistency/app.py --json 2>/dev/null | grep -q 'weak_hash'
           echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"frensense_scan_file","arguments":{"path":"/tmp/frensense-consistency/app.py"}}}' |
-            timeout 30 ./target/release/frensense-mcp 2>/dev/null | grep -q 'weak_hash'
+            timeout 30 ./target/release/frensense mcp 2>/dev/null | grep -q 'weak_hash'
           echo "Delivery surface consistency OK"
 
       - name: Baseline Regression Check
