@@ -443,7 +443,7 @@ impl<'a> ProgramSvfg<'a> {
         for &fi in &self.topological_order {
             // Suppress local pass-through edges for callees that already have
             // summaries (their relational summary replaces the local edge).
-            let suppressible: Vec<(NodeKey, NodeKey)> = self.functions[fi]
+            let mut suppressible: Vec<(NodeKey, NodeKey)> = self.functions[fi]
                 .bindings
                 .iter()
                 .filter(|b| {
@@ -459,6 +459,22 @@ impl<'a> ProgramSvfg<'a> {
                         .chain(b.receiver.map(|recv| (recv, r)))
                 })
                 .collect();
+
+            // External calls with registered propagator rules: suppress pass-through
+            // edges for argument slots that do NOT propagate taint.
+            for b in &self.functions[fi].bindings {
+                if b.callees.is_empty()
+                    && let Some(r) = b.ret_node
+                    && let Some(propagating_slots) = facts.propagator_input_args(&b.callee_name)
+                {
+                    for (a, slot) in &b.args {
+                        if !propagating_slots.contains(slot) {
+                            suppressible.push((*a, r));
+                        }
+                    }
+                }
+            }
+
             for (from, to) in suppressible {
                 self.suppressed.insert((fi, from, to));
             }

@@ -1,5 +1,60 @@
-import { defineConfig } from 'vitepress'
-import { createContentLoader } from 'vitepress'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { defineConfig, createContentLoader } from 'vitepress'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+function getWorkspaceVersion(): string {
+  try {
+    const cargoTomlPath = path.resolve(__dirname, '../../Cargo.toml')
+    const content = fs.readFileSync(cargoTomlPath, 'utf-8')
+    const match = content.match(/\[package\][\s\S]*?version\s*=\s*"([^"]+)"/)
+    if (match && match[1]) {
+      return match[1]
+    }
+  } catch {}
+  return '0.7.0-preview.4'
+}
+
+async function getPublishedVersion(): Promise<string> {
+  const fallback = getWorkspaceVersion()
+
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 1500)
+    const res = await fetch('https://api.github.com/repos/Friehub/frensense-v2/releases/latest', {
+      headers: { 'User-Agent': 'frensense-docs-builder' },
+      signal: controller.signal
+    })
+    clearTimeout(timer)
+    if (res.ok) {
+      const data = (await res.json()) as { tag_name?: string }
+      if (data?.tag_name) {
+        return data.tag_name.replace(/^v/, '')
+      }
+    }
+  } catch {}
+
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 1500)
+    const res = await fetch('https://registry.npmjs.org/@friehub/frensense/latest', {
+      signal: controller.signal
+    })
+    clearTimeout(timer)
+    if (res.ok) {
+      const data = (await res.json()) as { version?: string }
+      if (data?.version) {
+        return data.version
+      }
+    }
+  } catch {}
+
+  return fallback
+}
+
+const currentVersion = await getPublishedVersion()
 
 // frensense v2 documentation site.
 // Deployed at the domain root; the legacy v1 site is served under /v1/.
@@ -9,7 +64,52 @@ export default defineConfig({
   description:
     'Frensense v2, a compiler-mode static analysis engine that lowers every file to a program graph and reports exact source-to-sink taint paths.',
   ignoreDeadLinks: true, // v1 archive pages are copied in after the build, not known to VitePress.
-  head: [['link', { rel: 'icon', type: 'image/png', href: '/favicon.png' }]],
+  head: [
+    ['link', { rel: 'icon', type: 'image/png', href: '/favicon.png' }],
+    [
+      'script',
+      {},
+      `
+      (function() {
+        if (typeof window === 'undefined') return;
+        var STORAGE_KEY = 'frensense_latest_version';
+        function applyVersion(v) {
+          if (!v) return;
+          var display = v.startsWith('v') ? v : 'v' + v;
+          var targets = document.querySelectorAll('.VPNavBarMenuGroup button span, .frensense-version');
+          targets.forEach(function(el) {
+            if (/^v?\\d+\\.\\d+\\.\\d+/.test(el.textContent ? el.textContent.trim() : '')) {
+              el.textContent = display;
+            }
+          });
+        }
+        try {
+          var cached = sessionStorage.getItem(STORAGE_KEY);
+          if (cached) applyVersion(cached);
+        } catch (_) {}
+
+        if (window.fetch) {
+          fetch('https://api.github.com/repos/Friehub/frensense-v2/releases/latest')
+            .then(function(res) { return res.ok ? res.json() : null; })
+            .then(function(data) {
+              if (data && data.tag_name) {
+                var ver = data.tag_name;
+                try { sessionStorage.setItem(STORAGE_KEY, ver); } catch (_) {}
+                applyVersion(ver);
+              }
+            })
+            .catch(function() {});
+        }
+        window.addEventListener('DOMContentLoaded', function() {
+          try {
+            var cached = sessionStorage.getItem(STORAGE_KEY);
+            if (cached) applyVersion(cached);
+          } catch (_) {}
+        });
+      })();
+      `
+    ]
+  ],
 
   cleanUrls: true,
 
@@ -29,9 +129,11 @@ export default defineConfig({
         ]
       },
       {
-        text: 'v0.7.1-preview',
+        text: `v${currentVersion}`,
         items: [
-          { text: 'Changelog', link: 'https://github.com/Friehub/frensense-v2/blob/main/CHANGELOG.md' }
+          { text: 'Changelog', link: 'https://github.com/Friehub/frensense-v2/blob/main/CHANGELOG.md' },
+          { text: 'crates.io', link: 'https://crates.io/crates/frensense' },
+          { text: 'GitHub Releases', link: 'https://github.com/Friehub/frensense-v2/releases' }
         ]
       }
     ],

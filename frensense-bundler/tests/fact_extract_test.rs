@@ -2,9 +2,13 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
+use frensense_bundler::builder::build_facts_bundle;
 use frensense_bundler::fact_extract::{extract_facts, group_families, Family, FamilyMetadata};
+use frensense_bundler::format::load_bundle;
 use frensense_engine::analysis::taint::config::TaintConfig;
-use frensense_engine::analysis::taint::facts::{FactTable, LearnedFactEntry};
+use frensense_engine::analysis::taint::facts::{
+    fact_table_from_entries, FactTable, LearnedFactEntry, PolicyRequirement,
+};
 
 fn config() -> TaintConfig {
     TaintConfig {
@@ -290,6 +294,127 @@ export function connect() {
         !scan_neg.has_alert(),
         "consumer negative MUST stay silent: {:?}",
         scan_neg.checker
+    );
+}
+
+/// End-to-end verification that the engine is teachable via a `.frc` bundle
+/// for a security-policy bug (CWE-862: Missing Authorization).
+///
+/// Training: two Python files teach the rule
+///   "calling `delete_user_account` without `verify_admin_permission` is a violation".
+/// Expected outcomes:
+///   - No bundle: scanner sees the positive file and produces 0 findings
+///     (the engine has no prior knowledge of this custom API).
+///   - With bundle: scanner fires on the unguarded positive.
+///   - With bundle: scanner stays silent on the guarded negative.
+#[test]
+fn test_security_policy_frc_roundtrip() {
+    let dir = tempfile::tempdir().unwrap();
+
+    // Training corpus
+    std::fs::write(
+        dir.path().join("delete_account_positive.py"),
+        concat!(
+            "# check-call: delete_user_account\n",
+            "def handle(uid):\n",
+            "    delete_user_account(uid)\n",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("delete_account_negative.py"),
+        concat!(
+            "def handle(uid):\n",
+            "    if not verify_admin_permission(uid):\n",
+            "        raise Exception('denied')\n",
+            "    delete_user_account(uid)\n",
+        ),
+    )
+    .unwrap();
+
+    // Build the .frc bundle from the corpus
+    let cfg = TaintConfig::default();
+    let builtin = FactTable::default();
+    let (bundle_bytes, published) =
+        build_facts_bundle(dir.path(), &cfg, &builtin).expect("bundle build must not fail");
+
+    // At least one Check or Policy fact must have been published
+    let has_policy_fact = published.iter().any(|f| match &f.entry {
+        LearnedFactEntry::Check {
+            call, unless_guard, ..
+        } => {
+            call.ends_with("delete_user_account")
+                && unless_guard
+                    .as_deref()
+                    .map(|g| g.contains("verify_admin_permission"))
+                    .unwrap_or(false)
+        }
+        LearnedFactEntry::Policy {
+            when_call, require, ..
+        } => {
+            when_call.ends_with("delete_user_account")
+                && require.iter().any(|r| {
+                    matches!(r, PolicyRequirement::GuardCall { call }
+                        if call.contains("verify_admin_permission"))
+                })
+        }
+        _ => false,
+    });
+    assert!(
+        has_policy_fact,
+        "bundler must publish a GuardCall policy for delete_user_account; published: {:#?}",
+        published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+    );
+
+    // Round-trip: load the bundle bytes and hydrate a FactTable
+    let loaded = load_bundle(&bundle_bytes).expect("bundle must deserialize");
+    let learned_facts = fact_table_from_entries(&loaded.learned_facts);
+
+    // Scanner test fixtures
+    let positive_file = vec![(
+        "app_positive.py".to_string(),
+        concat!(
+            "def route_handler(user_id):\n",
+            "    delete_user_account(user_id)\n",
+        )
+        .to_string(),
+        "py".to_string(),
+    )];
+
+    let negative_file = vec![(
+        "app_negative.py".to_string(),
+        concat!(
+            "def route_handler(user_id):\n",
+            "    if not verify_admin_permission(user_id):\n",
+            "        raise PermissionError('forbidden')\n",
+            "    delete_user_account(user_id)\n",
+        )
+        .to_string(),
+        "py".to_string(),
+    )];
+
+    // Without bundle: engine is blind to this custom API -- 0 findings expected
+    let baseline = frensense_engine::scan::scan(&positive_file, &cfg, &builtin);
+    assert!(
+        !baseline.has_alert(),
+        "no findings expected without bundle (engine has no prior knowledge): {:?}",
+        baseline.checker
+    );
+
+    // With bundle: positive must alert
+    let with_bundle_pos = frensense_engine::scan::scan(&positive_file, &cfg, &learned_facts);
+    assert!(
+        with_bundle_pos.has_alert(),
+        "unguarded positive MUST alert after engine is taught the rule; checker: {:?}",
+        with_bundle_pos.checker
+    );
+
+    // With bundle: negative must stay silent
+    let with_bundle_neg = frensense_engine::scan::scan(&negative_file, &cfg, &learned_facts);
+    assert!(
+        !with_bundle_neg.has_alert(),
+        "guarded negative MUST stay silent after engine is taught the rule; checker: {:?}",
+        with_bundle_neg.checker
     );
 }
 

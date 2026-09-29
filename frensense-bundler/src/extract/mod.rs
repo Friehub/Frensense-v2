@@ -38,7 +38,7 @@ pub use call_analysis::{
 pub use candidate::{apply_candidate, fact_key, Candidate};
 pub use family::{group_families, Family, FamilyMetadata, LearnedFact};
 pub use gate::{scan_variant, separates, PreparedFamily};
-pub use noise::looks_taint_relevant;
+pub use noise::{guard_priority, is_exception_name, looks_taint_relevant};
 pub use propose::propose;
 
 /// Full extraction: propose per family -> replay-gate -> merged learned table.
