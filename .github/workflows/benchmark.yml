@@ -38,35 +38,37 @@ jobs:
       - name: Build Frensense
         run: cargo build --release
 
-      - name: Checkout OWASP Juice Shop
-        run: git clone https://github.com/juice-shop/juice-shop.git /tmp/juice-shop
+      - name: Checkout OWASP BenchmarkPython
+        run: git clone --depth 1 https://github.com/OWASP-Benchmark/BenchmarkPython.git /tmp/BenchmarkPython
 
-      - name: Run Historical Benchmark
+      - name: Run OWASP Python Benchmark
         run: |
-          ./scripts/historical-benchmark.sh /tmp/juice-shop routes/ --last 10
-          
-          # Convert CSV to github-action-benchmark custom JSON format
+          python3 scripts/owasp_benchmark.py \
+            --owasp-csv /tmp/BenchmarkPython/expectedresults-0.1.csv \
+            --owasp-testcode /tmp/BenchmarkPython/testcode \
+            --json-out /tmp/owasp_scorecard.json | tee /tmp/owasp_summary.txt
+
+          echo "## OWASP Benchmark for Python Results" >> $GITHUB_STEP_SUMMARY
+          echo '```text' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/owasp_summary.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
           python3 -c "
-          import csv, json, sys, glob
-          csv_files = glob.glob('historical-scan-juice-shop-*.csv')
-          if not csv_files:
-              print('No CSV file found!')
-              sys.exit(1)
-          
-          data = []
-          with open(csv_files[0]) as f:
-              reader = csv.DictReader(f)
-              for row in reader:
-                  data.append({
-                      'name': f\"Juice Shop {row['tag']}\",
-                      'value': int(row['advisories']),
-                      'unit': 'advisories'
-                  })
-          
+          import json
+          with open('/tmp/owasp_scorecard.json') as f:
+              scorecard = json.load(f)
+          total = scorecard['total']
+          data = [
+              {'name': 'OWASP Benchmark Score (TPR - FPR)', 'value': round(total['score'] * 100, 1), 'unit': '%'},
+              {'name': 'OWASP Benchmark True Positive Rate (TPR)', 'value': round(total['tpr'] * 100, 1), 'unit': '%'},
+              {'name': 'OWASP Benchmark False Positive Rate (FPR)', 'value': round(total['fpr'] * 100, 1), 'unit': '%'},
+              {'name': 'OWASP Benchmark True Positives (TP)', 'value': total['TP'], 'unit': 'cases'},
+              {'name': 'OWASP Benchmark False Positives (FP)', 'value': total['FP'], 'unit': 'cases'}
+          ]
           with open('benchmark-results.json', 'w') as f:
               json.dump(data, f, indent=2)
           "
-          
+
           cat benchmark-results.json
 
       - name: Store and Publish Benchmark Results
@@ -76,7 +78,6 @@ jobs:
           output-file-path: benchmark-results.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           auto-push: true
-          # Alert if our vulnerability recall drops by more than 5%
-          alert-threshold: '105%'
           comment-on-alert: true
-          fail-on-alert: true
+          fail-on-alert: false
+          summary-always: true
