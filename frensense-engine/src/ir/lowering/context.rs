@@ -57,10 +57,10 @@ impl<'a> LoweringContext<'a> {
     /// Dynamic node role query: consults learned bundle facts, then falls back to `LanguageSpec::classify`.
     pub fn classify_node(&self, kind: &str) -> NodeRole {
         let lang = self.spec.name();
-        if let Some(facts) = self.facts {
-            if let Some(role) = facts.get_grammar_role(lang, kind) {
-                return role.clone();
-            }
+        if let Some(facts) = self.facts
+            && let Some(role) = facts.get_grammar_role(lang, kind)
+        {
+            return role.clone();
         }
         self.spec.classify(kind)
     }
@@ -68,10 +68,10 @@ impl<'a> LoweringContext<'a> {
     /// Dynamic cast query: consults learned bundle facts, then falls back to `LanguageSpec::is_cast`.
     pub fn is_cast(&self, kind: &str) -> bool {
         let lang = self.spec.name();
-        if let Some(facts) = self.facts {
-            if let Some(has_feat) = facts.has_grammar_feature(lang, kind, GrammarFeature::Cast) {
-                return has_feat;
-            }
+        if let Some(facts) = self.facts
+            && let Some(has_feat) = facts.has_grammar_feature(lang, kind, GrammarFeature::Cast)
+        {
+            return has_feat;
         }
         self.spec.is_cast(kind)
     }
@@ -79,12 +79,11 @@ impl<'a> LoweringContext<'a> {
     /// Dynamic template string query.
     pub fn is_template_string(&self, kind: &str) -> bool {
         let lang = self.spec.name();
-        if let Some(facts) = self.facts {
-            if let Some(has_feat) =
+        if let Some(facts) = self.facts
+            && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::TemplateString)
-            {
-                return has_feat;
-            }
+        {
+            return has_feat;
         }
         self.spec.is_template_string(kind)
     }
@@ -92,12 +91,11 @@ impl<'a> LoweringContext<'a> {
     /// Dynamic template fragment query.
     pub fn is_template_fragment(&self, kind: &str) -> bool {
         let lang = self.spec.name();
-        if let Some(facts) = self.facts {
-            if let Some(has_feat) =
+        if let Some(facts) = self.facts
+            && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::TemplateFragment)
-            {
-                return has_feat;
-            }
+        {
+            return has_feat;
         }
         self.spec.is_template_literal_fragment(kind)
     }
@@ -105,12 +103,11 @@ impl<'a> LoweringContext<'a> {
     /// Dynamic destructuring pattern query.
     pub fn is_destructuring_pattern(&self, kind: &str) -> bool {
         let lang = self.spec.name();
-        if let Some(facts) = self.facts {
-            if let Some(has_feat) =
+        if let Some(facts) = self.facts
+            && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::DestructuringPattern)
-            {
-                return has_feat;
-            }
+        {
+            return has_feat;
         }
         self.spec.is_destructuring_pattern(kind)
     }
@@ -118,12 +115,11 @@ impl<'a> LoweringContext<'a> {
     /// Dynamic pair pattern query.
     pub fn is_pair_pattern(&self, kind: &str) -> bool {
         let lang = self.spec.name();
-        if let Some(facts) = self.facts {
-            if let Some(has_feat) =
+        if let Some(facts) = self.facts
+            && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::PairPattern)
-            {
-                return has_feat;
-            }
+        {
+            return has_feat;
         }
         self.spec.is_pair_pattern(kind)
     }
@@ -131,11 +127,10 @@ impl<'a> LoweringContext<'a> {
     /// Dynamic pair entry query.
     pub fn is_pair_entry(&self, kind: &str) -> bool {
         let lang = self.spec.name();
-        if let Some(facts) = self.facts {
-            if let Some(has_feat) = facts.has_grammar_feature(lang, kind, GrammarFeature::PairEntry)
-            {
-                return has_feat;
-            }
+        if let Some(facts) = self.facts
+            && let Some(has_feat) = facts.has_grammar_feature(lang, kind, GrammarFeature::PairEntry)
+        {
+            return has_feat;
         }
         self.spec.is_pair_entry(kind)
     }
@@ -143,12 +138,11 @@ impl<'a> LoweringContext<'a> {
     /// Dynamic straight-line ternary query.
     pub fn is_ternary_straight_line(&self, kind: &str) -> bool {
         let lang = self.spec.name();
-        if let Some(facts) = self.facts {
-            if let Some(has_feat) =
+        if let Some(facts) = self.facts
+            && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::TernaryStraightLine)
-            {
-                return has_feat;
-            }
+        {
+            return has_feat;
         }
         self.spec.is_ternary_straight_line(kind)
     }
@@ -156,12 +150,11 @@ impl<'a> LoweringContext<'a> {
     /// Dynamic declaration assignment query.
     pub fn is_declaration_assignment(&self, kind: &str) -> bool {
         let lang = self.spec.name();
-        if let Some(facts) = self.facts {
-            if let Some(has_feat) =
+        if let Some(facts) = self.facts
+            && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::DeclarationAssignment)
-            {
-                return has_feat;
-            }
+        {
+            return has_feat;
         }
         self.spec.is_declaration_assignment(kind)
     }
@@ -169,12 +162,11 @@ impl<'a> LoweringContext<'a> {
     /// Dynamic property kind query.
     pub fn is_property_kind(&self, kind: &str) -> bool {
         let lang = self.spec.name();
-        if let Some(facts) = self.facts {
-            if let Some(has_feat) =
+        if let Some(facts) = self.facts
+            && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::PropertyKind)
-            {
-                return has_feat;
-            }
+        {
+            return has_feat;
         }
         self.spec.is_property_kind(kind)
     }

@@ -785,18 +785,17 @@ impl FactTable {
         feature: GrammarFeature,
     ) -> Option<bool> {
         let lang = language.to_lowercase();
-        if let Some(set) = self.grammar_features.get(&(lang, node_kind.to_string())) {
-            if set.contains(&feature) {
-                return Some(true);
-            }
+        if let Some(set) = self.grammar_features.get(&(lang, node_kind.to_string()))
+            && set.contains(&feature)
+        {
+            return Some(true);
         }
         if let Some(set) = self
             .grammar_features
             .get(&("*".to_string(), node_kind.to_string()))
+            && set.contains(&feature)
         {
-            if set.contains(&feature) {
-                return Some(true);
-            }
+            return Some(true);
         }
         None
     }
@@ -983,8 +982,8 @@ impl FactTable {
     ///   `got.get(taint)` is.
     pub fn is_sink_call(&self, last: &str, receiver_root: Option<&str>) -> bool {
         if !self.verb_sinks.contains(last) {
-            // Ordinary sink: presence in the signature table or IDOR finder set decides.
-            return self.sink_signatures.contains_key(last) || self.is_idor_finder_sink(last);
+            // Ordinary sink: presence in the signature table decides.
+            return self.sink_signatures.contains_key(last);
         }
         match receiver_root {
             Some(root) => self.client_roots.contains(root),

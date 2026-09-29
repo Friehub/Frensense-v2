@@ -271,7 +271,7 @@ impl<'a> LoweringContext<'a> {
             .ir
             .blocks
             .get(&self.current_block)
-            .map_or(true, |b| matches!(b.terminator, Terminator::None))
+            .is_none_or(|b| matches!(b.terminator, Terminator::None))
         {
             self.ir
                 .set_terminator(self.current_block, Terminator::Jump(merge_block));
@@ -288,7 +288,7 @@ impl<'a> LoweringContext<'a> {
                 .ir
                 .blocks
                 .get(&self.current_block)
-                .map_or(true, |b| matches!(b.terminator, Terminator::None))
+                .is_none_or(|b| matches!(b.terminator, Terminator::None))
             {
                 self.ir
                     .set_terminator(self.current_block, Terminator::Jump(merge_block));
