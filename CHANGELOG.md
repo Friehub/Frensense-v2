@@ -6,23 +6,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.7.0-preview.4] - 2026-09-28
+## [0.7.0-preview.4] - 2026-09-29
 
-Preview release fixing receiver-parameter taint bleeding, generalizing predicate guards and sink signatures, eliminating over 900 receiver false positives in Cloudflare Workers and Hono services, correcting dominator-aware guard validation, and preserving return branch terminators in IR lowering.
+Preview release adding comprehensive verification across all 13 teachable security dimensions, native guard call policy synthesis, candidate guard prioritization and exception filtering, forward taint propagator slot suppression, language-specific receiver sink validation, benchmark CI optimization, and dynamic documentation versioning.
+
+### Added
+
+#### Engine & Verification
+- **All 13 Teachable Dimensions Verification**: Implemented comprehensive integration test suite (`tests/all_13_dimensions_test.rs`) verifying that all 13 teachable security analysis dimensions in the engine can be taught via `.frc` bundles: custom sources, custom sinks, custom sanitizers, custom propagators, custom memory allocators, custom memory deallocators, IDOR query keys, IDOR finder sinks, banned argument literals, required argument literals, weak crypto algorithms, guard bypass allowlists, and tool schema policy enforcers.
+- **Multi-Language Corpus Verification**: Validated corpus extraction and engine scanning across multi-language implementations (TypeScript, Python, and C).
+- **Subsystem Teachability with Built-in Fallbacks**: Extended `FactTable` and `.frc` bundle serialization to teach custom allocators, custom deallocators (wired to `MemorySummaryRegistry`), IDOR query keys and finder sinks, taint propagators, and guard denylist patterns, retaining sound built-in defaults as fallbacks.
+- **Bundle-Driven External Wrapper and Policy Detection**: Verified end-to-end detection where opaque external wrappers (such as custom memory deallocators in C causing Use-After-Free and unmodeled execution sinks in TypeScript) that produce zero findings at baseline are successfully flagged with high confidence when taught through a `.frc` bundle, while safe control variants remain cleanly silent.
+
+#### Bundler
+- **Native Guard Call Policy Synthesis**: Added candidate generation for `Candidate::Policy` with `PolicyRequirement::GuardCall` for declared triggers, enabling condition branches to teach policy requirements directly.
+- **Guard Candidate Ranking**: Added `guard_priority` heuristic to prioritize boolean predicates (such as `test`, `is_*`, and validator calls) over generic function invocations.
+
+#### Docs & Infrastructure
+- **Dynamic Docs Versioning**: Configured documentation site to pull live published versions dynamically via registry and GitHub Releases APIs at build time and client runtime with fallback to workspace Cargo metadata.
 
 ### Fixed
 
 #### Engine
+- **Language-Specific Receiver Sink Filtering**: Restricted IDOR verb sink checks in `is_sink_call` so JavaScript/TypeScript verbs do not trigger false positive sink alerts on native Python dictionary lookups and string operations.
+- **Propagator Non-Propagating Argument Suppression**: In `compute_summaries`, suppressed pass-through edges on argument slots not designated as propagating inputs, preventing taint leakage across unrelated parameters in external propagator calls.
 - **Backward Taint Engine Receiver Slot Normalization**: Aligned virtual call receiver slots to `usize::MAX` in `BackwardTaintEngine::explore_call_site`, preventing receiver object handles (such as database connections and KV namespaces) from being interpreted as positional argument slot 0.
 - **Non-Sink Exploration Gating**: Ensured `explore_call_site` skips call positions when `sink_alert_with_facts` evaluates to `None`, eliminating false-positive backward walks from safe receivers, safe parameterized binding channels, and non-sink methods.
 - **Use-Block Guard Dominance Tracking**: Updated `BackwardTaintEngine::explore_from` to evaluate whether a guard branch dominates the block where the tainted variable is consumed (`use_block`), rather than where it was defined (`def_block`), allowing predicate guards (such as `RegExp.test`) to accurately sanitize downstream taint flows.
 - **Branch Terminator Preservation in IR Lowering**: Corrected `NodeRole::Branch` lowering to check `matches!(b.terminator, Terminator::None)` before appending `Terminator::Jump(merge_block)`, preserving `Terminator::Return` instructions in early-exit guard blocks and removing invalid control-flow paths into merge blocks.
 - **Unary Negation Operation Support**: Extended `GuardMap::build` and `analysis/value.rs` to support `"neg"` and `"not"` unary operator representations alongside `"!"`, properly handling condition polarity inversion for TypeScript and other language lowerings.
 - **IR Lowering Pipeline Modularization**: Deconstructed monolithic `lowering.rs` into specialized submodules (`context`, `expr`, `stmt`, `calls`, `binary`, `memory`, `pattern`, `dispatch`), improving readability and maintainability.
-- **Subsystem Teachability with Built-in Fallbacks**: Extended `FactTable` and `.frc` bundle serialization to teach custom allocators, custom deallocators (wired to `MemorySummaryRegistry`), IDOR query keys and finder sinks, taint propagators, and guard denylist patterns, retaining sound built-in defaults as fallbacks.
-- **Bundle-Driven External Wrapper & Policy Detection**: Verified end-to-end detection where opaque external wrappers (such as custom memory deallocators in C causing Use-After-Free and unmodeled execution sinks in TypeScript) that produce zero findings at baseline are successfully flagged with high confidence when taught through a `.frc` bundle, while safe control variants remain cleanly silent.
 
 #### Bundler
+- **Exception Constructor Filtering**: Added `is_exception_name` checks in `frensense-bundler/src/extract/noise.rs`, preventing standard exception and error classes (such as `ValueError`, `SecurityError`, `RuntimeError`, `Error`) from being misclassified as guard validation calls.
 - **Fact Extraction Pipeline Modularization**: Deconstructed monolithic `fact_extract.rs` into isolated submodules (`family`, `candidate`, `noise`, `call_analysis`, `propose`, `gate`, `tests`), providing a robust and extensible training extraction pipeline.
 
 #### Language Specs & Facts
@@ -31,6 +47,11 @@ Preview release fixing receiver-parameter taint bleeding, generalizing predicate
 - **Predicate Sanitizer Classification**: Added `test` to `JS_SANITIZER_NAMES` and classified it as `SanitizerKind::Full` in `js_classify_sanitizer`; automated guard style recognition for sanitizers matching `test`, `isValid`, or prefixed with `is`.
 - **Ambiguous Verb Disambiguation**: Added `set` to ambiguous verb sinks in `facts.rs` to require known client roots (`lodash`, `_`) before alerting, preventing bare `.set(...)` on context objects from being misflagged as prototype pollution.
 - **Credential Setter Specificity**: Refined credential sink exclusions to replace bare `"set"` with qualified identifiers (`setPassword`, `set_password`, `setSecret`, `set_secret`).
+
+### Performance
+
+#### CI & Benchmarks
+- **Streamlined Vulnerability Benchmarks**: Replaced multi-tag Juice Shop clone with a dedicated, lightweight OWASP Python benchmark runner (`scripts/owasp_benchmark.py`), saving 51 minutes of CI execution time across pipeline runs.
 
 ## [0.7.0-preview.3] - 2026-09-28
 
@@ -120,7 +141,7 @@ spatial memory safety, and CallVirtual receiver-binding fixes on top of
 #### Docs
 
 - **Public corpus authoring guide**: `docs/FRENSENSE_CORPUS_GUIDE.md`
-  rewritten as the reference for writing corpus families — quick start,
+  rewritten as the reference for writing corpus families: quick start,
   naming conventions, the metadata block, policy authoring, verification
   workflow, and common mistakes.
 

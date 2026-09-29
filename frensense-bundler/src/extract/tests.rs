@@ -464,6 +464,87 @@ mod policy_proposal_tests {
             "policy facts must survive the FRC1 round-trip (or the family failed the gate)"
         );
     }
+
+    /// End-to-end security-policy teaching: the bundler observes
+    /// `delete_user_account` called in BOTH variants, but only the safe
+    /// variant also calls `verify_admin_permission`. The expected outcome is a
+    /// GuardCall-style Check or Policy fact that fires on the unguarded
+    /// positive and stays silent on the guarded negative.
+    #[test]
+    fn security_policy_guard_call_extracted_and_fires() {
+        let dir = TempDir::new().unwrap();
+        // Positive: privileged delete without authorization check.
+        write(
+            &dir,
+            "delete_account_positive.py",
+            concat!(
+                "# check-call: delete_user_account\n",
+                "def handle(uid):\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+        // Negative: same privileged delete guarded by admin verification.
+        write(
+            &dir,
+            "delete_account_negative.py",
+            concat!(
+                "def handle(uid):\n",
+                "    if not verify_admin_permission(uid):\n",
+                "        raise Exception('denied')\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(
+            families.len(),
+            1,
+            "corpus must form exactly one family; got: {:?}",
+            families.iter().map(|f| &f.id).collect::<Vec<_>>()
+        );
+
+        let (_, published) = extract_facts(&families, &config, &table);
+
+        // The bundler must publish at least one Check or Policy fact for the
+        // `delete_user_account` trigger with the guard.
+        let found_policy = published.iter().any(|f| match &f.entry {
+            LearnedFactEntry::Check {
+                call, unless_guard, ..
+            } => {
+                call.ends_with("delete_user_account")
+                    && unless_guard
+                        .as_deref()
+                        .map(|g| g.contains("verify_admin_permission"))
+                        .unwrap_or(false)
+            }
+            LearnedFactEntry::Policy {
+                when_call, require, ..
+            } => {
+                when_call.ends_with("delete_user_account")
+                    && require.iter().any(|r| {
+                        matches!(r, PolicyRequirement::GuardCall { call }
+                            if call.contains("verify_admin_permission"))
+                    })
+            }
+            _ => false,
+        });
+        assert!(
+            found_policy,
+            "expected a GuardCall policy for delete_user_account + verify_admin_permission; got: {:#?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+
+        // The learned fact table must separate the family: positive alerts,
+        // negative stays silent.
+        let (learned, _) = extract_facts(&families, &config, &table);
+        let family = &families[0];
+        let prep = gate::PreparedFamily::new(family).unwrap();
+        assert!(
+            prep.separates(&config, &learned),
+            "family must separate under learned facts: positive alerts, negative is silent"
+        );
+    }
 }
 
 mod slot_regression_tests {

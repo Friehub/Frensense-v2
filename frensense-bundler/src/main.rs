@@ -100,9 +100,10 @@ fn run_facts_pipeline(corpus_dir: &Path, output_path: &Path) -> Result<(), Strin
             frensense_engine::analysis::taint::facts::LearnedFactEntry::Check {
                 rule,
                 call,
+                unless_guard,
                 ..
             } => {
-                format!("check:{rule}({call})")
+                format!("check:{rule}({call}, guard={unless_guard:?})")
             }
             frensense_engine::analysis::taint::facts::LearnedFactEntry::Policy {
                 rule,

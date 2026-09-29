@@ -156,15 +156,23 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
                     .map(|v| collect_calls(std::slice::from_ref(v)))
                     .all(|calls| calls.contains_key(g))
             };
-            unless_guard = neg_calls
+            let mut eligible_guards: Vec<&String> = neg_calls
                 .keys()
-                .find(|g| !pos_has(g) && !builtin.sanitizer_fact(g).is_some() && all_negs_have(g))
-                .or_else(|| {
-                    neg_calls
-                        .keys()
-                        .find(|g| !pos_has(g) && !builtin.sanitizer_fact(g).is_some())
+                .filter(|g| {
+                    !pos_has(g)
+                        && !builtin.sanitizer_fact(g).is_some()
+                        && !super::noise::is_exception_name(g)
+                        && looks_taint_relevant(g)
                 })
-                .cloned();
+                .collect();
+            eligible_guards.sort_by_key(|g| {
+                (
+                    if all_negs_have(g) { 1 } else { 0 },
+                    super::noise::guard_priority(g),
+                    std::cmp::Reverse(*g),
+                )
+            });
+            unless_guard = eligible_guards.last().cloned().cloned();
             // Inline modality: any negative compares a trigger-argument var
             // against a literal bound.
             if family
@@ -180,6 +188,10 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
                 // doesn't yet teach a suppressible difference.
                 continue;
             }
+        }
+        if family.declared_check_call.as_ref() == Some(call) && unless_guard.is_some() {
+            // Emitted natively as Candidate::Policy in the declared_check_call block below.
+            continue;
         }
         candidates.push(Candidate::Check {
             rule,
@@ -208,6 +220,49 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
             && neg_calls.contains_key(&trigger)
             && builtin.learned_checks.iter().all(|c| c.call != trigger)
         {
+            let pos_has = |g: &str| pos_calls.contains_key(g);
+            let all_negs_have = |g: &str| {
+                family
+                    .negatives
+                    .iter()
+                    .map(|v| collect_calls(std::slice::from_ref(v)))
+                    .all(|calls| calls.contains_key(g))
+            };
+            // Shape (b-native): required guard call in the same function.
+            let mut eligible_guards: Vec<&String> = neg_calls
+                .keys()
+                .filter(|g| {
+                    g.as_str() != trigger
+                        && !pos_has(g)
+                        && builtin.sanitizer_fact(g).is_none()
+                        && builtin.sink_signature(g).is_none()
+                        && !super::noise::is_exception_name(g)
+                        && looks_taint_relevant(g)
+                })
+                .collect();
+            eligible_guards.sort_by_key(|g| {
+                (
+                    if all_negs_have(g) { 1 } else { 0 },
+                    super::noise::guard_priority(g),
+                    std::cmp::Reverse(*g),
+                )
+            });
+            if let Some(guard) = eligible_guards.last() {
+                candidates.push(Candidate::Policy {
+                    rule: format!("policy_{trigger}"),
+                    call: trigger.clone(),
+                    message: family.metadata.observation.clone().unwrap_or_else(|| {
+                        format!(
+                            "Corpus-verified policy violation: `{trigger}` requires `{guard}` guard (learned from family {})",
+                            family.id
+                        )
+                    }),
+                    require: vec![PolicyRequirement::GuardCall {
+                        call: (*guard).clone(),
+                    }],
+                    scope: PolicyScope::Function,
+                });
+            }
             // Shape (c): banned-call co-occurrence. Calls the POSITIVES make
             // that no negative makes: candidate `NotCall` requirements.
             let banned: Vec<String> = pos_calls
