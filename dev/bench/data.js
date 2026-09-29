@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790626746450,
+  "lastUpdate": 1790711864638,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -444,6 +444,55 @@ window.BENCHMARK_DATA = {
             "name": "Juice Shop v20.2.0",
             "value": 99,
             "unit": "advisories"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "02aea22bcee2e8382b64ee9caa61df684c4c4204",
+          "message": "Merge pull request #23 from Friehub/feat/predicate-guards-and-sink-signatures\n\nci: streamline vulnerability benchmarks to OWASP Python",
+          "timestamp": "2026-09-29T19:56:47Z",
+          "tree_id": "a5834a15e8145d1983fc9bd036c3dae3976260e6",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/02aea22bcee2e8382b64ee9caa61df684c4c4204"
+        },
+        "date": 1790711863516,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 23.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 26.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 3,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 118,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 23,
+            "unit": "cases"
           }
         ]
       }
