@@ -44,6 +44,7 @@ export default defineConfig({
             { text: 'Introduction', link: '/guide/' },
             { text: 'Installation', link: '/guide/installation' },
             { text: 'Your first scan', link: '/guide/first-scan' },
+            { text: 'Teachable engine', link: '/guide/teachability' },
             { text: 'CLI reference', link: '/guide/cli' }
           ]
         },

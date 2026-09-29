@@ -131,6 +131,8 @@ pub enum NodeRole {
     Other,
 }
 
+impl NodeRole {}
+
 /// Sanitizer strength: what kind of injection does this call defeat?
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SanitizerKind {
@@ -356,6 +358,84 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// `function_definition`).
     fn is_function_node(&self, kind: &str) -> bool {
         matches!(self.classify(kind), NodeRole::Function { .. })
+    }
+
+    /// Returns `true` if this node kind represents a type cast or type assertion (e.g. `x as T`, `(T)x`).
+    fn is_cast(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// Returns `true` if this node kind represents a string template or interpolated string (e.g. `template_string`, `f_string`).
+    fn is_template_string(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// Returns `true` if this node kind represents an untainted literal fragment of a template string (e.g. `string_fragment`).
+    fn is_template_literal_fragment(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// Returns `true` if this node kind represents a destructuring pattern (e.g. `object_pattern`, `array_pattern`).
+    fn is_destructuring_pattern(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// Returns `true` if this node kind represents a pair pattern inside a destructuring pattern (e.g. `pair_pattern`).
+    fn is_pair_pattern(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// Returns `true` if this node kind represents a key-value pair inside an object literal (e.g. `pair`).
+    fn is_pair_entry(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// Returns `true` if this node kind represents a ternary conditional expression evaluated straight-line
+    /// (e.g. `ternary_expression`, `conditional_expression`, `conditional_type`).
+    fn is_ternary_straight_line(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// Returns `true` if this node kind represents an assignment expression in declaration position
+    /// (e.g. Python `subscript`, `attribute`).
+    fn is_declaration_assignment(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// Unwraps declarator wrapper nodes (e.g. `pointer_declarator`, `expression_list`, etc.)
+    /// to locate the leaf name binding node.
+    fn unwrap_declarator_node<'a>(&self, node: Node<'a>) -> Node<'a> {
+        let mut cur = node;
+        if matches!(
+            cur.kind(),
+            "expression_list" | "identifier_list" | "expression_sequence"
+        ) {
+            let mut nc = cur.walk();
+            let named: Vec<_> = cur.named_children(&mut nc).collect();
+            if named.len() == 1 {
+                cur = named[0];
+            }
+        }
+        while let Some(inner) = match cur.kind() {
+            "pointer_declarator"
+            | "array_declarator"
+            | "parenthesized_declarator"
+            | "reference_declarator" => {
+                let mut wc = cur.walk();
+                let mut found = None;
+                for c in cur.children(&mut wc) {
+                    if c.is_named() && c.kind() != "comment" {
+                        found = Some(c);
+                        break;
+                    }
+                }
+                found
+            }
+            _ => None,
+        } {
+            cur = inner;
+        }
+        cur
     }
 
     // ── Special structural patterns ───────────────────────────────────────

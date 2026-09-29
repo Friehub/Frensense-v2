@@ -10,5 +10,6 @@
 //! through the engine's compiler → delta → replay gate → publish facts.
 
 pub mod builder;
+pub mod extract;
 pub mod fact_extract;
 pub mod format;

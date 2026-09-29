@@ -137,6 +137,47 @@ fn run_facts_pipeline(corpus_dir: &Path, output_path: &Path) -> Result<(), Strin
                     fact.builders, fact.enforcers, fact.bound_keywords
                 )
             }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::GrammarRole {
+                language,
+                node_kind,
+                role,
+            } => {
+                format!("grammar_role:{language}:{node_kind}({role:?})")
+            }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::GrammarFeature {
+                language,
+                node_kind,
+                feature,
+            } => {
+                format!("grammar_feature:{language}:{node_kind}({feature:?})")
+            }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::Allocator { name } => {
+                format!("allocator:{name}")
+            }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::Deallocator { name } => {
+                format!("deallocator:{name}")
+            }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::IdorFinderSink {
+                call,
+                keys,
+            } => {
+                format!("idor_sink:{call}(keys={keys:?})")
+            }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::IdorKey { key } => {
+                format!("idor_key:{key}")
+            }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::Propagator {
+                call,
+                input_args,
+                preserves_taint,
+            } => {
+                format!("propagator:{call}(args={input_args:?},taints={preserves_taint})")
+            }
+            frensense_engine::analysis::taint::facts::LearnedFactEntry::GuardDenylistPattern {
+                pattern,
+            } => {
+                format!("guard_denylist:{pattern}")
+            }
         };
 
         eprintln!("  [{}] {} ← {}", f.status, call, f.families.join(", "));

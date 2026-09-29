@@ -554,7 +554,11 @@ impl GuardMap {
                             src: Operand::Var(u),
                             ..
                         } => {
-                            let new_sense = if op == "!" { !*sense } else { *sense };
+                            let new_sense = if op == "!" || op == "neg" || op == "not" {
+                                !*sense
+                            } else {
+                                *sense
+                            };
                             next.push((*u, new_sense));
                         }
                         Instruction::BinaryOp { op, lhs, rhs, .. } => {
@@ -570,8 +574,16 @@ impl GuardMap {
                             if literal_sibling && is_comparison {
                                 let is_inverted = op == "!=" || op == "!==" || op == "not in";
                                 let is_denylist = match (lhs, rhs) {
-                                    (Operand::StringLiteral(s), _) if s.contains("..") => true,
-                                    (_, Operand::StringLiteral(s)) if s.contains("..") => true,
+                                    (Operand::StringLiteral(s), _)
+                                        if facts.is_guard_denylist(s) =>
+                                    {
+                                        true
+                                    }
+                                    (_, Operand::StringLiteral(s))
+                                        if facts.is_guard_denylist(s) =>
+                                    {
+                                        true
+                                    }
                                     _ => false,
                                 };
                                 let effective_sense = if is_inverted ^ is_denylist {
@@ -833,18 +845,15 @@ impl<'a> BackwardTaintEngine<'a> {
         }
 
         // Collect (slot, var, arg-node) triplets. For virtual calls the
-        // receiver is slot 0 (matching the forward engine's cross-edge slots).
+        // receiver is slot usize::MAX (matching the forward engine's arg_slots convention).
         let mut triplets: Vec<(usize, VarId, NodeKey)> = Vec::new();
-        let mut slot = 0usize;
         if let Some(Operand::Var(r)) = receiver {
-            triplets.push((0, *r, NodeKey::instr(block, idx, *r)));
-            slot = 1;
+            triplets.push((usize::MAX, *r, NodeKey::instr(block, idx, *r)));
         }
-        for a in args {
+        for (slot, a) in args.iter().enumerate() {
             if let Operand::Var(v) = a {
                 triplets.push((slot, *v, NodeKey::instr(block, idx, *v)));
             }
-            slot += 1;
         }
         if triplets.is_empty() {
             return;
@@ -854,11 +863,10 @@ impl<'a> BackwardTaintEngine<'a> {
 
         for (arg_slot, var, arg_node) in triplets {
             let sink_eval = sink_alert_with_facts(ir, self.config, &self.facts, &arg_node);
-            let finding_class = sink_eval
-                .as_ref()
-                .map(|(c, _)| *c)
-                .unwrap_or(FindingClass::Injection);
-            let alert = sink_eval.map(|(_, m)| m);
+            let (finding_class, alert) = match sink_eval {
+                Some((class, msg)) => (class, Some(msg)),
+                None => continue,
+            };
             // Receiver-aware role: `kv.put(t)` resolves Storage (dotted
             // KVNamespace.put) while `axios.put(t)` stays Ssrf, the
             // receiver root is the disambiguator, mirroring verb-sink
@@ -1066,11 +1074,11 @@ impl<'a> BackwardTaintEngine<'a> {
 
     /// Backward BFS from `root` within one root's exploration state.
     fn explore_from(&mut self, fi: usize, root: NodeKey, state: &mut ExploreState) {
-        let mut queue: VecDeque<(usize, NodeKey)> = VecDeque::new();
-        queue.push_back((fi, root));
+        let mut queue: VecDeque<(usize, NodeKey, BlockId)> = VecDeque::new();
+        queue.push_back((fi, root, root.block));
 
         let dbg = DebugFlags::get();
-        while let Some((cf, cur)) = queue.pop_front() {
+        while let Some((cf, cur, use_block)) = queue.pop_front() {
             dbg_trace!(
                 dbg.walk,
                 "[walk] cf={cf} key={cur:?} kind={:?}",
@@ -1089,8 +1097,8 @@ impl<'a> BackwardTaintEngine<'a> {
             // guard map). Pure value-flow cannot see this: the guard is a
             // sibling use, not a link in the chain.
             if let Some(gm) = self.guard_maps.get(&cf)
-                && let Some(def_block) = self.def_block_of(cf, &cur)
-                && gm.is_guarded(cur.var, def_block)
+                && (gm.is_guarded(cur.var, use_block)
+                    || (cf == fi && gm.is_guarded(cur.var, root.block)))
             {
                 state.saw_sanitized_root_only = true;
                 continue;
@@ -1183,7 +1191,7 @@ impl<'a> BackwardTaintEngine<'a> {
                     if self.capture_paths {
                         self.current_parents.insert((pf, pk), (cf, cur));
                     }
-                    queue.push_back((pf, pk));
+                    queue.push_back((pf, pk, pk.block));
                 }
             }
             for pk in local_preds {
@@ -1191,7 +1199,7 @@ impl<'a> BackwardTaintEngine<'a> {
                     if self.capture_paths {
                         self.current_parents.insert((cf, pk), (cf, cur));
                     }
-                    queue.push_back((cf, pk));
+                    queue.push_back((cf, pk, cur.block));
                 }
             }
         }
@@ -1288,14 +1296,6 @@ impl<'a> BackwardTaintEngine<'a> {
             }
         }
         false
-    }
-
-    /// Block containing the node's defining instruction (guards are
-    /// block-anchored). Sentinel instr_idxs (params/terminator) map to their
-    /// block too.
-    fn def_block_of(&self, fi: usize, key: &NodeKey) -> Option<BlockId> {
-        let fe = &self.prog.functions[fi];
-        fe.svfg.node(key).map(|_| key.block)
     }
 
     /// Convenience: just the vulnerable alerts (compatible with forward engines).

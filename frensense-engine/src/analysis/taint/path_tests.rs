@@ -227,4 +227,64 @@ export function getUser(req: any, pool: any): void {
             vuln.iter().map(|f| f.finding_class).collect::<Vec<_>>()
         );
     }
+
+    /// Custom taught IDOR finder sink and custom key: misses at baseline, detects as Idor with learned facts.
+    #[test]
+    fn custom_teachable_idor_finder_and_key() {
+        let src = r#"
+export function getAccount(req: any, repo: any): void {
+  repo.fetchRecord({ org_identifier: req.body.orgId });
+}
+"#;
+        // 1. Baseline: fetchRecord is unknown, 0 findings
+        let baseline_findings = run(src);
+        let baseline_vuln: Vec<_> = baseline_findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable && f.alert.is_some())
+            .collect();
+        assert!(
+            baseline_vuln.is_empty(),
+            "custom sink must not alert at baseline"
+        );
+
+        // 2. With learned IDOR finder sink and custom key
+        let files = vec![("test.ts".to_string(), src.to_string(), "ts".to_string())];
+        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
+        let mut facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        let fact = crate::analysis::taint::facts::LearnedFactEntry::IdorFinderSink {
+            call: "fetchRecord".to_string(),
+            keys: vec!["org_identifier".to_string()],
+        };
+        fact.apply(&mut facts);
+
+        let mut sources = rustc_hash::FxHashSet::default();
+        sources.insert("req.body".to_string());
+        let config = TaintConfig {
+            sources,
+            sinks: rustc_hash::FxHashSet::default(),
+            sanitizers: rustc_hash::FxHashSet::default(),
+        };
+
+        let res = crate::scan::scan(&files, &config, &facts);
+        let taught_vuln: Vec<_> = res
+            .findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable && f.alert.is_some())
+            .collect();
+
+        assert!(
+            !taught_vuln.is_empty(),
+            "custom IDOR finder must alert with learned fact"
+        );
+        assert!(
+            taught_vuln
+                .iter()
+                .any(|f| f.finding_class == FindingClass::Idor),
+            "must classify as Idor finding class, got {:?}",
+            taught_vuln
+                .iter()
+                .map(|f| f.finding_class)
+                .collect::<Vec<_>>()
+        );
+    }
 }

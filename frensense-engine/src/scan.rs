@@ -16,7 +16,7 @@ use crate::analysis::taint::config::TaintConfig;
 use crate::analysis::taint::engine::{BackwardTaintEngine, BackwardVerdict, SinkFinding};
 use crate::analysis::taint::facts::FactTable;
 use crate::checks::{self, CheckerFinding};
-use crate::harness::lower_source;
+use crate::harness::lower_source_with_facts;
 use crate::ir::function::FunctionIR;
 
 /// Scan a set of source files under a config and fact table.
@@ -27,7 +27,7 @@ pub fn scan(
     config: &TaintConfig,
     facts: &FactTable,
 ) -> ScanResult {
-    match prepare(files) {
+    match prepare_with_facts(files, Some(facts)) {
         Ok(p) => scan_prepared(&p, config, facts),
         Err(e) => ScanResult {
             findings: Vec::new(),
@@ -60,11 +60,19 @@ pub struct PreparedProgram {
 /// # Errors
 /// Returns the first lowering error, if any.
 pub fn prepare(files: &[(String, String, String)]) -> Result<PreparedProgram, String> {
+    prepare_with_facts(files, None)
+}
+
+/// Lower every file once with dynamic bundle facts.
+pub fn prepare_with_facts(
+    files: &[(String, String, String)],
+    facts: Option<&FactTable>,
+) -> Result<PreparedProgram, String> {
     let mut irs: FxHashMap<String, FunctionIR> = FxHashMap::default();
     let mut fn_file: FxHashMap<String, String> = FxHashMap::default();
     let mut file_source: FxHashMap<String, String> = FxHashMap::default();
     for (path, source, ext) in files {
-        let fns = lower_source(path, source, ext)?;
+        let fns = lower_source_with_facts(path, source, ext, facts)?;
         for (name, ir) in fns {
             fn_file.entry(name.clone()).or_insert_with(|| path.clone());
             file_source
@@ -119,7 +127,7 @@ pub fn scan_prepared(
     // `facts` also carries corpus-learned checks installed by the bundle.
     let checker_findings = checks::check_all(statics.values().copied(), facts);
 
-    let prog = ProgramSvfg::new(statics, config);
+    let prog = ProgramSvfg::new_with_facts(statics, config, facts);
     let mut engine = BackwardTaintEngine::new(&prog, config)
         .with_fact_table(facts)
         .with_fn_file(fn_file);

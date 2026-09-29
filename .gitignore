@@ -92,6 +92,7 @@ corpus-facts.frc
 
 # Compiled knowledge bundles
 *.frc
+*scorecard*.json
 
 # Private docs and strategy notes (README, LICENSE, CHANGELOG, CONTRIBUTING,
 # CLA, the public benchmarking guide, and the MCP/LSP/agent-integration
@@ -107,6 +108,7 @@ corpus-facts.frc
 !docs/LSP_USAGE.md
 !docs/AGENT_INTEGRATION.md
 !docs/FRENSENSE_CORPUS_GUIDE.md
+!docs/TEACHABILITY.md
 !docs-site/**
 docs-site/node_modules/
 **/node_modules/

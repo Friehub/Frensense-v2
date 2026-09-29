@@ -147,6 +147,24 @@ impl MemorySummaryRegistry {
                 },
             );
         }
+        for alloc in &facts.custom_allocators {
+            reg.summaries
+                .entry(alloc.clone())
+                .or_insert_with(|| MemorySummary {
+                    returns_fresh: true,
+                    return_capacity: CapacitySpec::Unknown,
+                    consumes_params: Vec::new(),
+                });
+        }
+        for dealloc in &facts.custom_deallocators {
+            reg.summaries
+                .entry(dealloc.clone())
+                .or_insert_with(|| MemorySummary {
+                    returns_fresh: false,
+                    return_capacity: CapacitySpec::Unknown,
+                    consumes_params: vec![0],
+                });
+        }
         reg
     }
 

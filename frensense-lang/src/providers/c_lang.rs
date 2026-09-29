@@ -302,6 +302,10 @@ impl LanguageSpec for CSpec {
         classify_c(kind)
     }
 
+    fn is_cast(&self, kind: &str) -> bool {
+        kind == "cast_expression"
+    }
+
     fn wrap_region(&self, code: &str) -> String {
         format!("void _region() {{\n{}\n}}", code)
     }
