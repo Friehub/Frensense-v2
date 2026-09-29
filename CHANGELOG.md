@@ -20,6 +20,7 @@ Preview release fixing receiver-parameter taint bleeding, generalizing predicate
 - **Unary Negation Operation Support**: Extended `GuardMap::build` and `analysis/value.rs` to support `"neg"` and `"not"` unary operator representations alongside `"!"`, properly handling condition polarity inversion for TypeScript and other language lowerings.
 - **IR Lowering Pipeline Modularization**: Deconstructed monolithic `lowering.rs` into specialized submodules (`context`, `expr`, `stmt`, `calls`, `binary`, `memory`, `pattern`, `dispatch`), improving readability and maintainability.
 - **Subsystem Teachability with Built-in Fallbacks**: Extended `FactTable` and `.frc` bundle serialization to teach custom allocators, custom deallocators (wired to `MemorySummaryRegistry`), IDOR query keys and finder sinks, taint propagators, and guard denylist patterns, retaining sound built-in defaults as fallbacks.
+- **Bundle-Driven External Wrapper & Policy Detection**: Verified end-to-end detection where opaque external wrappers (such as custom memory deallocators in C causing Use-After-Free and unmodeled execution sinks in TypeScript) that produce zero findings at baseline are successfully flagged with high confidence when taught through a `.frc` bundle, while safe control variants remain cleanly silent.
 
 #### Bundler
 - **Fact Extraction Pipeline Modularization**: Deconstructed monolithic `fact_extract.rs` into isolated submodules (`family`, `candidate`, `noise`, `call_analysis`, `propose`, `gate`, `tests`), providing a robust and extensible training extraction pipeline.
