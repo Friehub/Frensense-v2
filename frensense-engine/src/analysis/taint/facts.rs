@@ -983,8 +983,8 @@ impl FactTable {
     ///   `got.get(taint)` is.
     pub fn is_sink_call(&self, last: &str, receiver_root: Option<&str>) -> bool {
         if !self.verb_sinks.contains(last) {
-            // Ordinary sink: presence in the signature table decides.
-            return self.sink_signatures.contains_key(last);
+            // Ordinary sink: presence in the signature table or IDOR finder set decides.
+            return self.sink_signatures.contains_key(last) || self.is_idor_finder_sink(last);
         }
         match receiver_root {
             Some(root) => self.client_roots.contains(root),
@@ -1324,10 +1324,26 @@ impl LearnedFactEntry {
             LearnedFactEntry::IdorFinderSink { call, keys } => {
                 let last = call.rsplit('.').next().unwrap_or(call).to_string();
                 table.idor_finder_sinks.insert(call.clone());
-                table.idor_finder_sinks.insert(last);
+                table.idor_finder_sinks.insert(last.clone());
                 for k in keys {
                     table.idor_keys.insert(k.clone());
                 }
+                let sig = SinkSignature {
+                    call: call.clone(),
+                    dangerous_args: std::collections::BTreeSet::new(),
+                    binding_args_safe: false,
+                    idor_keys: if keys.is_empty() {
+                        crate::analysis::forward::DEFAULT_IDOR_KEYS
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect()
+                    } else {
+                        keys.clone()
+                    },
+                    role: crate::analysis::taint::role::SinkRole::Resource,
+                };
+                table.sink_signatures.insert(call.clone(), sig.clone());
+                table.sink_signatures.entry(last).or_insert(sig);
             }
             LearnedFactEntry::IdorKey { key } => {
                 table.idor_keys.insert(key.clone());

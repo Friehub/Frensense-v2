@@ -1403,10 +1403,13 @@ pub(crate) fn sink_alert_with_facts(
         return None;
     }
     let slot_and_name = match &b.instructions[idx] {
-        Instruction::CallStatic { func, args, .. } if config.sinks.contains(func) => args
-            .iter()
-            .position(|a| *a == Operand::Var(var))
-            .map(|pos| (pos, func)),
+        Instruction::CallStatic { func, args, .. }
+            if config.sinks.contains(func) || facts.is_sink_call(func, None) =>
+        {
+            args.iter()
+                .position(|a| *a == Operand::Var(var))
+                .map(|pos| (pos, func))
+        }
         Instruction::CallVirtual {
             method,
             args,
