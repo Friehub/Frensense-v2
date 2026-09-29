@@ -6,6 +6,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0-preview.4] - 2026-09-28
+
+Preview release fixing receiver-parameter taint bleeding, generalizing predicate guards and sink signatures, eliminating over 900 receiver false positives in Cloudflare Workers and Hono services, correcting dominator-aware guard validation, and preserving return branch terminators in IR lowering.
+
+### Fixed
+
+#### Engine
+- **Backward Taint Engine Receiver Slot Normalization**: Aligned virtual call receiver slots to `usize::MAX` in `BackwardTaintEngine::explore_call_site`, preventing receiver object handles (such as database connections and KV namespaces) from being interpreted as positional argument slot 0.
+- **Non-Sink Exploration Gating**: Ensured `explore_call_site` skips call positions when `sink_alert_with_facts` evaluates to `None`, eliminating false-positive backward walks from safe receivers, safe parameterized binding channels, and non-sink methods.
+- **Use-Block Guard Dominance Tracking**: Updated `BackwardTaintEngine::explore_from` to evaluate whether a guard branch dominates the block where the tainted variable is consumed (`use_block`), rather than where it was defined (`def_block`), allowing predicate guards (such as `RegExp.test`) to accurately sanitize downstream taint flows.
+- **Branch Terminator Preservation in IR Lowering**: Corrected `NodeRole::Branch` lowering to check `matches!(b.terminator, Terminator::None)` before appending `Terminator::Jump(merge_block)`, preserving `Terminator::Return` instructions in early-exit guard blocks and removing invalid control-flow paths into merge blocks.
+- **Unary Negation Operation Support**: Extended `GuardMap::build` and `analysis/value.rs` to support `"neg"` and `"not"` unary operator representations alongside `"!"`, properly handling condition polarity inversion for TypeScript and other language lowerings.
+- **IR Lowering Pipeline Modularization**: Deconstructed monolithic `lowering.rs` into specialized submodules (`context`, `expr`, `stmt`, `calls`, `binary`, `memory`, `pattern`, `dispatch`), improving readability and maintainability.
+- **Subsystem Teachability with Built-in Fallbacks**: Extended `FactTable` and `.frc` bundle serialization to teach custom allocators, custom deallocators (wired to `MemorySummaryRegistry`), IDOR query keys and finder sinks, taint propagators, and guard denylist patterns, retaining sound built-in defaults as fallbacks.
+
+#### Bundler
+- **Fact Extraction Pipeline Modularization**: Deconstructed monolithic `fact_extract.rs` into isolated submodules (`family`, `candidate`, `noise`, `call_analysis`, `propose`, `gate`, `tests`), providing a robust and extensible training extraction pipeline.
+
+#### Language Specs & Facts
+- **JavaScript/TypeScript Sink Signatures**: Registered slot-restricted signatures for `prepare` (`&[0]`), `redirect` (`&[0]`), `put` (`&[0, 1]`), `delete` (`&[0]`), `del` (`&[0]`), `set` (`&[0, 1]`), and `append` (`&[0, 1]`) in `JS_SINK_SIGNATURES`.
+- **LanguageSpec AST Classification Hooks**: Added `is_cast`, `is_template_string`, `is_destructuring_pattern`, `is_pair_pattern`, `is_ternary_straight_line`, and `unwrap_declarator_node` to `LanguageSpec` to decouple IR lowering from hardcoded grammar node kinds.
+- **Predicate Sanitizer Classification**: Added `test` to `JS_SANITIZER_NAMES` and classified it as `SanitizerKind::Full` in `js_classify_sanitizer`; automated guard style recognition for sanitizers matching `test`, `isValid`, or prefixed with `is`.
+- **Ambiguous Verb Disambiguation**: Added `set` to ambiguous verb sinks in `facts.rs` to require known client roots (`lodash`, `_`) before alerting, preventing bare `.set(...)` on context objects from being misflagged as prototype pollution.
+- **Credential Setter Specificity**: Refined credential sink exclusions to replace bare `"set"` with qualified identifiers (`setPassword`, `set_password`, `setSecret`, `set_secret`).
+
 ## [0.7.0-preview.3] - 2026-09-28
 
 Preview release adding interprocedural memory safety contracts,

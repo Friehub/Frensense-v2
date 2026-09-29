@@ -9,6 +9,7 @@ pub mod demand_tests {
     use crate::analysis::forward::ProgramSvfg;
     use crate::analysis::taint::config::TaintConfig;
     use crate::analysis::taint::engine::{BackwardTaintEngine, BackwardVerdict};
+    use crate::analysis::taint::facts::FactTable;
     use crate::ir::function::*;
     use rustc_hash::FxHashMap;
 
@@ -1311,6 +1312,128 @@ pub mod demand_tests {
                 .any(|f| f.verdict == BackwardVerdict::Vulnerable),
             "undecided ternary must keep the tainted arm live, got {:?}",
             findings
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test: RegExp.test guard sanitizes taint flow before sink
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_regex_test_guard_sanitizes_flow() {
+        let mut config = TaintConfig::default();
+        let mut facts = FactTable::default();
+        for spec in frensense_lang::all_specs() {
+            let c = crate::analysis::taint::facts::config_from_spec(spec);
+            config.sources.extend(c.sources);
+            config.sinks.extend(c.sinks);
+            config.sanitizers.extend(c.sanitizers);
+            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
+        }
+
+        let files = vec![(
+            "search.ts".to_string(),
+            r#"
+const INDEX_NAME_RE = /^[a-zA-Z0-9_]{1,64}$/;
+
+export function handleSearch(c: any) {
+  const index = c.req.query("index");
+  if (!INDEX_NAME_RE.test(index)) {
+    return c.json({ error: "invalid" }, 400);
+  }
+  const db = c.env.friehub_db;
+  return db.prepare("SELECT * FROM " + index).all();
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )];
+
+        let result = crate::scan::scan(&files, &config, &facts);
+        let vulns: Vec<_> = result
+            .findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            vulns.is_empty(),
+            "guarded flow via RegExp.test must be sanitized, got: {:?}",
+            vulns
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test: DB prepare receiver is suppressed (only argument is checked)
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_db_prepare_receiver_suppression() {
+        let mut config = TaintConfig::default();
+        let mut facts = FactTable::default();
+        for spec in frensense_lang::all_specs() {
+            let c = crate::analysis::taint::facts::config_from_spec(spec);
+            config.sources.extend(c.sources);
+            config.sinks.extend(c.sinks);
+            config.sanitizers.extend(c.sanitizers);
+            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
+        }
+
+        let files = vec![(
+            "query.ts".to_string(),
+            r#"
+export function handleDb(c: any) {
+  const db = c.env.friehub_db;
+  return db.prepare("SELECT 1 FROM users WHERE id = ?").bind(1).all();
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )];
+
+        let result = crate::scan::scan(&files, &config, &facts);
+        let vulns: Vec<_> = result
+            .findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            vulns.is_empty(),
+            "parameterized db.prepare must not alert on receiver or binding channel, got: {:?}",
+            vulns
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Test: Context c.set(...) does not alert as a prototype pollution sink
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_context_set_not_flagged_as_sink() {
+        let mut config = TaintConfig::default();
+        let mut facts = FactTable::default();
+        for spec in frensense_lang::all_specs() {
+            let c = crate::analysis::taint::facts::config_from_spec(spec);
+            config.sources.extend(c.sources);
+            config.sinks.extend(c.sinks);
+            config.sanitizers.extend(c.sanitizers);
+            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
+        }
+
+        let files = vec![(
+            "middleware.ts".to_string(),
+            r#"
+export function middleware(c: any) {
+  const rid = c.req.header("X-Request-Id");
+  c.set("requestId", rid);
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )];
+
+        let result = crate::scan::scan(&files, &config, &facts);
+        let set_findings: Vec<_> = result.findings.iter().filter(|f| f.sink == "set").collect();
+        assert!(
+            set_findings.is_empty(),
+            "c.set must not be treated as a sink, got: {:?}",
+            set_findings
         );
     }
 }

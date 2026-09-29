@@ -11,6 +11,7 @@
 
 use rustc_hash::FxHashMap;
 
+use crate::analysis::taint::facts::FactTable;
 use crate::ir::function::*;
 use crate::ir::lowering::LoweringContext;
 use crate::ir::ssa::SSABuilder;
@@ -32,6 +33,17 @@ pub fn lower_source(
     path: &str,
     source: &str,
     ext: &str,
+) -> Result<FxHashMap<String, FunctionIR>, String> {
+    lower_source_with_facts(path, source, ext, None)
+}
+
+/// Lower a single source file into SSA'd `FunctionIR`s with optional bundle facts
+/// that supply dynamic grammar classifications and features.
+pub fn lower_source_with_facts(
+    path: &str,
+    source: &str,
+    ext: &str,
+    facts: Option<&FactTable>,
 ) -> Result<FxHashMap<String, FunctionIR>, String> {
     let spec = frensense_lang::spec_for_ext(ext)
         .ok_or_else(|| format!("no language spec for extension '{ext}'"))?;
@@ -70,7 +82,7 @@ pub fn lower_source(
                 })
                 .map(|n| source[n.start_byte()..n.end_byte()].to_string())
                 .unwrap_or_else(|| format!("<fn@{}>", node.start_byte()));
-            let ir = lower_one(&name, node, source, spec);
+            let ir = lower_one(&name, node, source, spec, facts);
             irs.entry(ir.name.clone()).or_insert(ir);
         }
         // Top-level arrow functions bound to consts/lets, the dominant
@@ -95,13 +107,13 @@ pub fn lower_source(
                     .map(|n| source[n.start_byte()..n.end_byte()].to_string())
                     .unwrap_or_else(|| format!("<fn@{}>", decl.start_byte()));
                 if value.kind() == "arrow_function" || value.kind() == "function_expression" {
-                    let ir = lower_one(&name, value, source, spec);
+                    let ir = lower_one(&name, value, source, spec, facts);
                     irs.entry(ir.name.clone()).or_insert(ir);
                 } else {
                     // Non-function static initializer: allowlist Sets, config
                     // objects, schema builders. Lowered as pseudo-IR so the
                     // checker layer can assert policy over them.
-                    let ir = lower_static(&name, value, source, spec);
+                    let ir = lower_static(&name, value, source, spec, facts);
                     irs.entry(ir.name.clone()).or_insert(ir);
                 }
             }
@@ -120,7 +132,7 @@ pub fn lower_source(
                 for a in &arg_nodes {
                     if a.kind() == "arrow_function" || a.kind() == "function_expression" {
                         let name = format!("<{}:handler@{}>", path, a.start_byte());
-                        let ir = lower_one(&name, *a, source, spec);
+                        let ir = lower_one(&name, *a, source, spec, facts);
                         irs.entry(ir.name.clone()).or_insert(ir);
                     }
                 }
@@ -146,8 +158,9 @@ fn lower_one(
     fn_node: tree_sitter::Node,
     source: &str,
     spec: &'static dyn frensense_lang::spec::LanguageSpec,
+    facts: Option<&FactTable>,
 ) -> FunctionIR {
-    let mut ctx = LoweringContext::new(spec, source, name.to_string());
+    let mut ctx = LoweringContext::new_with_facts(spec, source, name.to_string(), facts);
 
     // First try the direct `parameters` field (JS/TS/Python/Rust/Go).
     // For C, the function_definition has no direct `parameters` field; instead
@@ -189,8 +202,9 @@ fn lower_static(
     value_node: tree_sitter::Node,
     source: &str,
     spec: &'static dyn frensense_lang::spec::LanguageSpec,
+    facts: Option<&FactTable>,
 ) -> FunctionIR {
-    let mut ctx = LoweringContext::new(spec, source, name.to_string());
+    let mut ctx = LoweringContext::new_with_facts(spec, source, name.to_string(), facts);
     ctx.visit_node(value_node);
     SSABuilder::new(ctx.ir).build()
 }

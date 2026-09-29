@@ -313,6 +313,227 @@ pub struct SchemaPolicyFact {
     pub bound_keywords: Vec<String>,
 }
 
+/// Syntactic grammar features that can be dynamically learned or configured via bundle facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub enum GrammarFeature {
+    Cast,
+    TemplateString,
+    TemplateFragment,
+    DestructuringPattern,
+    PairPattern,
+    PairEntry,
+    TernaryStraightLine,
+    DeclarationAssignment,
+    PropertyKind,
+}
+
+/// An owned, serializable representation of [`frensense_lang::NodeRole`] for bundle facts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub enum TeachableNodeRole {
+    Function {
+        is_method: bool,
+        name_field: Option<String>,
+        params_field: String,
+        body_field: String,
+    },
+    Declaration {
+        name_field: String,
+        value_field: String,
+    },
+    Assignment {
+        lhs_field: String,
+        rhs_field: String,
+    },
+    Call {
+        callee_field: String,
+        args_field: String,
+    },
+    MemberAccess {
+        object_field: String,
+        property_field: String,
+    },
+    Branch,
+    Conditional,
+    Loop,
+    Return,
+    Try,
+    Catch,
+    Finally,
+    Throw,
+    ErrorGuard,
+    ContextManager,
+    ErrorPropagation,
+    Await,
+    Block,
+    Composite,
+    Import,
+    Export,
+    Identifier,
+    Literal,
+    Parameters,
+    Arguments,
+    ClassDef,
+    BinaryOp,
+    UnaryOp,
+    Match,
+    Unsafe,
+    AsyncBlock,
+    Other,
+}
+
+impl TeachableNodeRole {
+    /// Convert this owned teachable role into the engine's standard [`frensense_lang::NodeRole`].
+    pub fn to_node_role(&self) -> frensense_lang::NodeRole {
+        fn leak_field(s: &str) -> &'static str {
+            Box::leak(s.to_string().into_boxed_str())
+        }
+
+        match self {
+            TeachableNodeRole::Function {
+                is_method,
+                name_field,
+                params_field,
+                body_field,
+            } => frensense_lang::NodeRole::Function {
+                is_method: *is_method,
+                name_field: name_field.as_deref().map(leak_field),
+                params_field: leak_field(params_field),
+                body_field: leak_field(body_field),
+            },
+            TeachableNodeRole::Declaration {
+                name_field,
+                value_field,
+            } => frensense_lang::NodeRole::Declaration {
+                name_field: leak_field(name_field),
+                value_field: leak_field(value_field),
+            },
+            TeachableNodeRole::Assignment {
+                lhs_field,
+                rhs_field,
+            } => frensense_lang::NodeRole::Assignment {
+                lhs_field: leak_field(lhs_field),
+                rhs_field: leak_field(rhs_field),
+            },
+            TeachableNodeRole::Call {
+                callee_field,
+                args_field,
+            } => frensense_lang::NodeRole::Call {
+                callee_field: leak_field(callee_field),
+                args_field: leak_field(args_field),
+            },
+            TeachableNodeRole::MemberAccess {
+                object_field,
+                property_field,
+            } => frensense_lang::NodeRole::MemberAccess {
+                object_field: leak_field(object_field),
+                property_field: leak_field(property_field),
+            },
+            TeachableNodeRole::Branch => frensense_lang::NodeRole::Branch,
+            TeachableNodeRole::Conditional => frensense_lang::NodeRole::Conditional,
+            TeachableNodeRole::Loop => frensense_lang::NodeRole::Loop,
+            TeachableNodeRole::Return => frensense_lang::NodeRole::Return,
+            TeachableNodeRole::Try => frensense_lang::NodeRole::Try,
+            TeachableNodeRole::Catch => frensense_lang::NodeRole::Catch,
+            TeachableNodeRole::Finally => frensense_lang::NodeRole::Finally,
+            TeachableNodeRole::Throw => frensense_lang::NodeRole::Throw,
+            TeachableNodeRole::ErrorGuard => frensense_lang::NodeRole::ErrorGuard,
+            TeachableNodeRole::ContextManager => frensense_lang::NodeRole::ContextManager,
+            TeachableNodeRole::ErrorPropagation => frensense_lang::NodeRole::ErrorPropagation,
+            TeachableNodeRole::Await => frensense_lang::NodeRole::Await,
+            TeachableNodeRole::Block => frensense_lang::NodeRole::Block,
+            TeachableNodeRole::Composite => frensense_lang::NodeRole::Composite,
+            TeachableNodeRole::Import => frensense_lang::NodeRole::Import,
+            TeachableNodeRole::Export => frensense_lang::NodeRole::Export,
+            TeachableNodeRole::Identifier => frensense_lang::NodeRole::Identifier,
+            TeachableNodeRole::Literal => frensense_lang::NodeRole::Literal,
+            TeachableNodeRole::Parameters => frensense_lang::NodeRole::Parameters,
+            TeachableNodeRole::Arguments => frensense_lang::NodeRole::Arguments,
+            TeachableNodeRole::ClassDef => frensense_lang::NodeRole::ClassDef,
+            TeachableNodeRole::BinaryOp => frensense_lang::NodeRole::BinaryOp,
+            TeachableNodeRole::UnaryOp => frensense_lang::NodeRole::UnaryOp,
+            TeachableNodeRole::Match => frensense_lang::NodeRole::Match,
+            TeachableNodeRole::Unsafe => frensense_lang::NodeRole::Unsafe,
+            TeachableNodeRole::AsyncBlock => frensense_lang::NodeRole::AsyncBlock,
+            TeachableNodeRole::Other => frensense_lang::NodeRole::Other,
+        }
+    }
+}
+
+impl From<&frensense_lang::NodeRole> for TeachableNodeRole {
+    fn from(role: &frensense_lang::NodeRole) -> Self {
+        match role {
+            frensense_lang::NodeRole::Function {
+                is_method,
+                name_field,
+                params_field,
+                body_field,
+            } => TeachableNodeRole::Function {
+                is_method: *is_method,
+                name_field: name_field.map(|s| s.to_string()),
+                params_field: params_field.to_string(),
+                body_field: body_field.to_string(),
+            },
+            frensense_lang::NodeRole::Declaration {
+                name_field,
+                value_field,
+            } => TeachableNodeRole::Declaration {
+                name_field: name_field.to_string(),
+                value_field: value_field.to_string(),
+            },
+            frensense_lang::NodeRole::Assignment {
+                lhs_field,
+                rhs_field,
+            } => TeachableNodeRole::Assignment {
+                lhs_field: lhs_field.to_string(),
+                rhs_field: rhs_field.to_string(),
+            },
+            frensense_lang::NodeRole::Call {
+                callee_field,
+                args_field,
+            } => TeachableNodeRole::Call {
+                callee_field: callee_field.to_string(),
+                args_field: args_field.to_string(),
+            },
+            frensense_lang::NodeRole::MemberAccess {
+                object_field,
+                property_field,
+            } => TeachableNodeRole::MemberAccess {
+                object_field: object_field.to_string(),
+                property_field: property_field.to_string(),
+            },
+            frensense_lang::NodeRole::Branch => TeachableNodeRole::Branch,
+            frensense_lang::NodeRole::Conditional => TeachableNodeRole::Conditional,
+            frensense_lang::NodeRole::Loop => TeachableNodeRole::Loop,
+            frensense_lang::NodeRole::Return => TeachableNodeRole::Return,
+            frensense_lang::NodeRole::Try => TeachableNodeRole::Try,
+            frensense_lang::NodeRole::Catch => TeachableNodeRole::Catch,
+            frensense_lang::NodeRole::Finally => TeachableNodeRole::Finally,
+            frensense_lang::NodeRole::Throw => TeachableNodeRole::Throw,
+            frensense_lang::NodeRole::ErrorGuard => TeachableNodeRole::ErrorGuard,
+            frensense_lang::NodeRole::ContextManager => TeachableNodeRole::ContextManager,
+            frensense_lang::NodeRole::ErrorPropagation => TeachableNodeRole::ErrorPropagation,
+            frensense_lang::NodeRole::Await => TeachableNodeRole::Await,
+            frensense_lang::NodeRole::Block => TeachableNodeRole::Block,
+            frensense_lang::NodeRole::Composite => TeachableNodeRole::Composite,
+            frensense_lang::NodeRole::Import => TeachableNodeRole::Import,
+            frensense_lang::NodeRole::Export => TeachableNodeRole::Export,
+            frensense_lang::NodeRole::Identifier => TeachableNodeRole::Identifier,
+            frensense_lang::NodeRole::Literal => TeachableNodeRole::Literal,
+            frensense_lang::NodeRole::Parameters => TeachableNodeRole::Parameters,
+            frensense_lang::NodeRole::Arguments => TeachableNodeRole::Arguments,
+            frensense_lang::NodeRole::ClassDef => TeachableNodeRole::ClassDef,
+            frensense_lang::NodeRole::BinaryOp => TeachableNodeRole::BinaryOp,
+            frensense_lang::NodeRole::UnaryOp => TeachableNodeRole::UnaryOp,
+            frensense_lang::NodeRole::Match => TeachableNodeRole::Match,
+            frensense_lang::NodeRole::Unsafe => TeachableNodeRole::Unsafe,
+            frensense_lang::NodeRole::AsyncBlock => TeachableNodeRole::AsyncBlock,
+            frensense_lang::NodeRole::Other => TeachableNodeRole::Other,
+        }
+    }
+}
+
 /// The merged fact table: built-in language tables + bundle-learned facts.
 ///
 /// Built from a [`TaintConfig`] (name sets, backward compatible) plus
@@ -377,6 +598,24 @@ pub struct FactTable {
     /// Merged into the scan's `TaintConfig::sources` before analysis so
     /// bundles teach new frameworks without touching the built-in tables.
     pub learned_sources: FxHashSet<String>,
+    /// Dynamic node role classifications learned from a `.frc` bundle:
+    /// `(language, node_kind) -> NodeRole`.
+    pub grammar_roles: FxHashMap<(String, String), frensense_lang::NodeRole>,
+    /// Dynamic grammar features learned from a `.frc` bundle:
+    /// `(language, node_kind) -> Set<GrammarFeature>`.
+    pub grammar_features: FxHashMap<(String, String), FxHashSet<GrammarFeature>>,
+    /// Dynamic custom memory allocators learned from a bundle or specification.
+    pub custom_allocators: FxHashSet<String>,
+    /// Dynamic custom memory deallocators learned from a bundle or specification.
+    pub custom_deallocators: FxHashSet<String>,
+    /// Dynamic IDOR-class query keys learned from a bundle or specification.
+    pub idor_keys: FxHashSet<String>,
+    /// Dynamic IDOR-class finder sinks learned from a bundle or specification.
+    pub idor_finder_sinks: FxHashSet<String>,
+    /// Dynamic taint propagators: `call -> input_arg_slots`.
+    pub propagators: FxHashMap<String, Vec<usize>>,
+    /// Dynamic guard denylist string patterns (default fallback: `[".."]`).
+    pub guard_denylist_patterns: Vec<String>,
 }
 
 impl FactTable {
@@ -497,6 +736,130 @@ impl FactTable {
             .extend(other.session_roots.iter().cloned());
         self.learned_sources
             .extend(other.learned_sources.iter().cloned());
+        for (k, v) in &other.grammar_roles {
+            self.grammar_roles.insert(k.clone(), v.clone());
+        }
+        for (k, v) in &other.grammar_features {
+            self.grammar_features
+                .entry(k.clone())
+                .or_default()
+                .extend(v.iter().copied());
+        }
+        self.custom_allocators
+            .extend(other.custom_allocators.iter().cloned());
+        self.custom_deallocators
+            .extend(other.custom_deallocators.iter().cloned());
+        self.idor_keys.extend(other.idor_keys.iter().cloned());
+        self.idor_finder_sinks
+            .extend(other.idor_finder_sinks.iter().cloned());
+        for (k, v) in &other.propagators {
+            self.propagators.insert(k.clone(), v.clone());
+        }
+        for p in &other.guard_denylist_patterns {
+            if !self.guard_denylist_patterns.contains(p) {
+                self.guard_denylist_patterns.push(p.clone());
+            }
+        }
+    }
+
+    /// Look up a dynamic AST node classification role learned from a `.frc` bundle.
+    pub fn get_grammar_role(
+        &self,
+        language: &str,
+        node_kind: &str,
+    ) -> Option<&frensense_lang::NodeRole> {
+        let lang = language.to_lowercase();
+        self.grammar_roles
+            .get(&(lang, node_kind.to_string()))
+            .or_else(|| {
+                self.grammar_roles
+                    .get(&("*".to_string(), node_kind.to_string()))
+            })
+    }
+
+    /// Check if a dynamic AST grammar feature is learned from a `.frc` bundle.
+    pub fn has_grammar_feature(
+        &self,
+        language: &str,
+        node_kind: &str,
+        feature: GrammarFeature,
+    ) -> Option<bool> {
+        let lang = language.to_lowercase();
+        if let Some(set) = self.grammar_features.get(&(lang, node_kind.to_string())) {
+            if set.contains(&feature) {
+                return Some(true);
+            }
+        }
+        if let Some(set) = self
+            .grammar_features
+            .get(&("*".to_string(), node_kind.to_string()))
+        {
+            if set.contains(&feature) {
+                return Some(true);
+            }
+        }
+        None
+    }
+
+    /// Check whether a call allocates heap memory (checks dynamic custom allocators, then built-in defaults).
+    pub fn is_allocator(&self, name: &str) -> bool {
+        const DIRECT_ALLOC_CALLS: &[&str] = &[
+            "malloc",
+            "calloc",
+            "realloc",
+            "aligned_alloc",
+            "valloc",
+            "alloca",
+        ];
+        let last = name.rsplit('.').next().unwrap_or(name);
+        self.custom_allocators.contains(name)
+            || self.custom_allocators.contains(last)
+            || DIRECT_ALLOC_CALLS.contains(&name)
+            || DIRECT_ALLOC_CALLS.contains(&last)
+    }
+
+    /// Check whether a call deallocates heap memory (checks dynamic custom deallocators, then built-in defaults).
+    pub fn is_deallocator(&self, name: &str) -> bool {
+        const DIRECT_FREE_CALLS: &[&str] = &["free"];
+        let last = name.rsplit('.').next().unwrap_or(name);
+        self.custom_deallocators.contains(name)
+            || self.custom_deallocators.contains(last)
+            || DIRECT_FREE_CALLS.contains(&name)
+            || DIRECT_FREE_CALLS.contains(&last)
+    }
+
+    /// Check whether a key is an IDOR-class query parameter (checks dynamic keys, then built-in defaults).
+    pub fn is_idor_key(&self, key: &str) -> bool {
+        self.idor_keys.contains(key) || crate::analysis::forward::DEFAULT_IDOR_KEYS.contains(&key)
+    }
+
+    /// Check whether a call is an IDOR finder sink (checks dynamic sinks, then built-in defaults).
+    pub fn is_idor_finder_sink(&self, sink: &str) -> bool {
+        let last = sink.rsplit('.').next().unwrap_or(sink);
+        self.idor_finder_sinks.contains(sink)
+            || self.idor_finder_sinks.contains(last)
+            || crate::analysis::forward::IDOR_FINDER_SINKS.contains(&sink)
+            || crate::analysis::forward::IDOR_FINDER_SINKS.contains(&last)
+    }
+
+    /// Look up input argument slots that propagate taint through `call`.
+    pub fn propagator_input_args(&self, call: &str) -> Option<&[usize]> {
+        let last = call.rsplit('.').next().unwrap_or(call);
+        self.propagators
+            .get(call)
+            .or_else(|| self.propagators.get(last))
+            .map(|v| v.as_slice())
+    }
+
+    /// Check whether a string literal matches a guard denylist pattern (default: contains "..").
+    pub fn is_guard_denylist(&self, literal: &str) -> bool {
+        if self.guard_denylist_patterns.is_empty() {
+            literal.contains("..")
+        } else {
+            self.guard_denylist_patterns
+                .iter()
+                .any(|p| literal.contains(p.as_str()))
+        }
     }
 
     /// Source patterns to merge into the scan's `TaintConfig`: the union of
@@ -750,6 +1113,34 @@ pub enum LearnedFactEntry {
     GuardBypass(GuardBypassFact),
     /// Schema validation builders, enforcers, or keywords.
     SchemaPolicy(SchemaPolicyFact),
+    /// Dynamic AST grammar role mapping taught by a bundle.
+    GrammarRole {
+        language: String,
+        node_kind: String,
+        role: TeachableNodeRole,
+    },
+    /// Dynamic AST grammar feature taught by a bundle.
+    GrammarFeature {
+        language: String,
+        node_kind: String,
+        feature: GrammarFeature,
+    },
+    /// Register a custom memory allocator function name.
+    Allocator { name: String },
+    /// Register a custom memory deallocator function name.
+    Deallocator { name: String },
+    /// Register an IDOR-class finder sink and optional custom IDOR query payload keys.
+    IdorFinderSink { call: String, keys: Vec<String> },
+    /// Register an IDOR-class query payload key (e.g. "tenant_id", "workspace_id").
+    IdorKey { key: String },
+    /// Register a taint propagator rule for a function/method.
+    Propagator {
+        call: String,
+        input_args: Vec<usize>,
+        preserves_taint: bool,
+    },
+    /// Register a string pattern indicating a denylist-style guard comparison.
+    GuardDenylistPattern { pattern: String },
 }
 
 impl LearnedFactEntry {
@@ -899,6 +1290,64 @@ impl LearnedFactEntry {
                     .schema_keywords
                     .extend(fact.bound_keywords.iter().cloned());
             }
+            LearnedFactEntry::GrammarRole {
+                language,
+                node_kind,
+                role,
+            } => {
+                table.grammar_roles.insert(
+                    (language.to_lowercase(), node_kind.clone()),
+                    role.to_node_role(),
+                );
+            }
+            LearnedFactEntry::GrammarFeature {
+                language,
+                node_kind,
+                feature,
+            } => {
+                table
+                    .grammar_features
+                    .entry((language.to_lowercase(), node_kind.clone()))
+                    .or_default()
+                    .insert(*feature);
+            }
+            LearnedFactEntry::Allocator { name } => {
+                let last = name.rsplit('.').next().unwrap_or(name).to_string();
+                table.custom_allocators.insert(name.clone());
+                table.custom_allocators.insert(last);
+            }
+            LearnedFactEntry::Deallocator { name } => {
+                let last = name.rsplit('.').next().unwrap_or(name).to_string();
+                table.custom_deallocators.insert(name.clone());
+                table.custom_deallocators.insert(last);
+            }
+            LearnedFactEntry::IdorFinderSink { call, keys } => {
+                let last = call.rsplit('.').next().unwrap_or(call).to_string();
+                table.idor_finder_sinks.insert(call.clone());
+                table.idor_finder_sinks.insert(last);
+                for k in keys {
+                    table.idor_keys.insert(k.clone());
+                }
+            }
+            LearnedFactEntry::IdorKey { key } => {
+                table.idor_keys.insert(key.clone());
+            }
+            LearnedFactEntry::Propagator {
+                call,
+                input_args,
+                preserves_taint,
+            } => {
+                if *preserves_taint {
+                    let last = call.rsplit('.').next().unwrap_or(call).to_string();
+                    table.propagators.insert(call.clone(), input_args.clone());
+                    table.propagators.insert(last, input_args.clone());
+                }
+            }
+            LearnedFactEntry::GuardDenylistPattern { pattern } => {
+                if !table.guard_denylist_patterns.contains(pattern) {
+                    table.guard_denylist_patterns.push(pattern.clone());
+                }
+            }
         }
     }
 }
@@ -966,7 +1415,15 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
         if last != *call
             && matches!(
                 last.as_str(),
-                "get" | "post" | "put" | "delete" | "patch" | "head" | "options" | "request"
+                "get"
+                    | "post"
+                    | "put"
+                    | "delete"
+                    | "patch"
+                    | "head"
+                    | "options"
+                    | "request"
+                    | "set"
             )
         {
             t.verb_sinks.insert(last.clone());
@@ -981,11 +1438,15 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
         // Finder/updater sinks carry the default IDOR key set: a tainted
         // argument arriving as an object literal with these keys is an
         // access-control query payload, not an injection string.
-        let idor_keys: Vec<String> = if crate::analysis::forward::IDOR_FINDER_SINKS.contains(call) {
-            crate::analysis::forward::DEFAULT_IDOR_KEYS
-                .iter()
-                .map(|s| s.to_string())
-                .collect()
+        let idor_keys: Vec<String> = if t.is_idor_finder_sink(call) {
+            if !t.idor_keys.is_empty() {
+                t.idor_keys.iter().cloned().collect()
+            } else {
+                crate::analysis::forward::DEFAULT_IDOR_KEYS
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect()
+            }
         } else {
             Vec::new()
         };
@@ -1013,10 +1474,40 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
     for root in spec.known_session_roots() {
         t.session_roots.insert((*root).to_string());
     }
-    // Spec sanitizers are declared per-language via `classify_sanitizer`;
-    // probe the common method-name space is impractical, so we rely on the
-    // runtime `is_sanitizer_use` path that calls `classify_sanitizer`
-    // directly. No static table needed here beyond configured names.
+    // Spec sanitizers: register each known sanitizer into `t.sanitizer_facts`.
+    // Identify predicate guards (regex `.test()`, `.isValid()`, `is...()` type-guards,
+    // or Full classification) and set `guard_style = true`.
+    for name in spec.known_sanitizer_names() {
+        let kind = spec
+            .classify_sanitizer(name)
+            .map(|k| format!("{k:?}"))
+            .unwrap_or_else(|| "encode".into());
+        let guard_style =
+            *name == "test" || *name == "isValid" || name.starts_with("is") || kind == "Full";
+        t.sanitizer_facts
+            .entry((*name).to_string())
+            .or_insert_with(|| SanitizerFact {
+                call: (*name).to_string(),
+                kind,
+                sanitizes_args: Default::default(),
+                guard_style,
+            });
+    }
+    for prop in spec.propagator_rules() {
+        let key = prop.call.to_string();
+        let last = prop
+            .call
+            .rsplit('.')
+            .next()
+            .unwrap_or(prop.call)
+            .to_string();
+        let args: Vec<usize> = match prop.tainted_arg {
+            Some(idx) => vec![idx],
+            None => Vec::new(),
+        };
+        t.propagators.insert(key, args.clone());
+        t.propagators.entry(last).or_insert(args);
+    }
     t
 }
 
@@ -1292,5 +1783,139 @@ pub mod seed {
             Self::load(path)?.apply_to(t);
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod teachable_subsystem_tests {
+    use super::*;
+    use crate::checks::memory_summary::MemorySummaryRegistry;
+
+    #[test]
+    fn test_teachable_allocator_and_deallocator() {
+        let mut table = FactTable::default();
+        // Fallback built-ins work
+        assert!(table.is_allocator("malloc"));
+        assert!(table.is_allocator("calloc"));
+        assert!(table.is_deallocator("free"));
+        assert!(!table.is_allocator("custom_arena_alloc"));
+        assert!(!table.is_deallocator("custom_arena_free"));
+
+        // Learn custom primitives from bundle
+        let alloc_fact = LearnedFactEntry::Allocator {
+            name: "custom_arena_alloc".into(),
+        };
+        let dealloc_fact = LearnedFactEntry::Deallocator {
+            name: "custom_arena_free".into(),
+        };
+        alloc_fact.apply(&mut table);
+        dealloc_fact.apply(&mut table);
+
+        assert!(table.is_allocator("custom_arena_alloc"));
+        assert!(table.is_deallocator("custom_arena_free"));
+        // Built-ins still work
+        assert!(table.is_allocator("malloc"));
+        assert!(table.is_deallocator("free"));
+
+        // MemorySummaryRegistry consumes dynamic facts seamlessly
+        let reg = MemorySummaryRegistry::from_facts(&table);
+        assert!(reg.returns_fresh("custom_arena_alloc"));
+        assert_eq!(reg.consumes_params("custom_arena_free"), &[0]);
+    }
+
+    #[test]
+    fn test_teachable_idor_finder_sinks_and_keys() {
+        let mut table = FactTable::default();
+        // Fallback built-ins work
+        assert!(table.is_idor_finder_sink("find"));
+        assert!(table.is_idor_finder_sink("findOne"));
+        assert!(table.is_idor_key("id"));
+        assert!(table.is_idor_key("where"));
+        assert!(!table.is_idor_finder_sink("findCompanyRecord"));
+        assert!(!table.is_idor_key("organization_id"));
+
+        // Learn custom IDOR sink and keys
+        let fact = LearnedFactEntry::IdorFinderSink {
+            call: "findCompanyRecord".into(),
+            keys: vec!["organization_id".into(), "tenant_id".into()],
+        };
+        fact.apply(&mut table);
+
+        assert!(table.is_idor_finder_sink("findCompanyRecord"));
+        assert!(table.is_idor_key("organization_id"));
+        assert!(table.is_idor_key("tenant_id"));
+        // Built-in fallbacks intact
+        assert!(table.is_idor_finder_sink("findOne"));
+        assert!(table.is_idor_key("id"));
+    }
+
+    #[test]
+    fn test_teachable_propagator_rules() {
+        let mut table = FactTable::default();
+        assert_eq!(table.propagator_input_args("custom_transform"), None);
+
+        let fact = LearnedFactEntry::Propagator {
+            call: "custom_transform".into(),
+            input_args: vec![0, 2],
+            preserves_taint: true,
+        };
+        fact.apply(&mut table);
+
+        assert_eq!(
+            table.propagator_input_args("custom_transform"),
+            Some(&[0, 2][..])
+        );
+        assert_eq!(
+            table.propagator_input_args("mod.custom_transform"),
+            Some(&[0, 2][..])
+        );
+    }
+
+    #[test]
+    fn test_teachable_guard_denylist_patterns() {
+        let mut table = FactTable::default();
+        // Default fallback to ".."
+        assert!(table.is_guard_denylist("../etc/shadow"));
+        assert!(!table.is_guard_denylist("/private/vault"));
+
+        let fact = LearnedFactEntry::GuardDenylistPattern {
+            pattern: "/private/vault".into(),
+        };
+        fact.apply(&mut table);
+
+        assert!(table.is_guard_denylist("/private/vault"));
+    }
+
+    #[test]
+    #[cfg(feature = "serialize")]
+    fn test_bincode_roundtrip_all_new_variants() {
+        let facts = vec![
+            LearnedFactEntry::Allocator {
+                name: "arena_alloc".into(),
+            },
+            LearnedFactEntry::Deallocator {
+                name: "arena_free".into(),
+            },
+            LearnedFactEntry::IdorFinderSink {
+                call: "query_repo".into(),
+                keys: vec!["workspace_id".into()],
+            },
+            LearnedFactEntry::IdorKey {
+                key: "team_id".into(),
+            },
+            LearnedFactEntry::Propagator {
+                call: "format_str".into(),
+                input_args: vec![0, 1],
+                preserves_taint: true,
+            },
+            LearnedFactEntry::GuardDenylistPattern {
+                pattern: ".env".into(),
+            },
+        ];
+
+        let bytes = bincode::serialize(&facts).expect("serialization succeeds");
+        let decoded: Vec<LearnedFactEntry> =
+            bincode::deserialize(&bytes).expect("deserialization succeeds");
+        assert_eq!(facts, decoded);
     }
 }

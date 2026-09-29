@@ -117,6 +117,37 @@ fn classify_js(kind: &str) -> NodeRole {
     }
 }
 
+fn is_js_cast(kind: &str) -> bool {
+    matches!(kind, "as_expression" | "cast_expression" | "type_assertion")
+}
+
+fn is_js_template_string(kind: &str) -> bool {
+    matches!(kind, "template_string" | "string" | "binary_expression")
+}
+
+fn is_js_template_literal_fragment(kind: &str) -> bool {
+    kind == "string_fragment"
+}
+
+fn is_js_destructuring_pattern(kind: &str) -> bool {
+    matches!(kind, "object_pattern" | "array_pattern")
+}
+
+fn is_js_pair_pattern(kind: &str) -> bool {
+    kind == "pair_pattern"
+}
+
+fn is_js_pair_entry(kind: &str) -> bool {
+    kind == "pair"
+}
+
+fn is_js_ternary_straight_line(kind: &str) -> bool {
+    matches!(
+        kind,
+        "ternary_expression" | "conditional_expression" | "conditional_type"
+    )
+}
+
 fn extract_js_imports<'tree>(root: Node<'tree>, source: &str) -> Vec<Import> {
     let mut imports = Vec::new();
     let mut cursor = root.walk();
@@ -334,8 +365,8 @@ fn js_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
             Some(SanitizerKind::Full)
         }
 
-        // Type narrowing and shell escapes
-        "shellescape" | "shellQuote" | "escapeShellArg" | "quoteForShell" | "isUUID"
+        // Type narrowing, regex guards, and shell escapes
+        "test" | "shellescape" | "shellQuote" | "escapeShellArg" | "quoteForShell" | "isUUID"
         | "isEmail" | "isAlphanumeric" | "isNumeric" | "isInt" | "isFloat" | "isISO8601"
         | "isValid" => Some(SanitizerKind::Full),
 
@@ -393,6 +424,7 @@ static JS_SANITIZER_NAMES: &[&str] = &[
     "isFloat",
     "isISO8601",
     "isValid",
+    "test",
     "sqlEscape",
     "escapeId",
     "format",
@@ -853,6 +885,34 @@ impl LanguageSpec for TypeScriptSpec {
         classify_js(kind)
     }
 
+    fn is_cast(&self, kind: &str) -> bool {
+        is_js_cast(kind)
+    }
+
+    fn is_template_string(&self, kind: &str) -> bool {
+        is_js_template_string(kind)
+    }
+
+    fn is_template_literal_fragment(&self, kind: &str) -> bool {
+        is_js_template_literal_fragment(kind)
+    }
+
+    fn is_destructuring_pattern(&self, kind: &str) -> bool {
+        is_js_destructuring_pattern(kind)
+    }
+
+    fn is_pair_pattern(&self, kind: &str) -> bool {
+        is_js_pair_pattern(kind)
+    }
+
+    fn is_pair_entry(&self, kind: &str) -> bool {
+        is_js_pair_entry(kind)
+    }
+
+    fn is_ternary_straight_line(&self, kind: &str) -> bool {
+        is_js_ternary_straight_line(kind)
+    }
+
     fn wrap_region(&self, code: &str) -> String {
         format!("function _region(): void {{\n{}\n}}", code)
     }
@@ -1121,6 +1181,34 @@ impl LanguageSpec for JavaScriptSpec {
 
     fn classify(&self, kind: &str) -> NodeRole {
         classify_js(kind)
+    }
+
+    fn is_cast(&self, kind: &str) -> bool {
+        is_js_cast(kind)
+    }
+
+    fn is_template_string(&self, kind: &str) -> bool {
+        is_js_template_string(kind)
+    }
+
+    fn is_template_literal_fragment(&self, kind: &str) -> bool {
+        is_js_template_literal_fragment(kind)
+    }
+
+    fn is_destructuring_pattern(&self, kind: &str) -> bool {
+        is_js_destructuring_pattern(kind)
+    }
+
+    fn is_pair_pattern(&self, kind: &str) -> bool {
+        is_js_pair_pattern(kind)
+    }
+
+    fn is_pair_entry(&self, kind: &str) -> bool {
+        is_js_pair_entry(kind)
+    }
+
+    fn is_ternary_straight_line(&self, kind: &str) -> bool {
+        is_js_ternary_straight_line(kind)
     }
 
     fn wrap_region(&self, code: &str) -> String {
@@ -1579,6 +1667,7 @@ static JS_SINK_SIGNATURES: &[(&'static str, &'static [usize], bool)] = &[
     ("privateDecrypt", &[0], false),
     ("createDecipheriv", &[0, 1], false),
     // ── Parameterized SQL: slot 1+ is the binding channel (safe) ──
+    ("prepare", &[0], true), // db.prepare(sql) - slot 0 is SQL string, receiver is DB handle
     ("query", &[0], true),   // pool.query(sql, params)
     ("execute", &[0], true), // mysql2 / prepare(sql, params)
     ("raw", &[0], true),     // sequelize
@@ -1588,6 +1677,14 @@ static JS_SINK_SIGNATURES: &[(&'static str, &'static [usize], bool)] = &[
     ("all", &[0], true), // sqlite .all(sql, params), dangerous in mongo context, but param binding dominates
     ("get", &[0], true), // sqlite .get(sql, params)
     ("run", &[0], true), // sqlite .run(sql, params)
+    // ── Open Redirect: slot 0 is the target URL (receiver is context/response) ──
+    ("redirect", &[0], false),
+    // ── Storage / KV / Cache: receiver is the storage handle ──
+    ("put", &[0, 1], false),
+    ("delete", &[0], false),
+    ("del", &[0], false),
+    ("set", &[0, 1], false),
+    ("append", &[0, 1], false),
     // ── HTTP fetch: slot 1 is the request-options/init object ──
     // (fetch(url, init): taint in init.method/body IS dangerous, but the
     //  options object is also where SSRF host overrides live; leave all-args

@@ -246,7 +246,9 @@ fn sharpen_branch(
             Operand::Var(c) => {
                 state.insert(*c, Value::BoolConst(sense));
                 match defs.get(c) {
-                    Some(Instruction::UnaryOp { op, src, .. }) if op == "!" => {
+                    Some(Instruction::UnaryOp { op, src, .. })
+                        if op == "!" || op == "neg" || op == "not" =>
+                    {
                         cur = src;
                         sense = !sense;
                     }

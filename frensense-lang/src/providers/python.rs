@@ -637,6 +637,10 @@ impl LanguageSpec for PythonSpec {
         kind == "identifier"
     }
 
+    fn is_declaration_assignment(&self, kind: &str) -> bool {
+        matches!(kind, "subscript" | "attribute")
+    }
+
     /// Python `with open(path) as f:` - extracts the path argument.
     fn context_manager_call<'s>(&self, node: Node<'_>, source: &'s str) -> Option<&'s str> {
         python_context_manager_call(node, source)

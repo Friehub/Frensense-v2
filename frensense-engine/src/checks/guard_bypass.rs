@@ -30,7 +30,15 @@ static CONTAINMENT_CALLEES: &[&str] = &["includes", "indexOf", "contains"];
 
 /// Credential-setting call names (last segment): functions whose argument is
 /// a plaintext password by convention.
-static CREDENTIAL_SINKS: &[&str] = &["hash", "hashPassword", "hashpw", "setPassword", "set"];
+static CREDENTIAL_SINKS: &[&str] = &[
+    "hash",
+    "hashPassword",
+    "hashpw",
+    "setPassword",
+    "set_password",
+    "setSecret",
+    "set_secret",
+];
 
 /// Credential parameter names (source_name of the arg var) that mark a
 /// value as a plaintext credential.

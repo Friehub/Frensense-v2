@@ -231,6 +231,17 @@ impl<'a> ProgramSvfg<'a> {
     /// `FunctionIR`s. `config` is needed at build time because summaries must
     /// know which calls are sinks.
     pub fn new(irs: &FxHashMap<String, &'a FunctionIR>, config: &TaintConfig) -> Self {
+        let facts = FactTable::from_config(config);
+        Self::new_with_facts(irs, config, &facts)
+    }
+
+    /// Like [`ProgramSvfg::new`] but consults an explicit [`FactTable`] for
+    /// learned sink signatures and sanitizers during summary computation.
+    pub fn new_with_facts(
+        irs: &FxHashMap<String, &'a FunctionIR>,
+        config: &TaintConfig,
+        facts: &FactTable,
+    ) -> Self {
         // 1. Build per-function SVFGs (deterministic name order).
         let mut names: Vec<&String> = irs.keys().collect();
         names.sort();
@@ -274,7 +285,7 @@ impl<'a> ProgramSvfg<'a> {
 
         prog.discover_bindings(&callgraph);
         prog.compute_topological_order();
-        prog.compute_summaries(config);
+        prog.compute_summaries(config, facts);
         prog.install_cross_edges();
         prog.install_heap_cross_edges();
         prog
@@ -428,7 +439,7 @@ impl<'a> ProgramSvfg<'a> {
     // Step 3: bottom-up summaries (one analysis per function)
     // -----------------------------------------------------------------------
 
-    fn compute_summaries(&mut self, config: &TaintConfig) {
+    fn compute_summaries(&mut self, config: &TaintConfig, facts: &FactTable) {
         for &fi in &self.topological_order {
             // Suppress local pass-through edges for callees that already have
             // summaries (their relational summary replaces the local edge).
@@ -452,7 +463,7 @@ impl<'a> ProgramSvfg<'a> {
                 self.suppressed.insert((fi, from, to));
             }
 
-            let summary = self.compute_one_summary(fi, config);
+            let summary = self.compute_one_summary(fi, config, facts);
             self.functions[fi].summary = Some(summary);
         }
     }
@@ -460,7 +471,12 @@ impl<'a> ProgramSvfg<'a> {
     /// Compositional summary for one function: BFS restricted to the
     /// function's *own* graph; at call sites with summarised callees, apply
     /// the callee summary instead of crossing into it.
-    fn compute_one_summary(&self, fi: usize, config: &TaintConfig) -> TaintSummary {
+    fn compute_one_summary(
+        &self,
+        fi: usize,
+        config: &TaintConfig,
+        facts: &FactTable,
+    ) -> TaintSummary {
         let fe = &self.functions[fi];
         let nparams = fe.ir.parameters.len();
         let mut param_taints_return = vec![false; nparams];
@@ -484,7 +500,7 @@ impl<'a> ProgramSvfg<'a> {
                 if node.kind == NodeKind::FormalRet {
                     param_taints_return[p] = true;
                 }
-                if sink_alert(fe.ir, config, &cur).is_some() {
+                if sink_alert_with_facts(fe.ir, config, facts, &cur).is_some() {
                     param_reaches_sink[p] = true;
                 }
 
@@ -523,7 +539,7 @@ impl<'a> ProgramSvfg<'a> {
                     if self.suppressed.contains(&(fi, cur, succ)) {
                         continue;
                     }
-                    if is_sanitizer_use(fe.ir, config, &succ) {
+                    if is_sanitizer_use_with_facts(fe.ir, config, facts, &succ) {
                         continue;
                     }
                     if visited.insert(succ) {
@@ -953,7 +969,8 @@ impl<'a> ProgramSvfg<'a> {
         };
 
         // Recompute the config-dependent state under the NEW rule set.
-        prog.compute_summaries(config);
+        let default_facts = FactTable::from_config(config);
+        prog.compute_summaries(config, &default_facts);
         prog
     }
 }
@@ -1560,6 +1577,7 @@ pub const IDOR_FINDER_SINKS: &[&str] = &[
 pub struct InterproceduralTaintEngine<'a> {
     prog: &'a ProgramSvfg<'a>,
     config: &'a TaintConfig,
+    facts: FactTable,
     tainted: FxHashSet<(usize, NodeKey)>,
     pub alerts: Vec<String>,
 }
@@ -1569,9 +1587,16 @@ impl<'a> InterproceduralTaintEngine<'a> {
         Self {
             prog,
             config,
+            facts: FactTable::from_config(config),
             tainted: FxHashSet::default(),
             alerts: Vec::new(),
         }
+    }
+
+    /// Merge additional (e.g. bundle-learned) facts over the default table.
+    pub fn with_fact_table(mut self, facts: &FactTable) -> Self {
+        self.facts.merge(facts);
+        self
     }
 
     /// Run the BFS from all source nodes across all functions.
@@ -1595,7 +1620,7 @@ impl<'a> InterproceduralTaintEngine<'a> {
             let fe = &self.prog.functions[fi];
 
             // Sink check at every visited node.
-            if let Some((_, alert)) = sink_alert(fe.ir, self.config, &cur)
+            if let Some((_, alert)) = sink_alert_with_facts(fe.ir, self.config, &self.facts, &cur)
                 && !self.alerts.contains(&alert)
             {
                 self.alerts.push(alert);
@@ -1607,7 +1632,7 @@ impl<'a> InterproceduralTaintEngine<'a> {
 
             // Local edges (suppressed pass-through edges removed).
             for succ in self.prog.local_successors(fi, &cur) {
-                if is_sanitizer_use(fe.ir, self.config, &succ) {
+                if is_sanitizer_use_with_facts(fe.ir, self.config, &self.facts, &succ) {
                     continue;
                 }
                 self.visit(fi, succ, &mut queue);
@@ -1617,7 +1642,7 @@ impl<'a> InterproceduralTaintEngine<'a> {
             // formal-ret → actual-ret).
             for (gi, gk) in self.prog.inter_successors(fi, &cur) {
                 let ge = &self.prog.functions[gi];
-                if is_sanitizer_use(ge.ir, self.config, &gk) {
+                if is_sanitizer_use_with_facts(ge.ir, self.config, &self.facts, &gk) {
                     continue;
                 }
                 self.visit(gi, gk, &mut queue);

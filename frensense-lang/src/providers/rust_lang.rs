@@ -509,6 +509,10 @@ impl LanguageSpec for RustSpec {
         classify_rust(kind)
     }
 
+    fn is_cast(&self, kind: &str) -> bool {
+        kind == "type_cast_expression"
+    }
+
     // tree-sitter-rust: `field_expression` property children are
     // `field_identifier`, a named field, not a computed index.
     fn is_property_kind(&self, kind: &str) -> bool {
