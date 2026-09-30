@@ -6,6 +6,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0-preview.5] - 2026-09-30
+
+Preview release adding graph-based UAF validation over the store-aware program SVFG, control-dependence gating for guard bypass and policy checks, bounded interprocedural path re-expansion, single-owner function IRs with closure-edge feeding, and an exactly-once detection regression gate.
+
+### Added
+
+#### Engine
+- **Graph-Based UAF Validation**: Added `check_with_prog` and `check_all_with_graph`, validating free-to-use flows against store-aware `ProgramSvfg` paths through scan, so a UAF alert requires an end-to-end path rather than a local two-node pattern.
+- **Control Dependence Graph**: Added dominator-based CDG analysis (`ir/control.rs`) exposing the set of predicates controlling each block.
+- **Predicate-Feeds Guard Gating**: Guard bypass checks now require the guard's predicate to actually control the sink's block (`feeds_predicate`), silencing predicate-blockers that never control the risky path.
+- **Policy Trigger-Site Dominance Caching**: Co-occurrence policy checks evaluate requirement satisfaction at trigger sites with dominance caching, so nested requirements resolve without per-node repetition.
+- **Bounded Path Re-Expansion**: Forward taint explores beyond the first call boundary with a bounded interprocedural continuation keyed by (function, node, context-block) and a `seen_nodes` revisit guard, resolving deep parameter-plus-closure chains to the declaring function.
+- **Detection Regression Gate**: Added `regression_gate_tests.rs` locking every nested-function flow shape (parameter, closure, bound-arrow, deep nesting, policy, sanitizer-negative) to exactly one finding with correct owner attribution, plus cross-shape duplicate-result probes.
+
+### Changed
+
+#### Engine
+- **Single-Owner Function IRs**: Every function body is now lowered into exactly one named IR, linked through a new `enclosing_fn` chain; `NodeRole::Function` no longer contributes body copies to the enclosing IR. This removes duplicate findings, misattribution to outer functions, duplicated policy hits, and the linear IR blow-up that nested extractions previously caused.
+- **Closure Edge Feeding**: Free use-nodes inside extracted function bodies are fed from the first enclosing function that defines the name, walking the `enclosing_fn` chain until a defining scope is reached (module scope stops the walk), preserving the flows that previously relied on inlined capture copies; callgraph and callback edges are unchanged.
+- **Extraction Identity Tracking**: Function identity tracking via named children and `bound_fns` with a statics-only `inside_function`, so every extraction site resolves an owner name (`<fn@N>` fallback for nameless functions).
+
+### Fixed
+
+#### Engine
+- **Phantom Const-Function Duplicate Results**: Unnamed const nested functions no longer produce twin IRs and duplicate `<fn@N>` findings; each function resolves a single owner across all nested shapes (verified by duplicate probes: parameter-plus-closure, closure, nested policy, bound-arrow policy, phantom const handler, and returned-arrow cases all return exactly one attributed result).
+- **Receiver Access-Path Attribution**: Session-trust receiver access-path tests now search all IRs, since extracted bodies moved from enclosing IRs to per-function IRs.
+
 ## [0.7.0-preview.4] - 2026-09-29
 
 Preview release adding comprehensive verification across all 13 teachable security dimensions, native guard call policy synthesis, candidate guard prioritization and exception filtering, forward taint propagator slot suppression, language-specific receiver sink validation, benchmark CI optimization, and dynamic documentation versioning.

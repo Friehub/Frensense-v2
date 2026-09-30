@@ -52,6 +52,55 @@ export function hasItem (items: string[], needle: string) {
         assert!(hits.is_empty(), "non-URL includes must stay silent");
     }
 
+    /// The containment result must FEED a predicate: a value that gates
+    /// nothing (only logged, then discarded) is not a guard even on
+    /// URL-shaped input with a URL parameter present.
+    #[test]
+    fn containment_result_must_feed_predicate() {
+        let src = r#"
+export const auditUrl = (url: string) => {
+  const ok = url.includes("https://allowed.com")
+  audit.record(ok)
+  return true
+}
+"#;
+        let fns = lower_source("t.ts", src, "ts").unwrap();
+        let facts = FactTable::default();
+        let hits: Vec<_> = fns
+            .values()
+            .flat_map(|ir| guard_bypass::check(ir, &facts))
+            .collect();
+        assert!(
+            hits.is_empty(),
+            "containment gating nothing must stay silent: {:?}",
+            hits
+        );
+    }
+
+    /// A containment result feeding a branch condition is a guard: fires.
+    #[test]
+    fn containment_result_feeding_branch_fires() {
+        let src = r#"
+export const isRedirectAllowed = (url: string) => {
+  if (url.includes("https://allowed.com")) {
+    return url
+  }
+  return null
+}
+"#;
+        let fns = lower_source("t.ts", src, "ts").unwrap();
+        let facts = FactTable::default();
+        let hits: Vec<_> = fns
+            .values()
+            .flat_map(|ir| guard_bypass::check(ir, &facts))
+            .collect();
+        assert!(
+            !hits.is_empty(),
+            "branch-fed containment must fire as a guard"
+        );
+        assert_eq!(hits[0].rule, "substring_allowlist_guard");
+    }
+
     /// The weakPasswordChallenge shape: a plaintext password parameter fed
     /// to a hash-named call.
     #[test]

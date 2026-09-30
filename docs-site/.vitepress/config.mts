@@ -14,7 +14,7 @@ function getWorkspaceVersion(): string {
       return match[1]
     }
   } catch {}
-  return '0.7.0-preview.4'
+  return '0.7.0-preview.5'
 }
 
 async function getPublishedVersion(): Promise<string> {

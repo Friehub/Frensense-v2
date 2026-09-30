@@ -16,7 +16,8 @@
 
 use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
-use crate::ir::function::{FunctionIR, Instruction, Operand};
+use crate::ir::function::{FunctionIR, Instruction, Operand, Terminator, VarId};
+use rustc_hash::FxHashSet;
 
 fn last_segment(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
@@ -116,9 +117,16 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                 _ => false,
             });
             if has_url_param && (recv_is_url || arg_is_urlish) {
-                let span = dest
-                    .and_then(|d| ir.var_metadata.get(d))
-                    .and_then(|m| m.byte_range);
+                // The containment result must actually decide control flow
+                // (feed a branch/switch condition or a returned predicate).
+                // A value that gates nothing - discarded, only logged - is
+                // not a guard, and neither is a statement-form call whose
+                // result never exists.
+                let Some(d) = dest else { continue };
+                if !feeds_predicate(ir, *d) {
+                    continue;
+                }
+                let span = ir.var_metadata.get(d).and_then(|m| m.byte_range);
                 findings.push(CheckerFinding {
                     learned: is_learned,
                     function: ir.name.clone(),
@@ -135,6 +143,102 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
         }
     }
     findings
+}
+
+/// Forward def-use closure: does `dest` transitively decide control flow -
+/// reach a `Branch`/`Switch` condition or a `Return` source? Bounded walk
+/// (8 hops, visited-set) over instruction destinations and phi merges;
+/// `false` means the value gates nothing.
+fn feeds_predicate(ir: &FunctionIR, dest: VarId) -> bool {
+    let mut seen: FxHashSet<VarId> = FxHashSet::default();
+    seen.insert(dest);
+    let mut frontier = vec![dest];
+    for _ in 0..8 {
+        if frontier.is_empty() {
+            break;
+        }
+        let mut next = Vec::new();
+        for v in &frontier {
+            for blk in ir.blocks.values() {
+                match &blk.terminator {
+                    Terminator::Branch {
+                        cond: Operand::Var(c),
+                        ..
+                    }
+                    | Terminator::Switch {
+                        cond: Operand::Var(c),
+                        ..
+                    } if *c == *v => return true,
+                    Terminator::Return {
+                        src: Some(Operand::Var(s)),
+                    } if *s == *v => return true,
+                    _ => {}
+                }
+                for phi in &blk.phis {
+                    if phi.incoming.iter().any(|(_, iv)| iv == v) && seen.insert(phi.dest) {
+                        next.push(phi.dest);
+                    }
+                }
+                for instr in &blk.instructions {
+                    if uses_var(instr, *v)
+                        && let Some(d) = dest_of(instr)
+                        && seen.insert(d)
+                    {
+                        next.push(d);
+                    }
+                }
+            }
+        }
+        frontier = next;
+    }
+    false
+}
+
+/// True when `instr` reads `v` in any operand position.
+fn uses_var(instr: &Instruction, v: VarId) -> bool {
+    let eq = |op: &Operand| matches!(op, Operand::Var(x) if *x == v);
+    match instr {
+        Instruction::Assign { src, .. }
+        | Instruction::Cast { src, .. }
+        | Instruction::UnaryOp { src, .. } => eq(src),
+        Instruction::BinaryOp { lhs, rhs, .. } => eq(lhs) || eq(rhs),
+        Instruction::LoadField { base, .. } => *base == v,
+        Instruction::StoreField { base, src, .. } => *base == v || eq(src),
+        Instruction::LoadElement { base, index, .. } => *base == v || eq(index),
+        Instruction::StoreElement {
+            base, index, src, ..
+        } => *base == v || eq(index) || eq(src),
+        Instruction::LoadGlobal { .. } | Instruction::Allocate { .. } => false,
+        Instruction::StoreGlobal { src, .. } => eq(src),
+        Instruction::CallStatic { args, .. } => args.iter().any(eq),
+        Instruction::CallVirtual { receiver, args, .. } => eq(receiver) || args.iter().any(eq),
+        Instruction::CallPointer { func_ptr, args, .. } => eq(func_ptr) || args.iter().any(eq),
+        Instruction::AddressOf { src, .. } => *src == v,
+        Instruction::Dereference { ptr, .. } => eq(ptr),
+        Instruction::ExtractValue { tuple, .. } => eq(tuple),
+        Instruction::Await { promise, .. } => eq(promise),
+        Instruction::Yield { src, .. } => src.as_ref().is_some_and(eq),
+    }
+}
+
+/// The variable `instr` defines, when it defines one.
+fn dest_of(instr: &Instruction) -> Option<VarId> {
+    match instr {
+        Instruction::Assign { dest, .. }
+        | Instruction::LoadField { dest, .. }
+        | Instruction::LoadElement { dest, .. }
+        | Instruction::LoadGlobal { dest, .. }
+        | Instruction::Cast { dest, .. }
+        | Instruction::ExtractValue { dest, .. }
+        | Instruction::BinaryOp { dest, .. }
+        | Instruction::UnaryOp { dest, .. }
+        | Instruction::Await { dest, .. } => Some(*dest),
+        Instruction::CallStatic { dest, .. }
+        | Instruction::CallVirtual { dest, .. }
+        | Instruction::CallPointer { dest, .. }
+        | Instruction::Yield { dest, .. } => *dest,
+        _ => None,
+    }
 }
 
 /// Rule 2: credential hashing policy. A call named like a hasher whose

@@ -343,8 +343,15 @@ struct ExploreState {
     source_desc: Option<String>,
     saw_sanitized_root_only: bool,
     saw_unknown: bool,
-    /// Nodes whose local predecessors were fully expanded for this root.
-    visited: FxHashSet<(usize, NodeKey)>,
+    /// Nodes whose predecessors were fully expanded for this root, keyed by
+    /// `(function, node, use-context block)`. The context is part of the key
+    /// because the guard-stop decision is context-dependent: a shared node
+    /// first visited with a guard-stopped context must still be expanded
+    /// when reached again with an unguarded context (bounded by O(E) -
+    /// a node re-enqueues at most once per distinct consumer block).
+    visited: FxHashSet<(usize, NodeKey, BlockId)>,
+    /// Distinct `(function, node)` pairs seen, for stats only.
+    seen_nodes: FxHashSet<(usize, NodeKey)>,
 }
 
 /// Human-readable description of the taint origin at a source node:
@@ -619,92 +626,9 @@ impl GuardMap {
         }
         let _ = config;
 
-        // Dominators (Cooper-Harvey-Kennedy, small graphs).
-        let mut preds: FxHashMap<BlockId, Vec<BlockId>> = FxHashMap::default();
-        let mut succs: FxHashMap<BlockId, Vec<BlockId>> = FxHashMap::default();
-        for (&b, blk) in &ir.blocks {
-            for s in &blk.successors {
-                succs.entry(b).or_default().push(*s);
-                preds.entry(*s).or_default().push(b);
-            }
-        }
-        // RPO from entry.
-        let entry = ir.entry_block;
-        let mut po = Vec::new();
-        let mut seen = FxHashSet::default();
-        let mut stack = vec![(entry, 0usize)];
-        while let Some((b, i)) = stack.pop() {
-            if i == 0 {
-                if !seen.insert(b) {
-                    continue;
-                }
-                stack.push((b, 1));
-                if let Some(ss) = succs.get(&b) {
-                    for &s in ss {
-                        stack.push((s, 0));
-                    }
-                }
-            } else {
-                po.push(b);
-            }
-        }
-        let rpo: Vec<BlockId> = po.iter().rev().copied().collect();
-        let mut idom: FxHashMap<BlockId, BlockId> = FxHashMap::default();
-        idom.insert(entry, entry);
-        let mut changed = true;
-        while changed {
-            changed = false;
-            for &b in &rpo {
-                if b == entry {
-                    continue;
-                }
-                let Some(ps) = preds.get(&b) else { continue };
-                let mut new_idom: Option<BlockId> = None;
-                for &p in ps {
-                    if idom.contains_key(&p) {
-                        new_idom = Some(match new_idom {
-                            None => p,
-                            Some(cur) => {
-                                // intersect (Cooper-Harvey-Kennedy)
-                                let pos = |x: BlockId| po.iter().position(|&y| y == x).unwrap_or(0);
-                                let mut f1 = cur;
-                                let mut f2 = p;
-                                while f1 != f2 {
-                                    while pos(f1) < pos(f2) {
-                                        f1 = *idom.get(&f1).unwrap_or(&f1);
-                                    }
-                                    while pos(f2) < pos(f1) {
-                                        f2 = *idom.get(&f2).unwrap_or(&f2);
-                                    }
-                                }
-                                f1
-                            }
-                        });
-                    }
-                }
-                if let Some(n) = new_idom
-                    && idom.get(&b) != Some(&n)
-                {
-                    idom.insert(b, n);
-                    changed = true;
-                }
-            }
-        }
-        // Dominator sets via idom chains.
-        let mut dominators: FxHashMap<BlockId, FxHashSet<BlockId>> = FxHashMap::default();
-        for &b in &rpo {
-            let mut set = FxHashSet::default();
-            set.insert(b);
-            let mut cur = b;
-            while let Some(&p) = idom.get(&cur) {
-                if p == cur {
-                    break;
-                }
-                set.insert(p);
-                cur = p;
-            }
-            dominators.insert(b, set);
-        }
+        // Dominators: shared structural module (also serves policy guard
+        // dominance and control-dependence queries in checks).
+        let dominators = crate::ir::control::dominators(ir);
 
         Self { guards, dominators }
     }
@@ -876,7 +800,8 @@ impl<'a> BackwardTaintEngine<'a> {
                 .role_for_call(name, receiver_root.as_deref())
                 .unwrap_or(crate::analysis::taint::role::SinkRole::Other);
             let mut state = ExploreState::default();
-            state.visited.insert((fi, arg_node));
+            state.visited.insert((fi, arg_node, arg_node.block));
+            state.seen_nodes.insert((fi, arg_node));
             self.current_parents.clear();
             self.explore_from(fi, arg_node, &mut state);
 
@@ -891,9 +816,9 @@ impl<'a> BackwardTaintEngine<'a> {
             };
 
             // Bookkeeping for stats.
-            self.stats.nodes_visited += state.visited.len();
+            self.stats.nodes_visited += state.seen_nodes.len();
             let mut fns: FxHashSet<usize> = FxHashSet::default();
-            for (f, _) in state.visited.iter() {
+            for (f, _) in state.seen_nodes.iter() {
                 fns.insert(*f);
             }
             self.stats.functions_visited += fns.len();
@@ -1133,7 +1058,7 @@ impl<'a> BackwardTaintEngine<'a> {
             // Branch feasibility at phis: a Phi merges values from sibling
             // arms; when the branch condition is a constant comparison, the
             // infeasible arm never executes and its definition must not feed
-            // the merge (`bar = const if 7*18+106 > 200 else param` — the
+            // the merge (`bar = const if 7*18+106 > 200 else param` - the
             // tainted else arm is dead). Filter phi predecessors here rather
             // than in the SVFG: feasibility is a walk-time question and the
             // graph stays a pure value-flow structure.
@@ -1187,7 +1112,8 @@ impl<'a> BackwardTaintEngine<'a> {
             }
 
             for (pf, pk) in cross_preds {
-                if state.visited.insert((pf, pk)) {
+                if state.visited.insert((pf, pk, pk.block)) {
+                    state.seen_nodes.insert((pf, pk));
                     if self.capture_paths {
                         self.current_parents.insert((pf, pk), (cf, cur));
                     }
@@ -1195,7 +1121,8 @@ impl<'a> BackwardTaintEngine<'a> {
                 }
             }
             for pk in local_preds {
-                if state.visited.insert((cf, pk)) {
+                if state.visited.insert((cf, pk, cur.block)) {
+                    state.seen_nodes.insert((cf, pk));
                     if self.capture_paths {
                         self.current_parents.insert((cf, pk), (cf, cur));
                     }

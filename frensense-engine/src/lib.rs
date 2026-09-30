@@ -30,6 +30,8 @@ pub mod debug_flags;
 pub mod graph;
 pub mod harness;
 pub mod ir;
+#[cfg(test)]
+mod regression_gate_tests;
 pub mod scan;
 
 /// Opaque identifier for a source file within a single analysis session.

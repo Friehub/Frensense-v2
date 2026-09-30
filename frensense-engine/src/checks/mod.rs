@@ -42,6 +42,7 @@ mod uaf_tests;
 #[cfg(test)]
 mod weak_hash_tests;
 
+use crate::analysis::forward::ProgramSvfg;
 use crate::analysis::taint::facts::FactTable;
 use crate::ir::function::FunctionIR;
 use rustc_hash::FxHashSet;
@@ -72,6 +73,17 @@ pub struct CheckerFinding {
 pub fn check_all<'a>(
     irs: impl IntoIterator<Item = &'a FunctionIR>,
     facts: &FactTable,
+) -> Vec<CheckerFinding> {
+    check_all_with_graph(irs, facts, None)
+}
+
+/// [`check_all`] with the program value-flow graph: the UAF checker walks
+/// interprocedural free/use edges (callee parameter frees, caller-side
+/// frees, factory provenance) that intraprocedural IR alone cannot see.
+pub fn check_all_with_graph<'a>(
+    irs: impl IntoIterator<Item = &'a FunctionIR>,
+    facts: &FactTable,
+    prog: Option<&ProgramSvfg<'_>>,
 ) -> Vec<CheckerFinding> {
     let mut seen: FxHashSet<(String, String, usize)> = FxHashSet::default();
     let mut all = Vec::new();
@@ -109,7 +121,12 @@ pub fn check_all<'a>(
             .chain(guard_bypass::check(ir, facts))
             .chain(guard_bypass::check_credentials(ir, facts))
             .chain(schema_policy::check(ir, facts))
-            .chain(uaf::check_with_summaries(ir, &mem_summaries))
+            .chain(
+                match prog.and_then(|p| p.function_index(&ir.name).map(|fi| (p, fi))) {
+                    Some((p, fi)) => uaf::check_with_prog(fi, p, &mem_summaries),
+                    None => uaf::check_with_summaries(ir, &mem_summaries),
+                },
+            )
             .chain(oob::check_with_summaries(ir, &mem_summaries))
             .chain(learned::check(ir, facts));
         for f in findings {

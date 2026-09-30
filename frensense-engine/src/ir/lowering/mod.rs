@@ -79,6 +79,14 @@ impl<'a> LoweringContext<'a> {
 
             NodeRole::Composite => self.visit_composite(node),
 
+            // Function values own their body: extraction lowers them into a
+            // dedicated IR (named, bound, route, or positional `<fn@N>`).
+            // The enclosing IR contributes nothing for the node itself -
+            // inlining a copy here duplicated every finding, policy hit, and
+            // sink walk under two function names. Call sites resolve by name
+            // (`CallStatic`); captures flow through closure edges.
+            NodeRole::Function { .. } => None,
+
             _ => self.visit_children_generic(node),
         }
     }

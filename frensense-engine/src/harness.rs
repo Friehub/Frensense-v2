@@ -9,7 +9,7 @@
 //! The bundler MUST lower corpus pairs through this same harness (not its own
 //! walker) so that facts are extracted from exactly the IR the engine scans.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::analysis::taint::facts::FactTable;
 use crate::ir::function::*;
@@ -57,33 +57,30 @@ pub fn lower_source_with_facts(
         .ok_or_else(|| format!("parse failed for {path}"))?;
 
     let mut irs: FxHashMap<String, FunctionIR> = FxHashMap::default();
+    // Spans of function values already lowered under their binding name
+    // (lexical const / route registration). The generic walker must not
+    // lower the same node again under a positional `<fn@N>` name: the twin
+    // duplicates every finding and policy segment of the bound function.
+    let mut bound_fns: FxHashSet<usize> = FxHashSet::default();
     let mut stack = vec![tree.root_node()];
     while let Some(node) = stack.pop() {
         // Language-driven function detection: JS/TS `function_declaration` /
         // `method_definition`, Python `function_definition` (+ async),
         // Rust `function_item`, Go `function_declaration` / `method_declaration`.
         if spec.is_function_node(node.kind()) {
-            let name = node
-                .child_by_field_name("name")
-                .or_else(|| {
-                    let mut decl = node.child_by_field_name("declarator");
-                    while let Some(d) = decl {
-                        if d.kind() == "identifier" {
-                            return Some(d);
-                        }
-                        if let Some(inner) = d.child_by_field_name("declarator") {
-                            decl = Some(inner);
-                        } else {
-                            let mut c = d.walk();
-                            return d.children(&mut c).find(|k| k.kind() == "identifier");
-                        }
-                    }
-                    None
-                })
-                .map(|n| source[n.start_byte()..n.end_byte()].to_string())
-                .unwrap_or_else(|| format!("<fn@{}>", node.start_byte()));
-            let ir = lower_one(&name, node, source, spec, facts);
-            irs.entry(ir.name.clone()).or_insert(ir);
+            let name = function_name_of(node, source);
+            // Skip only bindings whose lexical declaration or route
+            // registration already lowered this node under its binding
+            // name. EVERY other function - including nameless nested ones
+            // - is extracted: with inlining gone, extraction is its only
+            // home, and call sites resolve to it by name or by cross edge.
+            let is_twin = name.is_none() && bound_fns.contains(&node.start_byte());
+            if !is_twin {
+                let name = name.unwrap_or_else(|| format!("<fn@{}>", node.start_byte()));
+                let mut ir = lower_one(&name, node, source, spec, facts);
+                ir.enclosing_fn = enclosing_extracted_name(node, source, path, spec);
+                irs.entry(ir.name.clone()).or_insert(ir);
+            }
         }
         // Top-level arrow functions bound to consts/lets, the dominant
         // shape for utility libraries (`export const hash = (d) => ...`).
@@ -107,12 +104,20 @@ pub fn lower_source_with_facts(
                     .map(|n| source[n.start_byte()..n.end_byte()].to_string())
                     .unwrap_or_else(|| format!("<fn@{}>", decl.start_byte()));
                 if value.kind() == "arrow_function" || value.kind() == "function_expression" {
-                    let ir = lower_one(&name, value, source, spec, facts);
+                    bound_fns.insert(value.start_byte());
+                    let mut ir = lower_one(&name, value, source, spec, facts);
+                    ir.enclosing_fn = enclosing_extracted_name(value, source, path, spec);
                     irs.entry(ir.name.clone()).or_insert(ir);
-                } else {
-                    // Non-function static initializer: allowlist Sets, config
-                    // objects, schema builders. Lowered as pseudo-IR so the
-                    // checker layer can assert policy over them.
+                } else if !inside_function(node, spec) {
+                    // Top-level non-function static initializer: allowlist
+                    // Sets, config objects, schema builders. Lowered as
+                    // pseudo-IR so the checker layer can assert policy over
+                    // them. A NESTED declaration is skipped: its value is
+                    // already lowered as part of the enclosing function's
+                    // body, and extracting it again created a phantom
+                    // top-level function attributed to no source construct
+                    // (`const r = runTool(cmd)` inside a handler fired
+                    // policy twice, once for `r`, once for the handler).
                     let ir = lower_static(&name, value, source, spec, facts);
                     irs.entry(ir.name.clone()).or_insert(ir);
                 }
@@ -132,19 +137,115 @@ pub fn lower_source_with_facts(
                 for a in &arg_nodes {
                     if a.kind() == "arrow_function" || a.kind() == "function_expression" {
                         let name = format!("<{}:handler@{}>", path, a.start_byte());
-                        let ir = lower_one(&name, *a, source, spec, facts);
+                        bound_fns.insert(a.start_byte());
+                        let mut ir = lower_one(&name, *a, source, spec, facts);
+                        ir.enclosing_fn = enclosing_extracted_name(*a, source, path, spec);
                         irs.entry(ir.name.clone()).or_insert(ir);
                     }
                 }
             }
         }
+        // Named children only: the anonymous `function` keyword token is
+        // classified as a Function node by the JS spec, and visiting it
+        // spawned an empty `<fn@N>` pseudo-function for every declaration.
         let mut c = node.walk();
-        let kids: Vec<_> = node.children(&mut c).collect();
+        let kids: Vec<_> = node.named_children(&mut c).collect();
         for k in kids.into_iter().rev() {
             stack.push(k);
         }
     }
     Ok(irs)
+}
+
+/// True when `node` sits inside any function body (a named ancestor
+/// classifies as Function). Only used to skip NESTED non-function static
+/// initializers: their value is lowered as part of the enclosing function.
+fn inside_function(node: tree_sitter::Node, spec: &dyn frensense_lang::spec::LanguageSpec) -> bool {
+    let mut cur = node.parent();
+    while let Some(ancestor) = cur {
+        if spec.is_function_node(ancestor.kind()) {
+            return true;
+        }
+        cur = ancestor.parent();
+    }
+    false
+}
+
+/// The declaration-level name of a function node: the `name` field, or the
+/// C-style declarator chain (`function_definition → declarator → ...`).
+fn function_name_of(node: tree_sitter::Node, source: &str) -> Option<String> {
+    node.child_by_field_name("name")
+        .or_else(|| {
+            let mut decl = node.child_by_field_name("declarator");
+            while let Some(d) = decl {
+                if d.kind() == "identifier" {
+                    return Some(d);
+                }
+                if let Some(inner) = d.child_by_field_name("declarator") {
+                    decl = Some(inner);
+                } else {
+                    let mut c = d.walk();
+                    return d.children(&mut c).find(|k| k.kind() == "identifier");
+                }
+            }
+            None
+        })
+        .map(|n| source[n.start_byte()..n.end_byte()].to_string())
+}
+
+/// The program name under which `fn_node` was extracted, mirroring every
+/// extraction branch in [`lower_source_with_facts`]. Always `Some` for a
+/// function node - nameless, unbound ones get the positional `<fn@byte>`
+/// name. Used to resolve an extracted function's lexical parent.
+fn extracted_ancestor_name(fn_node: tree_sitter::Node, source: &str, path: &str) -> Option<String> {
+    // Direct declaration name (function_declaration, method_definition,
+    // named function expression) - same order as extraction.
+    if let Some(name) = function_name_of(fn_node, source) {
+        return Some(name);
+    }
+    // Bound to a const/let: the lexical branch extracts it under the
+    // binding's name (`const helper = (x) => …`).
+    if let Some(parent) = fn_node.parent()
+        && parent.kind() == "variable_declarator"
+        && parent.child_by_field_name("value") == Some(fn_node)
+        && (fn_node.kind() == "arrow_function" || fn_node.kind() == "function_expression")
+    {
+        let name = parent
+            .child_by_field_name("name")
+            .map(|n| source[n.start_byte()..n.end_byte()].to_string())
+            .unwrap_or_else(|| format!("<fn@{}>", parent.start_byte()));
+        return Some(name);
+    }
+    // Route-registration handler: `app.get("/", handler)`.
+    if let Some(args) = fn_node.parent()
+        && args.kind() == "arguments"
+        && let Some(call) = args.parent()
+        && call.kind() == "call_expression"
+        && let Some(callee) = call.child_by_field_name("function")
+        && is_route_registration(&source[callee.start_byte()..callee.end_byte()])
+    {
+        return Some(format!("<{}:handler@{}>", path, fn_node.start_byte()));
+    }
+    // Nameless, unbound function: extracted positionally by byte offset.
+    Some(format!("<fn@{}>", fn_node.start_byte()))
+}
+
+/// The program name of the innermost enclosing extracted function for a
+/// function node at `node`'s position, or None at module scope.
+fn enclosing_extracted_name(
+    node: tree_sitter::Node,
+    source: &str,
+    path: &str,
+    spec: &dyn frensense_lang::spec::LanguageSpec,
+) -> Option<String> {
+    let mut cur = node.parent();
+    while let Some(ancestor) = cur {
+        if spec.is_function_node(ancestor.kind()) {
+            return extracted_ancestor_name(ancestor, source, path);
+        }
+        cur = ancestor.parent();
+    }
+    None
 }
 
 fn is_route_registration(callee_text: &str) -> bool {
@@ -237,7 +338,7 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             "identifier" => Some(p),
             // C `parameter_declaration`: shape is `type declarator`, where the
             // declarator may be pointer_declarator → identifier (e.g. `char *p`).
-            // child(0) returns the type specifier, not the name — use the
+            // child(0) returns the type specifier, not the name - use the
             // `declarator` field and walk it to find the leaf identifier.
             "parameter_declaration" => p
                 .child_by_field_name("declarator")
@@ -270,5 +371,155 @@ fn find_param_identifier(node: tree_sitter::Node<'_>) -> Option<tree_sitter::Nod
         _ => node
             .child_by_field_name("declarator")
             .and_then(find_param_identifier),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lower_source;
+
+    fn keys(src: &str) -> Vec<String> {
+        let fns = lower_source("t.ts", src, "ts").unwrap();
+        let mut ks: Vec<String> = fns.keys().cloned().collect();
+        ks.sort();
+        ks
+    }
+
+    /// Regression: `const r = runTool(cmd)` nested in a handler must NOT be
+    /// extracted as a phantom top-level function - the call already belongs
+    /// to the handler's IR, and the phantom fired policy checks twice under
+    /// a function name that exists nowhere in the source.
+    #[test]
+    fn nested_non_function_const_not_extracted() {
+        let src = r#"
+export function handler (cmd: string) {
+  const r = runTool(cmd)
+  return r
+}
+"#;
+        let fns = lower_source("t.ts", src, "ts").unwrap();
+        let mut ks: Vec<String> = fns.keys().cloned().collect();
+        ks.sort();
+        assert_eq!(ks, vec!["handler".to_string()], "phantom entries: {ks:?}");
+        let handler = &fns["handler"];
+        let has_run_tool =
+            handler.blocks.values().any(|b| {
+                b.instructions.iter().any(|i| matches!(
+                i,
+                crate::ir::function::Instruction::CallStatic { func, .. } if func == "runTool"
+            ))
+            });
+        assert!(has_run_tool, "the nested call must stay in the handler IR");
+    }
+
+    /// The anonymous `function` keyword token classifies as a Function node;
+    /// visiting it used to spawn an empty `<fn@N>` pseudo-function for every
+    /// declaration in the file.
+    #[test]
+    fn function_keyword_token_not_extracted() {
+        let ks = keys(
+            r#"
+export function handler (cmd: string) {
+  return runTool(cmd)
+}
+"#,
+        );
+        assert_eq!(ks, vec!["handler".to_string()], "phantom entries: {ks:?}");
+    }
+
+    /// A nested arrow const is extracted ONCE under its binding name; the
+    /// generic walker must not lower the same node again as `<fn@N>`.
+    #[test]
+    fn bound_arrow_lowered_exactly_once() {
+        let ks = keys(
+            r#"
+export function handler (cmd: string) {
+  const helper = (x) => db.execute(x)
+  return helper(cmd)
+}
+"#,
+        );
+        assert_eq!(
+            ks,
+            vec!["handler".to_string(), "helper".to_string()],
+            "expected exactly handler+helper, got: {ks:?}"
+        );
+    }
+
+    /// Top-level arrow consts: one entry under the binding name, no twin.
+    #[test]
+    fn top_level_arrow_const_lowered_once() {
+        let ks = keys(
+            r#"
+export const hash = (d: string) => db.execute(d)
+"#,
+        );
+        assert_eq!(ks, vec!["hash".to_string()], "got: {ks:?}");
+    }
+
+    /// Route-registration handlers: lowered under the stable handler name
+    /// only, not again as a positional `<fn@N>` twin.
+    #[test]
+    fn route_handler_lowered_once() {
+        let ks = keys(
+            r#"
+const app = makeApp()
+app.get("/", (req: any, res: any) => open(res))
+"#,
+        );
+        assert!(
+            ks.iter().all(|k| !k.starts_with("<fn@")),
+            "positional twin leaked: {ks:?}"
+        );
+    }
+
+    /// Top-level non-function statics keep their pseudo-IR: the checker
+    /// layer asserts policy over allowlists/config objects defined here.
+    #[test]
+    fn top_level_static_still_extracted() {
+        let ks = keys(
+            r#"
+const allowed = new Set(["http://a.example"])
+export function handler () { return 1 }
+"#,
+        );
+        assert!(ks.contains(&"allowed".to_string()), "got: {ks:?}");
+        assert!(ks.contains(&"handler".to_string()), "got: {ks:?}");
+    }
+
+    /// A nameless module-scope function expression (IIFE) has no enclosing
+    /// lowered IR - it must still be extracted, or its body is never scanned.
+    #[test]
+    fn module_scope_iife_still_extracted() {
+        let ks = keys(
+            r#"
+(function () { runTool(cmd) })()
+export function handler () { return 1 }
+"#,
+        );
+        assert!(
+            ks.iter().any(|k| k.starts_with("<fn@")),
+            "IIFE coverage lost: {ks:?}"
+        );
+        assert!(ks.contains(&"handler".to_string()), "got: {ks:?}");
+    }
+
+    /// Nested NAMED function declarations are kept: call sites inside the
+    /// enclosing function resolve to them via cross edges.
+    #[test]
+    fn nested_named_function_still_extracted() {
+        let ks = keys(
+            r#"
+export function outer (cmd: string) {
+  function inner (x: string) { return runTool(x) }
+  return inner(cmd)
+}
+"#,
+        );
+        assert_eq!(
+            ks,
+            vec!["inner".to_string(), "outer".to_string()],
+            "got: {ks:?}"
+        );
     }
 }

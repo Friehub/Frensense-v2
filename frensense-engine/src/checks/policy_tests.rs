@@ -126,6 +126,102 @@ export function handler (cmd: string) {
         );
     }
 
+    /// Function-scope enforcement is SPATIAL: a guard call that runs only
+    /// on one branch does not dominate the trigger, so it enforces nothing
+    /// and the policy must still fire.
+    #[test]
+    fn non_dominating_guard_still_fires() {
+        let src = r#"
+export function handler (cmd: string, doAudit: boolean) {
+  if (doAudit) {
+    checkPermission(cmd)
+  }
+  return runTool(cmd)
+}
+"#;
+        let mut facts = FactTable::default();
+        facts.policy_facts.push(PolicyFact {
+            rule: "policy_run_tool".into(),
+            when_call: "runTool".into(),
+            require: vec![PolicyRequirement::GuardCall {
+                call: "checkPermission".into(),
+            }],
+            scope: PolicyScope::Function,
+            message: "tool executed without policy check".into(),
+            severity: "warning".into(),
+        });
+        let hits = policy::check_program(&lower(src), &facts);
+        assert_eq!(
+            hits.len(),
+            1,
+            "conditional guard cannot enforce the trigger: {:?}",
+            hits
+        );
+    }
+
+    /// Same block, guard AFTER the trigger: the check runs after the
+    /// privileged call, too late to enforce it - must fire.
+    #[test]
+    fn guard_after_trigger_in_same_block_fires() {
+        let src = r#"
+export function handler (cmd: string) {
+  runTool(cmd)
+  checkPermission(cmd)
+}
+"#;
+        let mut facts = FactTable::default();
+        facts.policy_facts.push(PolicyFact {
+            rule: "policy_run_tool".into(),
+            when_call: "runTool".into(),
+            require: vec![PolicyRequirement::GuardCall {
+                call: "checkPermission".into(),
+            }],
+            scope: PolicyScope::Function,
+            message: "tool executed without policy check".into(),
+            severity: "warning".into(),
+        });
+        let hits = policy::check_program(&lower(src), &facts);
+        assert_eq!(
+            hits.len(),
+            1,
+            "guard executing after the trigger enforces nothing: {:?}",
+            hits
+        );
+    }
+
+    /// Regression: `const r = runTool(cmd)` nested in a handler must not be
+    /// re-extracted by the harness as a phantom top-level function - that
+    /// produced a second, spurious policy hit attributed to a function that
+    /// exists nowhere in the source.
+    #[test]
+    fn nested_const_call_fires_policy_exactly_once() {
+        let src = r#"
+export function handler (cmd: string) {
+  const r = runTool(cmd)
+  return r
+}
+"#;
+        let mut facts = FactTable::default();
+        facts.policy_facts.push(PolicyFact {
+            rule: "policy_run_tool".into(),
+            when_call: "runTool".into(),
+            require: vec![PolicyRequirement::GuardCall {
+                call: "checkPermission".into(),
+            }],
+            scope: PolicyScope::Function,
+            message: "tool executed without policy check".into(),
+            severity: "warning".into(),
+        });
+        let hits = policy::check_program(&lower(src), &facts);
+        assert_eq!(
+            hits.len(),
+            1,
+            "nested const must not double-fire policy: {:?}",
+            hits
+        );
+        assert_eq!(hits[0].function, "handler");
+    }
+
     /// RequireCall: an audit-log write must accompany the privileged call.
     #[test]
     fn require_call_policy() {

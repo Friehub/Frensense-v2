@@ -1026,7 +1026,7 @@ pub mod demand_tests {
         );
     }
     // -----------------------------------------------------------------------
-    // Branch feasibility: `bar = "safe" if const_true else param` — the
+    // Branch feasibility: `bar = "safe" if const_true else param` - the
     // tainted else arm is dead, so the flow through the phi is not
     // Vulnerable.
     //
@@ -1434,6 +1434,195 @@ export function middleware(c: any) {
             set_findings.is_empty(),
             "c.set must not be treated as a sink, got: {:?}",
             set_findings
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression: a shared heap-store source use is first visited with the
+    // guard's *safe* arm as context (guard-stop fires, node never expands),
+    // and the later visit with the *unsafe* arm context - the one that leads
+    // to the source - must not be deduplicated away.
+    //
+    //   b0:    bar = request.form.get("p")        // source
+    //          obj = {}
+    //          obj.data = bar                     // store: shared use(bar) node
+    //          cond = bar == "ok"                 // guard: safe arm = true arm
+    //          branch cond ? armSafe : armOther
+    //   armSafe:  v1 = obj.data                   // heap edge → shared use
+    //   armOther: v2 = obj.data                   // heap edge → shared use
+    //   merge:    v = phi(v1, v2); open(v)
+    //
+    // Backward: phi → v1 def (ctx=merge) expands first (lower block id) and
+    // pushes use(bar)@store with ctx=armSafe → guard-stop on pop. The v2-def
+    // expansion then tries to push the *same* node with ctx=armOther; that
+    // context is the unguarded path through which the source must be found.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_guard_stop_on_shared_store_does_not_hide_unguarded_path() {
+        let mut handler = FunctionIR::new("handler".into());
+        {
+            let b0 = handler.entry_block;
+            let mem0 = handler.initial_memory_state;
+
+            let req = handler.new_var(dummy_meta("request"));
+            let form = handler.new_var(dummy_meta("request.form"));
+            handler.push_instruction(
+                b0,
+                Instruction::LoadField {
+                    dest: form,
+                    mem_in: mem0,
+                    base: req,
+                    field: "form".into(),
+                },
+            );
+            let got = handler.new_var(dummy_meta("got"));
+            let m1 = handler.new_var(mem_meta("m1"));
+            handler.push_instruction(
+                b0,
+                Instruction::CallVirtual {
+                    dest: Some(got),
+                    mem_out: m1,
+                    mem_in: mem0,
+                    method: "get".into(),
+                    receiver: Operand::Var(form),
+                    args: vec![Operand::StringLiteral("\"p\"".into())],
+                },
+            );
+            let bar = handler.new_var(dummy_meta("bar"));
+            handler.push_instruction(
+                b0,
+                Instruction::Assign {
+                    dest: bar,
+                    src: Operand::Var(got),
+                },
+            );
+
+            // obj = {} - clean allocation root for the load bases.
+            let obj = handler.new_var(dummy_meta("obj"));
+            let ma = handler.new_var(mem_meta("ma"));
+            handler.push_instruction(
+                b0,
+                Instruction::Allocate {
+                    dest: obj,
+                    mem_out: ma,
+                    mem_in: mem0,
+                    kind: AllocationKind::Object,
+                },
+            );
+
+            // obj.data = bar - the shared store whose src-use node feeds
+            // both arm loads via heap edges.
+            let ms = handler.new_var(mem_meta("ms"));
+            handler.push_instruction(
+                b0,
+                Instruction::StoreField {
+                    mem_out: ms,
+                    mem_in: ma,
+                    base: obj,
+                    field: "data".into(),
+                    src: Operand::Var(bar),
+                },
+            );
+
+            // cond = bar == "ok" - non-denylist comparison: the true arm
+            // is the guard's safe block.
+            let cond = handler.new_var(dummy_meta("cond"));
+            handler.push_instruction(
+                b0,
+                Instruction::BinaryOp {
+                    dest: cond,
+                    op: "==".into(),
+                    lhs: Operand::Var(bar),
+                    rhs: Operand::StringLiteral("\"ok\"".into()),
+                },
+            );
+
+            // Safe arm created first → lower block id → its phi incoming
+            // sorts first, so the guard-stopped context wins the shared node.
+            let arm_safe = handler.new_block();
+            let arm_other = handler.new_block();
+            let merge = handler.new_block();
+            handler.set_terminator(
+                b0,
+                Terminator::Branch {
+                    cond: Operand::Var(cond),
+                    true_block: arm_safe,
+                    false_block: arm_other,
+                },
+            );
+            handler.add_edge(b0, arm_safe);
+            handler.add_edge(b0, arm_other);
+
+            let v1 = handler.new_var(dummy_meta("v1"));
+            handler.push_instruction(
+                arm_safe,
+                Instruction::LoadField {
+                    dest: v1,
+                    mem_in: ms,
+                    base: obj,
+                    field: "data".into(),
+                },
+            );
+            handler.set_terminator(arm_safe, Terminator::Jump(merge));
+            handler.add_edge(arm_safe, merge);
+
+            let v2 = handler.new_var(dummy_meta("v2"));
+            handler.push_instruction(
+                arm_other,
+                Instruction::LoadField {
+                    dest: v2,
+                    mem_in: ms,
+                    base: obj,
+                    field: "data".into(),
+                },
+            );
+            handler.set_terminator(arm_other, Terminator::Jump(merge));
+            handler.add_edge(arm_other, merge);
+
+            let v = handler.new_var(dummy_meta("v"));
+            handler.push_phi(
+                merge,
+                Phi {
+                    dest: v,
+                    incoming: vec![(arm_safe, v1), (arm_other, v2)],
+                },
+            );
+            let m2 = handler.new_var(mem_meta("m2"));
+            handler.push_instruction(
+                merge,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m2,
+                    mem_in: ms,
+                    func: "open".into(),
+                    args: vec![Operand::Var(v)],
+                },
+            );
+            handler.set_terminator(merge, Terminator::Return { src: None });
+        }
+
+        let cfg = TaintConfig {
+            sources: [
+                "request.form.get".to_string(),
+                "request.form".to_string(),
+                "request".to_string(),
+            ]
+            .into_iter()
+            .collect(),
+            sinks: ["open".to_string()].into_iter().collect(),
+            sanitizers: [].into_iter().collect(),
+        };
+        let prog = build_program(vec![handler]);
+        let (findings, _stats) = run_backward(&cfg, &prog);
+
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.verdict == BackwardVerdict::Vulnerable),
+            "unguarded heap path through the store must reach the source \
+             even when the safe-arm context guard-stopped the shared node, \
+             got {:?}",
+            findings
         );
     }
 }

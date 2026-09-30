@@ -122,12 +122,16 @@ pub fn scan_prepared(
     let fn_file = &prepared.fn_file;
     let file_source = &prepared.file_source;
 
+    // The program graph is built first: non-dataflow checks that walk
+    // interprocedural value flow (UAF free/use pairs) reuse it, and the
+    // taint engine below gets the same instance.
+    let prog = ProgramSvfg::new_with_facts(statics, config, facts);
+
     // Non-dataflow policy checks run on the same lowered IR, no taint
     // needed, so weak-crypto/config bugs surface even with zero taint paths.
     // `facts` also carries corpus-learned checks installed by the bundle.
-    let checker_findings = checks::check_all(statics.values().copied(), facts);
-
-    let prog = ProgramSvfg::new_with_facts(statics, config, facts);
+    let checker_findings =
+        checks::check_all_with_graph(statics.values().copied(), facts, Some(&prog));
     let mut engine = BackwardTaintEngine::new(&prog, config)
         .with_fact_table(facts)
         .with_fn_file(fn_file);

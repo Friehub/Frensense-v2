@@ -8,10 +8,12 @@
 //!   the typed representation every analysis consumes.
 //! * [`lowering`], tree-sitter AST → `FunctionIR` (via `frensense-lang`).
 //! * [`ssa`], Memory SSA construction.
+//! * [`control`], dominators / post-dominators / control dependence.
 //!
 //! This layer knows nothing about taint, checks, or program graphs, it is
 //! the reusable compiler frontend.
 
+pub mod control;
 pub mod function;
 pub mod lowering;
 pub mod ssa;

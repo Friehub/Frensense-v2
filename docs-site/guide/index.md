@@ -24,7 +24,7 @@ use-after-free / double-free, and out-of-bounds accesses.
 
 ## Status
 
-v2 is a **preview** (<span class="frensense-version">v0.7.0-preview.4</span>). The knowledge-bundle format and CLI
+v2 is a **preview** (<span class="frensense-version">v0.7.0-preview.5</span>). The knowledge-bundle format and CLI
 surface may still change before the stable release.
 
 > **Coming from v1?** The legacy v1 documentation is preserved at

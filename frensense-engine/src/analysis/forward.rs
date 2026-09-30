@@ -288,6 +288,7 @@ impl<'a> ProgramSvfg<'a> {
         prog.compute_summaries(config, facts);
         prog.install_cross_edges();
         prog.install_heap_cross_edges();
+        prog.install_closure_edges();
         prog
     }
 
@@ -646,6 +647,125 @@ impl<'a> ProgramSvfg<'a> {
             edges.sort_by_key(|(f, k)| (*f, k.block.0, k.instr_idx, k.var.0));
             edges.dedup();
         }
+    }
+
+    /// Closure (captured free-variable) edges. A function extracted from a
+    /// nested position reads variables its own IR never defines; the value
+    /// lives in the innermost enclosing extracted function that DOES define
+    /// them, resolved through [`FunctionIR::enclosing_fn`]. The module-scope
+    /// boundary ends the walk - no analysed IR owns those names (matching
+    /// the pre-restructure behavior where inlining resolved captures only
+    /// inside a function's own IR).
+    ///
+    /// Value-flow direction `def(E, name) ──▶ use(F, v)`, keyed by the
+    /// DEFINING node (the map's convention: key = value source, as with
+    /// `FormalRet → ActualRet`), so the backward taint walk crosses into the
+    /// defining scope at each free use node - including multi-block free
+    /// vars (per-scope `VarId`s) and terminator uses, since every node whose
+    /// var has no def site is covered.
+    fn install_closure_edges(&mut self) {
+        for fi in 0..self.functions.len() {
+            // Free use nodes grouped by source name: a node whose var has no
+            // definition (or formal parameter) in this function.
+            let mut free_by_name: FxHashMap<String, Vec<NodeKey>> = FxHashMap::default();
+            {
+                let fe = &self.functions[fi];
+                for &key in fe.svfg.nodes.keys() {
+                    if fe.def_site.contains_key(&key.var) {
+                        continue;
+                    }
+                    let Some(meta) = fe.ir.var_metadata.get(&key.var) else {
+                        continue;
+                    };
+                    if meta.is_memory_state {
+                        continue;
+                    }
+                    let Some(name) = meta.source_name.as_deref() else {
+                        continue;
+                    };
+                    if name.is_empty() {
+                        continue;
+                    }
+                    free_by_name.entry(name.to_string()).or_default().push(key);
+                }
+            }
+            if free_by_name.is_empty() {
+                continue;
+            }
+
+            for (name, mut use_nodes) in free_by_name {
+                // Walk the lexical chain to the first enclosing function
+                // that actually defines `name`.
+                let mut target: Option<usize> = None;
+                let mut cur = self.functions[fi].ir.enclosing_fn.clone();
+                let mut hops = 0;
+                while let Some(enc) = cur
+                    && hops < 32
+                {
+                    hops += 1;
+                    let Some(&gi) = self.func_index.get(&enc) else {
+                        break;
+                    };
+                    if self.defines_name(gi, &name) {
+                        target = Some(gi);
+                        break;
+                    }
+                    cur = self.functions[gi].ir.enclosing_fn.clone();
+                }
+                let Some(gi) = target else {
+                    continue; // module scope: no analysed IR owns the name
+                };
+
+                // All def nodes of `name` in the target (params, assignments,
+                // phis): conservative may-reach, like any other cross edge.
+                let mut def_nodes: Vec<NodeKey> = Vec::new();
+                for (&var, &dkey) in &self.functions[gi].def_site {
+                    if self.functions[gi]
+                        .ir
+                        .var_metadata
+                        .get(&var)
+                        .is_some_and(|m| m.source_name.as_deref() == Some(name.as_str()))
+                    {
+                        def_nodes.push(dkey);
+                    }
+                }
+                if def_nodes.is_empty() {
+                    continue;
+                }
+                def_nodes.sort_by_key(|k| (k.block.0, k.instr_idx, k.var.0));
+                def_nodes.dedup();
+                use_nodes.sort_by_key(|k| (k.block.0, k.instr_idx, k.var.0));
+                use_nodes.dedup();
+
+                for u in use_nodes {
+                    for &d in &def_nodes {
+                        // Key = value source (the def in the defining
+                        // scope), so reverse lookup at the free use node
+                        // finds its feeders.
+                        self.cross_edges.entry((gi, d)).or_default().push((fi, u));
+                    }
+                }
+            }
+        }
+
+        // Re-establish determinism over the whole map (closure edges join
+        // the parameter/return/heap edges).
+        for edges in self.cross_edges.values_mut() {
+            edges.sort_by_key(|(f, k)| (*f, k.block.0, k.instr_idx, k.var.0));
+            edges.dedup();
+        }
+    }
+
+    /// True when function `fi` has a defined variable (def site or formal
+    /// parameter) whose source name is `name`.
+    fn defines_name(&self, fi: usize, name: &str) -> bool {
+        let fe = &self.functions[fi];
+        fe.def_site.keys().any(|&var| {
+            fe.ir
+                .var_metadata
+                .get(&var)
+                .is_some_and(|m| m.source_name.as_deref() == Some(name))
+        })
     }
 
     /// Local successors of a node, minus suppressed pass-through edges.

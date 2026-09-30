@@ -93,16 +93,15 @@ export function handler (req: any) {
     #[test]
     fn receiver_access_path_resolves_namespaced_stores() {
         let irs = lower_source("t.ts", SESSION_FLOW, "ts").unwrap();
-        let (_, ir) = irs
-            .iter()
-            .find(|(n, _)| n.contains("orderHistory") || n.contains("handler"))
-            .expect("fn");
-        // Some var in the function must resolve to a path containing the
-        // session root.
-        let any_path = ir.var_metadata.keys().any(|v| {
-            crate::analysis::taint::facts::FactTable::receiver_access_path(ir, *v)
-                .map(|p| p.contains("authenticatedUsers"))
-                .unwrap_or(false)
+        // The handler body lives in the IR that OWNS it - the returned
+        // arrow (`<fn@N>`), not the `orderHistory` husk that only returns
+        // it - so search every IR for the resolved path.
+        let any_path = irs.values().any(|ir| {
+            ir.var_metadata.keys().any(|v| {
+                crate::analysis::taint::facts::FactTable::receiver_access_path(ir, *v)
+                    .map(|p| p.contains("authenticatedUsers"))
+                    .unwrap_or(false)
+            })
         });
         assert!(
             any_path,

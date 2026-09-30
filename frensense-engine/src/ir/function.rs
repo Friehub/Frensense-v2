@@ -278,6 +278,11 @@ pub struct FunctionIR {
     pub blocks: FxHashMap<BlockId, BasicBlock>,
     pub entry_block: BlockId,
     pub var_metadata: FxHashMap<VarId, VarMetadata>,
+    /// Program name of the innermost enclosing extracted function, when this
+    /// function was extracted from a nested position (None for module scope).
+    /// Closure edges resolve free variables through this lexical chain.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub enclosing_fn: Option<String>,
     #[cfg_attr(feature = "serialize", serde(default))]
     // legacy safety: recompute via max ids if absent
     next_var_id: usize,
@@ -298,6 +303,7 @@ impl FunctionIR {
             blocks,
             entry_block: entry_id,
             var_metadata: FxHashMap::default(),
+            enclosing_fn: None,
             next_var_id: 1,
             next_block_id: 1,
         };
