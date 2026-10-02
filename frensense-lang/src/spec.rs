@@ -98,8 +98,12 @@ pub enum NodeRole {
     Block, // { … } / indented block
     /// Value-context composite literal: JS/TS `object` used as a value (not a
     /// statement block), `array`, `object_pattern` in expression position.
-    /// All children are value-producers; taint in ANY child taints the whole
-    /// composite (may-analysis merge, the conservative direction).
+    /// Uniformly-keyed objects and arrays lower to an allocation with one
+    /// store per property/element: field reads resolve through
+    /// field-sensitive heap edges (taint in one property does not pollute
+    /// reads of another), while whole-container consumers see every stored
+    /// value. Objects with unkeyed children (spreads) keep the legacy
+    /// may-analysis union - conservative for taint.
     Composite,
     Import,     // import / use / require
     Export,     // export (JS/TS only)
@@ -547,15 +551,208 @@ pub trait LanguageSpec: Send + Sync + 'static {
         &[]
     }
 
-    /// Known taint source accessor patterns.
+    /// HTTP methods that are ambiguous as bare last-segment call names:
+    /// routers (`app.get`), maps (`m.set`), http clients (`got.post`) and
+    /// caches (`kv.put`) all share them. A dotted spec entry with one of
+    /// these last segments arms *receiver gating* - the call only counts
+    /// as a sink when its receiver root is a declared client root (the
+    /// dotted entry's first segment).
     ///
-    /// e.g. `"req.body"`, `"request.args"`, `"r.URL.Query"`.
-    /// Known motifs (abstract groups of calls) for this language.
-    /// Returns `(motif_name, concrete_call)` pairs.
-    fn known_motif_members(&self) -> &'static [(&'static str, &'static str)] {
+    /// Defaults to the HTTP method set: every server language has it, and
+    /// a provider with no dotted verb entries gains nothing (the gate only
+    /// arms for entries the provider actually declares). Providers may
+    /// narrow the list.
+    fn known_ambiguous_verbs(&self) -> &'static [&'static str] {
+        &[
+            "get", "post", "put", "delete", "patch", "head", "options", "request", "set",
+        ]
+    }
+
+    /// IDOR-class finder sinks: `(call, identity keys)`.
+    ///
+    /// A tainted argument composing an object literal with one of these
+    /// top-level keys is an *identity payload* - it answers "which record"
+    /// - and is reported as an access-control (Idor) finding. Sinks listed
+    /// here only report such payloads: leaf values inside parameterized
+    /// clauses (`{ where: { id: taint } }`), non-identity object fields and
+    /// bare scalars are structurally unprovable as access-control
+    /// violations and are not reported (zero-FP policy).
+    ///
+    /// Vocabulary belongs to the language spec (or a `.frc` bundle), never
+    /// to the engine.
+    fn known_idor_sinks(&self) -> &'static [(&'static str, &'static [&'static str])] {
         &[]
     }
 
+    /// String patterns marking a *denylist guard* literal: comparing user
+    /// input against a literal containing any of these patterns rejects
+    /// the input (`path.contains("..")` → traversal blocked). The engine's
+    /// guard analysis reads the set from the fact table; it is seeded from
+    /// this method and extended by `.frc` bundles
+    /// (`GuardDenylistPattern`).
+    ///
+    /// Defaults to the path-traversal marker - a lexical fact of path
+    /// handling in every language. Providers may extend.
+    fn known_guard_denylist(&self) -> &'static [&'static str] {
+        &[".."]
+    }
+
+    /// Is this sanitizer a *predicate guard* - a boolean check consumed by
+    /// a branch (`if (isSafe(x)) return;`) rather than a value
+    /// transforming call? Guards gate paths; transforms rewrite values.
+    ///
+    /// Default: full sanitizers plus JS-style predicate naming (`test`,
+    /// `isValid`, `is*`). Providers with different naming conventions
+    /// (e.g. Go's `IsX`, Python's `is_x`) override.
+    fn is_predicate_guard(&self, name: &str, kind: Option<&SanitizerKind>) -> bool {
+        kind.is_some_and(|k| matches!(k, SanitizerKind::Full))
+            || name == "test"
+            || name == "isValid"
+            || name.starts_with("is")
+    }
+
+    /// Memory allocator/deallocator vocabulary: which calls return fresh
+    /// memory, with what capacity contract, and which slots they consume.
+    /// Consumed by the engine's memory-summary inference, UAF discovery
+    /// and spatial (OOB) checker through `FactTable::memory_functions`.
+    ///
+    /// Defaults to the C-family bootstrap table
+    /// ([`crate::memory::bootstrap_memory_functions`]); providers whose
+    /// language has a different memory model override.
+    fn known_memory_functions(&self) -> &'static [crate::memory::MemoryFuncSpec] {
+        crate::memory::bootstrap_memory_functions()
+    }
+
+    /// Buffer-manipulation vocabulary: copy/fill/read builtins with their
+    /// destination/source/length argument slots, consumed by the engine's
+    /// spatial (OOB) checker through `FactTable::buffer_builtins`.
+    ///
+    /// Defaults to the C-family bootstrap table
+    /// ([`crate::memory::bootstrap_buffer_builtins`]).
+    fn known_buffer_builtins(&self) -> &'static [crate::memory::BufferBuiltinSpec] {
+        crate::memory::bootstrap_buffer_builtins()
+    }
+
+    /// Containment-test callees (guard/allowlist checks) through
+    /// `FactTable::containment_callees`. Defaults to
+    /// [`crate::policy::bootstrap_containment_callees`].
+    fn known_containment_callees(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_containment_callees()
+    }
+
+    /// Credential-setting sinks through `FactTable::credential_sinks`.
+    /// Defaults to [`crate::policy::bootstrap_credential_sinks`].
+    fn known_credential_sinks(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_credential_sinks()
+    }
+
+    /// Plaintext-credential parameter names through
+    /// `FactTable::credential_params`. Defaults to
+    /// [`crate::policy::bootstrap_credential_params`].
+    fn known_credential_params(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_credential_params()
+    }
+
+    /// Schema number-builder methods through `FactTable::schema_builders`.
+    /// Defaults to [`crate::policy::bootstrap_schema_builders`].
+    fn known_schema_builders(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_schema_builders()
+    }
+
+    /// Schema bound-enforcing methods through `FactTable::schema_enforcers`.
+    /// Defaults to [`crate::policy::bootstrap_schema_enforcers`].
+    fn known_schema_enforcers(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_schema_enforcers()
+    }
+
+    /// Schema bound keywords through `FactTable::schema_keywords`. Defaults
+    /// to [`crate::policy::bootstrap_schema_keywords`].
+    fn known_schema_keywords(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_schema_keywords()
+    }
+
+    /// Substring hints marking a function parameter as URL/redirect-like
+    /// through `FactTable::url_param_hints`. Defaults to
+    /// [`crate::policy::bootstrap_url_param_hints`].
+    fn known_url_param_hints(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_url_param_hints()
+    }
+
+    /// Substring hints marking a guard argument as URL-ish through
+    /// `FactTable::url_arg_hints`. Defaults to
+    /// [`crate::policy::bootstrap_url_arg_hints`].
+    fn known_url_arg_hints(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_url_arg_hints()
+    }
+
+    /// Substring hints marking a literal as an absolute URL through
+    /// `FactTable::url_literal_hints`. Defaults to
+    /// [`crate::policy::bootstrap_url_literal_hints`].
+    fn known_url_literal_hints(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_url_literal_hints()
+    }
+
+    /// Substring hints marking a function name as security-context code
+    /// through `FactTable::security_context_hints`. Defaults to
+    /// [`crate::policy::bootstrap_security_context_hints`].
+    fn known_security_context_hints(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_security_context_hints()
+    }
+
+    /// Substring hints marking a call as an authentication check (idor
+    /// suppression) through `FactTable::auth_guard_hints`. Defaults to
+    /// [`crate::policy::bootstrap_auth_guard_hints`].
+    fn known_auth_guard_hints(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_auth_guard_hints()
+    }
+
+    /// Substring hints marking a callee whose algorithm choice is
+    /// security-sensitive (`insecure_jwt_algorithm` qualification) through
+    /// `FactTable::jwt_algorithm_hints`. Defaults to
+    /// [`crate::policy::bootstrap_jwt_algorithm_hints`].
+    fn known_jwt_algorithm_hints(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_jwt_algorithm_hints()
+    }
+
+    /// Substring hints marking an enclosing function/parameter as credential
+    /// context (weak-digest qualification) through
+    /// `FactTable::credential_context_hints`. Defaults to
+    /// [`crate::policy::bootstrap_credential_context_hints`].
+    fn known_credential_context_hints(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_credential_context_hints()
+    }
+
+    /// Weak-hash policy rules through `FactTable::weak_hash_rules`.
+    /// Defaults to [`crate::policy::bootstrap_weak_hash_rules`].
+    fn known_weak_hash_rules(&self) -> &'static [crate::policy::WeakPrimitiveRule] {
+        crate::policy::bootstrap_weak_hash_rules()
+    }
+
+    /// Insecure config selectors through
+    /// `FactTable::insecure_config_selectors`. Defaults to
+    /// [`crate::policy::bootstrap_insecure_config_selectors`].
+    fn known_insecure_config_selectors(
+        &self,
+    ) -> &'static [(&'static str, &'static [&'static str], &'static str)] {
+        crate::policy::bootstrap_insecure_config_selectors()
+    }
+
+    /// Key-size policy rules through `FactTable::key_size_rules`. Defaults
+    /// to [`crate::policy::bootstrap_key_size_rules`].
+    fn known_key_size_rules(&self) -> &'static [crate::policy::KeySizeRule] {
+        crate::policy::bootstrap_key_size_rules()
+    }
+
+    /// Suspicious hash-wrapper names through
+    /// `FactTable::suspicious_hash_wrappers`. Defaults to
+    /// [`crate::policy::bootstrap_suspicious_hash_wrappers`].
+    fn known_suspicious_hash_wrappers(&self) -> &'static [&'static str] {
+        crate::policy::bootstrap_suspicious_hash_wrappers()
+    }
+
+    /// Known taint source accessor patterns.
+    ///
+    /// e.g. `"req.body"`, `"request.args"`, `"r.URL.Query"`.
     fn known_source_patterns(&self) -> &'static [&'static str] {
         &[]
     }
@@ -630,20 +827,6 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// Returns `&[]` for languages that don't use Express-style registration
     /// (Go uses `http.HandleFunc`, Python uses `@app.route`, Rust uses macros).
     fn route_registration_patterns(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    /// Semantic categories for fingerprint similarity scoring.
-    ///
-    /// Returns `(category_name, api_names)` pairs.  When the engine extracts a
-    /// fingerprint, each API call is hashed against the `api_names` list.  If
-    /// matched, the `category_name` hash is added to the fingerprint's
-    /// `semantic_markers`.  During scoring, matching semantic markers increase
-    /// `semantic_sim`, which is a key dimension in the similarity gate.
-    ///
-    /// This is distinct from [`package_category()`](LanguageSpec::package_category)
-    /// which maps package names to sink categories for vulnerability detection.
-    fn known_semantic_categories(&self) -> &'static [(&'static str, &'static [&'static str])] {
         &[]
     }
 }

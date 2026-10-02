@@ -69,6 +69,8 @@ fn classify_c(kind: &str) -> NodeRole {
         }
         "binary_expression" => NodeRole::BinaryOp,
         "unary_expression" | "pointer_expression" | "sizeof_expression" => NodeRole::UnaryOp,
+        // `x++` / `--x`: lowered as read-modify-write by visit_unary_op.
+        "update_expression" => NodeRole::UnaryOp,
         "switch_statement" => NodeRole::Match,
 
         _ => NodeRole::Other,
@@ -169,6 +171,13 @@ static C_SINK_NAMES: &[(&'static str, crate::spec::SinkLabel)] = &[
     ("stat", crate::spec::SinkLabel::PathTraversal),
     ("access", crate::spec::SinkLabel::PathTraversal),
     // Buffer Overflow / Memory Safety
+    //
+    // Unsized copies only: a tainted source into gets/strcpy/strcat is an
+    // unbounded write. Sized copies (memcpy, memmove, memset, strncpy,
+    // strncat) are deliberately NOT taint sinks - they carry an explicit
+    // length, so boundedness is a spatial question for the capacity-based
+    // checker, and every idiomatic `memcpy(buf, getenv_derived, n)` pattern
+    // (config parsing, path building) alerted on normal input handling.
     ("gets", crate::spec::SinkLabel::BufferOverflow),
     ("strcpy", crate::spec::SinkLabel::BufferOverflow),
     ("strcat", crate::spec::SinkLabel::BufferOverflow),
@@ -177,11 +186,6 @@ static C_SINK_NAMES: &[(&'static str, crate::spec::SinkLabel)] = &[
     ("printf", crate::spec::SinkLabel::FormatString),
     ("snprintf", crate::spec::SinkLabel::FormatString),
     ("sscanf", crate::spec::SinkLabel::FormatString),
-    ("memcpy", crate::spec::SinkLabel::BufferOverflow),
-    ("memmove", crate::spec::SinkLabel::BufferOverflow),
-    ("memset", crate::spec::SinkLabel::BufferOverflow),
-    ("strncpy", crate::spec::SinkLabel::BufferOverflow),
-    ("strncat", crate::spec::SinkLabel::BufferOverflow),
     ("mktemp", crate::spec::SinkLabel::PathTraversal),
     ("tmpnam", crate::spec::SinkLabel::PathTraversal),
     // SSRF
@@ -362,6 +366,24 @@ impl LanguageSpec for CSpec {
         C_SINK_NAMES
     }
 
+    /// Format-string sinks: only the FORMAT slot is dangerous. A tainted
+    /// destination buffer (`sprintf(malloc(strlen(input)), ...)`) or tainted
+    /// data being formatted (`snprintf(dst, n, "%s", input)`) is normal I/O,
+    /// not a vulnerability - alerting on every slot made every getenv-driven
+    /// path builder a Critical finding on real C (alsa-lib, cJSON).
+    fn known_sink_signatures(&self) -> &'static [(&'static str, &'static [usize], bool)] {
+        // (call, dangerous slots, binding slots safe)
+        // sprintf/vsprintf(dst, fmt, ...), printf(fmt, ...),
+        // snprintf(dst, n, fmt, ...), sscanf(input, fmt, ...).
+        &[
+            ("sprintf", &[1], false),
+            ("vsprintf", &[1], false),
+            ("printf", &[0], false),
+            ("snprintf", &[2], false),
+            ("sscanf", &[1], false),
+        ]
+    }
+
     fn known_source_patterns(&self) -> &'static [&'static str] {
         C_SOURCE_PATTERNS
     }
@@ -398,47 +420,5 @@ impl LanguageSpec for CSpec {
 
     fn route_registration_patterns(&self) -> &'static [&'static str] {
         &[]
-    }
-
-    fn known_semantic_categories(&self) -> &'static [(&'static str, &'static [&'static str])] {
-        &[
-            (
-                "db_query",
-                &[
-                    "sqlite3_exec",
-                    "sqlite3_prepare",
-                    "mysql_query",
-                    "PQexec",
-                    "PQprepare",
-                    "sqlite3_step",
-                ],
-            ),
-            (
-                "db_write",
-                &[
-                    "sqlite3_exec",
-                    "mysql_query",
-                    "PQexec",
-                    "INSERT",
-                    "UPDATE",
-                    "DELETE",
-                ],
-            ),
-            ("cmd_exec", &["system", "popen", "exec", "execl", "execvp"]),
-            ("file_read", &["fopen", "fread", "read", "getline", "fgets"]),
-            (
-                "file_write",
-                &["fwrite", "fprintf", "fputs", "write", "fopen"],
-            ),
-            ("http_request", &["curl_easy_perform", "curl", "http_get"]),
-            ("crypto_weak", &["MD5", "SHA1", "MD5_Init", "SHA1_Init"]),
-            (
-                "crypto_strong",
-                &["SHA256", "SHA512", "SHA256_Init", "SHA512_Init"],
-            ),
-            ("deserialize", &["sscanf", "strtol", "atoi", "atof"]),
-            ("process", &["exit", "abort", "_exit", "kill"]),
-            ("regex", &["regcomp", "regexec", "regex_t"]),
-        ]
     }
 }

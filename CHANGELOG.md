@@ -6,6 +6,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+#### Engine
+- **CVE-2026-56109 Deallocation on Error Path Detection**: Added analysis in `checks::uaf::uninit` detecting deallocation of uninitialized stack pointers along unchecked error/EOF paths (inequality return checks without dominating `< 0` diversion).
+- **CFG Jump Resolution for `goto` and Labels**: Added first-class lowering support in `LoweringContext` (`visit_goto`, `visit_labeled_statement`) wiring basic block jump terminators and control flow edges across forward and backward labels.
+- **Out-Parameter Address-Taken Initialization Tracking**: Implemented `is_address_taken_on_all_paths` in `uninit.rs` verifying whether all paths reaching a block execute `Instruction::AddressOf` for a local pointer, correctly recognizing out-parameter initialization.
+
+#### CLI & Bundler
+- **Unified `frensense bundle` Subcommand**: Exposed `frensense bundle <corpus_dir> [output.frc]` directly in the primary CLI with rich documentation under `frensense bundle --help`, enabling users to compile positive/negative corpus pairs into `.frc` bundles without internal crate invocations.
+- **Modular Bundling Pipeline**: Extracted the bundle compilation, seed facts ingestion, and replay gate verification into `frensense_bundler::run_facts_pipeline` with strictly scoped helper functions (< 40 lines).
+- **Corpus-Driven C Memory Contract Learning**: Verified end-to-end learning from upstream C codebases (`alsa-lib`), extracting 11 interprocedural memory contracts (allocators, deallocators, parameter consumers) directly from source deltas and enforcing the Zero False-Positive contract on patched code.
+
+### Changed
+
+#### Engine
+- **Modularized UAF Engine**: Decomposed the monolithic `uaf.rs` checker into single-responsibility submodules under `checks::uaf/` (`types.rs`, `discovery.rs`, `must_exec.rs`, `walker.rs`, `uninit.rs`, and `mod.rs`), adhering to strict single-purpose function sizing (< 40 lines).
+
+### Fixed
+
+#### Engine
+- **Fallthrough Blindness on `goto` Error Exits**: Resolved an engine blindspot where unmodeled `goto` statements in C AST lowering caused error-diverting guard branches to fall through into subsequent code blocks.
+- **Out-Parameter Uninitialized False Positives**: Resolved false positive `UninitializedFree` reports on valid C out-parameter patterns (e.g. `snd_config_hook_load`), ensuring full precision on real-world production codebases.
+
 ## [0.7.0-preview.5] - 2026-09-30
 
 Preview release adding graph-based UAF validation over the store-aware program SVFG, control-dependence gating for guard bypass and policy checks, bounded interprocedural path re-expansion, single-owner function IRs with closure-edge feeding, and an exactly-once detection regression gate.

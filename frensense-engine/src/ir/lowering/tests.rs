@@ -225,3 +225,84 @@ fn test_dynamic_destructuring_and_straight_line_ternary() {
     assert!(loaded_fields.contains(&"name".to_string()));
     assert!(loaded_fields.contains(&"email".to_string()));
 }
+
+#[test]
+fn compound_assignment_lowers_to_read_modify_write() {
+    use crate::harness::lower_source;
+    use crate::ir::function::Instruction;
+
+    for (name, src, lang) in [
+        ("t.c", "int f(){ int x=1; x*=4; return x; }", "c"),
+        ("t.js", "function f(){ let x=1; x+=4; return x; }", "js"),
+        (
+            "t.py",
+            "def f():\n    x = 1\n    x += 4\n    return x\n",
+            "py",
+        ),
+    ] {
+        let fns = lower_source(name, src, lang).unwrap();
+        let ir = &fns["f"];
+        let has_rmw = ir
+            .blocks
+            .values()
+            .flat_map(|b| &b.instructions)
+            .any(|i| matches!(i, Instruction::BinaryOp { op, .. } if op == "+" || op == "*"));
+        assert!(
+            has_rmw,
+            "{lang}: compound assignment must lower to a BinaryOp read-modify-write"
+        );
+    }
+}
+
+#[test]
+fn update_expression_lowers_to_read_modify_write() {
+    use crate::harness::lower_source;
+    use crate::ir::function::Instruction;
+
+    for (name, src, lang, expect) in [
+        ("t.c", "int f(){ int i=0; i++; ++i; return i; }", "c", 2),
+        ("t.js", "function f(){ let i=0; i++; return i; }", "js", 1),
+    ] {
+        let fns = lower_source(name, src, lang).unwrap();
+        let ir = &fns["f"];
+        let increments = ir
+            .blocks
+            .values()
+            .flat_map(|b| &b.instructions)
+            .filter(|i| matches!(i, Instruction::BinaryOp { op, .. } if op == "+"))
+            .count();
+        assert_eq!(
+            increments, expect,
+            "{lang}: increment expressions must lower to BinaryOp +"
+        );
+    }
+}
+
+#[test]
+fn goto_and_labeled_statement_lower_to_cfg_jumps() {
+    use crate::harness::lower_source;
+    use crate::ir::function::Terminator;
+
+    let src = r#"
+int test(int x) {
+    if (x < 0) {
+        goto exit;
+    }
+    x = x + 1;
+exit:
+    return x;
+}
+"#;
+    let fns = lower_source("test.c", src, "c").unwrap();
+    let ir = &fns["test"];
+    let return_block = ir
+        .blocks
+        .values()
+        .find(|b| matches!(b.terminator, Terminator::Return { .. }))
+        .expect("return block must exist");
+    assert!(
+        return_block.predecessors.len() >= 2,
+        "exit block must have incoming goto and fallthrough edges: {:?}",
+        return_block.predecessors
+    );
+}

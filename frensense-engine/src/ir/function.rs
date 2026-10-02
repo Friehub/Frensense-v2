@@ -47,6 +47,14 @@ pub struct VarMetadata {
     /// this to classify the *shape* of the tainted argument (IDOR-style
     /// object payload vs raw injection string).
     pub object_keys: Vec<String>,
+    /// Bound by a declaration visited while lowering this function's body
+    /// (`char *p;`, `let x;`, `x = v` in Python, destructuring patterns) -
+    /// provably function-scoped. Vars created at first *expression* use are
+    /// left `false`: those are file/module/header globals (or undeclared
+    /// names), whose values are initialized elsewhere. Uninitialized-free
+    /// analysis fires only on `declared` vars.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub declared: bool,
 }
 
 /// Operands are the inputs to instructions.
@@ -315,6 +323,7 @@ impl FunctionIR {
             byte_range: None,
             is_memory_state: true,
             object_keys: Vec::new(),
+            declared: false,
         });
 
         f

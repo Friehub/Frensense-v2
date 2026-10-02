@@ -127,7 +127,7 @@ pub fn check_all_with_graph<'a>(
                     None => uaf::check_with_summaries(ir, &mem_summaries),
                 },
             )
-            .chain(oob::check_with_summaries(ir, &mem_summaries))
+            .chain(oob::check_with_summaries(ir, &mem_summaries, facts))
             .chain(learned::check(ir, facts));
         for f in findings {
             let key = (

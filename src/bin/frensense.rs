@@ -16,15 +16,17 @@ fn print_help() {
     println!();
     println!("Usage: frensense [path] [options]");
     println!(
-        "       frensense watch [path] [options]   Re-scan on file changes, print new findings"
+        "       frensense bundle <corpus_dir> [output.frc]  Compile corpus pairs into a .frc bundle"
     );
     println!(
-        "       frensense mcp                      Run the Model Context Protocol (MCP) server"
+        "       frensense watch [path] [options]            Re-scan on file changes, print new findings"
     );
     println!(
-        "       frensense lsp                      Run the Language Server Protocol (LSP) server"
+        "       frensense mcp                               Run the Model Context Protocol (MCP) server"
     );
-    println!();
+    println!(
+        "       frensense lsp                               Run the Language Server Protocol (LSP) server"
+    );
     println!();
     println!("Options:");
     println!("  --json                     Output findings as JSON");
@@ -42,8 +44,66 @@ fn print_help() {
     println!("  --compare-baseline <file>  Fail on new findings vs. baseline");
 }
 
+fn print_bundle_help() {
+    println!("Frensense Bundle Compiler: compile corpus pairs into a .frc facts bundle.");
+    println!();
+    println!("Usage: frensense bundle <corpus_dir> [output.frc]");
+    println!();
+    println!("Arguments:");
+    println!(
+        "  <corpus_dir>  Directory containing vulnerability families organized as paired variants:"
+    );
+    println!(
+        "                '<id>_positive.<ext>' (vulnerable) and '<id>_negative.<ext>' (safe/fixed)."
+    );
+    println!(
+        "  [output.frc]  Destination file for compiled facts bundle (default: frensense-corpus.frc)."
+    );
+    println!();
+    println!("Workflow:");
+    println!("  1. Author a vulnerability concept as a pair of source files in <corpus_dir>:");
+    println!("       - <id>_positive.<ext>: contains the vulnerable flow or unguarded call");
+    println!(
+        "       - <id>_negative.<ext>: contains the safe/remediated pattern (with // SAFE: comment)"
+    );
+    println!("  2. (Optional) In the positive file, open with a '[frensense]' metadata block:");
+    println!("       // [frensense]");
+    println!("       // observation: description of the flaw");
+    println!("       // impact: potential security impact");
+    println!("       // improvement: recommended remediation");
+    println!("       // cwe: CWE-xxx");
+    println!("       // severity: Critical | Warning | Info");
+    println!(
+        "  3. Run 'frensense bundle <corpus_dir> [output.frc]' to compile and replay-verify the facts."
+    );
+    println!(
+        "  4. Run 'frensense <path> --corpus-bundle <output.frc>' to scan using the learned bundle."
+    );
+}
+
+fn handle_bundle_command(args: &[String]) -> Result<bool> {
+    if args.get(1).map(|s| s.as_str()) != Some("bundle") {
+        return Ok(false);
+    }
+    if args.len() < 3 || args.iter().any(|a| a == "--help" || a == "-h") {
+        print_bundle_help();
+        std::process::exit(0);
+    }
+    let corpus_dir = std::path::PathBuf::from(&args[2]);
+    let output_path = args
+        .get(3)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("frensense-corpus.frc"));
+
+    if let Err(e) = frensense_bundler::run_facts_pipeline(&corpus_dir, &output_path) {
+        eprintln!("Bundle compilation error: {e}");
+        std::process::exit(1);
+    }
+    Ok(true)
+}
+
 fn handle_early_args(args: &[String]) -> bool {
-    if args.len() < 2 || args.iter().any(|a| a == "--help" || a == "-h") {
+    if args.len() < 2 || (args.len() == 2 && args.iter().any(|a| a == "--help" || a == "-h")) {
         print_help();
         std::process::exit(0);
     }
@@ -183,6 +243,10 @@ fn run_lsp() -> Result<()> {
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     if handle_early_args(&args) {
+        return Ok(());
+    }
+
+    if handle_bundle_command(&args)? {
         return Ok(());
     }
 

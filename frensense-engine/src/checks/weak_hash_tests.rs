@@ -72,6 +72,59 @@ export function legacy (d: string) { return md5(d) }
         );
     }
 
+    /// Insecure algorithm selector accepted by a *verifier*:
+    /// `jwt.verify(token, secret, 'none')` - verification-context fires.
+    #[test]
+    fn jwt_verifier_with_insecure_algorithm_fires() {
+        let src = r#"
+import * as jwt from 'jsonwebtoken'
+export function checkToken (token: string, secret: string) {
+  return jwt.verify(token, secret, 'none')
+}
+"#;
+        let findings = check(src);
+        assert!(
+            findings.iter().any(|(_, r)| *r == "insecure_jwt_algorithm"),
+            "jwt.verify with 'none' must fire, got {findings:?}"
+        );
+    }
+
+    /// Challenge/test harness wrappers that *issue* a token under an
+    /// insecure algorithm (`jwtChallenge(id, req, 'none', ...)`) are not
+    /// verifiers accepting `none` - no finding.
+    #[test]
+    fn jwt_issuing_wrapper_is_silent() {
+        let src = r#"
+export function jwtChallenges (req: any) {
+  jwtChallenge('jwtUnsignedChallenge', req, 'none', /x/)
+}
+"#;
+        let findings = check(src);
+        assert!(
+            !findings.iter().any(|(_, r)| *r == "insecure_jwt_algorithm"),
+            "token-issuing wrapper must not fire, got {findings:?}"
+        );
+    }
+
+    /// A generic digest utility (`const digest = (data) => createHash('md5')`)
+    /// with no credential context is not a password-KDF shape - the
+    /// selector rule fires only when the enclosing function/parameters name
+    /// a credential context (password/secret/token/...). Credential-named
+    /// wrappers (`hashPassword`) keep firing (covered by
+    /// `weak_hash_createhash_md5_fires`).
+    #[test]
+    fn createhash_md5_without_credential_context_is_silent() {
+        let src = r#"
+import * as crypto from 'crypto'
+export const digest = (data: string) => crypto.createHash('md5').update(data).digest('hex')
+"#;
+        let findings = check(src);
+        assert!(
+            !findings.iter().any(|(_, r)| *r == "weak_hash"),
+            "non-credential digest utility must be silent, got {findings:?}"
+        );
+    }
+
     /// Clean code produces zero checker findings.
     #[test]
     fn clean_code_is_silent() {
@@ -133,7 +186,7 @@ export function spreadFirst (req: any, pool: any) {
     fn object_literal_via_variable_propagates() {
         let src = r#"
 export function varFind (req: any, db: any) {
-    const f = { name: req.body.name };
+    const f = { _id: req.body.name };
     db.collection.findOne(f);
 }
 "#;
@@ -152,12 +205,13 @@ export function spreadTaintedVar (req: any, pool: any) {
     }
 
     /// `find` (mongoose/mongo shell) must be a known sink, it was only in
-    /// the semantic-categories table, which the engine never reads.
+    /// the semantic-categories table, which the engine never reads. Uses an
+    /// identity payload: finder sinks only report identity-keyed objects.
     #[test]
     fn find_is_a_sink() {
         let src = r#"
 export function directFind (req: any, db: any) {
-    db.collection.find(req.body.name);
+    db.collection.find({ _id: req.body.name });
 }
 "#;
         assert_eq!(scan_count(src), 1, "find missing from sink table");

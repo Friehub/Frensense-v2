@@ -120,6 +120,31 @@ export function storePassword (clearTextPassword: string) {
         assert_eq!(hits[0].rule, "credential_kdf_policy");
     }
 
+    /// Verification shape: the digest result is only *compared* against a
+    /// stored value (`security.hash(pw) !== stored`), never persisted -
+    /// checking a password against the stored hash is not a KDF-storage
+    /// violation. No finding.
+    #[test]
+    fn credential_kdf_comparison_is_silent() {
+        let src = r#"
+export function verifyLogin (password: string, stored: string) {
+  if (security.hash(password) !== stored) {
+    throw new Error('bad password')
+  }
+}
+"#;
+        let fns = lower_source("t.ts", src, "ts").unwrap();
+        let facts = FactTable::default();
+        let hits: Vec<_> = fns
+            .values()
+            .flat_map(|ir| guard_bypass::check_credentials(ir, &facts))
+            .collect();
+        assert!(
+            hits.is_empty(),
+            "comparison-only digest must not fire the KDF policy, got {hits:?}"
+        );
+    }
+
     /// Hashing a non-credential value must not fire.
     #[test]
     fn non_credential_hash_stays_silent() {

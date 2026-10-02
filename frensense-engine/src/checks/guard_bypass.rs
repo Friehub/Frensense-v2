@@ -23,35 +23,6 @@ fn last_segment(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
 
-/// Containment-test callees: last-segment match. `includes` is the canonical
-/// JS shape; `indexOf`/`search`/`match` count when the result feeds a
-/// boolean guard (approximated here by presence in the same function as an
-/// allowlist-style loop accumulation).
-static CONTAINMENT_CALLEES: &[&str] = &["includes", "indexOf", "contains"];
-
-/// Credential-setting call names (last segment): functions whose argument is
-/// a plaintext password by convention.
-static CREDENTIAL_SINKS: &[&str] = &[
-    "hash",
-    "hashPassword",
-    "hashpw",
-    "setPassword",
-    "set_password",
-    "setSecret",
-    "set_secret",
-];
-
-/// Credential parameter names (source_name of the arg var) that mark a
-/// value as a plaintext credential.
-static CREDENTIAL_PARAM_NAMES: &[&str] = &[
-    "password",
-    "passwd",
-    "pwd",
-    "clearTextPassword",
-    "clearPassword",
-    "newPassword",
-];
-
 /// Rule 1: substring-containment guard. Fires on `includes`/`indexOf` calls
 /// where the receiver OR the argument is a function parameter named like a
 /// URL/redirect target (`url`, `toUrl`, `redirect`, ...), the shape of an
@@ -64,7 +35,11 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
         .filter_map(|p| ir.var_metadata.get(p).and_then(|m| m.source_name.clone()))
         .collect();
     let has_url_param = param_names.iter().any(|n| {
-        n.to_ascii_lowercase().contains("url") || n.to_ascii_lowercase().contains("redirect")
+        let l = n.to_ascii_lowercase();
+        frensense_lang::policy::bootstrap_url_param_hints()
+            .iter()
+            .any(|h| l.contains(h))
+            || facts.url_param_hints.iter().any(|h| l.contains(h))
     });
 
     for block in ir.blocks.values() {
@@ -83,7 +58,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                 _ => continue,
             };
             let seg = last_segment(callee);
-            let is_builtin = CONTAINMENT_CALLEES.contains(&seg);
+            let is_builtin = frensense_lang::policy::bootstrap_containment_callees().contains(&seg);
             let is_learned = facts
                 .containment_callees
                 .iter()
@@ -101,7 +76,10 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                 })
                 .map(|n| {
                     let l = n.to_ascii_lowercase();
-                    l.contains("url") || l.contains("redirect")
+                    frensense_lang::policy::bootstrap_url_param_hints()
+                        .iter()
+                        .any(|h| l.contains(h))
+                        || facts.url_param_hints.iter().any(|h| l.contains(h))
                 })
                 .unwrap_or(false);
             let arg_is_urlish = args.iter().any(|a| match a {
@@ -111,7 +89,10 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                     .and_then(|m| m.source_name.clone())
                     .map(|n| {
                         let l = n.to_ascii_lowercase();
-                        l.contains("url") || l.contains("redirect") || l.contains("allowed")
+                        frensense_lang::policy::bootstrap_url_arg_hints()
+                            .iter()
+                            .any(|h| l.contains(h))
+                            || facts.url_arg_hints.iter().any(|h| l.contains(h))
                     })
                     .unwrap_or(false),
                 _ => false,
@@ -263,7 +244,8 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                 _ => continue,
             };
             let seg = last_segment(callee);
-            let is_builtin_sink = CREDENTIAL_SINKS.contains(&seg);
+            let is_builtin_sink =
+                frensense_lang::policy::bootstrap_credential_sinks().contains(&seg);
             let is_learned_sink = facts
                 .credential_sinks
                 .iter()
@@ -279,7 +261,7 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                     .and_then(|m| m.source_name.clone())
                     .map(|n| {
                         let l = n.to_ascii_lowercase();
-                        let builtin = CREDENTIAL_PARAM_NAMES
+                        let builtin = frensense_lang::policy::bootstrap_credential_params()
                             .iter()
                             .any(|c| l == c.to_ascii_lowercase());
                         let learned = facts
@@ -295,6 +277,15 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                 _ => false,
             });
             if cred_arg {
+                // Verification shape: the digest result is only compared
+                // against a stored value (`hash(pw) !== stored`), never
+                // stored or passed on - checking a password is not a KDF
+                // storage violation.
+                if let Some(d) = dest
+                    && only_used_in_comparison(ir, *d)
+                {
+                    continue;
+                }
                 let span = dest
                     .and_then(|d| ir.var_metadata.get(d))
                     .and_then(|m| m.byte_range);
@@ -321,6 +312,49 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
 /// itself is part of the vulnerability, attacker URLs embed allowed
 /// entries. One finding per allowlist definition, spanned at the
 /// definition.
+/// Resolve `var` to the allocation it (transitively) binds through `Assign`
+/// copies - `const a = [..]` lowers to `Allocate` + a binding copy, and the
+/// allowlist collections are constructed from their stored elements.
+fn allocation_of(ir: &FunctionIR, mut var: VarId) -> Option<VarId> {
+    for _ in 0..8 {
+        let mut next = None;
+        'blocks: for blk in ir.blocks.values() {
+            for instr in &blk.instructions {
+                let dest = match instr {
+                    Instruction::Assign { dest, .. }
+                    | Instruction::Allocate { dest, .. }
+                    | Instruction::Cast { dest, .. }
+                    | Instruction::CallStatic {
+                        dest: Some(dest), ..
+                    }
+                    | Instruction::CallVirtual {
+                        dest: Some(dest), ..
+                    }
+                    | Instruction::BinaryOp { dest, .. }
+                    | Instruction::UnaryOp { dest, .. } => dest,
+                    _ => continue,
+                };
+                if *dest != var {
+                    continue;
+                }
+                match instr {
+                    Instruction::Allocate { .. } => return Some(var),
+                    Instruction::Assign {
+                        src: Operand::Var(v),
+                        ..
+                    } => {
+                        next = Some(*v);
+                        break 'blocks;
+                    }
+                    _ => return None,
+                }
+            }
+        }
+        var = next?;
+    }
+    None
+}
+
 pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFinding> {
     let guard_exists = irs.iter().any(|ir| !check(ir, facts).is_empty());
     if !guard_exists {
@@ -340,12 +374,37 @@ pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Ve
                 if !matches!(seg, "Set" | "Map") {
                     continue;
                 }
+                // Entries may arrive as direct literal args (legacy union
+                // lowering) or as stored elements of an allocated
+                // collection: `[a, b]` lowers to `Allocate` + `StoreElement`s
+                // bound through a copy (`const x = new Set([...])`).
+                let mut stored: Vec<&Operand> = Vec::new();
+                for a in args {
+                    if let Operand::Var(v) = a
+                        && let Some(alloc) = allocation_of(ir, *v)
+                    {
+                        for blk in ir.blocks.values() {
+                            for ins in &blk.instructions {
+                                if let Instruction::StoreField { base, src, .. }
+                                | Instruction::StoreElement { base, src, .. } = ins
+                                    && *base == alloc
+                                {
+                                    stored.push(src);
+                                }
+                            }
+                        }
+                    }
+                }
                 let mut urlish = false;
                 let mut first_url_span = None;
-                for a in args {
+                for a in args.iter().chain(stored.iter().copied()) {
                     if let Operand::StringLiteral(s) = a {
                         let l = s.to_ascii_lowercase();
-                        if l.contains("http") || l.contains("://") {
+                        if frensense_lang::policy::bootstrap_url_literal_hints()
+                            .iter()
+                            .any(|h| l.contains(h))
+                            || facts.url_literal_hints.iter().any(|h| l.contains(h))
+                        {
                             urlish = true;
                             // The entry literal's own span: the concrete
                             // allowlist item an attacker embeds. Prefer it
@@ -382,4 +441,88 @@ pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Ve
         }
     }
     findings
+}
+
+// ---------------------------------------------------------------------------
+// Verification-shape qualification for `credential_kdf_policy`
+// ---------------------------------------------------------------------------
+
+fn operand_is_var(op: &Operand, v: VarId) -> bool {
+    matches!(op, Operand::Var(x) if *x == v)
+}
+
+fn instruction_uses_var(instr: &Instruction, v: VarId) -> bool {
+    match instr {
+        Instruction::Assign { src, .. } => operand_is_var(src, v),
+        Instruction::LoadField { base, .. } => *base == v,
+        Instruction::StoreField { base, src, .. } => *base == v || operand_is_var(src, v),
+        Instruction::LoadElement { base, index, .. } => *base == v || operand_is_var(index, v),
+        Instruction::StoreElement {
+            base, index, src, ..
+        } => *base == v || operand_is_var(index, v) || operand_is_var(src, v),
+        Instruction::StoreGlobal { src, .. } => operand_is_var(src, v),
+        Instruction::CallStatic { args, .. } => args.iter().any(|a| operand_is_var(a, v)),
+        Instruction::CallVirtual { receiver, args, .. } => {
+            operand_is_var(receiver, v) || args.iter().any(|a| operand_is_var(a, v))
+        }
+        Instruction::CallPointer { func_ptr, args, .. } => {
+            operand_is_var(func_ptr, v) || args.iter().any(|a| operand_is_var(a, v))
+        }
+        Instruction::AddressOf { src, .. } => *src == v,
+        Instruction::Dereference { ptr, .. } => operand_is_var(ptr, v),
+        Instruction::Cast { src, .. } => operand_is_var(src, v),
+        Instruction::ExtractValue { tuple, .. } => operand_is_var(tuple, v),
+        Instruction::BinaryOp { lhs, rhs, .. } => operand_is_var(lhs, v) || operand_is_var(rhs, v),
+        Instruction::UnaryOp { src, .. } => operand_is_var(src, v),
+        Instruction::Await { promise, .. } => operand_is_var(promise, v),
+        Instruction::Yield { src, .. } => src.as_ref().is_some_and(|s| operand_is_var(s, v)),
+        _ => false,
+    }
+}
+
+fn terminator_uses_var(t: &Terminator, v: VarId) -> bool {
+    match t {
+        Terminator::Branch { cond, .. } => operand_is_var(cond, v),
+        Terminator::Switch { cond, cases, .. } => {
+            operand_is_var(cond, v) || cases.iter().any(|(c, _)| operand_is_var(c, v))
+        }
+        Terminator::Return { src } => src.as_ref().is_some_and(|s| operand_is_var(s, v)),
+        Terminator::Throw { src } => operand_is_var(src, v),
+        _ => false,
+    }
+}
+
+/// True when every use of `v` is an operand of a *comparison* BinaryOp
+/// (verification: `security.hash(pw) !== stored`). A value that is stored,
+/// passed to another call, returned, or unused fires the policy as before;
+/// phi participation counts as a non-comparison use (conservative).
+fn only_used_in_comparison(ir: &FunctionIR, v: VarId) -> bool {
+    let mut total = 0usize;
+    let mut cmp = 0usize;
+    for b in ir.blocks.values() {
+        for phi in &b.phis {
+            if phi.dest == v || phi.incoming.iter().any(|(_, x)| *x == v) {
+                total += 1;
+            }
+        }
+        for instr in &b.instructions {
+            if !instruction_uses_var(instr, v) {
+                continue;
+            }
+            total += 1;
+            let is_cmp = if let Instruction::BinaryOp { op, lhs, rhs, .. } = instr {
+                (operand_is_var(lhs, v) || operand_is_var(rhs, v))
+                    && matches!(op.as_str(), "==" | "===" | "!=" | "!==" | "in" | "not in")
+            } else {
+                false
+            };
+            if is_cmp {
+                cmp += 1;
+            }
+        }
+        if terminator_uses_var(&b.terminator, v) {
+            total += 1;
+        }
+    }
+    total > 0 && total == cmp
 }

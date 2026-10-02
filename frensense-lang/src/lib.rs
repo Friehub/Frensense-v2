@@ -275,6 +275,8 @@
 //! }
 //! ```
 
+pub mod memory;
+pub mod policy;
 pub mod providers;
 pub mod registry;
 pub mod spec;

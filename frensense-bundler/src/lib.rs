@@ -13,3 +13,6 @@ pub mod builder;
 pub mod extract;
 pub mod fact_extract;
 pub mod format;
+pub mod pipeline;
+
+pub use pipeline::run_facts_pipeline;

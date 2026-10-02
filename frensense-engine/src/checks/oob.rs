@@ -18,80 +18,12 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::analysis::taint::facts::FactTable;
 use crate::analysis::value::{self, ValueInfo};
 use crate::checks::CheckerFinding;
 use crate::checks::memory_summary::{CapacitySpec, MemorySummaryRegistry};
 use crate::graph::steensgaard::{ClassId, Steensgaard};
 use crate::ir::function::{BasicBlock, BlockId, FunctionIR, Instruction, Operand, VarId};
-
-/// Callee last segments that allocate memory with a known capacity.
-const ALLOC_CALLS: &[&str] = &[
-    "malloc",
-    "calloc",
-    "realloc",
-    "aligned_alloc",
-    "valloc",
-    "alloca",
-];
-
-/// Known memory manipulation builtins that copy, write, or fill buffers.
-struct BuiltinSpec {
-    name: &'static str,
-    dst_arg: Option<usize>,
-    src_arg: Option<usize>,
-    len_arg: usize,
-}
-
-const BUILTINS: &[BuiltinSpec] = &[
-    BuiltinSpec {
-        name: "memset",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 2,
-    },
-    BuiltinSpec {
-        name: "bzero",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 1,
-    },
-    BuiltinSpec {
-        name: "memcpy",
-        dst_arg: Some(0),
-        src_arg: Some(1),
-        len_arg: 2,
-    },
-    BuiltinSpec {
-        name: "memmove",
-        dst_arg: Some(0),
-        src_arg: Some(1),
-        len_arg: 2,
-    },
-    BuiltinSpec {
-        name: "strncpy",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 2,
-    },
-    BuiltinSpec {
-        name: "snprintf",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 1,
-    },
-    BuiltinSpec {
-        name: "fgets",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 1,
-    },
-    BuiltinSpec {
-        name: "read",
-        dst_arg: Some(1),
-        src_arg: None,
-        len_arg: 2,
-    },
-];
 
 fn last_segment(call: &str) -> &str {
     let s = call.rsplit('.').next().unwrap_or(call);
@@ -267,14 +199,24 @@ fn finding(
 
 /// Run spatial memory safety checks over one function with default summaries.
 pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
-    check_with_summaries(ir, &MemorySummaryRegistry::default())
+    check_with_summaries(ir, &MemorySummaryRegistry::default(), &FactTable::default())
 }
 
-/// Run spatial memory safety checks over one function with an interprocedural memory summary registry.
+/// Run spatial memory safety checks over one function with an
+/// interprocedural memory summary registry and the spec/bundle vocabulary
+/// (memory contracts, buffer builtins) resolved from `facts`.
 pub fn check_with_summaries(
     ir: &FunctionIR,
     summaries: &MemorySummaryRegistry,
+    facts: &FactTable,
 ) -> Vec<CheckerFinding> {
+    // Buffer vocabulary: spec-seeded, bootstrap fallback when empty.
+    let buffer_builtins: &[frensense_lang::memory::BufferBuiltinSpec] =
+        if facts.buffer_builtins.is_empty() {
+            frensense_lang::memory::bootstrap_buffer_builtins()
+        } else {
+            &facts.buffer_builtins
+        };
     let pts = Steensgaard::analyze(ir);
     let val_info = value::analyze(ir);
     let mut findings: Vec<CheckerFinding> = Vec::new();
@@ -329,6 +271,7 @@ pub fn check_with_summaries(
         pts: &Steensgaard,
         val_info: &ValueInfo,
         summaries: &MemorySummaryRegistry,
+        buffer_builtins: &[frensense_lang::memory::BufferBuiltinSpec],
         findings: &mut Vec<CheckerFinding>,
         mut ps: PathState,
         block_id: BlockId,
@@ -342,7 +285,7 @@ pub fn check_with_summaries(
                     dest: Some(d),
                     args,
                     ..
-                } if ALLOC_CALLS.contains(&last_segment(func)) || summaries.returns_fresh(func) => {
+                } if summaries.returns_fresh(func) => {
                     let fresh = ClassId(pts.members.len() + ps.generation.len() + d.0 + 1000);
                     if let Some((cap_lo, cap_hi)) =
                         eval_alloc_capacity(func, args, block_id, val_info, summaries)
@@ -362,11 +305,7 @@ pub fn check_with_summaries(
 
                 // --- Freeing a buffer / Consumed parameters ---
                 Instruction::CallStatic { func, args, .. } => {
-                    let consumed_slots = if last_segment(func) == "free" {
-                        vec![0]
-                    } else {
-                        summaries.consumes_params(func)
-                    };
+                    let consumed_slots = summaries.consumes_params(func);
                     for slot in consumed_slots {
                         if let Some(Operand::Var(v)) = args.get(slot)
                             && let Some(c) = ps.class_for(pts, *v)
@@ -376,7 +315,7 @@ pub fn check_with_summaries(
                         }
                     }
                     let seg = last_segment(func);
-                    if let Some(spec) = BUILTINS.iter().find(|b| b.name == seg) {
+                    if let Some(spec) = buffer_builtins.iter().find(|b| b.name == seg) {
                         // Check destination write bounds
                         if let Some(dst_idx) = spec.dst_arg
                             && let Some(Operand::Var(dst_var)) = args.get(dst_idx)
@@ -574,6 +513,7 @@ pub fn check_with_summaries(
             &pts,
             &val_info,
             summaries,
+            buffer_builtins,
             &mut findings,
             PathState::default(),
             ir.entry_block,
@@ -602,6 +542,7 @@ pub fn check_with_summaries(
             &pts,
             &val_info,
             summaries,
+            buffer_builtins,
             &mut findings,
             joined,
             b,

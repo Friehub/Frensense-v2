@@ -21,6 +21,7 @@ pub mod callgraph_tests {
             byte_range: None,
             is_memory_state: false,
             object_keys: Vec::new(),
+            declared: false,
         }
     }
 
@@ -45,6 +46,7 @@ pub mod callgraph_tests {
             byte_range: None,
             is_memory_state: false,
             object_keys: Vec::new(),
+            declared: false,
         }
     }
 

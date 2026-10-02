@@ -21,96 +21,9 @@ use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
-/// A known call whose string-literal argument selects a weak primitive.
-///
-/// Matches the two shapes real code uses:
-/// - `createHash('md5')`, the selector literal is argument 0.
-/// - `md5(data)` / `MD5(...)`, bare weak-hash functions; no selector needed.
-#[derive(Debug)]
-struct WeakPrimitiveRule {
-    rule_id: &'static str,
-    /// Callee last-segment names that take a selector literal argument.
-    selector_calls: &'static [&'static str],
-    /// Bare function names that are weak by themselves.
-    bare_calls: &'static [&'static str],
-    /// Argument slot of the selector literal (ignored for bare calls).
-    selector_slot: usize,
-    /// Selector literals that mark the call weak (case-insensitive, quotes
-    /// stripped by the caller).
-    weak_selectors: &'static [&'static str],
-}
-
-/// The builtin policy table. Language specs can extend this later via the
-/// same `&'static` pattern as sink names; for now these are the universal
-/// crypto policy facts.
-static WEAK_HASH_RULES: &[WeakPrimitiveRule] = &[
-    // Node crypto: createHash('md5'), createHash('sha1')
-    WeakPrimitiveRule {
-        rule_id: "weak_hash",
-        selector_calls: &["createHash"],
-        bare_calls: &["md5", "sha1"],
-        selector_slot: 0,
-        weak_selectors: &["md5", "md4", "sha1", "sha"],
-    },
-    // Python hashlib / passlib: hashlib.new('md5', ...)
-    WeakPrimitiveRule {
-        rule_id: "weak_hash",
-        selector_calls: &["new"],
-        bare_calls: &["md5", "sha1"],
-        selector_slot: 0,
-        weak_selectors: &["md5", "md4", "sha1", "sha"],
-    },
-    // Java MessageDigest / Go crypto/md5 style, covered by bare names where
-    // applicable; the receiver name (`crypto`) is matched loosely so
-    // `crypto.createHash` and `hashlib.new` both resolve to last segment.
-];
-
-/// Known *string-literal* insecure configuration selectors: calls whose
-/// argument literal itself selects an insecure mode regardless of algorithm.
-static INSECURE_CONFIG_SELECTORS: &[(&str, &[&str], &str)] = &[
-    // jwt.sign(payload, secret, { algorithm: 'none' }) style appears as a
-    // string selector on some APIs; `none`/`HS1` in the `alg` slot.
-    ("jwt", &["none", "hs1"], "insecure_jwt_algorithm"),
-];
-
-/// A key-size rule: a generation call whose constant bit-length argument
-/// falls below the security floor. Value-aware: the argument may be a var
-/// whose lattice value is a provable constant, not just a bare literal.
-struct KeySizeRule {
-    rule_id: &'static str,
-    /// Callee last segment (case-insensitive match).
-    call: &'static str,
-    /// Argument slot carrying the bit length.
-    slot: usize,
-    /// Minimum acceptable bits.
-    min_bits: i64,
-    /// Human label of what the key protects.
-    kind: &'static str,
-}
-
-static KEY_SIZE_RULES: &[KeySizeRule] = &[
-    KeySizeRule {
-        rule_id: "weak_rsa_key_size",
-        call: "generateKeyPair",
-        slot: 0,
-        min_bits: 2048,
-        kind: "RSA",
-    },
-    KeySizeRule {
-        rule_id: "weak_rsa_key_size",
-        call: "generateKey",
-        slot: 0,
-        min_bits: 128,
-        kind: "symmetric keys",
-    },
-];
-
-/// Known *wrapper* names whose entire purpose is hashing: a weak selector
-/// inside the wrapper (checked cross-function by the corpus replay gate) or
-/// a suspicious receiver qualification makes these worth flagging. Bare
-/// wrappers like `security.hash(...)` are the Juice Shop weakPassword shape:
-/// the wrapper resolves to `createHash('md5')` elsewhere in the same file.
-static SUSPICIOUS_HASH_WRAPPERS: &[&str] = &["hash", "hashpw", "hashPassword", "digest"];
+// Weak-hash, key-size and insecure-selector policy tables live in
+// `frensense_lang::policy` (spec-extendable via `FactTable::weak_hash_rules`,
+// `key_size_rules`, `insecure_config_selectors`, `suspicious_hash_wrappers`).
 
 fn strip_quotes(lit: &str) -> &str {
     let lit = lit.trim();
@@ -131,13 +44,22 @@ fn last_segment(name: &str) -> &str {
 
 /// Resolve a dotted receiver path for a virtual call (`security.hash` →
 /// "security.hash") by walking the receiver var's defining chain.
-fn receiver_path(ir: &FunctionIR, _args: &[Operand], _callee: &str) -> Option<String> {
+fn receiver_path(
+    ir: &FunctionIR,
+    _args: &[Operand],
+    _callee: &str,
+    facts: &FactTable,
+) -> Option<String> {
     // Cheap static heuristic: only flag when the enclosing function name or
     // module context suggests security code. The full receiver-chain walk
     // needs cross-function info; the corpus replay gate (task 9) is the
     // mechanism that learns wrapper→primitive mappings from pairs.
     let n = ir.name.to_ascii_lowercase();
-    if n.contains("insecure") || n.contains("security") {
+    if frensense_lang::policy::bootstrap_security_context_hints()
+        .iter()
+        .any(|h| n.contains(h))
+        || facts.security_context_hints.iter().any(|h| n.contains(h))
+    {
         return Some(ir.name.clone());
     }
     None
@@ -161,20 +83,38 @@ pub fn check_function(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding>
     let mut findings = Vec::new();
     for block in ir.blocks.values() {
         for instr in &block.instructions {
-            if let Instruction::CallStatic { func, args, .. }
-            | Instruction::CallVirtual {
-                method: func, args, ..
-            } = instr
-            {
-                check_call(
-                    ir,
-                    func,
+            match instr {
+                Instruction::CallStatic { func, args, .. } => {
+                    check_call(
+                        ir,
+                        func,
+                        func,
+                        args,
+                        instr_span(ir, instr),
+                        &values,
+                        facts,
+                        &mut findings,
+                    );
+                }
+                Instruction::CallVirtual {
+                    method,
+                    receiver,
                     args,
-                    instr_span(ir, instr),
-                    &values,
-                    facts,
-                    &mut findings,
-                );
+                    ..
+                } => {
+                    let path = crate::analysis::forward::receiver_call_path(ir, receiver, method);
+                    check_call(
+                        ir,
+                        method,
+                        &path,
+                        args,
+                        instr_span(ir, instr),
+                        &values,
+                        facts,
+                        &mut findings,
+                    );
+                }
+                _ => {}
             }
         }
     }
@@ -219,9 +159,11 @@ fn instr_span(ir: &FunctionIR, instr: &Instruction) -> Option<(usize, usize)> {
     ir.var_metadata.get(&dest)?.byte_range
 }
 
+#[allow(clippy::too_many_arguments)] // fact/lattice/out plumbing, no meaningful grouping
 fn check_call(
     ir: &FunctionIR,
     callee: &str,
+    full_path: &str,
     args: &[Operand],
     span: Option<(usize, usize)>,
     values: &crate::analysis::value::ValueInfo,
@@ -236,15 +178,20 @@ fn check_call(
     let callee_seg = last_segment(callee);
     let callee_lower = callee_seg.to_ascii_lowercase();
 
-    for rule in WEAK_HASH_RULES {
+    for rule in frensense_lang::policy::bootstrap_weak_hash_rules()
+        .iter()
+        .chain(facts.weak_hash_rules.iter())
+    {
         // Selector shape: `createHash('md5')`.
-        if rule.selector_calls.iter().any(|c| {
-            let c = last_segment(c).to_ascii_lowercase();
-            c == callee_lower
-        }) && let Some(sel) = args
-            .get(rule.selector_slot)
-            .and_then(|a| arg_str_literal(a, values))
-            .map(str::to_ascii_lowercase)
+        if in_credential_context(ir, facts)
+            && rule.selector_calls.iter().any(|c| {
+                let c = last_segment(c).to_ascii_lowercase();
+                c == callee_lower
+            })
+            && let Some(sel) = args
+                .get(rule.selector_slot)
+                .and_then(|a| arg_str_literal(a, values))
+                .map(str::to_ascii_lowercase)
             && rule.weak_selectors.contains(&sel.as_str())
         {
             out.push(CheckerFinding {
@@ -329,9 +276,12 @@ fn check_call(
     // receiver is a security-ish namespace. Matched by last segment of the
     // receiver chain when available; bare `hash(x)` is too generic to flag
     // on its own, so require a known crypto-receiver qualification.
-    if SUSPICIOUS_HASH_WRAPPERS.contains(&callee_lower.as_str())
-        && let Some(path) = receiver_path(ir, args, callee)
-    {
+    let is_suspicious_wrapper = frensense_lang::policy::bootstrap_suspicious_hash_wrappers()
+        .contains(&callee_lower.as_str())
+        || facts
+            .suspicious_hash_wrappers
+            .contains(callee_lower.as_str());
+    if is_suspicious_wrapper && let Some(path) = receiver_path(ir, args, callee, facts) {
         out.push(CheckerFinding {
             learned: false,
             function: ir.name.clone(),
@@ -348,7 +298,10 @@ fn check_call(
     // argument is a PROVABLE CONSTANT below the security floor. The value
     // lattice resolves `const bits = 512; generateKey(bits)` the same as a
     // direct literal, so wrapper indirection doesn't hide the weakness.
-    for rule in KEY_SIZE_RULES {
+    for rule in frensense_lang::policy::bootstrap_key_size_rules()
+        .iter()
+        .chain(facts.key_size_rules.iter())
+    {
         if last_segment(rule.call).to_ascii_lowercase() != callee_lower {
             continue;
         }
@@ -377,8 +330,20 @@ fn check_call(
 
     // Insecure literal selectors (`{ algorithm: 'none' }` shapes land here
     // once object literals are flattened; for now the string form).
-    for (prefix, selectors, rule_id) in INSECURE_CONFIG_SELECTORS {
-        if !callee_lower.starts_with(prefix) {
+    for (prefix, selectors, rule_id) in
+        frensense_lang::policy::bootstrap_insecure_config_selectors()
+            .iter()
+            .chain(facts.insecure_config_selectors.iter())
+    {
+        // Match the full dotted call path (`jwt.verify`) or the callee
+        // (`jwtChallenge`); only a *verifier* accepting an insecure
+        // algorithm is the violation - token issuers that merely embed the
+        // literal (`jwtChallenge(id, req, 'none', ...)`) are harness code.
+        let path_lower = full_path.to_ascii_lowercase();
+        if !(path_lower.starts_with(prefix) || callee_lower.starts_with(prefix)) {
+            continue;
+        }
+        if !jwt_algorithm_context(&path_lower, &callee_lower, facts) {
             continue;
         }
         for arg in args {
@@ -400,4 +365,45 @@ fn check_call(
             }
         }
     }
+}
+
+/// Algorithm-operation qualification for `insecure_jwt_algorithm`: the
+/// callee path must hint at an operation whose algorithm choice matters
+/// (verify/decode/sign/...), vocabulary from the spec
+/// (`known_jwt_algorithm_hints`, bootstrap fallback) - harness wrappers
+/// that merely embed the literal stay silent.
+fn jwt_algorithm_context(path: &str, callee: &str, facts: &FactTable) -> bool {
+    let matches = |s: &str| {
+        frensense_lang::policy::bootstrap_jwt_algorithm_hints()
+            .iter()
+            .any(|h| s.contains(h))
+            || facts.jwt_algorithm_hints.iter().any(|h| s.contains(h))
+    };
+    matches(path) || matches(callee)
+}
+
+/// Credential-context qualification for the selector-shape weak-hash rule:
+/// the enclosing function name or a parameter name must hint at a
+/// credential context (password/secret/token/...). A generic digest
+/// utility (`const digest = (data) => createHash('md5')`) is not a KDF
+/// shape; credential-named wrappers (`hashPassword(clearText)`) are.
+/// Bare weak calls (`md5(data)`) stay unqualified - they are weak by
+/// themselves.
+fn in_credential_context(ir: &FunctionIR, facts: &FactTable) -> bool {
+    let hint_match = |s: &str| {
+        let l = s.to_ascii_lowercase();
+        frensense_lang::policy::bootstrap_credential_context_hints()
+            .iter()
+            .any(|h| l.contains(h))
+            || facts.credential_context_hints.iter().any(|h| l.contains(h))
+    };
+    if hint_match(&ir.name) {
+        return true;
+    }
+    ir.parameters.iter().any(|p| {
+        ir.var_metadata
+            .get(p)
+            .and_then(|m| m.source_name.as_deref())
+            .is_some_and(hint_match)
+    })
 }

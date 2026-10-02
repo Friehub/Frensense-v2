@@ -18,25 +18,6 @@ use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
-/// Schema number-builder methods (last segment) that produce an unbounded
-/// numeric field when their builder chain lacks a `.max()`/`.min()` call.
-static NUMBER_BUILDERS: &[&str] = &["number", "int", "float", "bigint"];
-
-/// Bound keywords whose appearance in a description implies a declared
-/// (but unenforced) numeric policy.
-static BOUND_KEYWORDS: &[&str] = &["maximum", "max", "minimum", "min", "limit", "up to"];
-
-/// Methods that would actually enforce a bound on the builder chain.
-static ENFORCERS: &[&str] = &[
-    "max",
-    "min",
-    "minimum",
-    "maximum",
-    "int",
-    "multipleOf",
-    "step",
-];
-
 type BuilderEntry = (String, bool, Option<(usize, usize)>);
 
 pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
@@ -76,7 +57,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                             });
                         described.push((text, span));
                     }
-                } else if ENFORCERS.contains(&seg)
+                } else if frensense_lang::policy::bootstrap_schema_enforcers().contains(&seg)
                     || facts
                         .schema_enforcers
                         .iter()
@@ -84,7 +65,8 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                 {
                     enforcers.push(seg);
                 } else {
-                    let is_builtin_builder = NUMBER_BUILDERS.contains(&seg);
+                    let is_builtin_builder =
+                        frensense_lang::policy::bootstrap_schema_builders().contains(&seg);
                     let is_learned_builder = facts
                         .schema_builders
                         .iter()
@@ -104,7 +86,9 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
         for (_builder, builder_learned, span) in &builders {
             for (text, _dspan) in &described {
                 let lower = text.to_ascii_lowercase();
-                let is_builtin_keyword = BOUND_KEYWORDS.iter().any(|k| lower.contains(k));
+                let is_builtin_keyword = frensense_lang::policy::bootstrap_schema_keywords()
+                    .iter()
+                    .any(|k| lower.contains(k));
                 let is_learned_keyword = facts
                     .schema_keywords
                     .iter()

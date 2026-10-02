@@ -71,14 +71,31 @@ pub fn prepare_with_facts(
     let mut irs: FxHashMap<String, FunctionIR> = FxHashMap::default();
     let mut fn_file: FxHashMap<String, String> = FxHashMap::default();
     let mut file_source: FxHashMap<String, String> = FxHashMap::default();
-    for (path, source, ext) in files {
+    // Deterministic merge order (path-sorted): which twin of a colliding
+    // name keeps the bare key must not depend on directory walk order.
+    let mut ordered: Vec<&(String, String, String)> = files.iter().collect();
+    ordered.sort_by(|a, b| a.0.cmp(&b.0));
+    for (path, source, ext) in ordered {
         let fns = lower_source_with_facts(path, source, ext, facts)?;
-        for (name, ir) in fns {
-            fn_file.entry(name.clone()).or_insert_with(|| path.clone());
+        for (name, mut ir) in fns {
             file_source
                 .entry(path.clone())
                 .or_insert_with(|| source.clone());
-            irs.entry(name).or_insert(ir);
+            // Function keys are only unique per file: byte-offset names
+            // (`<fn@505>`) and common method names (`set`) collide across
+            // files. First-wins dropped the other file's whole function
+            // silently (the forgedReview/noSqlReviews miss); rekey the
+            // incoming twin under its file instead. `ir.name` tracks the
+            // key so findings, `fn_file`, and checker locations stay in
+            // lockstep.
+            let key = if irs.contains_key(&name) {
+                format!("{path}::{name}")
+            } else {
+                name
+            };
+            ir.name = key.clone();
+            fn_file.entry(key.clone()).or_insert_with(|| path.clone());
+            irs.insert(key, ir);
         }
     }
     Ok(PreparedProgram {
@@ -268,5 +285,82 @@ impl ScanResult {
             // like a taint family. Without this, Check facts could never be
             // validated by the replay gate.
             || !self.checker.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod collision_tests {
+    use super::scan;
+    use crate::analysis::taint::facts::{config_from_spec, fact_table_from_spec};
+
+    fn ts_tables() -> (
+        crate::analysis::taint::config::TaintConfig,
+        crate::analysis::taint::facts::FactTable,
+    ) {
+        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
+        (config_from_spec(spec), fact_table_from_spec(spec))
+    }
+
+    /// Same prefix in both files => the nameless nested arrows start at the
+    /// same byte offset => both lower to the identical `<fn@N>` key.
+    /// Whole-program merge must keep BOTH functions (first-wins dropped the
+    /// second file's entire handler: forgedReview/noSqlReviews miss).
+    #[test]
+    fn cross_file_closure_offset_collision_keeps_both_functions() {
+        const PREFIX: &str = "export function wrap () {\n  return";
+        let a = format!("{PREFIX} (req) => {{\n    noop(1)\n  }}\n}}\n");
+        let b = format!("{PREFIX} (req) => {{\n    exec(req)\n  }}\n}}\n");
+        let (config, facts) = ts_tables();
+        let result = scan(
+            &[
+                ("app/a.ts".to_string(), a, "ts".to_string()),
+                ("app/b.ts".to_string(), b, "ts".to_string()),
+            ],
+            &config,
+            &facts,
+        );
+        assert!(result.errors.is_empty(), "scan errors: {:?}", result.errors);
+        let b_hits: Vec<_> = result
+            .located
+            .iter()
+            .filter(|l| l.file == "app/b.ts")
+            .collect();
+        assert!(
+            b_hits.iter().any(|l| l.finding.sink == "exec"),
+            "second file's `<fn@N>` twin was dropped by the name-keyed merge; \
+             located: {:?}",
+            result
+                .located
+                .iter()
+                .map(|l| (&l.file, &l.finding.sink))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Four object-literal setters share the name `set`; the password setter
+    /// holds the `hash(clearTextPassword)` call. Same-name collapse within
+    /// one file dropped it (weakPassword miss). Every setter must survive.
+    #[test]
+    fn within_file_method_name_collision_keeps_all_setters() {
+        let src = "export const init = () => {\n  const attrs = {\n    first: {\n      set (v: string) {\n        keep(v)\n      }\n    },\n    second: {\n      set (v: string) {\n        keep(v)\n      }\n    },\n    password: {\n      set (clearTextPassword: string) {\n        hash(clearTextPassword)\n      }\n    }\n  }\n  return attrs\n}\n";
+        let (config, facts) = ts_tables();
+        let result = scan(
+            &[("app/user.ts".to_string(), src.to_string(), "ts".to_string())],
+            &config,
+            &facts,
+        );
+        assert!(result.errors.is_empty(), "scan errors: {:?}", result.errors);
+        assert!(
+            result
+                .located_checker
+                .iter()
+                .any(|c| c.finding.rule == "credential_kdf_policy"),
+            "password setter dropped by same-name collapse; checker findings: {:?}",
+            result
+                .located_checker
+                .iter()
+                .map(|c| (&c.finding.rule, &c.finding.function, c.line))
+                .collect::<Vec<_>>()
+        );
     }
 }

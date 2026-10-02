@@ -24,6 +24,9 @@ pub struct LoweringContext<'a> {
     /// version this into mem_1, mem_2, mem_3 and generate Memory Phis.
     pub memory_var: VarId,
 
+    /// Jump target blocks for labeled statements: label_name -> BlockId
+    pub labels: FxHashMap<String, BlockId>,
+
     /// Optional learned fact table providing dynamic grammar overrides.
     pub facts: Option<&'a FactTable>,
 }
@@ -50,7 +53,19 @@ impl<'a> LoweringContext<'a> {
             current_block: entry,
             env: vec![FxHashMap::default()], // Global/Function scope
             memory_var,
+            labels: FxHashMap::default(),
             facts,
+        }
+    }
+
+    /// Retrieve or allocate a BlockId for a named label.
+    pub fn get_or_create_label_block(&mut self, name: &str) -> BlockId {
+        if let Some(&bid) = self.labels.get(name) {
+            bid
+        } else {
+            let bid = self.ir.new_block();
+            self.labels.insert(name.to_string(), bid);
+            bid
         }
     }
 
@@ -186,10 +201,25 @@ impl<'a> LoweringContext<'a> {
             byte_range: Some((node.start_byte(), node.end_byte())),
             is_memory_state: false,
             object_keys: Vec::new(),
+            declared: false,
         });
 
         self.env.last_mut().unwrap().insert(name, new_var);
         Operand::Var(new_var)
+    }
+
+    /// Fresh temporary for lowering-synthesized values (compound assignment,
+    /// increment/decrement). Spanned to `node` so findings on the result
+    /// resolve to the statement that produced it.
+    pub fn new_temp(&mut self, node: Node) -> VarId {
+        self.ir.new_var(VarMetadata {
+            source_name: None,
+            type_name: None,
+            byte_range: Some((node.start_byte(), node.end_byte())),
+            is_memory_state: false,
+            object_keys: Vec::new(),
+            declared: false,
+        })
     }
 
     /// Generic child walk shared by degenerate shapes (returns the last

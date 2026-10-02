@@ -15,7 +15,8 @@ use std::fmt::Write as _;
 
 use rustc_hash::FxHashMap;
 
-use crate::graph::svfg::NodeKey;
+use super::engine::BackwardTaintEngine;
+use crate::graph::svfg::{NodeKey, NodeKind};
 use crate::ir::function::{FunctionIR, Instruction};
 
 // ---------------------------------------------------------------------------
@@ -254,5 +255,142 @@ pub(crate) fn span_of(ir: &FunctionIR, key: &NodeKey) -> Option<(usize, usize)> 
             .and_then(|m| m.byte_range)
             .or_else(|| ir.var_metadata.get(&key.var).and_then(|m| m.byte_range)),
         _ => ir.var_metadata.get(&key.var).and_then(|m| m.byte_range),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reconstruction of a walked source->sink chain (engine impl lives here so
+// rendering stays next to the path types).
+// ---------------------------------------------------------------------------
+
+impl<'a> BackwardTaintEngine<'a> {
+    /// Classify one walked node as a [`PathStep`] for path reporting.
+    fn step_of(&self, cf: usize, key: &NodeKey) -> PathStep {
+        let fe = &self.prog.functions[cf];
+        let ir = fe.ir;
+        let fname = ir.name.clone();
+        let Some(node) = fe.svfg.node(key) else {
+            return PathStep::Assignment {
+                function: fname,
+                variable: key.var.0 as u32,
+            };
+        };
+        match &node.kind {
+            NodeKind::Phi => PathStep::Phi {
+                function: fname,
+                variable: key.var.0 as u32,
+            },
+            NodeKind::FormalParam => {
+                let name = ir
+                    .var_metadata
+                    .get(&key.var)
+                    .and_then(|m| m.source_name.clone())
+                    .unwrap_or_else(|| format!("v{}", key.var.0));
+                PathStep::FormalParam {
+                    function: fname,
+                    param: name,
+                }
+            }
+            NodeKind::ActualArg {
+                call_site,
+                arg_index,
+            } => PathStep::CallArgument {
+                function: fname,
+                callee: self.callee_display(ir, call_site),
+                slot: *arg_index,
+            },
+            NodeKind::ActualRet { call_site } => {
+                let callee = self.callee_display(ir, call_site);
+                let external = !self.prog.functions.iter().any(|f| f.ir.name == callee);
+                PathStep::CallReturn {
+                    function: fname,
+                    callee,
+                    external,
+                }
+            }
+            NodeKind::FormalRet => PathStep::ReturnToCaller { caller: fname },
+            NodeKind::InstrDef | NodeKind::InstrUse => self.instr_step(ir, key, fname),
+        }
+    }
+
+    /// Display name of the callee at a call-site node key.
+    fn callee_display(&self, ir: &FunctionIR, call_site: &NodeKey) -> String {
+        let Some(idx) = call_site.instr_idx else {
+            return "?".into();
+        };
+        match ir
+            .blocks
+            .get(&call_site.block)
+            .and_then(|b| b.instructions.get(idx))
+        {
+            Some(Instruction::CallStatic { func, .. }) => func.clone(),
+            Some(Instruction::CallVirtual { method, .. }) => method.clone(),
+            _ => "?".into(),
+        }
+    }
+
+    /// Instruction-level step: field loads become `FieldLoad`, everything
+    /// else a generic `Assignment` (variable-level flow).
+    fn instr_step(&self, ir: &FunctionIR, key: &NodeKey, fname: String) -> PathStep {
+        let Some(idx) = key.instr_idx else {
+            return PathStep::Assignment {
+                function: fname,
+                variable: key.var.0 as u32,
+            };
+        };
+        let Some(b) = ir.blocks.get(&key.block) else {
+            return PathStep::Assignment {
+                function: fname,
+                variable: key.var.0 as u32,
+            };
+        };
+        match b.instructions.get(idx) {
+            Some(Instruction::LoadField { base, field, .. }) => {
+                let base_name = ir
+                    .var_metadata
+                    .get(base)
+                    .and_then(|m| m.source_name.clone())
+                    .unwrap_or_else(|| format!("v{}", base.0));
+                PathStep::FieldLoad {
+                    function: fname,
+                    base: base_name,
+                    field: field.clone(),
+                }
+            }
+            _ => PathStep::Assignment {
+                function: fname,
+                variable: key.var.0 as u32,
+            },
+        }
+    }
+
+    /// Walk the BFS parent map from the sink argument back to the source and
+    /// build the source→sink [`TaintPath`].
+    pub(super) fn reconstruct_path(
+        &self,
+        source_node: Option<(usize, NodeKey)>,
+        source_desc: Option<String>,
+    ) -> TaintPath {
+        let mut chain: Vec<(String, FunctionIR, NodeKey, PathStep)> = Vec::new();
+        // The parent map maps each visited node → its BFS parent (the node
+        // one step closer to the sink). The chain therefore runs from the
+        // source (which has no parent entry, BFS stopped there) to the node
+        // just before the sink argument. The sink node itself is not a step:
+        // the finding already reports it.
+        let Some((sf, skey)) = source_node else {
+            return TaintPath::new(chain, source_desc, &self.fn_file);
+        };
+        let mut cur = (sf, skey);
+        for _ in 0..self.current_parents.len() + 1 {
+            let (cf, key) = cur;
+            let ir = self.prog.functions[cf].ir.clone();
+            let step = self.step_of(cf, &key);
+            chain.push((ir.name.clone(), ir, key, step));
+            match self.current_parents.get(&cur) {
+                Some(&parent) => cur = parent,
+                None => break,
+            }
+        }
+        TaintPath::new(chain, source_desc, &self.fn_file)
     }
 }

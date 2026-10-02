@@ -110,6 +110,7 @@ impl<'a> LoweringContext<'a> {
                     byte_range: Some((node.start_byte(), node.end_byte())),
                     is_memory_state: false,
                     object_keys: Vec::new(),
+                    declared: false,
                 });
                 self.ir.push_instruction(
                     self.current_block,
@@ -167,6 +168,7 @@ impl<'a> LoweringContext<'a> {
             byte_range: Some((node.start_byte(), node.end_byte())),
             is_memory_state: false,
             object_keys: Vec::new(),
+            declared: false,
         });
 
         let true_block = self.ir.new_block();
@@ -309,6 +311,70 @@ impl<'a> LoweringContext<'a> {
             .and_then(|c| self.visit_node(c));
         self.ir
             .set_terminator(self.current_block, Terminator::Return { src: value });
+        None
+    }
+
+    pub fn visit_goto(&mut self, node: Node) -> Option<Operand> {
+        let label_name = node
+            .child_by_field_name("label")
+            .or_else(|| {
+                let mut c = node.walk();
+                node.named_children(&mut c)
+                    .find(|n| n.kind() == "statement_identifier" || n.kind() == "identifier")
+            })
+            .map(|n| self.source[n.start_byte()..n.end_byte()].trim().to_string());
+
+        if let Some(name) = label_name {
+            let target_block = self.get_or_create_label_block(&name);
+            if self
+                .ir
+                .blocks
+                .get(&self.current_block)
+                .is_none_or(|b| matches!(b.terminator, Terminator::None))
+            {
+                self.ir
+                    .set_terminator(self.current_block, Terminator::Jump(target_block));
+                self.ir.add_edge(self.current_block, target_block);
+            }
+            self.current_block = self.ir.new_block();
+        }
+        None
+    }
+
+    pub fn visit_labeled_statement(&mut self, node: Node) -> Option<Operand> {
+        let label_name = node
+            .child_by_field_name("label")
+            .or_else(|| {
+                let mut c = node.walk();
+                node.named_children(&mut c)
+                    .find(|n| n.kind() == "statement_identifier" || n.kind() == "identifier")
+            })
+            .map(|n| self.source[n.start_byte()..n.end_byte()].trim().to_string());
+
+        if let Some(name) = label_name {
+            let label_block = self.get_or_create_label_block(&name);
+            if self
+                .ir
+                .blocks
+                .get(&self.current_block)
+                .is_none_or(|b| matches!(b.terminator, Terminator::None))
+            {
+                self.ir
+                    .set_terminator(self.current_block, Terminator::Jump(label_block));
+                self.ir.add_edge(self.current_block, label_block);
+            }
+            self.current_block = label_block;
+        }
+
+        let inner_stmt = node.child_by_field_name("statement").or_else(|| {
+            let mut c = node.walk();
+            node.named_children(&mut c)
+                .find(|n| n.kind() != "statement_identifier" && n.kind() != "identifier")
+        });
+
+        if let Some(stmt) = inner_stmt {
+            self.visit_node(stmt);
+        }
         None
     }
 }

@@ -820,7 +820,7 @@ impl LanguageSpec for PythonSpec {
     }
 
     fn ternary_cond_index(&self) -> usize {
-        // Python: `then if cond else else_arm` — the condition is the
+        // Python: `then if cond else else_arm` - the condition is the
         // middle named child, unlike JS/C where it comes first.
         1
     }
@@ -956,103 +956,5 @@ impl LanguageSpec for PythonSpec {
 
     fn shell_api_method_names(&self) -> &'static [&'static str] {
         &[]
-    }
-
-    fn known_semantic_categories(&self) -> &'static [(&'static str, &'static [&'static str])] {
-        &[
-            (
-                "db_query",
-                &[
-                    "execute", "query", "raw", "fetchone", "fetchall", "get", "find", "find_one",
-                    "filter", "all",
-                ],
-            ),
-            (
-                "db_write",
-                &[
-                    "insert",
-                    "update",
-                    "upsert",
-                    "create",
-                    "delete",
-                    "remove",
-                    "save",
-                    "bulk_create",
-                ],
-            ),
-            (
-                "cmd_exec",
-                &[
-                    "system",
-                    "popen",
-                    "subprocess.run",
-                    "subprocess.call",
-                    "subprocess.Popen",
-                    "os.system",
-                    "os.popen",
-                ],
-            ),
-            (
-                "file_read",
-                &[
-                    "open",
-                    "read",
-                    "readlines",
-                    "read_text",
-                    "Path.read_text",
-                    "io.open",
-                ],
-            ),
-            (
-                "file_write",
-                &["write", "writelines", "write_text", "Path.write_text"],
-            ),
-            (
-                "http_request",
-                &[
-                    "requests.get",
-                    "requests.post",
-                    "requests.put",
-                    "requests.delete",
-                    "requests.patch",
-                    "requests.Session",
-                    "httpx.get",
-                    "httpx.post",
-                    "aiohttp",
-                    "urllib.request",
-                    "urlopen",
-                ],
-            ),
-            ("url_redirect", &["redirect", "HttpResponseRedirect"]),
-            (
-                "crypto_weak",
-                &["md5", "sha1", "hashlib.md5", "hashlib.sha1"],
-            ),
-            (
-                "crypto_strong",
-                &[
-                    "sha256",
-                    "sha512",
-                    "hashlib.sha256",
-                    "hashlib.sha512",
-                    "bcrypt",
-                ],
-            ),
-            (
-                "deserialize",
-                &["loads", "load", "json.loads", "pickle.loads"],
-            ),
-            ("sanitize", &["escape", "bleach.clean", "markupsafe.escape"]),
-            ("regex", &["re.compile", "re.match", "re.search", "re.sub"]),
-            ("process", &["os.system", "os.popen", "subprocess"]),
-            (
-                "auth_middleware",
-                &["login_required", "permission_required", "authenticate"],
-            ),
-            (
-                "financial_calc",
-                &["price", "total", "amount", "balance", "Decimal"],
-            ),
-        ]
     }
 }

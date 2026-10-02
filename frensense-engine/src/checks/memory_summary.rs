@@ -17,19 +17,6 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::analysis::value;
 use crate::ir::function::{FunctionIR, Instruction, Operand, Terminator, VarId};
 
-/// Callee last segments that release heap memory directly.
-const DIRECT_FREE_CALLS: &[&str] = &["free"];
-
-/// Callee last segments that allocate heap memory directly.
-const DIRECT_ALLOC_CALLS: &[&str] = &[
-    "malloc",
-    "calloc",
-    "realloc",
-    "aligned_alloc",
-    "valloc",
-    "alloca",
-];
-
 fn last_segment(call: &str) -> &str {
     let s = call.rsplit('.').next().unwrap_or(call);
     s.rsplit("::").next().unwrap_or(s)
@@ -65,6 +52,9 @@ pub struct MemorySummary {
     pub return_capacity: CapacitySpec,
     /// Parameter indices consumed (freed/deallocated) by this function.
     pub consumes_params: Vec<usize>,
+    /// Parameter indices through which freshly allocated objects are written (out-parameters).
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub out_params_fresh: Vec<usize>,
 }
 
 /// Registry storing interprocedural memory contracts for library primitives
@@ -76,67 +66,64 @@ pub struct MemorySummaryRegistry {
 
 impl Default for MemorySummaryRegistry {
     fn default() -> Self {
-        let mut reg = Self {
-            summaries: FxHashMap::default(),
-        };
-        reg.register_builtins();
-        reg
+        Self::from_vocabulary(frensense_lang::memory::bootstrap_memory_functions())
     }
 }
 
 impl MemorySummaryRegistry {
-    /// Create an empty registry with built-in library primitives.
+    /// Create a registry seeded with the bootstrap memory vocabulary.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Returns true if `name` is one of the built-in bootstrap contracts.
-    ///
-    /// The bundler uses this to skip re-emitting builtins into the `.frc`
-    /// (they're already in the hardcoded bootstrap, no need to inflate bundle size).
-    pub fn is_builtin(name: &str) -> bool {
-        const BUILTIN_NAMES: &[&str] = &[
-            "free",
-            "malloc",
-            "calloc",
-            "realloc",
-            "aligned_alloc",
-            "valloc",
-            "alloca",
-            "g_free",
-            "g_malloc",
-            "g_malloc0",
-            "g_realloc",
-            "g_strdup",
-            "kfree",
-            "kmalloc",
-            "kzalloc",
-            "kcalloc",
-            "sqlite3_free",
-            "sqlite3_malloc",
-            "sqlite3_malloc64",
-            "sqlite3_realloc",
-            "CRYPTO_free",
-            "apr_palloc",
-            "xmlFree",
-            "cJSON_Delete",
-            "strdup",
-            "strndup",
-        ];
-        BUILTIN_NAMES.contains(&name)
+    /// Build a registry from a memory-function vocabulary (spec-provided
+    /// or the bootstrap default): one summary per entry, mapping the
+    /// spec's capacity shape onto [`CapacitySpec`].
+    fn from_vocabulary(vocab: &[frensense_lang::memory::MemoryFuncSpec]) -> Self {
+        use frensense_lang::memory::AllocCapacity;
+        let mut summaries = FxHashMap::default();
+        for f in vocab {
+            summaries.insert(
+                f.name.to_string(),
+                MemorySummary {
+                    returns_fresh: f.returns_fresh,
+                    return_capacity: match f.capacity {
+                        AllocCapacity::Unknown => CapacitySpec::Unknown,
+                        AllocCapacity::Param(n) => CapacitySpec::Param(n),
+                        AllocCapacity::ParamProduct(a, b) => CapacitySpec::ParamProduct(a, b),
+                    },
+                    consumes_params: f.consumes_params.to_vec(),
+                    out_params_fresh: Vec::new(),
+                },
+            );
+        }
+        Self { summaries }
     }
 
-    /// Seed a registry from bundle-learned memory contracts, then add the
-    /// built-in bootstrap.  Bundle-learned contracts override builtins on
-    /// name collision (more specific corpus knowledge wins).
+    /// Returns true if `name` is one of the bootstrap vocabulary contracts.
+    ///
+    /// The bundler uses this to skip re-emitting builtins into the `.frc`
+    /// (they're already in the spec vocabulary, no need to inflate bundle size).
+    pub fn is_builtin(name: &str) -> bool {
+        frensense_lang::memory::is_bootstrap_memory_func(name)
+    }
+
+    /// Seed a registry from the spec's memory vocabulary (falling back to
+    /// the bootstrap table when the facts carry none), then layer
+    /// bundle-learned contracts on top. Learned contracts override the
+    /// vocabulary on name collision (more specific corpus knowledge wins).
     ///
     /// Call this instead of `default()` when a `.frc` bundle is loaded, then
     /// follow up with `infer_program_summaries_into` for the current project's
     /// per-file fixpoint.
     pub fn from_facts(facts: &crate::analysis::taint::facts::FactTable) -> Self {
-        // Start with the hardcoded bootstrap so the engine always works even
-        // without a bundle, then merge bundle-learned contracts on top.
-        let mut reg = Self::default();
+        let vocabulary: &[frensense_lang::memory::MemoryFuncSpec] =
+            if facts.memory_functions.is_empty() {
+                frensense_lang::memory::bootstrap_memory_functions()
+            } else {
+                &facts.memory_functions
+            };
+        let mut reg = Self::from_vocabulary(vocabulary);
         for contract in &facts.memory_contracts {
             reg.summaries.insert(
                 contract.name.clone(),
@@ -144,6 +131,7 @@ impl MemorySummaryRegistry {
                     returns_fresh: contract.returns_fresh,
                     return_capacity: contract.return_capacity.clone(),
                     consumes_params: contract.consumes_params.clone(),
+                    out_params_fresh: Vec::new(),
                 },
             );
         }
@@ -154,6 +142,7 @@ impl MemorySummaryRegistry {
                     returns_fresh: true,
                     return_capacity: CapacitySpec::Unknown,
                     consumes_params: Vec::new(),
+                    out_params_fresh: Vec::new(),
                 });
         }
         for dealloc in &facts.custom_deallocators {
@@ -163,6 +152,7 @@ impl MemorySummaryRegistry {
                     returns_fresh: false,
                     return_capacity: CapacitySpec::Unknown,
                     consumes_params: vec![0],
+                    out_params_fresh: Vec::new(),
                 });
         }
         reg
@@ -185,91 +175,6 @@ impl MemorySummaryRegistry {
         registry
     }
 
-    fn register_builtins(&mut self) {
-        // Standard deallocators (consumes param 0)
-        let deallocs = &[
-            "free",
-            "g_free",
-            "kfree",
-            "cJSON_Delete",
-            "apr_palloc",
-            "CRYPTO_free",
-            "xmlFree",
-            "sqlite3_free",
-        ];
-        for &name in deallocs {
-            self.summaries.insert(
-                name.to_string(),
-                MemorySummary {
-                    returns_fresh: false,
-                    return_capacity: CapacitySpec::Unknown,
-                    consumes_params: vec![0],
-                },
-            );
-        }
-
-        // Standard allocators (returns fresh with param 0 capacity)
-        let param0_allocs = &[
-            "malloc",
-            "valloc",
-            "alloca",
-            "g_malloc",
-            "g_malloc0",
-            "kmalloc",
-            "kzalloc",
-            "sqlite3_malloc",
-        ];
-        for &name in param0_allocs {
-            self.summaries.insert(
-                name.to_string(),
-                MemorySummary {
-                    returns_fresh: true,
-                    return_capacity: CapacitySpec::Param(0),
-                    consumes_params: vec![],
-                },
-            );
-        }
-
-        // Calloc-style allocators (returns fresh with param0 * param1 capacity)
-        let calloc_allocs = &["calloc", "sqlite3_malloc64", "kcalloc"];
-        for &name in calloc_allocs {
-            self.summaries.insert(
-                name.to_string(),
-                MemorySummary {
-                    returns_fresh: true,
-                    return_capacity: CapacitySpec::ParamProduct(0, 1),
-                    consumes_params: vec![],
-                },
-            );
-        }
-
-        // Realloc-style allocators (consumes param 0, returns fresh with param 1 capacity)
-        let realloc_allocs = &["realloc", "g_realloc", "sqlite3_realloc"];
-        for &name in realloc_allocs {
-            self.summaries.insert(
-                name.to_string(),
-                MemorySummary {
-                    returns_fresh: true,
-                    return_capacity: CapacitySpec::Param(1),
-                    consumes_params: vec![0],
-                },
-            );
-        }
-
-        // String duplicates (returns fresh with unknown capacity)
-        let str_allocs = &["strdup", "strndup", "g_strdup"];
-        for &name in str_allocs {
-            self.summaries.insert(
-                name.to_string(),
-                MemorySummary {
-                    returns_fresh: true,
-                    return_capacity: CapacitySpec::Unknown,
-                    consumes_params: vec![],
-                },
-            );
-        }
-    }
-
     /// Insert or update a summary contract for a function name.
     pub fn insert(&mut self, name: String, summary: MemorySummary) {
         self.summaries.insert(name, summary);
@@ -283,26 +188,14 @@ impl MemorySummaryRegistry {
     }
 
     /// Returns true if calling `name` returns a freshly allocated object.
+    /// Vocabulary-driven: the registry was seeded from the spec's
+    /// `known_memory_functions` (or the bootstrap table).
     pub fn returns_fresh(&self, name: &str) -> bool {
-        let seg = last_segment(name);
-        if DIRECT_ALLOC_CALLS.contains(&seg) {
-            return true;
-        }
         self.get(name).is_some_and(|s| s.returns_fresh)
     }
 
     /// Returns the capacity specification for a fresh allocation returned by `name`.
     pub fn return_capacity(&self, name: &str) -> Option<&CapacitySpec> {
-        let seg = last_segment(name);
-        if seg == "malloc" || seg == "valloc" || seg == "alloca" {
-            return Some(&CapacitySpec::Param(0));
-        }
-        if seg == "calloc" {
-            return Some(&CapacitySpec::ParamProduct(0, 1));
-        }
-        if seg == "realloc" || seg == "aligned_alloc" {
-            return Some(&CapacitySpec::Param(1));
-        }
         self.get(name).and_then(|s| {
             if s.returns_fresh {
                 Some(&s.return_capacity)
@@ -314,12 +207,15 @@ impl MemorySummaryRegistry {
 
     /// Returns the indices of parameters consumed (deallocated) by `name`.
     pub fn consumes_params(&self, name: &str) -> Vec<usize> {
-        let seg = last_segment(name);
-        if DIRECT_FREE_CALLS.contains(&seg) {
-            return vec![0];
-        }
         self.get(name)
             .map(|s| s.consumes_params.clone())
+            .unwrap_or_default()
+    }
+
+    /// Returns the indices of parameters through which fresh allocations are written by `name`.
+    pub fn out_params_fresh(&self, name: &str) -> Vec<usize> {
+        self.get(name)
+            .map(|s| s.out_params_fresh.clone())
             .unwrap_or_default()
     }
 
@@ -533,12 +429,84 @@ impl MemorySummaryRegistry {
                     }
                 }
 
+                // 3. Infer out-parameter allocation provenance
+                let mut out_params: Vec<usize> = Vec::new();
+                for blk in ir.blocks.values() {
+                    for instr in &blk.instructions {
+                        match instr {
+                            Instruction::StoreElement {
+                                base,
+                                src: Operand::Var(src),
+                                ..
+                            }
+                            | Instruction::StoreField {
+                                base,
+                                src: Operand::Var(src),
+                                ..
+                            } => {
+                                if let Some(param_idx) = trace_to_param(ir, *base) {
+                                    let mut cur = *src;
+                                    let mut is_fresh = false;
+                                    let mut seen = FxHashSet::default();
+                                    while seen.insert(cur) {
+                                        match find_definition(ir, cur) {
+                                            Some(Instruction::CallStatic { func, .. }) => {
+                                                if self.returns_fresh(func) {
+                                                    is_fresh = true;
+                                                }
+                                                break;
+                                            }
+                                            Some(Instruction::Allocate { .. }) => {
+                                                is_fresh = true;
+                                                break;
+                                            }
+                                            Some(Instruction::Assign {
+                                                src: Operand::Var(next),
+                                                ..
+                                            })
+                                            | Some(Instruction::Cast {
+                                                src: Operand::Var(next),
+                                                ..
+                                            }) => {
+                                                cur = *next;
+                                            }
+                                            _ => break,
+                                        }
+                                    }
+                                    if is_fresh && !out_params.contains(&param_idx) {
+                                        out_params.push(param_idx);
+                                    }
+                                }
+                            }
+                            Instruction::CallStatic { func, args, .. } => {
+                                let callee_out = self.out_params_fresh(func);
+                                for &slot in &callee_out {
+                                    if let Some(Operand::Var(arg_var)) = args.get(slot) {
+                                        let target = match find_definition(ir, *arg_var) {
+                                            Some(Instruction::AddressOf { src, .. }) => *src,
+                                            _ => *arg_var,
+                                        };
+                                        if let Some(param_idx) = trace_to_param(ir, target)
+                                            && !out_params.contains(&param_idx)
+                                        {
+                                            out_params.push(param_idx);
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                out_params.sort();
+
                 // If any contract was discovered, register it.
-                if returns_fresh || !consumes.is_empty() {
+                if returns_fresh || !consumes.is_empty() || !out_params.is_empty() {
                     let summary = MemorySummary {
                         returns_fresh,
                         return_capacity,
                         consumes_params: consumes,
+                        out_params_fresh: out_params,
                     };
                     let prev = self.summaries.get(&ir.name);
                     if prev != Some(&summary) {

@@ -376,16 +376,65 @@ impl<'a> SvfgBuilder<'a> {
                 // a) Operand uses: def(v) → use(J, v) → def(J, w) for each defined w.
                 for use_var in Self::instruction_uses(instr) {
                     let use_key = NodeKey::instr(block_id, idx, use_var);
+
+                    // A field read whose base is a fresh allocation is a
+                    // *container identity* use, not a value use: the field's
+                    // value arrives through the Pass-3 store→load edges (or
+                    // is absent = clean). Linking the base def here would let
+                    // the backward walk climb from the load into the
+                    // container's other stores and union every property back
+                    // together - the exact pollution the allocation lowering
+                    // exists to remove.
+                    if self.is_container_identity_use(instr, use_var) {
+                        continue;
+                    }
+
                     self.graph.ensure_node(use_key, NodeKind::InstrUse);
                     self.connect_def_to_use(use_var, use_key);
 
                     // Intra-instruction flow: the consumed value contributes to
                     // everything this instruction defines. This is the edge that
                     // lets taint cross Assign / BinaryOp / Cast / Call-dest etc.
+                    //
+                    // Cut for boolean-producing operations (`a == b`, `a < b`,
+                    // `k in obj`, `instanceof`, `!a`): their destination holds a
+                    // BOOLEAN, whose printable payload is "true"/"false" -
+                    // operand bytes cannot survive into it, so linking
+                    // operand→dest manufactures source→sink paths that do not
+                    // exist (`flag = req.body == "admin"; execute(flag)`), and
+                    // the value lattice cannot see them (comparisons over
+                    // tainted operands fold to Top). Value-returning operators
+                    // keep their edges: `a || b` and `a + b` yield operands.
+                    if Self::defines_boolean_payload(instr) {
+                        continue;
+                    }
                     for &def_var in &defs {
                         let def_key = NodeKey::instr(block_id, idx, def_var);
                         self.graph.add_edge(use_key, def_key);
                     }
+                }
+
+                // a2) A store writes `src` INTO its container: the container's
+                // def node must reach `src` when walked backward, so a whole-
+                // container consumer (`sink(obj)`, `p = obj`) sees every
+                // stored value. Field reads are unaffected: they no longer
+                // climb through the container def (see the identity-use cut
+                // above) and resolve through Pass-3 edges instead.
+                //
+                // The edge always targets the ALLOCATION's own def node
+                // (following binding copies), never a copy's def: the
+                // backward engine stops field-demand walks exactly at
+                // allocation defs, and stores on non-allocation containers
+                // (parameters, unknown bases) keep their pre-existing edge
+                // structure - fill edges there would re-open the
+                // field-mismatch paths Pass 3 exists to filter.
+                if let Instruction::StoreField { base, src, .. }
+                | Instruction::StoreElement { base, src, .. } = instr
+                    && let Operand::Var(sv) = src
+                    && let Some(base_def) = self.allocation_def(*base)
+                {
+                    self.graph
+                        .add_edge(NodeKey::instr(block_id, idx, *sv), base_def);
                 }
 
                 // b) Memory flow: mem_in-use → mem_out-def (pass-through /
@@ -802,6 +851,82 @@ impl<'a> SvfgBuilder<'a> {
             }
         }
         v
+    }
+
+    /// The def node of the allocation that `var` resolves to through
+    /// binding copies, or `None` when the chain doesn't end in one.
+    ///
+    /// `const o = {...}` emits `Allocate` into a temporary and binds `o`
+    /// with an `Assign`, so both the temp and the bound name count.
+    fn allocation_def(&self, mut var: VarId) -> Option<NodeKey> {
+        for _ in 0..8 {
+            let key = *self.def_site.get(&var)?;
+            let NodeKey {
+                block,
+                instr_idx: Some(i),
+                ..
+            } = key
+            else {
+                return None;
+            };
+            let ins = self.ir.blocks.get(&block)?.instructions.get(i)?;
+            match ins {
+                Instruction::Allocate { .. } => return Some(key),
+                Instruction::Assign {
+                    src: Operand::Var(v),
+                    ..
+                } => var = *v,
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    /// Does `var` resolve (through binding copies) to an allocation?
+    fn resolves_to_allocation(&self, var: VarId) -> bool {
+        self.allocation_def(var).is_some()
+    }
+
+    /// Is `use_var` the container-identity operand of a field/element read
+    /// whose base resolves to a fresh allocation? Such reads must not
+    /// climb into the container's definition: their field's value arrives
+    /// through the Pass-3 store→load edges only.
+    fn is_container_identity_use(&self, instr: &Instruction, use_var: VarId) -> bool {
+        let base = match instr {
+            Instruction::LoadField { base, .. } | Instruction::LoadElement { base, .. } => *base,
+            _ => return false,
+        };
+        base == use_var && self.resolves_to_allocation(base)
+    }
+
+    /// Does this instruction define a boolean *payload* rather than a
+    /// transformed copy of its operands' bytes?
+    ///
+    /// Comparisons (`==`, `<`, `in`, `instanceof`, ...) and boolean
+    /// negation always print as `"true"`/`"false"`, so taint on the
+    /// operands cannot reach a consumer of the destination. Operators that
+    /// yield an operand's value (`||`, `&&`, arithmetic/string `+`) are
+    /// deliberately excluded - their destinations do carry payload bytes.
+    fn defines_boolean_payload(instr: &Instruction) -> bool {
+        match instr {
+            Instruction::BinaryOp { op, .. } => matches!(
+                op.as_str(),
+                "==" | "==="
+                    | "!="
+                    | "!=="
+                    | "<"
+                    | "<="
+                    | ">"
+                    | ">="
+                    | "in"
+                    | "not in"
+                    | "instanceof"
+                    | "is"
+                    | "is not"
+            ),
+            Instruction::UnaryOp { op, .. } => matches!(op.as_str(), "!" | "not"),
+            _ => false,
+        }
     }
 
     /// Returns the `mem_in` VarId if this instruction consumes a memory state.

@@ -85,6 +85,7 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
                 byte_range: Some((p.start_byte(), p.end_byte())),
                 is_memory_state: false,
                 object_keys: Vec::new(),
+                declared: false,
             });
             ctx.ir.parameters.push(v);
             ctx.env.last_mut().unwrap().insert(name, v);

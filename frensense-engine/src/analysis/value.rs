@@ -312,7 +312,11 @@ fn sharpen_branch(
 }
 
 /// Compute fixpoint abstract states with edge-sensitive branch sharpening.
-fn fixpoint(ir: &FunctionIR) -> FxHashMap<BlockId, AbsState> {
+/// Returns the block-entry states plus whether the worklist ran to
+/// convergence (`false` when the iteration cap cut the fixpoint short -
+/// states may then hold narrower-than-true values and must not be used
+/// for soundness-critical pruning).
+fn fixpoint(ir: &FunctionIR) -> (FxHashMap<BlockId, AbsState>, bool) {
     // Pre-index definition instructions for fast predicate inspection.
     let mut defs: FxHashMap<VarId, &Instruction> = FxHashMap::default();
     for blk in ir.blocks.values() {
@@ -356,6 +360,7 @@ fn fixpoint(ir: &FunctionIR) -> FxHashMap<BlockId, AbsState> {
     let mut queue: VecDeque<BlockId> = VecDeque::new();
     let mut queued: FxHashSet<BlockId> = FxHashSet::default();
     let mut iterations: usize = 0;
+    let mut converged = true;
     const MAX_ITERATIONS: usize = 64;
 
     for &b in &rpo {
@@ -366,6 +371,7 @@ fn fixpoint(ir: &FunctionIR) -> FxHashMap<BlockId, AbsState> {
     while let Some(bid) = queue.pop_front() {
         iterations += 1;
         if iterations > MAX_ITERATIONS * (ir.blocks.len() + 1) {
+            converged = false;
             break;
         }
         queued.remove(&bid);
@@ -465,7 +471,7 @@ fn fixpoint(ir: &FunctionIR) -> FxHashMap<BlockId, AbsState> {
         }
     }
 
-    in_state
+    (in_state, converged)
 }
 
 /// The per-function analysis result: each variable's value at the point
@@ -477,11 +483,16 @@ pub struct ValueInfo {
     pub blocks: usize,
     /// Block-entry abstract states (keyed by block ID).
     pub block_entry_states: FxHashMap<BlockId, AbsState>,
+    /// Whether the fixpoint worklist ran to convergence. `false` means the
+    /// iteration cap cut the analysis short: states may hold
+    /// narrower-than-true values, so consumers that prune or promote based
+    /// on these values must treat the whole result as `Top`.
+    pub converged: bool,
 }
 
 /// Analyse one function.
 pub fn analyze(ir: &FunctionIR) -> ValueInfo {
-    let in_states = fixpoint(ir);
+    let (in_states, converged) = fixpoint(ir);
 
     let mut values: FxHashMap<VarId, Value> = FxHashMap::default();
     for (bid, mut state) in in_states.clone() {
@@ -509,6 +520,7 @@ pub fn analyze(ir: &FunctionIR) -> ValueInfo {
         values,
         blocks: ir.blocks.len(),
         block_entry_states: in_states,
+        converged,
     }
 }
 

@@ -33,6 +33,7 @@ impl<'a> LoweringContext<'a> {
                 // Simple `const name = value`.
                 let rhs_op = self.visit_node(value_node).unwrap_or(Operand::Unknown);
                 if let Operand::Var(dest) = self.resolve_identifier(name_node) {
+                    self.mark_declared(dest);
                     self.ir.push_instruction(
                         self.current_block,
                         Instruction::Assign { dest, src: rhs_op },
@@ -61,6 +62,7 @@ impl<'a> LoweringContext<'a> {
                         if let (Some(k), Some(v)) = (prop, target) {
                             let field = self.source[k.start_byte()..k.end_byte()].to_string();
                             if let Operand::Var(dest) = self.resolve_identifier(v) {
+                                self.mark_declared(dest);
                                 self.ir.push_instruction(
                                     self.current_block,
                                     Instruction::LoadField {
@@ -85,6 +87,7 @@ impl<'a> LoweringContext<'a> {
                 if let Some(lval) = self.visit_lvalue(lhs) {
                     match lval {
                         LValue::Variable(dest) => {
+                            self.mark_declared(dest);
                             self.ir.push_instruction(
                                 self.current_block,
                                 Instruction::Assign { dest, src: rhs_op },
@@ -118,6 +121,37 @@ impl<'a> LoweringContext<'a> {
                 }
                 None
             }
+            (Some(name_node), None)
+                if matches!(self.classify_node(name_node.kind()), NodeRole::Identifier) =>
+            {
+                // Value-less declaration: `char *p;`, `let h;`, `x: int`.
+                // The name is never assigned in this statement, but the
+                // binding is still provably function-scoped.
+                if let Operand::Var(dest) = self.resolve_identifier(name_node) {
+                    self.mark_declared(dest);
+                }
+                // Sibling declarators of the same statement
+                // (`int *a, *b;`): identifiers get bound and marked here;
+                // initializer-bearing declarators recurse through the
+                // regular arms, which mark their own names.
+                let mut cursor = node.walk();
+                for child in node.named_children(&mut cursor) {
+                    let inner = self.spec.unwrap_declarator_node(child);
+                    if matches!(self.classify_node(inner.kind()), NodeRole::Identifier)
+                        && !matches!(
+                            self.classify_node(child.kind()),
+                            NodeRole::Declaration { .. }
+                        )
+                    {
+                        if let Operand::Var(dest) = self.resolve_identifier(inner) {
+                            self.mark_declared(dest);
+                        }
+                    } else {
+                        self.visit_node(child);
+                    }
+                }
+                None
+            }
             _ => {
                 // Container: lower children (each declarator hits the
                 // (name, value) arm above).
@@ -129,6 +163,16 @@ impl<'a> LoweringContext<'a> {
                 }
                 None
             }
+        }
+    }
+
+    /// Flags a var as bound by a declaration lowered inside this function's
+    /// body. Uninitialized-free analysis only reports `declared` vars:
+    /// vars created at first expression use are file/module/header globals
+    /// (initialized elsewhere), never never-assigned locals.
+    fn mark_declared(&mut self, var: VarId) {
+        if let Some(meta) = self.ir.var_metadata.get_mut(&var) {
+            meta.declared = true;
         }
     }
 }

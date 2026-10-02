@@ -46,6 +46,7 @@ impl<'a> LoweringContext<'a> {
             byte_range: Some((node.start_byte(), node.end_byte())),
             is_memory_state: false,
             object_keys: Vec::new(),
+            declared: false,
         });
 
         let callee_role = self.classify_node(callee_node.kind());

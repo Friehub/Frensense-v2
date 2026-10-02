@@ -185,9 +185,12 @@ mod idor_classification_tests {
         engine.findings
     }
 
-    /// `findOne({ where: { id: req.body.x } })`, object-payload shape → Idor.
+    /// `findOne({ where: { id: req.body.x } })`: `where` is a clause
+    /// wrapper, not an identity key - the driver parameterizes the leaf
+    /// value, nothing here proves which-record control. Not reported
+    /// (zero-FP: structurally unprovable findings never fire).
     #[test]
-    fn object_payload_is_idor_class() {
+    fn where_wrapped_clause_is_not_a_finding() {
         let src = r#"
 export function updateProfile(req: any, db: any): void {
   db.User.findOne({ where: { id: req.body.userId } });
@@ -198,11 +201,93 @@ export function updateProfile(req: any, db: any): void {
             .iter()
             .filter(|f| f.verdict == BackwardVerdict::Vulnerable && f.alert.is_some())
             .collect();
-        assert!(!vuln.is_empty(), "flow must be detected");
+        assert!(
+            vuln.is_empty(),
+            "where-wrapped clause must not alert, got {:?}",
+            vuln.iter()
+                .map(|f| (&f.sink, f.finding_class))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// `findOne({ _id: req.body.x })`: a top-level identity key marks the
+    /// payload as which-record control → still reported as Idor.
+    #[test]
+    fn identity_payload_is_idor_class() {
+        let src = r#"
+export function updateProfile(req: any, db: any): void {
+  db.User.findOne({ _id: req.body.userId });
+}
+"#;
+        let findings = run(src);
+        let vuln: Vec<_> = findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable && f.alert.is_some())
+            .collect();
+        assert!(!vuln.is_empty(), "identity payload must be detected");
         assert!(
             vuln.iter().any(|f| f.finding_class == FindingClass::Idor),
-            "object-payload flow must classify as Idor, got {:?}",
+            "identity-payload flow must classify as Idor, got {:?}",
             vuln.iter().map(|f| f.finding_class).collect::<Vec<_>>()
+        );
+    }
+
+    /// Auth-guarded handler: an early-return branch over an auth-vocab call
+    /// (`security.authenticatedUsers.from(req)` → `if (!user) return`)
+    /// dominates the sink and has a rejecting path that never reaches it -
+    /// the query only executes for authenticated callers, so the identity
+    /// payload is not an access-control violation. Suppressed (Idor class
+    /// only).
+    #[test]
+    fn auth_guarded_identity_payload_is_suppressed() {
+        let src = r#"
+export function likeReview(req: any, db: any): void {
+  const user = security.authenticatedUsers.from(req);
+  if (!user) {
+    return;
+  }
+  db.Reviews.findOne({ _id: req.body.id });
+}
+"#;
+        let findings = run(src);
+        let vuln: Vec<_> = findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable && f.alert.is_some())
+            .collect();
+        assert!(
+            vuln.is_empty(),
+            "auth-guarded identity query must be suppressed, got {:?}",
+            vuln.iter()
+                .map(|f| (&f.sink, f.finding_class))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Auth *presence* without a guard branch must NOT suppress: the forged
+    /// review TP shape fetches `user` but queries before (or without) any
+    /// auth check - the identity query is unguarded and stays reported.
+    #[test]
+    fn auth_call_without_guard_branch_still_reports() {
+        let src = r#"
+export function updateReview(req: any, db: any): void {
+  const user = security.authenticatedUsers.from(req);
+  db.Reviews.findOne({ _id: req.body.id });
+  if (user) {
+    audit(user);
+  }
+}
+"#;
+        let findings = run(src);
+        let vuln: Vec<_> = findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable && f.alert.is_some())
+            .collect();
+        assert!(
+            vuln.iter().any(|f| f.finding_class == FindingClass::Idor),
+            "unguarded identity query must still report as Idor, got {:?}",
+            vuln.iter()
+                .map(|f| (&f.sink, f.finding_class))
+                .collect::<Vec<_>>()
         );
     }
 

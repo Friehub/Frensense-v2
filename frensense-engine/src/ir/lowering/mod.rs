@@ -87,6 +87,9 @@ impl<'a> LoweringContext<'a> {
             // (`CallStatic`); captures flow through closure edges.
             NodeRole::Function { .. } => None,
 
+            _ if node.kind() == "goto_statement" => self.visit_goto(node),
+            _ if node.kind() == "labeled_statement" => self.visit_labeled_statement(node),
+
             _ => self.visit_children_generic(node),
         }
     }

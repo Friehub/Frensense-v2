@@ -471,3 +471,180 @@ export function orderHistory () {
         assert_eq!(hits.len(), 1, "probe6 duplicate: {hits:?}");
     }
 }
+
+#[cfg(test)]
+pub mod c_taint_gate {
+    use crate::analysis::taint::config::TaintConfig;
+    use crate::analysis::taint::engine::BackwardVerdict;
+    use crate::analysis::taint::facts::{FactTable, config_from_spec, fact_table_from_spec};
+    use crate::scan::{ScanResult, scan};
+
+    fn scan_c(src: &str) -> ScanResult {
+        let mut config = TaintConfig::default();
+        let mut facts = FactTable::default();
+        for spec in frensense_lang::all_specs() {
+            let c = config_from_spec(spec);
+            config.sources.extend(c.sources);
+            config.sinks.extend(c.sinks);
+            config.sanitizers.extend(c.sanitizers);
+            facts.merge(&fact_table_from_spec(spec));
+        }
+        let files = vec![("t.c".to_string(), src.to_string(), "c".to_string())];
+        scan(&files, &config, &facts)
+    }
+
+    fn vulnerable_at<'a>(res: &'a ScanResult, needle: &str, src: &str) -> Vec<&'a str> {
+        let line = src
+            .lines()
+            .position(|l| l.contains(needle))
+            .unwrap_or_else(|| panic!("needle {needle:?} not found")) as u32
+            + 1;
+        res.located
+            .iter()
+            .filter(|f| f.line == line && f.finding.verdict == BackwardVerdict::Vulnerable)
+            .map(|f| f.finding.function.as_str())
+            .collect()
+    }
+
+    /// alsa-lib `_snd_config_path`: getenv-driven buffer sized from strlen,
+    /// passed as sprintf's destination. The destination slot is not the
+    /// format string - must stay silent (was Critical on every slot).
+    #[test]
+    fn gate_getenv_sprintf_destination_stays_silent() {
+        let src = r#"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+void build(void) {
+    const char *root = getenv("ALSA_CONFIG_DIR");
+    char *path = malloc(strlen(root) + 16);
+    if (!path) return;
+    sprintf(path, "%s/%s", root, "alsa.conf");
+}
+"#;
+        let res = scan_c(src);
+        let hits = vulnerable_at(&res, "sprintf(path", src);
+        assert!(
+            hits.is_empty(),
+            "tainted destination/content into sprintf must stay silent: {hits:?}"
+        );
+    }
+
+    /// A genuinely tainted FORMAT argument is a format-string bug and must
+    /// still alert (the slot restriction narrows sinks, it never silences them).
+    #[test]
+    fn gate_tainted_format_string_still_fires() {
+        let src = r#"
+#include <stdio.h>
+#include <stdlib.h>
+void f(void) {
+    char buf[64];
+    char *fmt = getenv("FMT");
+    sprintf(buf, fmt);
+}
+"#;
+        let res = scan_c(src);
+        let hits = vulnerable_at(&res, "sprintf(buf", src);
+        assert!(
+            !hits.is_empty(),
+            "tainted format string must still alert as Vulnerable"
+        );
+    }
+
+    /// Sized copies carry an explicit length: copying getenv-derived text is
+    /// normal I/O (alsa `snd_config_update_r` memcpy of config paths) and is
+    /// checked spatially, not as a taint sink.
+    #[test]
+    fn gate_memcpy_tainted_content_stays_silent() {
+        let src = r#"
+#include <string.h>
+#include <stdlib.h>
+void f(void) {
+    char name[64];
+    char *c = getenv("ALSA_CONFIG_PATH");
+    memcpy(name, c, 8);
+}
+"#;
+        let res = scan_c(src);
+        let hits = vulnerable_at(&res, "memcpy(name", src);
+        assert!(
+            hits.is_empty(),
+            "memcpy of tainted content with explicit length must stay silent: {hits:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+pub mod spec_acceptance_gate {
+    use crate::analysis::taint::config::TaintConfig;
+    use crate::analysis::taint::engine::BackwardVerdict;
+    use crate::analysis::taint::facts::{FactTable, config_from_spec, fact_table_from_spec};
+    use crate::scan::{ScanResult, scan};
+
+    /// Full production pipeline: config + facts merged from every language
+    /// spec, exactly as the CLI scanner assembles them.
+    fn scan_ts(src: &str) -> ScanResult {
+        let mut config = TaintConfig::default();
+        let mut facts = FactTable::default();
+        for spec in frensense_lang::all_specs() {
+            let c = config_from_spec(spec);
+            config.sources.extend(c.sources);
+            config.sinks.extend(c.sinks);
+            config.sanitizers.extend(c.sanitizers);
+            facts.merge(&fact_table_from_spec(spec));
+        }
+        scan(
+            &[("app.ts".to_string(), src.to_string(), "ts".to_string())],
+            &config,
+            &facts,
+        )
+    }
+
+    /// Spec §4.2 (Verification & Acceptance): test cases containing
+    /// `env.SECRET_KEY -> createHmac` must produce **0 findings**. Env
+    /// vars are developer-controlled config, never attacker input - the
+    /// field path must not fall back to the `process`/root prefix, and the
+    /// param-sentinel source list must not cover it either.
+    #[test]
+    fn env_secret_key_into_create_hmac_stays_silent() {
+        let src = r#"
+const { createHmac } = require("crypto")
+export function sign(process: any, algo: string): string {
+  return createHmac(algo, process.env.SECRET_KEY)
+}
+"#;
+        let res = scan_ts(src);
+        let vuln: Vec<_> = res
+            .located
+            .iter()
+            .filter(|f| f.finding.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            vuln.is_empty(),
+            "env.SECRET_KEY -> createHmac must yield 0 findings, got {vuln:?}"
+        );
+    }
+
+    /// Companion negative control: the same sink with genuine request
+    /// input still fires (the silent case above is not silent because the
+    /// sink stopped matching).
+    #[test]
+    fn request_input_into_create_hmac_still_fires() {
+        let src = r#"
+const { createHmac } = require("crypto")
+export function sign(req: any, algo: string): string {
+  return createHmac(algo, req.body.key)
+}
+"#;
+        let res = scan_ts(src);
+        let vuln: Vec<_> = res
+            .located
+            .iter()
+            .filter(|f| f.finding.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            !vuln.is_empty(),
+            "request body into createHmac must stay Vulnerable (control)"
+        );
+    }
+}

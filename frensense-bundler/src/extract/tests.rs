@@ -248,6 +248,47 @@ mod grouping_tests {
     }
 
     #[test]
+    fn heldout_variants_are_excluded_from_grouping() {
+        // Held-out files are blind-verification material: they must never
+        // contribute a family, facts, or votes to the extracted bundle.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "uaf_positive.c",
+            "void h(void) { char *p; free(p); }\n",
+        );
+        write(
+            &dir,
+            "uaf_negative.c",
+            "void h(void) { char *p = 0; free(p); }\n",
+        );
+        write(
+            &dir,
+            "uaf_heldout_positive.c",
+            "void g(void) { char *q; free(q); }\n",
+        );
+        write(
+            &dir,
+            "uaf_heldout_negative.c",
+            "void g(void) { char *q = 0; free(q); }\n",
+        );
+
+        let families = group_families(dir.path()).unwrap();
+        let ids: Vec<&str> = families.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(ids, vec!["uaf"], "ids: {ids:?}");
+        assert_eq!(
+            families[0].positives.len(),
+            1,
+            "held-out leaked into positives"
+        );
+        assert_eq!(
+            families[0].negatives.len(),
+            1,
+            "held-out leaked into negatives"
+        );
+    }
+
+    #[test]
     fn declared_check_call_survives_language_split() {
         // The metadata comment is language-specific syntax; the py variant
         // declares it and only the python sub-family carries it.

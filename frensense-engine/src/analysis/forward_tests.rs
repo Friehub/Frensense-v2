@@ -19,6 +19,7 @@ pub mod interprocedural_tests {
             byte_range: None,
             is_memory_state: false,
             object_keys: Vec::new(),
+            declared: false,
         }
     }
 
@@ -29,6 +30,7 @@ pub mod interprocedural_tests {
             byte_range: None,
             is_memory_state: true,
             object_keys: Vec::new(),
+            declared: false,
         }
     }
 
@@ -1163,5 +1165,122 @@ pub mod interprocedural_tests {
             val_edges.contains(&(callee_idx, arg_node)),
             "val must connect to arg"
         );
+    }
+}
+
+#[cfg(test)]
+pub mod is_source_tests {
+    use crate::analysis::forward::{is_source, member_access_path};
+    use crate::analysis::taint::config::TaintConfig;
+    use crate::graph::svfg::NodeKey;
+    use crate::harness::lower_source;
+    use crate::ir::function::{FunctionIR, Instruction};
+
+    const SAMPLE: &str = r#"
+function handler(ctx) {
+  const a = ctx.request.body;
+  const b = ctx.env.SECRET;
+  const c = ctx.state.user;
+  consume(a, b, c);
+}
+"#;
+
+    fn sample_ir() -> FunctionIR {
+        lower_source("t.ts", SAMPLE, "ts")
+            .expect("lower")
+            .remove("handler")
+            .expect("handler fn")
+    }
+
+    /// NodeKey of the final `LoadField` whose reconstructed access path is `path`.
+    fn node_for(ir: &FunctionIR, path: &str) -> NodeKey {
+        for (block, blk) in &ir.blocks {
+            for (idx, instr) in blk.instructions.iter().enumerate() {
+                if let Instruction::LoadField {
+                    base, field, dest, ..
+                } = instr
+                    && member_access_path(ir, *base, field) == path
+                {
+                    return NodeKey {
+                        block: *block,
+                        instr_idx: Some(idx),
+                        var: *dest,
+                    };
+                }
+            }
+        }
+        panic!("no LoadField reconstructing access path {path:?}");
+    }
+
+    fn config(sources: &[&str]) -> TaintConfig {
+        TaintConfig {
+            sources: sources.iter().map(|s| (*s).to_string()).collect(),
+            sinks: Default::default(),
+            sanitizers: Default::default(),
+        }
+    }
+
+    /// Whole-value root registration ("ctx") must not leak into fields when
+    /// the config also declares granular rules for that root ("ctx.state"):
+    /// undeclared subtrees like `ctx.env.SECRET` stay clean.
+    #[test]
+    fn granular_rules_win_over_whole_value_root() {
+        let ir = sample_ir();
+        let cfg = config(&["ctx", "ctx.state"]);
+        assert!(
+            is_source(&ir, &cfg, &node_for(&ir, "ctx.state.user")),
+            "dotted source rule stays live"
+        );
+        assert!(
+            !is_source(&ir, &cfg, &node_for(&ir, "ctx.env.SECRET")),
+            "whole-value root must not cover undeclared fields when granular rules exist"
+        );
+        assert!(
+            !is_source(&ir, &cfg, &node_for(&ir, "ctx.request.body")),
+            "undeclared subtree under a suppressed root is not a source"
+        );
+    }
+
+    /// Without granular rules the whole-value root still covers its subtree
+    /// (destructured-root semantics: bare "body" covers "body.field").
+    #[test]
+    fn whole_value_root_covers_subtree_without_granular_rules() {
+        let ir = sample_ir();
+        let cfg = config(&["ctx"]);
+        assert!(is_source(&ir, &cfg, &node_for(&ir, "ctx.env.SECRET")));
+        assert!(is_source(&ir, &cfg, &node_for(&ir, "ctx.state.user")));
+    }
+
+    /// Spec acceptance: granular-only config keeps prefix-subtree matching
+    /// for its declared root and never claims undeclared siblings.
+    #[test]
+    fn spec_acceptance_granular_only_config() {
+        let ir = sample_ir();
+        let cfg = config(&["ctx.request"]);
+        assert!(is_source(&ir, &cfg, &node_for(&ir, "ctx.request.body")));
+        assert!(!is_source(&ir, &cfg, &node_for(&ir, "ctx.env.SECRET")));
+    }
+
+    /// The alert-text resolver must agree with `is_source` on the same
+    /// nodes: whatever is not a source must not yield a description, and
+    /// whatever is a source must yield the access path.
+    #[test]
+    fn source_description_agrees_with_is_source() {
+        use crate::analysis::taint::engine::source_description;
+
+        let ir = sample_ir();
+        let cfg = config(&["ctx", "ctx.state"]);
+        let user = node_for(&ir, "ctx.state.user");
+        assert_eq!(
+            source_description(&ir, &cfg, &user).as_deref(),
+            Some("ctx.state.user"),
+            "declared dotted rule describes itself"
+        );
+        let secret = node_for(&ir, "ctx.env.SECRET");
+        assert!(
+            source_description(&ir, &cfg, &secret).is_none(),
+            "suppressed root yields no description"
+        );
+        assert!(!is_source(&ir, &cfg, &secret));
     }
 }

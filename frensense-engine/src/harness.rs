@@ -79,7 +79,7 @@ pub fn lower_source_with_facts(
                 let name = name.unwrap_or_else(|| format!("<fn@{}>", node.start_byte()));
                 let mut ir = lower_one(&name, node, source, spec, facts);
                 ir.enclosing_fn = enclosing_extracted_name(node, source, path, spec);
-                irs.entry(ir.name.clone()).or_insert(ir);
+                insert_ir(&mut irs, ir, node.start_byte());
             }
         }
         // Top-level arrow functions bound to consts/lets, the dominant
@@ -107,7 +107,7 @@ pub fn lower_source_with_facts(
                     bound_fns.insert(value.start_byte());
                     let mut ir = lower_one(&name, value, source, spec, facts);
                     ir.enclosing_fn = enclosing_extracted_name(value, source, path, spec);
-                    irs.entry(ir.name.clone()).or_insert(ir);
+                    insert_ir(&mut irs, ir, value.start_byte());
                 } else if !inside_function(node, spec) {
                     // Top-level non-function static initializer: allowlist
                     // Sets, config objects, schema builders. Lowered as
@@ -119,7 +119,7 @@ pub fn lower_source_with_facts(
                     // (`const r = runTool(cmd)` inside a handler fired
                     // policy twice, once for `r`, once for the handler).
                     let ir = lower_static(&name, value, source, spec, facts);
-                    irs.entry(ir.name.clone()).or_insert(ir);
+                    insert_ir(&mut irs, ir, value.start_byte());
                 }
             }
         }
@@ -140,7 +140,7 @@ pub fn lower_source_with_facts(
                         bound_fns.insert(a.start_byte());
                         let mut ir = lower_one(&name, *a, source, spec, facts);
                         ir.enclosing_fn = enclosing_extracted_name(*a, source, path, spec);
-                        irs.entry(ir.name.clone()).or_insert(ir);
+                        insert_ir(&mut irs, ir, a.start_byte());
                     }
                 }
             }
@@ -155,6 +155,27 @@ pub fn lower_source_with_facts(
         }
     }
     Ok(irs)
+}
+
+/// Insert an IR keyed by its name, disambiguating on collision with the
+/// function node's byte offset. One file legitimately contains several
+/// same-named functions (four `set` object setters, several `handler`s):
+/// the old `entry().or_insert()` kept the first and silently erased every
+/// later twin's body from all analysis (the Juice Shop `weakPassword`
+/// miss). The kept name is the first one in walk order, so keys stay
+/// content-deterministic.
+fn insert_ir(irs: &mut FxHashMap<String, FunctionIR>, mut ir: FunctionIR, start: usize) {
+    if irs.contains_key(&ir.name) {
+        let base = ir.name.clone();
+        let mut key = format!("{base}@{start}");
+        let mut n = 0usize;
+        while irs.contains_key(&key) {
+            n += 1;
+            key = format!("{base}@{start}#{n}");
+        }
+        ir.name = key;
+    }
+    irs.insert(ir.name.clone(), ir);
 }
 
 /// True when `node` sits inside any function body (a named ancestor
@@ -326,6 +347,7 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
                 byte_range: Some((p.start_byte(), p.end_byte())),
                 is_memory_state: false,
                 object_keys: Vec::new(),
+                declared: true,
             });
             ctx.ir.parameters.push(v);
             ctx.env.last_mut().unwrap().insert(name, v);
@@ -356,6 +378,7 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
                 byte_range: Some((p.start_byte(), p.end_byte())),
                 is_memory_state: false,
                 object_keys: Vec::new(),
+                declared: true,
             });
             ctx.ir.parameters.push(v);
             ctx.env.last_mut().unwrap().insert(name, v);
