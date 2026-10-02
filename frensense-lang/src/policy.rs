@@ -137,6 +137,12 @@ pub struct WeakPrimitiveRule {
     /// Selector literals that mark the call weak (case-insensitive, quotes
     /// stripped by the caller).
     pub weak_selectors: &'static [&'static str],
+    /// When true, the selector shape fires only inside a credential context
+    /// (function or parameter names hint password/secret/token/...).
+    /// `crypto.createHash` doubles as a general-purpose checksum API, so
+    /// JS-shaped selector rules stay qualified; explicit weak-algorithm
+    /// selectors like `hashlib.new('md5')` fire unconditionally.
+    pub requires_credential_context: bool,
 }
 
 /// The bootstrap weak-hash policy table: universal crypto policy facts
@@ -149,6 +155,7 @@ pub static BOOTSTRAP_WEAK_HASH_RULES: &[WeakPrimitiveRule] = &[
         bare_calls: &["md5", "sha1"],
         selector_slot: 0,
         weak_selectors: &["md5", "md4", "sha1", "sha"],
+        requires_credential_context: true,
     },
     // Python hashlib / passlib: hashlib.new('md5', ...)
     WeakPrimitiveRule {
@@ -157,6 +164,7 @@ pub static BOOTSTRAP_WEAK_HASH_RULES: &[WeakPrimitiveRule] = &[
         bare_calls: &["md5", "sha1"],
         selector_slot: 0,
         weak_selectors: &["md5", "md4", "sha1", "sha"],
+        requires_credential_context: false,
     },
 ];
 

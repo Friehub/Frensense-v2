@@ -182,8 +182,12 @@ fn check_call(
         .iter()
         .chain(facts.weak_hash_rules.iter())
     {
-        // Selector shape: `createHash('md5')`.
-        if in_credential_context(ir, facts)
+        // Selector shape: `createHash('md5')`. Rules with
+        // `requires_credential_context` fire only inside credential-named
+        // functions or with credential-named parameters (a general-purpose
+        // `createHash` doubles as a checksum API); rules without it fire
+        // wherever a weak algorithm is named explicitly.
+        if (!rule.requires_credential_context || in_credential_context(ir, facts))
             && rule.selector_calls.iter().any(|c| {
                 let c = last_segment(c).to_ascii_lowercase();
                 c == callee_lower

@@ -23,11 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Engine
 - **Modularized UAF Engine**: Decomposed the monolithic `uaf.rs` checker into single-responsibility submodules under `checks::uaf/` (`types.rs`, `discovery.rs`, `must_exec.rs`, `walker.rs`, `uninit.rs`, and `mod.rs`), adhering to strict single-purpose function sizing (< 40 lines).
 
+#### Documentation
+- **Benchmark Record Refreshed**: The OWASP Benchmark for Python record is re-scored at **26.2%** score (TPR 28.5%, FPR 2.3%, TP/FP/FN/TN 129/18/323/760, 6s scan) against v0.7.0-preview.5 in `README.md` and `docs/BENCHMARKING.md`, with the full per-CWE table updated; CWE-328 (weak hash) now scores 100% (71/71, zero false positives).
+
 ### Fixed
 
 #### Engine
 - **Fallthrough Blindness on `goto` Error Exits**: Resolved an engine blindspot where unmodeled `goto` statements in C AST lowering caused error-diverting guard branches to fall through into subsequent code blocks.
 - **Out-Parameter Uninitialized False Positives**: Resolved false positive `UninitializedFree` reports on valid C out-parameter patterns (e.g. `snd_config_hook_load`), ensuring full precision on real-world production codebases.
+- **Weak-Hash Selector Coverage Regression**: Credential-context qualification of selector-shape weak-hash rules is now declared per rule in `frensense_lang::policy::WeakPrimitiveRule` (`requires_credential_context`) instead of applied uniformly: `crypto.createHash` stays qualified inside credential-named functions (generic digest utilities remain silent), while explicit weak-algorithm selectors (`hashlib.new('md5')`) fire unconditionally - restoring the OWASP CWE-328 class to 71/71 true positives with zero new false positives (juice-shop gate stays at 12 FP, corpus bundles 8/8).
 
 ## [0.7.0-preview.5] - 2026-09-30
 
