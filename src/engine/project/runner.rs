@@ -222,54 +222,16 @@ fn advisory_from_checker(
     file_id: crate::FileId,
 ) -> Advisory {
     let path = Path::new(file);
-    let is_temporal_memory_safety = c.rule == "use_after_free" || c.rule == "double_free";
-    let is_spatial_memory_safety = c.rule == "buffer_overflow"
-        || c.rule == "out_of_bounds_read"
-        || c.rule == "out_of_bounds_access";
-    let (severity, title, impact, improvement, tag) = if is_temporal_memory_safety {
-        (
-            Severity::Critical,
-            format!("Memory safety violation: {} ({})", c.rule, c.function),
-            format!(
-                "{} at {}:{}, dangerous temporal memory safety defect leading to memory corruption or arbitrary code execution.",
-                c.rule, file, line
-            ),
-            format!(
-                "Ensure memory is not used after free or freed multiple times in `{}`. Zero or null pointer variables after free.",
-                c.function
-            ),
-            "memory-safety",
-        )
-    } else if is_spatial_memory_safety {
-        (
-            Severity::Critical,
-            format!("Memory safety violation: {} ({})", c.rule, c.function),
-            format!(
-                "{} at {}:{}, dangerous spatial memory safety defect leading to memory corruption, out-of-bounds access, or arbitrary code execution.",
-                c.rule, file, line
-            ),
-            format!(
-                "Ensure buffer bounds and subscript indices are strictly validated before access in `{}`. Guard index against buffer capacity.",
-                c.function
-            ),
-            "memory-safety",
-        )
-    } else {
-        (
-            Severity::Warning,
-            format!("Policy violation: {} ({})", c.rule, c.function),
-            format!(
-                "{} at {}:{}, insecure cryptographic/configuration choice.",
-                c.rule, file, line
-            ),
-            format!(
-                "Replace the weak primitive in `{}` with a modern alternative \
-                 (bcrypt/argon2 for passwords, SHA-256+ for digests).",
-                c.function
-            ),
-            "policy",
-        )
-    };
+    // Severity and message templates are declared per-language in
+    // frensense-lang (`LanguageSpec::known_rule_registry`); rules no
+    // language declares fall back to the generic policy shape.
+    let (severity, title, impact, improvement, tag) = frensense_lang::severity::checker_advisory(
+        frensense_lang::spec_for_path(path),
+        &c.rule,
+        &c.function,
+        file,
+        line,
+    );
     let mut advisory = Advisory::bare(title, severity, file_id, path, c.message.clone())
         .with_confidence(1.0)
         .with_line(line)
@@ -294,45 +256,25 @@ fn advisory_from_finding(
 ) -> Advisory {
     let src = f.source_desc.as_deref().unwrap_or("user input");
     let path = Path::new(file);
-    // Rank by finding class: IDOR-shaped flows (access-control queries) are
-    // Warning; raw injection channels stay Critical.
-    // Role-first ranking: what the sink DOES with the data decides the
-    // default level; the shape class (Idor) can only lower it further.
-    let role_level = match f.role.default_level() {
-        "critical" => Severity::Critical,
-        "warning" => Severity::Warning,
-        _ => Severity::Info,
-    };
+    // Role-first ranking lives in frensense-lang's cross-cutting taint
+    // policy: what the sink DOES with the data decides the default level;
+    // the shape class (Idor) can only lower it further.
     let class_tag = f.role.tag();
-    let (severity, title) = match (f.finding_class, role_level) {
-        // Access-control query payloads: ranked by role, retitled.
-        (frensense_engine::analysis::taint::engine::FindingClass::Idor, Severity::Critical) => (
-            Severity::Warning,
-            format!(
-                "User-controlled query field in `{}` (access-control review)",
-                f.sink
-            ),
-        ),
-        // Response/validation sinks: review-level regardless of shape.
-        (_, Severity::Info) => (
-            Severity::Info,
-            format!(
-                "User data reaches `{}` {} (review: role={})",
-                f.sink,
-                match f.finding_class {
-                    frensense_engine::analysis::taint::engine::FindingClass::Idor =>
-                        "as a query field",
-                    frensense_engine::analysis::taint::engine::FindingClass::Injection =>
-                        "as a value",
-                },
-                f.role.tag()
-            ),
-        ),
-        (_, level) => (
-            level,
-            format!("Unsanitized data from `{src}` reaches sink `{}`", f.sink),
-        ),
+    let class = match f.finding_class {
+        frensense_engine::analysis::taint::engine::FindingClass::Idor => {
+            frensense_lang::severity::TaintClass::Idor
+        }
+        frensense_engine::analysis::taint::engine::FindingClass::Injection => {
+            frensense_lang::severity::TaintClass::Injection
+        }
     };
+    let (severity, title) = frensense_lang::severity::taint_advisory(
+        class,
+        Severity::parse(f.role.default_level()),
+        class_tag,
+        &f.sink,
+        src,
+    );
     let flow = f.path.render_text();
     let observation = format!(
         "Tainted value from `{src}` flows to sink `{}` (argument {}) in function `{}`.\nTaint path:\n{}",
@@ -378,15 +320,15 @@ fn advisory_from_finding(
 
 /// Stable finding ID: an FNV-1a hash over the finding's semantic
 /// coordinates (file, rule/sink, enclosing function, source). Deliberately
-/// EXCLUDES line/column so the ID survives line shifts — adding 10 lines
+/// EXCLUDES line/column so the ID survives line shifts - adding 10 lines
 /// above a finding must not make it look new to baselines and diff gates.
 /// What re-identifies a finding as "the same bug": the same dangerous API
 /// or rule, in the same function, in the same file. Edit the function
-/// itself (rename, remove the call) and the ID legitimately changes —
+/// itself (rename, remove the call) and the ID legitimately changes -
 /// that IS a different code state.
 ///
 /// FNV-1a rather than DefaultHasher: DefaultHasher's seed is stable only
-/// within one process for SipHash with fixed keys — actually fixed keys
+/// within one process for SipHash with fixed keys - actually fixed keys
 /// make it cross-process stable too, but FNV-1a is deterministic by spec,
 /// cheap, and dependency-free. Two components joined with `\u{1f}` so
 /// ("ab","c") and ("a","bc") hash differently.

@@ -421,4 +421,66 @@ impl LanguageSpec for CSpec {
     fn route_registration_patterns(&self) -> &'static [&'static str] {
         &[]
     }
+
+    /// C owns the memory-safety rule domain: temporal (free-then-use,
+    /// double-free) and spatial (buffer overflow / out-of-bounds) rules rank
+    /// Critical with memory-safety advisory templates.
+    fn known_rule_registry(&self) -> &'static [crate::severity::RuleEntry] {
+        use crate::rules;
+        use crate::severity::{RuleAdvisory, RuleEntry, Severity};
+
+        static REGISTRY: &[RuleEntry] = &[
+            RuleEntry {
+                rule: rules::USE_AFTER_FREE,
+                advisory: RuleAdvisory {
+                    level: Severity::Critical,
+                    title: "Memory safety violation: {rule} ({function})",
+                    impact: "{rule} at {file}:{line}, dangerous temporal memory safety defect leading to memory corruption or arbitrary code execution.",
+                    improvement: "Ensure memory is not used after free or freed multiple times in `{function}`. Zero or null pointer variables after free.",
+                    tag: "memory-safety",
+                },
+            },
+            RuleEntry {
+                rule: rules::DOUBLE_FREE,
+                advisory: RuleAdvisory {
+                    level: Severity::Critical,
+                    title: "Memory safety violation: {rule} ({function})",
+                    impact: "{rule} at {file}:{line}, dangerous temporal memory safety defect leading to memory corruption or arbitrary code execution.",
+                    improvement: "Ensure memory is not used after free or freed multiple times in `{function}`. Zero or null pointer variables after free.",
+                    tag: "memory-safety",
+                },
+            },
+            RuleEntry {
+                rule: rules::BUFFER_OVERFLOW,
+                advisory: RuleAdvisory {
+                    level: Severity::Critical,
+                    title: "Memory safety violation: {rule} ({function})",
+                    impact: "{rule} at {file}:{line}, dangerous spatial memory safety defect leading to memory corruption, out-of-bounds access, or arbitrary code execution.",
+                    improvement: "Ensure buffer bounds and subscript indices are strictly validated before access in `{function}`. Guard index against buffer capacity.",
+                    tag: "memory-safety",
+                },
+            },
+            RuleEntry {
+                rule: rules::OUT_OF_BOUNDS_READ,
+                advisory: RuleAdvisory {
+                    level: Severity::Critical,
+                    title: "Memory safety violation: {rule} ({function})",
+                    impact: "{rule} at {file}:{line}, dangerous spatial memory safety defect leading to memory corruption, out-of-bounds access, or arbitrary code execution.",
+                    improvement: "Ensure buffer bounds and subscript indices are strictly validated before access in `{function}`. Guard index against buffer capacity.",
+                    tag: "memory-safety",
+                },
+            },
+            RuleEntry {
+                rule: rules::OUT_OF_BOUNDS_ACCESS,
+                advisory: RuleAdvisory {
+                    level: Severity::Critical,
+                    title: "Memory safety violation: {rule} ({function})",
+                    impact: "{rule} at {file}:{line}, dangerous spatial memory safety defect leading to memory corruption, out-of-bounds access, or arbitrary code execution.",
+                    improvement: "Ensure buffer bounds and subscript indices are strictly validated before access in `{function}`. Guard index against buffer capacity.",
+                    tag: "memory-safety",
+                },
+            },
+        ];
+        REGISTRY
+    }
 }

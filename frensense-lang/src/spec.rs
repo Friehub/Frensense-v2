@@ -786,6 +786,14 @@ pub trait LanguageSpec: Send + Sync + 'static {
         &[]
     }
 
+    /// Rule ids this language declares with full advisory metadata
+    /// (severity plus title/impact/improvement templates). Rules absent from
+    /// the registry receive the engine's generic policy fallback. Each
+    /// language owns the rules of its own domain. Empty by default.
+    fn known_rule_registry(&self) -> &'static [crate::severity::RuleEntry] {
+        &[]
+    }
+
     // ── Context hints ─────────────────────────────────────────────────────
 
     /// Text strings whose presence in a source file suggests an HTTP handler

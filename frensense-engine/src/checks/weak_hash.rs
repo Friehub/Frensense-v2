@@ -285,7 +285,7 @@ fn check_call(
         out.push(CheckerFinding {
             learned: false,
             function: ir.name.clone(),
-            rule: "weak_hash_wrapper".to_string(),
+            rule: frensense_lang::rules::WEAK_HASH_WRAPPER.to_string(),
             message: format!(
                 "Password hashing routed through opaque wrapper `{path}`, \
                  verify it uses bcrypt/argon2/scrypt, not MD5/SHA-1",

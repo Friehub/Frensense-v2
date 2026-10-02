@@ -99,7 +99,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                     findings.push(CheckerFinding {
                         learned: *builder_learned || is_learned_keyword,
                         function: ir.name.clone(),
-                        rule: "unbounded_number_schema".to_string(),
+                        rule: frensense_lang::rules::UNBOUNDED_NUMBER_SCHEMA.to_string(),
                         message: format!(
                             "Schema declares a numeric policy in prose (`{text}`) but the \
                              builder chain applies no `.max()`/`.min()` enforcement, the \

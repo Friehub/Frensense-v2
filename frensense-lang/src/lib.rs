@@ -279,10 +279,13 @@ pub mod memory;
 pub mod policy;
 pub mod providers;
 pub mod registry;
+pub mod rules;
+pub mod severity;
 pub mod spec;
 
 // Convenient re-exports
 pub use registry::{all_specs, spec_for_ext, spec_for_path, LanguageRegistry};
+pub use severity::Severity;
 pub use spec::{
     Import, LanguageSpec, NodeRole, PackageCategory, PropagatorRule, SanitizerKind, TaintOrigin,
 };

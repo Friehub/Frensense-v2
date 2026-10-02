@@ -184,9 +184,9 @@ fn finding(
     span: Option<(usize, usize)>,
 ) -> CheckerFinding {
     let rule = match violation {
-        Violation::BufferOverflow => "buffer_overflow",
-        Violation::OutOfBoundsRead => "out_of_bounds_read",
-        Violation::OutOfBoundsAccess => "out_of_bounds_access",
+        Violation::BufferOverflow => frensense_lang::rules::BUFFER_OVERFLOW,
+        Violation::OutOfBoundsRead => frensense_lang::rules::OUT_OF_BOUNDS_READ,
+        Violation::OutOfBoundsAccess => frensense_lang::rules::OUT_OF_BOUNDS_ACCESS,
     };
     CheckerFinding {
         function: ir.name.clone(),

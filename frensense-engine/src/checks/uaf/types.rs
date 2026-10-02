@@ -84,21 +84,21 @@ pub fn finding(
     let span = span_var.and_then(|v| ir.var_metadata.get(&v).and_then(|m| m.byte_range));
     let (rule, message) = match violation {
         Violation::UseAfterFree => (
-            "use_after_free",
+            frensense_lang::rules::USE_AFTER_FREE,
             format!(
                 "`{name}` is used after the memory it points to was freed \
                  (free-then-use). Remove the use or the free."
             ),
         ),
         Violation::DoubleFree => (
-            "double_free",
+            frensense_lang::rules::DOUBLE_FREE,
             format!(
                 "`{name}` is freed twice (double-free). Remove the second \
                  free or null the pointer after the first."
             ),
         ),
         Violation::UninitializedFree => (
-            "double_free",
+            frensense_lang::rules::DOUBLE_FREE,
             format!(
                 "`{name}` is freed without guaranteed initialization \
                  (uninitialized pointer free). Initialize before use."

@@ -111,7 +111,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                 findings.push(CheckerFinding {
                     learned: is_learned,
                     function: ir.name.clone(),
-                    rule: "substring_allowlist_guard".to_string(),
+                    rule: frensense_lang::rules::SUBSTRING_ALLOWLIST_GUARD.to_string(),
                     message: format!(
                         "Allowlist validation uses substring containment `{seg}`, \
                          bypassable by embedding an allowed URL inside an attacker \
@@ -292,7 +292,7 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                 findings.push(CheckerFinding {
                     learned: matched_learned,
                     function: ir.name.clone(),
-                    rule: "credential_kdf_policy".to_string(),
+                    rule: frensense_lang::rules::CREDENTIAL_KDF_POLICY.to_string(),
                     message: format!(
                         "Credential `{seg}` call receives a plaintext password, \
                          password storage must use a memory-hard KDF \
@@ -430,7 +430,7 @@ pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Ve
                 findings.push(CheckerFinding {
                     learned: false,
                     function: ir.name.clone(),
-                    rule: "allowlist_definition_bypassable".to_string(),
+                    rule: frensense_lang::rules::ALLOWLIST_DEFINITION_BYPASSABLE.to_string(),
                     message: format!(
                         "Allowlist `{}` is enforced by substring containment elsewhere in                          the program, any URL embedding one of these entries passes the                          guard (`https://evil.com?https://allowed`). Enforce                          origin-exact matching at the guard.",
                         ir.name

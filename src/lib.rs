@@ -23,24 +23,10 @@ pub use frensense_engine::FileId;
 
 pub const FRENSENSE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Severity {
-    Critical,
-    Warning,
-    Info,
-}
-
-impl Severity {
-    #[must_use]
-    pub fn meets_threshold(&self, threshold: Severity) -> bool {
-        match (self, threshold) {
-            (Severity::Critical, _)
-            | (Severity::Info, Severity::Info)
-            | (Severity::Warning, Severity::Warning | Severity::Info) => true,
-            (Severity::Warning, Severity::Critical) | (Severity::Info, _) => false,
-        }
-    }
-}
+/// Advisory severity ranking - declared in `frensense-lang` alongside the
+/// per-language rule registries; re-exported here so every reporter surface
+/// (`cli`, `lsp`, `mcp`) keeps the `crate::Severity` path.
+pub use frensense_lang::Severity;
 
 /// A single finding, rendered compiler-style: where, what, why, how to fix.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
