@@ -430,3 +430,9 @@ pub(super) static JS_SOURCE_PATTERNS: &[&str] = &[
     "headers",
     "cookies",
 ];
+
+/// Trusted session-store roots for JS/TS web apps: values derived from a
+/// session accessor's return (`security.authenticatedUsers.get(token)`) are
+/// server-issued, not attacker-controlled. Declared here as language/framework
+/// vocabulary so no seed sidecar is needed.
+pub(super) static JS_SESSION_ROOTS: &[&str] = &["authenticatedUsers"];

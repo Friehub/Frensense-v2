@@ -7,9 +7,9 @@ use crate::fact_extract::LearnedFact;
 use crate::format::load_bundle;
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::facts::{FactTable, LearnedFactEntry};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-fn build_base_environment(corpus_dir: &Path) -> (TaintConfig, FactTable) {
+fn build_base_environment() -> (TaintConfig, FactTable) {
     let mut config = TaintConfig::default();
     let mut builtin = FactTable::default();
     for spec in frensense_lang::all_specs() {
@@ -19,28 +19,7 @@ fn build_base_environment(corpus_dir: &Path) -> (TaintConfig, FactTable) {
         config.sanitizers.extend(c.sanitizers);
         builtin.merge(&frensense_engine::analysis::taint::facts::fact_table_from_spec(spec));
     }
-    load_seed_facts(corpus_dir, &mut builtin);
     (config, builtin)
-}
-
-fn load_seed_facts(corpus_dir: &Path, builtin: &mut FactTable) {
-    for candidate in [
-        std::env::var("FRENSENSE_SEED_FACTS")
-            .ok()
-            .map(PathBuf::from),
-        Some(PathBuf::from("corpus/facts/seed_facts.json")),
-        Some(corpus_dir.join("../facts/seed_facts.json")),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        if let Err(e) = frensense_engine::analysis::taint::facts::seed::SeedFacts::load_and_apply(
-            &candidate, builtin,
-        ) {
-            eprintln!("[warn] {e}");
-            break;
-        }
-    }
 }
 
 fn format_entry_tag(entry: &LearnedFactEntry) -> String {
@@ -122,7 +101,7 @@ fn print_published_facts(facts: &[LearnedFact]) {
 
 /// Compile a corpus directory into an .frc facts bundle.
 pub fn run_facts_pipeline(corpus_dir: &Path, output_path: &Path) -> Result<(), String> {
-    let (config, builtin) = build_base_environment(corpus_dir);
+    let (config, builtin) = build_base_environment();
     let (bytes, facts) = build_facts_bundle(corpus_dir, &config, &builtin)?;
 
     let loaded = load_bundle(&bytes)?;

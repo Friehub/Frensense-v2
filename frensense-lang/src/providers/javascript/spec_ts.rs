@@ -20,7 +20,9 @@ use super::{
     params::classify_js_param,
     propagators::JS_PROPAGATORS,
     sanitizers::{js_classify_sanitizer, JS_SANITIZER_NAMES},
-    tables::{JS_IDOR_SINKS, JS_SINK_NAMES, JS_SINK_SIGNATURES, JS_SOURCE_PATTERNS},
+    tables::{
+        JS_IDOR_SINKS, JS_SESSION_ROOTS, JS_SINK_NAMES, JS_SINK_SIGNATURES, JS_SOURCE_PATTERNS,
+    },
 };
 
 // ── TypeScript spec ───────────────────────────────────────────────────────────
@@ -189,6 +191,10 @@ impl LanguageSpec for TypeScriptSpec {
 
     fn known_sanitizer_names(&self) -> &'static [&'static str] {
         JS_SANITIZER_NAMES
+    }
+
+    fn known_session_roots(&self) -> &'static [&'static str] {
+        JS_SESSION_ROOTS
     }
 
     fn route_context_hints(&self) -> &'static [&'static str] {

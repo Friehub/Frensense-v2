@@ -48,14 +48,9 @@ export function handler (req: any) {
         let files = vec![("test.ts".to_string(), src.to_string(), "ts".to_string())];
         let spec = frensense_lang::spec_for_ext("ts").unwrap();
         let config = config_from_spec(spec);
-        let mut facts = fact_table_from_spec(spec);
-        // Session roots are corpus-owned seed facts now, not spec tables,
-        // apply the same seed document production loads.
-        crate::analysis::taint::facts::seed::SeedFacts::parse(
-            r#"{"session_roots": ["authenticatedUsers"]}"#,
-        )
-        .expect("seed")
-        .apply_to(&mut facts);
+        // Session roots are language vocabulary (`known_session_roots`);
+        // the spec-built table already carries them.
+        let facts = fact_table_from_spec(spec);
         let prepared = prepare(&files).expect("prepare");
         scan_prepared(&prepared, &config, &facts).findings
     }
@@ -79,12 +74,7 @@ export function handler (req: any) {
         // doesn't fire on arbitrary receivers, assert via the fact table
         // directly for precision.
         let spec = frensense_lang::spec_for_ext("ts").unwrap();
-        let mut facts = fact_table_from_spec(spec);
-        crate::analysis::taint::facts::seed::SeedFacts::parse(
-            r#"{"session_roots": ["authenticatedUsers"]}"#,
-        )
-        .expect("seed")
-        .apply_to(&mut facts);
+        let facts = fact_table_from_spec(spec);
         assert!(!facts.is_session_path("get", Some("myMap")));
         assert!(facts.is_session_path("get", Some("security.authenticatedUsers")));
         assert!(!facts.is_session_path("put", Some("security.authenticatedUsers")));

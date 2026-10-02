@@ -52,26 +52,6 @@ impl Engine {
         // Built-in config + fact table from the language specs present.
         let (mut config, mut facts) = build_spec_tables(&files);
 
-        // Merge corpus-owned seed facts (deployment-specific knowledge:
-        // session-store roots, project conventions). Spec tables first,
-        // seed facts over them, bundle facts last (most specific wins).
-        let seed_paths = [
-            self.seed_facts_path.clone(),
-            Some(root.join("frensense-seed-facts.json")),
-            std::env::current_dir()
-                .ok()
-                .map(|d| d.join("corpus/facts/seed_facts.json")),
-        ];
-        for p in seed_paths.into_iter().flatten() {
-            if let Err(e) =
-                frensense_engine::analysis::taint::facts::seed::SeedFacts::load_and_apply(
-                    &p, &mut facts,
-                )
-            {
-                tracing::warn!("{e}");
-            }
-        }
-
         // Merge learned facts from the .frc bundle, if any.
         if let Some(bundle_bytes) = self.load_bundle_bytes(root)? {
             match frensense_bundler::format::load_bundle(bundle_bytes) {

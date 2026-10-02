@@ -22,16 +22,6 @@ pub mod kinds;
 pub mod signatures;
 pub mod table;
 
-/// Corpus-owned seed facts: deployment/deployment-specific knowledge that
-/// is NOT language semantics, framework/session-store names, project
-/// conventions, kept OUT of `frensense-lang` so the spec layer stays
-/// general and the corpus stays ownable.
-///
-/// Loaded from a JSON file and merged over the spec-built fact table;
-/// entries here win (they are more specific than any language default).
-#[cfg(feature = "serialize")]
-pub mod seed;
-
 #[cfg(test)]
 mod tests;
 
