@@ -109,7 +109,17 @@ pub fn extract_facts(
     let mut learned = FactTable::default();
     let mut published: Vec<LearnedFact> = Vec::new();
 
-    for (key, (cand, support, fams)) in votes {
+    // Deterministic gate order: `votes` is an `FxHashMap`, and its
+    // iteration order decides equal-key tie-breaks downstream. Sort by
+    // candidate key so bundle bytes never depend on hasher layout or
+    // insertion history.
+    let mut ordered_votes: Vec<(String, Candidate, u32, Vec<String>)> = votes
+        .into_iter()
+        .map(|(key, (cand, support, fams))| (key, cand, support, fams))
+        .collect();
+    ordered_votes.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (key, cand, support, fams) in ordered_votes {
         let mut trial = builtin.clone();
         apply_candidate(&mut trial, &cand);
 

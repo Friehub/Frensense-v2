@@ -36,7 +36,13 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
     let mut family_irs = Vec::new();
     for (path, src, ext) in family.positives.iter().chain(family.negatives.iter()) {
         if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
-            family_irs.extend(fns.into_values());
+            // Sort by function name: `lower_source` returns an
+            // `FxHashMap` whose iteration order is insertion- and
+            // hasher-dependent, and IR order feeds summary inference plus
+            // every downstream proposal - bundle bytes must not depend on it.
+            let mut fns: Vec<_> = fns.into_iter().collect();
+            fns.sort_by(|a, b| a.0.cmp(&b.0));
+            family_irs.extend(fns.into_iter().map(|(_, ir)| ir));
         }
     }
     if !family_irs.is_empty() {
@@ -265,7 +271,7 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
             }
             // Shape (c): banned-call co-occurrence. Calls the POSITIVES make
             // that no negative makes: candidate `NotCall` requirements.
-            let banned: Vec<String> = pos_calls
+            let mut banned: Vec<String> = pos_calls
                 .keys()
                 .filter(|c| {
                     c.as_str() != trigger
@@ -276,6 +282,9 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
                 })
                 .cloned()
                 .collect();
+            // Pick alphabetically, not in FxHashMap iteration order: the
+            // chosen name is baked into the learned fact's bytes.
+            banned.sort();
             if let Some(banned_call) = banned.first() {
                 candidates.push(Candidate::Policy {
                     rule: format!("policy_{trigger}_no_{banned_call}"),
@@ -318,13 +327,17 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
     let mut pos_irs = Vec::new();
     for (path, src, ext) in &family.positives {
         if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
-            pos_irs.extend(fns.into_values());
+            let mut fns: Vec<_> = fns.into_iter().collect();
+            fns.sort_by(|a, b| a.0.cmp(&b.0));
+            pos_irs.extend(fns.into_iter().map(|(_, ir)| ir));
         }
     }
     let mut neg_irs = Vec::new();
     for (path, src, ext) in &family.negatives {
         if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
-            neg_irs.extend(fns.into_values());
+            let mut fns: Vec<_> = fns.into_iter().collect();
+            fns.sort_by(|a, b| a.0.cmp(&b.0));
+            neg_irs.extend(fns.into_iter().map(|(_, ir)| ir));
         }
     }
 
