@@ -89,6 +89,9 @@ same stable ID.
 - **Cryptographic Weaknesses**: weak hashes, ECB mode, hardcoded keys.
 - **Server-Side Issues**: SSRF, path traversal, XXE, unsafe deserialization.
 - **Client-Side**: Reflected/DOM XSS, prototype pollution, open redirects.
+- **Memory Safety**: Use-after-free on graph-validated paths (UAF),
+  allocation-lifetime leaks (CWE-401), integer-overflow heap overflows
+  (CWE-190/680).
 - **Misconfiguration**: Missing security headers, session mismanagement,
   insecure cookies, TLS verification disabled.
 
@@ -100,6 +103,7 @@ same stable ID.
 | Python | Tree-sitter |, |
 | Go | Tree-sitter |, |
 | Rust | Tree-sitter | rust-analyzer HIR (`--use-compiler`) |
+| C | Tree-sitter |, |
 
 ## MCP Integration (AI Agents)
 

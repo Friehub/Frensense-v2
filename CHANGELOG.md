@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 #### Engine
+- **CWE-190/680 Integer-Overflow Heap-Overflow Checker**: Added `checks::int_overflow`, a facts-driven checker for integer overflow reaching a heap write: interval bounds over allocation sizes, index arithmetic and multiplication (rooted in the lang-declared capacity vocabulary) decide whether an overflowed value can reach the size/index of a copy into undersized heap storage; validated 4/4 on the `c_cwe_680_count_mul_wrap` corpus pair plus heldouts.
+- **CWE-401 Allocation-Lifetime (Memory Leak) Checker**: Added `checks::leak`, path-sensitive may-leak accounting reporting an allocation still frame-owned at a function exit. Ownership escapes (returned, stored, contract-consumed) remove candidates; null-guard and pointer-identity edges drop allocations bound to the guarded *storage* (every SSA version, stale loop-join bindings included); the exit scan counts only the deepest definition dominating the exit per storage cell, so superseded versions cannot report twice; freshness roots strictly at the declared allocator vocabulary.
+- **Break/Continue/Switch Lowering**: Added first-class lowering for `break`, `continue` and `switch`: a `LoopTarget` stack on `LoweringContext` gives both loop exits correct terminators (pre-header and body-end), unlabeled `break`/`continue` jump to them with fresh unreachable blocks, and `switch` lowers to a condition chain with per-case conditions, source-order fall-through bodies and break-to-merge - so case bodies join the CFG instead of orphaning unreachable exits.
 - **CVE-2026-56109 Deallocation on Error Path Detection**: Added analysis in `checks::uaf::uninit` detecting deallocation of uninitialized stack pointers along unchecked error/EOF paths (inequality return checks without dominating `< 0` diversion).
 - **CFG Jump Resolution for `goto` and Labels**: Added first-class lowering support in `LoweringContext` (`visit_goto`, `visit_labeled_statement`) wiring basic block jump terminators and control flow edges across forward and backward labels.
 - **Out-Parameter Address-Taken Initialization Tracking**: Implemented `is_address_taken_on_all_paths` in `uninit.rs` verifying whether all paths reaching a block execute `Instruction::AddressOf` for a local pointer, correctly recognizing out-parameter initialization.
@@ -21,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 #### Engine
+- **Literal Allocations No Longer Root Freshness**: Program-summary inference no longer marks a function returning an object/array literal (`Instruction::Allocate`) as a fresh factory; freshness roots at the declared allocator vocabulary, so GC-managed objects stay out of allocation-lifetime candidates (juice-shop gate holds at TP 12/12 with FP back to 12; OWASP record unchanged at 26.2%).
 - **Modularized UAF Engine**: Decomposed the monolithic `uaf.rs` checker into single-responsibility submodules under `checks::uaf/` (`types.rs`, `discovery.rs`, `must_exec.rs`, `walker.rs`, `uninit.rs`, and `mod.rs`), adhering to strict single-purpose function sizing (< 40 lines).
 
 #### Documentation
