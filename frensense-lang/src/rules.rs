@@ -21,6 +21,8 @@ pub const OUT_OF_BOUNDS_READ: &str = "out_of_bounds_read";
 pub const OUT_OF_BOUNDS_ACCESS: &str = "out_of_bounds_access";
 /// Integer wrap in an allocation size expression (undersized buffer).
 pub const INTEGER_OVERFLOW_ALLOC: &str = "integer_overflow_alloc";
+/// Memory still owned at function exit (missing release / leak).
+pub const MEMORY_LEAK: &str = "memory_leak";
 
 /// Allowlist guard built on substring containment (bypassable).
 pub const SUBSTRING_ALLOWLIST_GUARD: &str = "substring_allowlist_guard";

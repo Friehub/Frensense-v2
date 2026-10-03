@@ -21,6 +21,7 @@
 
 pub mod guard_bypass;
 pub mod int_overflow;
+pub mod leak;
 pub mod memory_summary;
 pub mod oob;
 pub mod policy;
@@ -32,6 +33,8 @@ pub mod weak_hash;
 mod guard_bypass_tests;
 #[cfg(test)]
 mod int_overflow_tests;
+#[cfg(test)]
+mod leak_tests;
 #[cfg(test)]
 mod memory_summary_tests;
 #[cfg(test)]
@@ -132,6 +135,7 @@ pub fn check_all_with_graph<'a>(
             )
             .chain(oob::check_with_summaries(ir, &mem_summaries, facts))
             .chain(int_overflow::check(ir, &mem_summaries, facts))
+            .chain(leak::check(ir, &mem_summaries))
             .chain(learned::check(ir, facts));
         for f in findings {
             let key = (

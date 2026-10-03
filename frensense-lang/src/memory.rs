@@ -124,6 +124,21 @@ pub fn is_bootstrap_memory_func(name: &str) -> bool {
     BOOTSTRAP_MEMORY_FUNCS.iter().any(|m| m.name == name)
 }
 
+/// Calls whose results live on the current stack frame, not the heap.
+/// Declared here because the vocabulary owner is lang: their lifetime
+/// ends with the frame by definition, so leak-style checkers must never
+/// treat them as leakable allocations (spatial checks still track their
+/// capacity like any other buffer).
+pub static BOOTSTRAP_STACK_ALLOCATORS: &[&str] = &["alloca", "_alloca", "__builtin_alloca"];
+
+/// Is `name` (bare, dotted, or `::`-qualified) a lang-declared stack
+/// allocator?
+pub fn is_stack_allocator(name: &str) -> bool {
+    let s = name.rsplit('.').next().unwrap_or(name);
+    let s = s.rsplit("::").next().unwrap_or(s);
+    BOOTSTRAP_STACK_ALLOCATORS.iter().any(|a| *a == s)
+}
+
 /// One buffer-manipulation builtin: which arguments are the destination
 /// buffer, the source data, and the length, so the spatial checker can
 /// verify write/read bounds against the tracked capacity.

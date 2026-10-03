@@ -232,6 +232,7 @@ extern void *custom_kalloc(int size);
 void caller_positive() {
     char *p = custom_kalloc(10);
     p[20] = 1;
+    free(p);
 }
 "#;
         let pos_fns = lower_source("pos.c", pos_src, "c").unwrap();
@@ -251,6 +252,7 @@ extern void *custom_kalloc(int size);
 void caller_negative() {
     char *p = custom_kalloc(10);
     p[5] = 1;
+    free(p);
 }
 "#;
         let neg_fns = lower_source("neg.c", neg_src, "c").unwrap();

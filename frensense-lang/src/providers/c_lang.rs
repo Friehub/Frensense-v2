@@ -489,6 +489,16 @@ impl LanguageSpec for CSpec {
                     tag: "memory-safety",
                 },
             },
+            RuleEntry {
+                rule: rules::MEMORY_LEAK,
+                advisory: RuleAdvisory {
+                    level: Severity::Warning,
+                    title: "Resource lifetime violation: {rule} ({function})",
+                    impact: "{rule} at {file}:{line}, an allocation is still owned by the frame when the function returns - it is never released, returned, or stored where it outlives the call, so the memory can never be reclaimed.",
+                    improvement: "Release the allocation on every path out of `{function}`, hand ownership back by returning or storing it, or make the callee that receives the pointer responsible for it.",
+                    tag: "resource-lifetime",
+                },
+            },
         ];
         REGISTRY
     }

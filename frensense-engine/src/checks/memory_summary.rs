@@ -419,10 +419,14 @@ impl MemorySummaryRegistry {
                                         }
                                     }
                                 }
-                                Instruction::Allocate { .. } => {
-                                    returns_fresh = true;
-                                    return_capacity = CapacitySpec::Unknown;
-                                }
+                                // Object/array literals (`Allocate`) are not
+                                // freshness roots: inferring factories from
+                                // them marks every wrapper of a literal fresh,
+                                // pulling GC-managed objects (whose lifetime
+                                // needs no release) into allocation-lifetime
+                                // candidates. Freshness roots at the declared
+                                // allocator vocabulary - a `CallStatic`
+                                // returning a call that is already fresh.
                                 _ => {}
                             }
                         }
