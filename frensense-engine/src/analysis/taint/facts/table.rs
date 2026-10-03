@@ -76,6 +76,11 @@ pub struct FactTable {
     /// Weak-hash policy rules (spec-seeded via
     /// `LanguageSpec::known_weak_hash_rules`).
     pub weak_hash_rules: Vec<frensense_lang::policy::WeakPrimitiveRule>,
+    /// Corpus-extendable allocation-size overflow rules (CWE-190 -> CWE-680;
+    /// spec-seeded via `LanguageSpec::known_integer_overflow_rules`, bundle
+    /// extension via `LearnedFactEntry::IntegerOverflowRule` from a family's
+    /// `[frensense] check-rule:` declaration).
+    pub integer_overflow_rules: Vec<frensense_lang::policy::IntegerOverflowRule>,
     /// Insecure config selectors (spec-seeded via
     /// `LanguageSpec::known_insecure_config_selectors`).
     pub insecure_config_selectors: Vec<(&'static str, &'static [&'static str], &'static str)>,
@@ -265,6 +270,11 @@ impl FactTable {
         for r in &other.weak_hash_rules {
             if !self.weak_hash_rules.contains(r) {
                 self.weak_hash_rules.push(*r);
+            }
+        }
+        for r in &other.integer_overflow_rules {
+            if !self.integer_overflow_rules.contains(r) {
+                self.integer_overflow_rules.push(r.clone());
             }
         }
         for s in &other.insecure_config_selectors {
@@ -498,6 +508,15 @@ pub enum LearnedFactEntry {
     },
     /// Register a string pattern indicating a denylist-style guard comparison.
     GuardDenylistPattern { pattern: String },
+    /// Register/extend an allocation-size integer-overflow rule: the corpus
+    /// declares the prover rule id, wrap threshold, and advisory; the
+    /// engine's stable prover evaluates it (CWE-190 -> CWE-680).
+    IntegerOverflowRule {
+        rule: String,
+        wrap_threshold: u128,
+        severity: String,
+        message: String,
+    },
 }
 
 impl LearnedFactEntry {
@@ -719,6 +738,28 @@ impl LearnedFactEntry {
             LearnedFactEntry::GuardDenylistPattern { pattern } => {
                 if !table.guard_denylist_patterns.contains(pattern) {
                     table.guard_denylist_patterns.push(pattern.clone());
+                }
+            }
+            LearnedFactEntry::IntegerOverflowRule {
+                rule,
+                wrap_threshold,
+                severity,
+                message,
+            } => {
+                let fact = frensense_lang::policy::IntegerOverflowRule {
+                    rule_id: rule.clone(),
+                    wrap_threshold: *wrap_threshold,
+                    severity: severity.clone(),
+                    message: message.clone(),
+                };
+                if let Some(existing) = table
+                    .integer_overflow_rules
+                    .iter_mut()
+                    .find(|r| r.rule_id == fact.rule_id && r.wrap_threshold == fact.wrap_threshold)
+                {
+                    *existing = fact;
+                } else {
+                    table.integer_overflow_rules.push(fact);
                 }
             }
         }

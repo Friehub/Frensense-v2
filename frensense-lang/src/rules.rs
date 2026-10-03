@@ -19,6 +19,8 @@ pub const BUFFER_OVERFLOW: &str = "buffer_overflow";
 pub const OUT_OF_BOUNDS_READ: &str = "out_of_bounds_read";
 /// Spatial memory-safety violation (out-of-bounds access).
 pub const OUT_OF_BOUNDS_ACCESS: &str = "out_of_bounds_access";
+/// Integer wrap in an allocation size expression (undersized buffer).
+pub const INTEGER_OVERFLOW_ALLOC: &str = "integer_overflow_alloc";
 
 /// Allowlist guard built on substring containment (bypassable).
 pub const SUBSTRING_ALLOWLIST_GUARD: &str = "substring_allowlist_guard";

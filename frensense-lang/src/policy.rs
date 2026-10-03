@@ -168,6 +168,45 @@ pub static BOOTSTRAP_WEAK_HASH_RULES: &[WeakPrimitiveRule] = &[
     },
 ];
 
+/// A corpus-extendable rule activating the allocation-size integer-overflow
+/// prover (CWE-190 wrap -> CWE-680 undersized allocation -> heap overflow).
+///
+/// The engine owns the prover ("how to look": provable operand ranges whose
+/// product can exceed the wrap threshold, flowing into an allocation's
+/// capacity argument); this table owns the conclusion ("what to conclude":
+/// which rule id fires, at which threshold, with which advisory). Lang
+/// ships the bootstrap seed below; a corpus bundle extends the table via
+/// `LearnedFactEntry::IntegerOverflowRule` from a family's `[frensense]`
+/// `check-rule:` declaration, so new rules of this class never require an
+/// engine or lang edit.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IntegerOverflowRule {
+    /// Finding rule id.
+    pub rule_id: String,
+    /// Products exceeding this value cannot be represented as an allocation
+    /// size on the target platform (`u64::MAX` == `SIZE_MAX` on LP64/LLP64).
+    pub wrap_threshold: u128,
+    /// Advisory severity hint: "critical" or "warning".
+    pub severity: String,
+    /// Corpus-authored advisory message (rendered with prover detail).
+    pub message: String,
+}
+
+/// The bootstrap allocation-size overflow rules (LP64 `SIZE_MAX` threshold).
+pub static BOOTSTRAP_INTEGER_OVERFLOW_RULES: std::sync::LazyLock<Vec<IntegerOverflowRule>> =
+    std::sync::LazyLock::new(|| {
+        vec![IntegerOverflowRule {
+            rule_id: crate::rules::INTEGER_OVERFLOW_ALLOC.to_string(),
+            wrap_threshold: 18_446_744_073_709_551_615,
+            severity: "critical".to_string(),
+            message: "Integer overflow in allocation size (CWE-190/CWE-680): \
+                      the size multiplication can wrap past SIZE_MAX, so the \
+                      allocation is undersized and the count-driven fill \
+                      overflows the heap buffer"
+                .to_string(),
+        }]
+    });
+
 /// Known *string-literal* insecure configuration selectors: calls whose
 /// argument literal itself selects an insecure mode regardless of
 /// algorithm. Tuple: `(callee prefix, selector literals, rule id)`.
@@ -289,6 +328,12 @@ pub fn bootstrap_credential_context_hints() -> &'static [&'static str] {
 /// The default weak-hash rules (see [`BOOTSTRAP_WEAK_HASH_RULES`]).
 pub fn bootstrap_weak_hash_rules() -> &'static [WeakPrimitiveRule] {
     BOOTSTRAP_WEAK_HASH_RULES
+}
+
+/// The default allocation-size overflow rules (see
+/// [`BOOTSTRAP_INTEGER_OVERFLOW_RULES`]).
+pub fn bootstrap_integer_overflow_rules() -> &'static [IntegerOverflowRule] {
+    &BOOTSTRAP_INTEGER_OVERFLOW_RULES
 }
 
 /// The default insecure config selectors (see [`BOOTSTRAP_INSECURE_CONFIG_SELECTORS`]).

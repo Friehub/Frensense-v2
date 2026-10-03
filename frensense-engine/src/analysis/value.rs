@@ -158,10 +158,19 @@ fn binary_interval(op: &str, (al, ah): (i64, i64), (bl, bh): (i64, i64)) -> Valu
         "+" | "concat" => Value::Range(add(al, bl), add(ah, bh)),
         "-" => Value::Range(add(al, -bh), add(ah, -bl)),
         "*" => {
-            let p = [al * bl, al * bh, ah * bl, ah * bh];
+            // Widen to i128 so wide ranges cannot wrap (or panic in
+            // debug): the corner products are clamped back to i64,
+            // which over-approximates the true interval.
+            let p = [
+                i128::from(al) * i128::from(bl),
+                i128::from(al) * i128::from(bh),
+                i128::from(ah) * i128::from(bl),
+                i128::from(ah) * i128::from(bh),
+            ];
+            let clamp = |v: i128| v.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
             Value::Range(
-                *p.iter().min().unwrap_or(&al),
-                *p.iter().max().unwrap_or(&ah),
+                clamp(*p.iter().min().unwrap_or(&i128::from(al))),
+                clamp(*p.iter().max().unwrap_or(&i128::from(ah))),
             )
         }
         "<<" if bl == bh && (0..=32).contains(&bl) => Value::Range(al << bl, ah << bh),

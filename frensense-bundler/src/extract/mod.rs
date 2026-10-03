@@ -71,6 +71,7 @@ pub fn extract_facts(
                     "sp:{:?}:{:?}:{:?}",
                     fact.builders, fact.enforcers, fact.bound_keywords
                 ),
+                Candidate::IntegerOverflowRule { rule, .. } => format!("io_rule:{rule}"),
             };
 
             let entry = votes.entry(key).or_insert_with(|| (c, 0, Vec::new()));
@@ -174,8 +175,15 @@ pub fn extract_facts(
                 for e in &fact.enforcers {
                     calls.push(e.as_str());
                 }
+                for k in &fact.bound_keywords {
+                    calls.push(k.as_str());
+                }
                 calls
             }
+            // The prover rule fires on allocation shapes, not a named call:
+            // empty = always relevant, every family re-checked for
+            // regression under this fact.
+            Candidate::IntegerOverflowRule { .. } => Vec::new(),
         };
 
         let mut ok = true;

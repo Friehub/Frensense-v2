@@ -34,6 +34,15 @@ pub struct FamilyMetadata {
     pub cvss: Option<f32>,
     pub owasp: Option<String>,
     pub severity: Option<String>,
+    /// Declared prover rule id (`check-rule:`): the family teaches this
+    /// allocation-size integer-overflow rule; extraction proposes it as an
+    /// `IntegerOverflowRule` fact regardless of delta signal (the replay
+    /// gate still validates separation).
+    pub check_rule: Option<String>,
+    /// Declared wrap threshold (`wrap-max:`): products above this value
+    /// cannot be an allocation size on the family's target platform
+    /// (default u64::MAX == SIZE_MAX on LP64/LLP64).
+    pub wrap_max: Option<u128>,
 }
 
 impl FamilyMetadata {
@@ -96,6 +105,12 @@ impl FamilyMetadata {
                 }
                 "owasp" => meta.owasp = Some(value.to_string()),
                 "severity" => meta.severity = Some(value.to_string()),
+                "check-rule" => meta.check_rule = Some(value.to_string()),
+                "wrap-max" => {
+                    if let Ok(v) = value.parse::<u128>() {
+                        meta.wrap_max = Some(v);
+                    }
+                }
                 _ => {}
             }
         }

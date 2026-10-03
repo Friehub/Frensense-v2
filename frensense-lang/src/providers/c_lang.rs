@@ -479,6 +479,16 @@ impl LanguageSpec for CSpec {
                     tag: "memory-safety",
                 },
             },
+            RuleEntry {
+                rule: rules::INTEGER_OVERFLOW_ALLOC,
+                advisory: RuleAdvisory {
+                    level: Severity::Critical,
+                    title: "Memory safety violation: {rule} ({function})",
+                    impact: "{rule} at {file}:{line}, integer wrap in the allocation size produces an undersized buffer and a subsequent heap buffer overflow.",
+                    improvement: "Validate the count against SIZE_MAX / element size before multiplying in `{function}` (pre-divide guard), or use an overflow-checked allocation (calloc / checked mul).",
+                    tag: "memory-safety",
+                },
+            },
         ];
         REGISTRY
     }

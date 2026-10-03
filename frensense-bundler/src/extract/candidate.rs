@@ -56,6 +56,15 @@ pub enum Candidate {
     GuardBypass { fact: GuardBypassFact },
     /// Schema policy rule (number builder, enforcer method, or bound keyword).
     SchemaPolicy { fact: SchemaPolicyFact },
+    /// Allocation-size integer-overflow rule declared by the family's
+    /// `[frensense] check-rule:` block (corpus extends the prover's rule
+    /// table; the engine's prover stays stable).
+    IntegerOverflowRule {
+        rule: String,
+        wrap_threshold: u128,
+        severity: String,
+        message: String,
+    },
 }
 
 impl Candidate {
@@ -117,6 +126,17 @@ impl Candidate {
             Candidate::WeakCrypto { fact } => LearnedFactEntry::WeakCrypto(fact.clone()),
             Candidate::GuardBypass { fact } => LearnedFactEntry::GuardBypass(fact.clone()),
             Candidate::SchemaPolicy { fact } => LearnedFactEntry::SchemaPolicy(fact.clone()),
+            Candidate::IntegerOverflowRule {
+                rule,
+                wrap_threshold,
+                severity,
+                message,
+            } => LearnedFactEntry::IntegerOverflowRule {
+                rule: rule.clone(),
+                wrap_threshold: *wrap_threshold,
+                severity: severity.clone(),
+                message: message.clone(),
+            },
         }
     }
 }
@@ -234,6 +254,28 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
                 table.schema_keywords.insert(k.clone());
             }
         }
+        Candidate::IntegerOverflowRule {
+            rule,
+            wrap_threshold,
+            severity,
+            message,
+        } => {
+            let fact = frensense_lang::policy::IntegerOverflowRule {
+                rule_id: rule.clone(),
+                wrap_threshold: *wrap_threshold,
+                severity: severity.clone(),
+                message: message.clone(),
+            };
+            if let Some(existing) = table
+                .integer_overflow_rules
+                .iter_mut()
+                .find(|r| r.rule_id == fact.rule_id && r.wrap_threshold == fact.wrap_threshold)
+            {
+                *existing = fact;
+            } else {
+                table.integer_overflow_rules.push(fact);
+            }
+        }
     }
 }
 
@@ -282,5 +324,6 @@ pub fn fact_key(e: &LearnedFactEntry) -> (String, String) {
         LearnedFactEntry::GuardDenylistPattern { pattern } => {
             ("guard_denylist".into(), pattern.clone())
         }
+        LearnedFactEntry::IntegerOverflowRule { rule, .. } => ("io_rule".into(), rule.clone()),
     }
 }

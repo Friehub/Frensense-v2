@@ -64,6 +64,29 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
         }
     }
 
+    // Corpus-declared allocation-size overflow rule: the positive's
+    // `[frensense]` block names the prover rule this family teaches
+    // (`check-rule:`), so propose it regardless of the taint delta - the
+    // replay gate still validates pos/neg separation before publishing.
+    if let Some(rule) = &family.metadata.check_rule {
+        candidates.push(Candidate::IntegerOverflowRule {
+            rule: rule.clone(),
+            wrap_threshold: family.metadata.wrap_max.unwrap_or(u64::MAX as u128),
+            severity: family
+                .metadata
+                .severity
+                .as_deref()
+                .unwrap_or("critical")
+                .to_ascii_lowercase(),
+            message: family.metadata.observation.clone().unwrap_or_else(|| {
+                format!(
+                    "Integer overflow in allocation size (learned from family {})",
+                    family.id
+                )
+            }),
+        });
+    }
+
     let pos = scan_variant(&family.positives, config, builtin);
     let neg = scan_variant(&family.negatives, config, builtin);
     let pos_alerts = pos.has_alert();

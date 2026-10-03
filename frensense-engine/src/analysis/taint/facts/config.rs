@@ -201,6 +201,10 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
     // Weak-crypto policy tables: spec-owned; `weak_hash::check` unions the
     // bootstrap defaults with these.
     t.weak_hash_rules = spec.known_weak_hash_rules().to_vec();
+    // Allocation-size overflow rules: spec-owned seed; the bundle extends
+    // via `LearnedFactEntry::IntegerOverflowRule`; `int_overflow::check`
+    // unions the bootstrap defaults with these.
+    t.integer_overflow_rules = spec.known_integer_overflow_rules().to_vec();
     t.insecure_config_selectors = spec.known_insecure_config_selectors().to_vec();
     t.key_size_rules = spec.known_key_size_rules().to_vec();
     t.suspicious_hash_wrappers = spec

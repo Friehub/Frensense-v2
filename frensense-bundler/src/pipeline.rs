@@ -52,6 +52,11 @@ fn format_entry_tag(entry: &LearnedFactEntry) -> String {
                 fact.rule_id, fact.call, fact.selector_slot
             )
         }
+        LearnedFactEntry::IntegerOverflowRule {
+            rule,
+            wrap_threshold,
+            ..
+        } => format!("io_rule:{rule}(max={wrap_threshold})"),
         _ => format_structural_entry(entry),
     }
 }

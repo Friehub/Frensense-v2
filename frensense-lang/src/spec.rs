@@ -728,6 +728,13 @@ pub trait LanguageSpec: Send + Sync + 'static {
         crate::policy::bootstrap_weak_hash_rules()
     }
 
+    /// Allocation-size overflow rules (CWE-190/CWE-680) through
+    /// `FactTable::integer_overflow_rules`. Defaults to
+    /// [`crate::policy::bootstrap_integer_overflow_rules`].
+    fn known_integer_overflow_rules(&self) -> &'static [crate::policy::IntegerOverflowRule] {
+        crate::policy::bootstrap_integer_overflow_rules()
+    }
+
     /// Insecure config selectors through
     /// `FactTable::insecure_config_selectors`. Defaults to
     /// [`crate::policy::bootstrap_insecure_config_selectors`].
