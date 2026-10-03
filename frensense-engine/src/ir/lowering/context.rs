@@ -8,6 +8,15 @@ use frensense_lang::{LanguageSpec, NodeRole};
 use rustc_hash::FxHashMap;
 use tree_sitter::Node;
 
+/// Innermost `break`/`continue` target while lowering a loop or C switch.
+/// `break` jumps to `break_target`; `continue` jumps to the innermost
+/// *loop*'s `continue_target` (switches contribute `None` so a `continue`
+/// below them still finds the enclosing loop).
+pub struct LoopTarget {
+    pub break_target: BlockId,
+    pub continue_target: Option<BlockId>,
+}
+
 pub struct LoweringContext<'a> {
     pub spec: &'a dyn LanguageSpec,
     pub source: &'a str,
@@ -26,6 +35,9 @@ pub struct LoweringContext<'a> {
 
     /// Jump target blocks for labeled statements: label_name -> BlockId
     pub labels: FxHashMap<String, BlockId>,
+
+    /// Loop/switch stack for `break` and `continue` (innermost last).
+    pub loop_stack: Vec<LoopTarget>,
 
     /// Optional learned fact table providing dynamic grammar overrides.
     pub facts: Option<&'a FactTable>,
@@ -54,6 +66,7 @@ impl<'a> LoweringContext<'a> {
             env: vec![FxHashMap::default()], // Global/Function scope
             memory_var,
             labels: FxHashMap::default(),
+            loop_stack: Vec::new(),
             facts,
         }
     }

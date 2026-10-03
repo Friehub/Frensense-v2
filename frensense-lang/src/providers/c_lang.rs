@@ -71,7 +71,6 @@ fn classify_c(kind: &str) -> NodeRole {
         "unary_expression" | "pointer_expression" | "sizeof_expression" => NodeRole::UnaryOp,
         // `x++` / `--x`: lowered as read-modify-write by visit_unary_op.
         "update_expression" => NodeRole::UnaryOp,
-        "switch_statement" => NodeRole::Match,
 
         _ => NodeRole::Other,
     }

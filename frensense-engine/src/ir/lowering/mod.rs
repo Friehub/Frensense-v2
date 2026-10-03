@@ -18,7 +18,7 @@ pub mod decl;
 pub mod expr;
 pub mod lvalue;
 
-pub use context::LoweringContext;
+pub use context::{LoopTarget, LoweringContext};
 pub use lvalue::LValue;
 
 use crate::ir::function::Operand;
@@ -55,6 +55,10 @@ impl<'a> LoweringContext<'a> {
             // ─── CONTROL FLOW ─────────────────────────────────────────────────
             NodeRole::Loop => self.visit_loop(node),
 
+            // `switch` gets a real condition chain (case labels as
+            // conditions) instead of the coarse branch-with-sequential-body.
+            _ if node.kind() == "switch_statement" => self.visit_switch(node),
+
             NodeRole::Branch if self.is_ternary_straight_line(node.kind()) => {
                 self.visit_ternary_straight_line(node)
             }
@@ -89,6 +93,8 @@ impl<'a> LoweringContext<'a> {
 
             _ if node.kind() == "goto_statement" => self.visit_goto(node),
             _ if node.kind() == "labeled_statement" => self.visit_labeled_statement(node),
+            _ if node.kind() == "break_statement" => self.visit_break(node),
+            _ if node.kind() == "continue_statement" => self.visit_continue(node),
 
             _ => self.visit_children_generic(node),
         }
