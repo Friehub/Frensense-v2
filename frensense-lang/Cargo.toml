@@ -38,7 +38,7 @@ version  = "0.23"
 optional = true
 
 [dependencies.tree-sitter-python]
-version  = "0.23"
+version  = "0.25"
 optional = true
 
 [dependencies.tree-sitter-rust]
