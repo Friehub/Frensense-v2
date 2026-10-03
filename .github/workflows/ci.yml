@@ -41,7 +41,7 @@ jobs:
           toolchain: stable
           components: rustfmt
       - name: Setup Rust Cache
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.8.1
 
       - name: Cache Cargo dependencies
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -140,7 +140,7 @@ jobs:
         with:
           toolchain: stable
       - name: Setup Rust Cache
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.8.1
       - name: Install cargo-semver-checks
         run: cargo install cargo-semver-checks --locked
       - name: Check SemVer
@@ -168,7 +168,7 @@ jobs:
         with:
           toolchain: stable
       - name: Setup Rust Cache
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.8.1
 
       - name: Run Full Regression Suite
         run: cargo test --workspace --all-features
@@ -271,7 +271,7 @@ jobs:
         with:
           toolchain: stable
       - name: Setup Rust Cache
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.8.1
 
       - name: Install cargo-criterion
         run: cargo install cargo-criterion --locked --force
