@@ -35,6 +35,9 @@ pub enum SinkRole {
     /// Data is reflected into an HTTP response. Usually not a bug by
     /// itself, review-level, the client-side rendering decides.
     Response,
+    /// Cross-site scripting (DOM, Reflected, Stored). Client-side code
+    /// execution in the browser context.
+    Xss,
     /// Data enters a validation/verification routine (jwt.verify,
     /// `.test()`, comparators). Consuming tainted data is these APIs'
     /// *job*; a finding here is almost always noise.
@@ -69,13 +72,11 @@ impl SinkRole {
 
             L::Jwt => SinkRole::Crypto,
 
-            L::Xss
-            | L::XssDom
-            | L::XssReflected
-            | L::ResponseLeak
-            | L::HeaderInjection
-            | L::CookiePoisoning
-            | L::ContentTypeInjection => SinkRole::Response,
+            L::Xss | L::XssDom | L::XssReflected => SinkRole::Xss,
+
+            L::ResponseLeak | L::HeaderInjection | L::CookiePoisoning | L::ContentTypeInjection => {
+                SinkRole::Response
+            }
 
             L::JwtUnsafeDecode => SinkRole::Validation,
 
@@ -92,7 +93,7 @@ impl SinkRole {
     pub fn default_level(&self) -> &'static str {
         match self {
             SinkRole::Execution | SinkRole::Other => "critical",
-            SinkRole::Resource | SinkRole::Storage | SinkRole::Crypto => "warning",
+            SinkRole::Resource | SinkRole::Storage | SinkRole::Crypto | SinkRole::Xss => "warning",
             SinkRole::Response | SinkRole::Validation => "info",
         }
     }
@@ -106,6 +107,7 @@ impl SinkRole {
             SinkRole::Crypto => "crypto",
             SinkRole::Response => "response",
             SinkRole::Validation => "validation",
+            SinkRole::Xss => "xss",
             SinkRole::Other => "other",
         }
     }

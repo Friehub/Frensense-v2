@@ -145,6 +145,11 @@ pub struct FactTable {
     pub idor_finder_sinks: FxHashSet<String>,
     /// Dynamic taint propagators: `call -> input_arg_slots`.
     pub propagators: FxHashMap<String, Vec<usize>>,
+    /// Spec propagator rules that declare `tainted_receiver: false`: taint
+    /// on the receiver must NOT reach the return of such calls. A negative
+    /// set (only explicit declarations appear), so unknown calls and
+    /// bundle-learned propagators keep the default receiver pass-through.
+    pub propagator_blocks_receiver: FxHashSet<String>,
     /// Guard denylist string patterns: spec-seeded
     /// (`known_guard_denylist`) and bundle-learned
     /// (`GuardDenylistPattern`).
@@ -330,6 +335,8 @@ impl FactTable {
         for (k, v) in &other.propagators {
             self.propagators.insert(k.clone(), v.clone());
         }
+        self.propagator_blocks_receiver
+            .extend(other.propagator_blocks_receiver.iter().cloned());
         for p in &other.guard_denylist_patterns {
             if !self.guard_denylist_patterns.contains(p) {
                 self.guard_denylist_patterns.push(p.clone());
@@ -395,6 +402,17 @@ impl FactTable {
             .get(call)
             .or_else(|| self.propagators.get(last))
             .map(|v| v.as_slice())
+    }
+
+    /// Does a spec rule declare that `call`'s receiver does not taint its
+    /// return (`tainted_receiver: false`)? Keyed like `propagators`: full
+    /// name first, then last segment.
+    pub fn propagator_blocks_receiver(&self, call: &str) -> bool {
+        if self.propagator_blocks_receiver.contains(call) {
+            return true;
+        }
+        let last = call.rsplit('.').next().unwrap_or(call);
+        last != call && self.propagator_blocks_receiver.contains(last)
     }
 
     /// Check whether a string literal matches a guard denylist pattern.

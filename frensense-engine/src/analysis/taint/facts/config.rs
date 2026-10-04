@@ -88,7 +88,23 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
         t.sink_signatures.insert((*call).to_string(), entry.clone());
         let last = call.rsplit('.').next().unwrap_or(call);
         if last != *call {
-            t.sink_signatures.entry(last.to_string()).or_insert(entry);
+            // Call sites match by last segment (`res.render(...)` looks up
+            // `render`), so a dotted per-slot rule must reach the bare key.
+            // It may replace the all-args alias loop 1 auto-created from a
+            // dotted sink-name entry (a mechanical alias of this same
+            // chain), but never a bare-owned entry: a bare name declared in
+            // its own right keeps its own rule, mirroring the bare-wins
+            // role rule above.
+            let alias_owned_by_dotted = t
+                .sink_signatures
+                .get(last)
+                .map(|cur| cur.call.contains('.'))
+                .unwrap_or(false);
+            if alias_owned_by_dotted {
+                t.sink_signatures.insert(last.to_string(), entry);
+            } else {
+                t.sink_signatures.entry(last.to_string()).or_insert(entry);
+            }
         }
     }
     // IDOR finder vocabulary from the spec: which calls take an identity
@@ -243,8 +259,16 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
             Some(idx) => vec![idx],
             None => Vec::new(),
         };
-        t.propagators.insert(key, args.clone());
-        t.propagators.entry(last).or_insert(args);
+        t.propagators.insert(key.clone(), args.clone());
+        t.propagators.entry(last.clone()).or_insert(args);
+        // Receiver semantics are part of the rule, not an implementation
+        // detail: `tainted_receiver: false` must suppress the receiver ->
+        // return edge too. The receiver's negative set keeps unknown and
+        // bundle-learned calls at the default pass-through.
+        if !prop.tainted_receiver {
+            t.propagator_blocks_receiver.insert(key);
+            t.propagator_blocks_receiver.insert(last);
+        }
     }
     t
 }
@@ -281,4 +305,33 @@ pub fn config_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> TaintC
         sinks,
         sanitizers,
     }
+}
+
+/// Build the merged `(TaintConfig, FactTable)` for a set of file
+/// extensions: one entry per distinct language spec present, exactly as
+/// the consumer CLI merges them when scanning those files.
+///
+/// This is the single table-assembly function for both sides of the
+/// harness/CLI contract: the scan runner feeds it the extensions of the
+/// scanned files, the fact bundler feeds it a family's extensions. Both
+/// must produce the same tables, or a family can learn under one dialect
+/// and be replayed under another - a Go propagator rule silencing taint
+/// in a TypeScript positive, or a Python sanitizer quieting a TypeScript
+/// negative the CLI would flag.
+pub fn tables_from_exts<'a>(exts: impl IntoIterator<Item = &'a str>) -> (TaintConfig, FactTable) {
+    let mut config = TaintConfig::default();
+    let mut facts = FactTable::default();
+    let mut seen: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
+    for ext in exts {
+        if let Some(spec) = frensense_lang::spec_for_ext(ext)
+            && seen.insert(spec.name())
+        {
+            let c = config_from_spec(spec);
+            config.sources.extend(c.sources);
+            config.sinks.extend(c.sinks);
+            config.sanitizers.extend(c.sanitizers);
+            facts.merge(&fact_table_from_spec(spec));
+        }
+    }
+    (config, facts)
 }

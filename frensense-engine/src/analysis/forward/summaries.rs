@@ -97,12 +97,23 @@ impl<'a> ProgramSvfg<'a> {
             for b in &self.functions[fi].bindings {
                 if b.callees.is_empty()
                     && let Some(r) = b.ret_node
-                    && let Some(propagating_slots) = facts.propagator_input_args(&b.callee_name)
                 {
-                    for (a, slot) in &b.args {
-                        if !propagating_slots.contains(slot) {
-                            suppressible.push((*a, r));
+                    if let Some(propagating_slots) = facts.propagator_input_args(&b.callee_name) {
+                        for (a, slot) in &b.args {
+                            if !propagating_slots.contains(slot) {
+                                suppressible.push((*a, r));
+                            }
                         }
+                    }
+                    // Spec rules with `tainted_receiver: false`: the
+                    // receiver -> return edge is suppressed as well.
+                    // Receiver edges exist by default for external
+                    // method-shaped calls; without this the flag would be
+                    // read at declaration time and silently dropped.
+                    if facts.propagator_blocks_receiver(&b.callee_name)
+                        && let Some(recv) = b.receiver
+                    {
+                        suppressible.push((recv, r));
                     }
                 }
             }

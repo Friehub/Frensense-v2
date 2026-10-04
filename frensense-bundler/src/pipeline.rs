@@ -5,22 +5,8 @@
 use crate::builder::build_facts_bundle;
 use crate::fact_extract::LearnedFact;
 use crate::format::load_bundle;
-use frensense_engine::analysis::taint::config::TaintConfig;
-use frensense_engine::analysis::taint::facts::{FactTable, LearnedFactEntry};
+use frensense_engine::analysis::taint::facts::LearnedFactEntry;
 use std::path::Path;
-
-fn build_base_environment() -> (TaintConfig, FactTable) {
-    let mut config = TaintConfig::default();
-    let mut builtin = FactTable::default();
-    for spec in frensense_lang::all_specs() {
-        let c = frensense_engine::analysis::taint::facts::config_from_spec(spec);
-        config.sources.extend(c.sources);
-        config.sinks.extend(c.sinks);
-        config.sanitizers.extend(c.sanitizers);
-        builtin.merge(&frensense_engine::analysis::taint::facts::fact_table_from_spec(spec));
-    }
-    (config, builtin)
-}
 
 fn format_entry_tag(entry: &LearnedFactEntry) -> String {
     match entry {
@@ -106,8 +92,7 @@ fn print_published_facts(facts: &[LearnedFact]) {
 
 /// Compile a corpus directory into an .frc facts bundle.
 pub fn run_facts_pipeline(corpus_dir: &Path, output_path: &Path) -> Result<(), String> {
-    let (config, builtin) = build_base_environment();
-    let (bytes, facts) = build_facts_bundle(corpus_dir, &config, &builtin)?;
+    let (bytes, facts) = build_facts_bundle(corpus_dir)?;
 
     let loaded = load_bundle(&bytes)?;
     eprintln!(

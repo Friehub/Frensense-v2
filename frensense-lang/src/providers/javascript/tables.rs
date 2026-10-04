@@ -43,6 +43,8 @@ pub(super) static JS_SINK_NAMES: &[(&'static str, crate::spec::SinkLabel)] = &[
     ("fopen", crate::spec::SinkLabel::PathTraversal),
     ("readdir", crate::spec::SinkLabel::PathTraversal),
     ("readdirSync", crate::spec::SinkLabel::PathTraversal),
+    ("axios.get", crate::spec::SinkLabel::Ssrf),
+    ("axios.post", crate::spec::SinkLabel::Ssrf),
     ("axios.put", crate::spec::SinkLabel::Ssrf),
     ("axios.delete", crate::spec::SinkLabel::Ssrf),
     ("axios.patch", crate::spec::SinkLabel::Ssrf),
@@ -225,6 +227,12 @@ pub(super) static JS_SINK_NAMES: &[(&'static str, crate::spec::SinkLabel)] = &[
     ("lodash.merge", crate::spec::SinkLabel::PrototypePollution),
     ("_.defaultsDeep", crate::spec::SinkLabel::PrototypePollution),
     ("_.set", crate::spec::SinkLabel::PrototypePollution),
+    ("_.unset", crate::spec::SinkLabel::PrototypePollution),
+    ("lodash.unset", crate::spec::SinkLabel::PrototypePollution),
+    ("unset", crate::spec::SinkLabel::PrototypePollution),
+    ("_.omit", crate::spec::SinkLabel::PrototypePollution),
+    ("lodash.omit", crate::spec::SinkLabel::PrototypePollution),
+    ("omit", crate::spec::SinkLabel::PrototypePollution),
     ("$.extend", crate::spec::SinkLabel::PrototypePollution),
     ("jQuery.extend", crate::spec::SinkLabel::PrototypePollution),
     ("angular.merge", crate::spec::SinkLabel::PrototypePollution),
@@ -240,7 +248,7 @@ pub(super) static JS_SINK_NAMES: &[(&'static str, crate::spec::SinkLabel)] = &[
     ("KVNamespace.put", crate::spec::SinkLabel::StorageWrite),
     ("KVNamespace.delete", crate::spec::SinkLabel::StorageWrite),
     ("env.DB.prepare", crate::spec::SinkLabel::SqlInjection),
-    ("res.send", crate::spec::SinkLabel::ResponseLeak),
+    ("res.send", crate::spec::SinkLabel::XssReflected),
     ("res.json", crate::spec::SinkLabel::ResponseLeak),
     ("res.redirect", crate::spec::SinkLabel::OpenRedirect),
     ("res.render", crate::spec::SinkLabel::TemplateSsti),
@@ -295,7 +303,11 @@ pub(super) static JS_SINK_SIGNATURES: &[(&'static str, &'static [usize], bool)] 
     ("redirect", &[0], false),
     // ── Template rendering: slot 0 is the view name (template-executed),
     // slot 1 the locals data object (data only, not SSTI) ──
-    ("render", &[0], false),
+    ("res.render", &[0], false),
+    ("ejs.render", &[0], false),
+    ("pug.render", &[0], false),
+    ("handlebars.render", &[0], false),
+    ("nunjucks.render", &[0], false),
     // ── Path traversal: slot 0 is the destination path, slot 1 the file
     // content buffer (tainted upload bytes written to a fixed path are not
     // traversal) ──

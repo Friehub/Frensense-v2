@@ -278,8 +278,17 @@ impl ScanResult {
 
     /// True if any sink argument was reached by a source in a dangerous
     /// slot (sink-signature aware).
+    ///
+    /// Info-tier findings (lang-declared Response/Validation roles:
+    /// reflect-into-response and decode APIs) are *observations*, not
+    /// alerts: the engine analyses and records them - role never gates
+    /// exploration - but learn/gate consumers count only warning+ findings.
+    /// Otherwise every benign `res.json(...)` echo on a negative would pin
+    /// `negative_alerts` to true and no sanitizer/check candidate could
+    /// ever separate a family.
     pub fn has_alert(&self) -> bool {
-        self.vulnerable().next().is_some()
+        self.vulnerable()
+            .any(|f| f.role.default_level() != "info")
             // Learned/built-in policy checks are alerts too: a corpus family
             // whose positive violates a learned check must separate exactly
             // like a taint family. Without this, Check facts could never be

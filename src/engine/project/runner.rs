@@ -16,7 +16,7 @@ use std::path::Path;
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::engine::BackwardVerdict;
 use frensense_engine::analysis::taint::facts::{
-    FactTable, config_from_spec, fact_table_from_entries, fact_table_from_spec,
+    FactTable, fact_table_from_entries, tables_from_exts,
 };
 use frensense_engine::scan;
 use frensense_engine::scan::LocatedFinding;
@@ -175,22 +175,12 @@ impl Engine {
 
 /// Build the merged `TaintConfig` and `FactTable` from the language specs of
 /// the files being scanned.
+///
+/// Delegates to [`tables_from_exts`], the shared assembly the fact bundler
+/// also uses, so the harness can never learn under tables the CLI would not
+/// scan with (harness/CLI parity).
 fn build_spec_tables(files: &[(String, String, String)]) -> (TaintConfig, FactTable) {
-    let mut config = TaintConfig::default();
-    let mut facts = FactTable::default();
-    let mut seen: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
-    for (_, _, ext) in files {
-        if let Some(spec) = frensense_lang::spec_for_ext(ext)
-            && seen.insert(spec.name())
-        {
-            let c = config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&fact_table_from_spec(spec));
-        }
-    }
-    (config, facts)
+    tables_from_exts(files.iter().map(|(_, _, ext)| ext.as_str()))
 }
 
 /// Build the compiler-style advisory for one non-dataflow policy finding.

@@ -26,7 +26,13 @@ pub fn parse_options(args: &[String]) -> CliOptions {
     let mut options = CliOptions {
         format: "text".to_string(),
         is_strict: false,
-        severity_filter: None,
+        // Default floor: warning. Info-tier findings are lang-declared
+        // *observations* (Response/Validation roles: reflect-into-response
+        // APIs like `res.send`/`res.json`, jwt.decode) - the engine produces
+        // them for analysis and `--severity info` surfaces them, but a
+        // default scan reports advisories only for warning+ findings.
+        // Reporting policy lives here, not in the analysis engine.
+        severity_filter: Some(Severity::Warning),
         language_filter: None,
         min_confidence: 0.0,
         corpus_bundle_path: None,

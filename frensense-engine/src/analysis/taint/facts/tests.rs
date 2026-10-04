@@ -149,18 +149,18 @@ fn test_rust_fetch_single_label() {
 fn test_receiver_role_disambiguates_dotted_vs_bare() {
     // The JS spec declares dotted KVNamespace.put (StorageWrite) whose
     // last segment collides with the bare HTTP-verb space, and
-    // `res.send` (ResponseLeak) colliding with `Queue.send` (Ssrf).
+    // `res.send` (XssReflected) colliding with `Queue.send` (Ssrf).
     // A receiver root matching the dotted entry's declared root must
     // flip the role; an unmatched receiver keeps the bare entry's.
     let spec = frensense_lang::spec_for_ext("ts").unwrap();
     let t = fact_table_from_spec(spec);
 
-    // res.send: receiver `res` matches the dotted root -> ResponseLeak.
+    // res.send: receiver `res` matches the dotted root -> XssReflected -> Xss.
     let res_send = t.role_for_call("send", Some("res"));
     assert_eq!(
         res_send,
-        Some(crate::analysis::taint::role::SinkRole::Response),
-        "res.send resolves via dotted ResponseLeak entry"
+        Some(crate::analysis::taint::role::SinkRole::Xss),
+        "res.send resolves via dotted XssReflected entry"
     );
     // queue.send: receiver `queue` does NOT match `res`'s root, but
     // Queue.send is its own dotted entry with root `Queue` -> Ssrf.

@@ -30,6 +30,23 @@ use super::noise::looks_taint_relevant;
 /// * If negatives contain guard/transform calls between the source and the
 ///   sink that positives lack -> propose sanitizer facts.
 pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Vec<Candidate> {
+    propose_with_trace(family, config, builtin).0
+}
+
+/// [`propose`] plus one human-readable note per decision: which branch the
+/// delta took, why a call was NOT proposed (already known to a built-in
+/// table, filtered as noise, positive already alerts so the sink path is
+/// closed), and which candidates were produced.
+///
+/// The bundler prints these under `FXDBG` and stores them in the learn
+/// report (`FXREPORT=<path>`), so a family that teaches nothing can say why
+/// instead of the pipeline staying silent about it.
+pub fn propose_with_trace(
+    family: &Family,
+    config: &TaintConfig,
+    builtin: &FactTable,
+) -> (Vec<Candidate>, Vec<String>) {
+    let mut notes: Vec<String> = Vec::new();
     let mut candidates = Vec::new();
 
     // Memory allocation / deallocation wrapper discovery from corpus examples:
@@ -94,20 +111,49 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
 
     if pos_alerts && !neg_alerts {
         // Taint flow already separates. Return any memory contracts discovered.
-        return candidates;
+        notes.push(
+            "positive alerts and the negative stays silent under the built-in tables: \
+             the family already separates, so no sink/sanitizer fact is needed"
+                .to_string(),
+        );
+        return (candidates, notes);
     }
+    notes.push(format!(
+        "delta under built-in tables: positive_alerts={pos_alerts} \
+         negative_alerts={neg_alerts} (family does not separate)"
+    ));
 
     // Guard/transform calls present in negatives but not in positives,
     // these are likely the *reason* the negative is safe.
     let pos_calls = collect_calls(&family.positives);
     let neg_calls = collect_calls(&family.negatives);
     for (call, shape) in &neg_calls {
-        if pos_calls.contains_key(call) || builtin.sanitizer_fact(call).is_some() {
+        if pos_calls.contains_key(call) {
+            notes.push(format!(
+                "sanitizer `{call}` not proposed: the positives call it too, so it is not a difference"
+            ));
+            continue;
+        }
+        if builtin.sanitizer_fact(call).is_some() {
+            notes.push(format!(
+                "sanitizer `{call}` not proposed: already a built-in sanitizer"
+            ));
             continue;
         }
         if !looks_taint_relevant(call) {
+            notes.push(format!(
+                "sanitizer `{call}` not proposed: filtered as non-taint-relevant"
+            ));
             continue;
         }
+        notes.push(format!(
+            "sanitizer candidate: `{call}` ({}), present only in negatives",
+            if *shape == CallShape::Predicate {
+                "predicate-style"
+            } else {
+                "transform"
+            }
+        ));
         candidates.push(Candidate::Sanitizer {
             call: call.clone(),
             guard: *shape == CallShape::Predicate,
@@ -118,23 +164,48 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
     // proposals (validated by replay).
     if !pos_alerts {
         for call in pos_calls.keys() {
-            if builtin.sink_signature(call).is_some() || builtin.sanitizer_fact(call).is_some() {
+            if builtin.sink_signature(call).is_some() {
+                notes.push(format!(
+                    "sink `{call}` not proposed: the built-in table already treats it as a sink, \
+                     so it cannot be the reason the positive stays silent"
+                ));
+                continue;
+            }
+            if builtin.sanitizer_fact(call).is_some() {
+                notes.push(format!(
+                    "sink `{call}` not proposed: the built-in table treats it as a sanitizer"
+                ));
                 continue;
             }
             if !looks_taint_relevant(call) {
+                notes.push(format!(
+                    "sink `{call}` not proposed: filtered as non-taint-relevant"
+                ));
                 continue;
             }
             if candidates
                 .iter()
                 .any(|c| matches!(c, Candidate::Sanitizer { call: c2, .. } if c2 == call))
             {
+                notes.push(format!(
+                    "sink `{call}` not proposed: already proposed as a sanitizer for this family"
+                ));
                 continue;
             }
+            notes.push(format!(
+                "sink candidate: `{call}` (unknown to every built-in table)"
+            ));
             candidates.push(Candidate::Sink {
                 call: call.clone(),
                 dangerous: BTreeSet::new(), // all args; replay validates
             });
         }
+    } else {
+        notes.push(
+            "unknown-call sink proposals skipped: they require a silent positive, and this \
+             positive already alerts"
+                .to_string(),
+        );
     }
 
     // Non-dataflow policy deltas: the two family shapes that express
@@ -654,5 +725,32 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
         }
     }
 
+    notes.push(format!(
+        "proposed {} candidate(s): {}",
+        candidates.len(),
+        candidate_keys(&candidates)
+    ));
+    (candidates, notes)
+}
+
+/// Compact `kind:name` list of candidates, for the proposal trace.
+fn candidate_keys(candidates: &[Candidate]) -> String {
+    if candidates.is_empty() {
+        return "(none)".to_string();
+    }
     candidates
+        .iter()
+        .map(|c| match c {
+            Candidate::Sink { call, .. } => format!("sink:{call}"),
+            Candidate::Sanitizer { call, guard } => {
+                format!("san:{call}:{}", if *guard { "guard" } else { "fn" })
+            }
+            Candidate::Check { rule, call, .. } => format!("check:{rule}:{call}"),
+            Candidate::Policy { rule, call, .. } => format!("policy:{rule}:{call}"),
+            Candidate::MemoryContract { name, .. } => format!("mem:{name}"),
+            Candidate::IntegerOverflowRule { rule, .. } => format!("io_rule:{rule}"),
+            _ => "candidate".to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }

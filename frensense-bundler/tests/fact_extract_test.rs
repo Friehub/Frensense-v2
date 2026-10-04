@@ -3,7 +3,9 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use frensense_bundler::builder::build_facts_bundle;
-use frensense_bundler::fact_extract::{extract_facts, group_families, Family, FamilyMetadata};
+use frensense_bundler::fact_extract::{
+    extract_facts_with_tables, group_families, Family, FamilyMetadata,
+};
 use frensense_bundler::format::load_bundle;
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::facts::{
@@ -85,7 +87,7 @@ export default router;
         "negative alerts at baseline (test unknown), this is the FP the fact should fix"
     );
 
-    let (learned, published) = extract_facts(&fams, &cfg, &builtin);
+    let (learned, published) = extract_facts_with_tables(&fams, &cfg, &builtin);
     let has_test = published.iter().any(
         |f| matches!(&f.entry, LearnedFactEntry::Sanitizer { call, guard_style: true, .. } if call == "test"),
     );
@@ -143,7 +145,7 @@ void caller() {
     // 2. Fact Extraction:
     // Bundler extracts memory contract from corpus pairs, replay-gates it,
     // and publishes it as a LearnedFactEntry::MemoryContract.
-    let (learned, published) = extract_facts(&fams, &cfg, &builtin);
+    let (learned, published) = extract_facts_with_tables(&fams, &cfg, &builtin);
     let has_my_free = published.iter().any(|f| {
         matches!(&f.entry, LearnedFactEntry::MemoryContract { name, consumes_params, .. }
             if name == "my_free" && consumes_params == &[0])
@@ -187,11 +189,20 @@ void test_app() {
         "c".to_string(),
     )];
 
-    // At baseline (without learned facts), the engine doesn't know external `my_free`:
+    // At baseline (without learned facts), the engine doesn't know external
+    // `my_free`, so no use-after-free can be proven. The ownership model may
+    // still report `memory_leak` here (unknown callees consume nothing by
+    // default, leak.rs): that finding is orthogonal to the contract this
+    // test teaches - the learned `consumes_params` is what unlocks the UAF.
     let baseline_pos = frensense_engine::scan::scan(&consumer_pos, &cfg, &builtin);
+    let baseline_uaf = baseline_pos
+        .checker
+        .iter()
+        .any(|c| c.rule == "use_after_free");
     assert!(
-        !baseline_pos.has_alert(),
-        "consumer positive does NOT alert at baseline because external my_free is unknown"
+        !baseline_uaf,
+        "consumer positive must NOT report use_after_free at baseline because external my_free is unknown; findings: {:?}",
+        baseline_pos.checker
     );
 
     // With learned facts (from the bundle), the engine knows `my_free` consumes param 0:
@@ -245,7 +256,7 @@ export function createSession(host: string) {
     };
 
     // 2. Extract facts via the bundler replay gate:
-    let (learned, published) = extract_facts(&[family], &cfg, &builtin);
+    let (learned, published) = extract_facts_with_tables(&[family], &cfg, &builtin);
     assert!(
         !published.is_empty(),
         "must publish learned facts from separating variants; published: {:?}",
@@ -336,7 +347,7 @@ fn test_security_policy_frc_roundtrip() {
     let cfg = TaintConfig::default();
     let builtin = FactTable::default();
     let (bundle_bytes, published) =
-        build_facts_bundle(dir.path(), &cfg, &builtin).expect("bundle build must not fail");
+        build_facts_bundle(dir.path()).expect("bundle build must not fail");
 
     // At least one Check or Policy fact must have been published
     let has_policy_fact = published.iter().any(|f| match &f.entry {
@@ -451,7 +462,7 @@ export function isAllowedUrl(targetUrl: string, allowedHost: string) {
     };
 
     // 2. Extract facts via the bundler replay gate:
-    let (learned, published) = extract_facts(&[family], &cfg, &builtin);
+    let (learned, published) = extract_facts_with_tables(&[family], &cfg, &builtin);
     assert!(
         !published.is_empty(),
         "must publish learned facts; published: {:?}",

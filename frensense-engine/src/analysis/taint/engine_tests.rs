@@ -2275,19 +2275,22 @@ export function b(id: any): void {
     }
 
     // -----------------------------------------------------------------------
-    // Zero-FP: sinks whose role only reflects or validates data are not
-    // findings - putting request data into `res.json` or decoding a JWT is
-    // those APIs' job. Only the execution sink in the same function reports.
+    // Engine purity: EVERY fact-declared sink is explored and reported when
+    // tainted data reaches it, regardless of role. Response/Validation sinks
+    // (`res.json`, `jwt.decode`) rank at `info` in advisory severity - that
+    // ranking is lang-declared policy applied at report time, never an
+    // analysis gate (a gate would let low-ranked built-in roles veto any
+    // bundler-learned knowledge about the same sink).
     //
     //   fn main() {
     //     v = getSource();
-    //     res.json(v);      // role=Response
-    //     jwt.decode(v);    // role=Validation
-    //     db.execute(v);    // role=Other -> still reported
+    //     res.json(v);      // role=Response  -> explored, reported
+    //     jwt.decode(v);    // role=Validation -> explored, reported
+    //     db.execute(v);    // role=Other      -> reported
     //   }
     // -----------------------------------------------------------------------
     #[test]
-    fn response_and_validation_role_sinks_are_not_findings() {
+    fn all_role_sinks_are_explored_and_reported() {
         use crate::analysis::taint::facts::SinkSignature;
         use crate::analysis::taint::role::SinkRole;
 
@@ -2362,23 +2365,25 @@ export function b(id: any): void {
         engine.run();
 
         let reported: Vec<_> = engine.findings.iter().collect();
-        assert!(
-            reported.iter().all(|f| f.sink == "db.execute"),
-            "only the execution sink may be reported; got {:?}",
-            reported
-        );
-        assert!(
-            reported
+        for (sink, role) in [
+            ("json", SinkRole::Response),
+            ("decode", SinkRole::Validation),
+            ("db.execute", SinkRole::Other),
+        ] {
+            let f = reported
                 .iter()
-                .any(|f| f.verdict == BackwardVerdict::Vulnerable),
-            "db.execute must still flag tainted data: {:?}",
-            reported
-        );
-        // The role-gated sinks must not even be explored: only db.execute's
-        // single argument slot counts.
+                .find(|f| f.sink == sink && f.verdict == BackwardVerdict::Vulnerable)
+                .unwrap_or_else(|| {
+                    panic!("{sink} must yield a Vulnerable finding; got {reported:?}")
+                });
+            assert_eq!(f.role, role, "role must survive into the finding: {f:?}");
+        }
+        // Every slot of every fact-declared sink is explored: json (receiver
+        // + arg) + decode (receiver + arg) + db.execute (arg).
         assert_eq!(
-            engine.stats.sink_args_explored, 1,
-            "response/validation sinks must be skipped before exploration"
+            engine.stats.sink_args_explored, 5,
+            "role must never gate exploration: {:?}",
+            engine.stats
         );
     }
 }

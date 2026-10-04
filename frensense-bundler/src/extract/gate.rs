@@ -52,12 +52,23 @@ impl PreparedFamily {
         })
     }
 
+    /// Alert flags under a fact table: (positive alerts, negative alerts).
+    ///
+    /// Separation is `positive && !negative`, but the gate's rejection
+    /// messages need to say WHICH side failed: a fact that silences the
+    /// positive is worthless, one that leaves the negative noisy is a false
+    /// positive waiting to happen.
+    pub fn alert_flags(&self, config: &TaintConfig, facts: &FactTable) -> (bool, bool) {
+        let pos = scan::scan_prepared(&self.pos, config, facts);
+        let neg = scan::scan_prepared(&self.neg, config, facts);
+        (pos.has_alert(), neg.has_alert())
+    }
+
     /// Family separation under a fact table. Reuses the lowered IRs;
     /// each call re-runs the taint engine + checker only.
     pub fn separates(&self, config: &TaintConfig, facts: &FactTable) -> bool {
-        let pos = scan::scan_prepared(&self.pos, config, facts);
-        let neg = scan::scan_prepared(&self.neg, config, facts);
-        pos.has_alert() && !neg.has_alert()
+        let (pos_alerts, neg_alerts) = self.alert_flags(config, facts);
+        pos_alerts && !neg_alerts
     }
 }
 

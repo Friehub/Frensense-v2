@@ -102,12 +102,7 @@ export function handle(req: any) { return req; }
         assert_eq!(families[0].id, "adv");
         assert_eq!(families[0].metadata.cwe.as_deref(), Some("CWE-79"));
 
-        let (bytes, _) = crate::builder::build_facts_bundle(
-            dir.path(),
-            &TaintConfig::default(),
-            &FactTable::default(),
-        )
-        .unwrap();
+        let (bytes, _) = crate::builder::build_facts_bundle(dir.path()).unwrap();
         let loaded = crate::format::load_bundle(&bytes).unwrap();
         let pat = loaded
             .patterns
@@ -137,12 +132,7 @@ export function handle(req: any) { return req; }
         )
         .unwrap();
 
-        let (bytes, _) = crate::builder::build_facts_bundle(
-            dir.path(),
-            &TaintConfig::default(),
-            &FactTable::default(),
-        )
-        .unwrap();
+        let (bytes, _) = crate::builder::build_facts_bundle(dir.path()).unwrap();
         let loaded = crate::format::load_bundle(&bytes).unwrap();
         let pat = loaded
             .patterns
@@ -387,7 +377,7 @@ mod policy_proposal_tests {
         );
         let families = group_families(dir.path()).unwrap();
         let (config, table) = builtin();
-        let (learned, published) = extract_facts(&families, &config, &table);
+        let (learned, published) = extract_facts_with_tables(&families, &config, &table);
 
         let _policies: Vec<&PolicyFact> = published
             .iter()
@@ -439,7 +429,7 @@ mod policy_proposal_tests {
         );
         let families = group_families(dir.path()).unwrap();
         let (config, table) = builtin();
-        let (_, published) = extract_facts(&families, &config, &table);
+        let (_, published) = extract_facts_with_tables(&families, &config, &table);
         let entries: Vec<&LearnedFactEntry> = published.iter().map(|f| &f.entry).collect();
         assert!(
             entries.iter().any(|e| matches!(
@@ -471,7 +461,7 @@ mod policy_proposal_tests {
         let families = group_families(dir.path()).unwrap();
         assert!(families[0].declared_check_call.is_none());
         let (config, table) = builtin();
-        let (_, published) = extract_facts(&families, &config, &table);
+        let (_, published) = extract_facts_with_tables(&families, &config, &table);
         assert!(
             published
                 .iter()
@@ -493,8 +483,7 @@ mod policy_proposal_tests {
             "ban_negative.ts",
             "// check-call: evaluate\nfunction run() { evaluate(request); }\n",
         );
-        let (bytes, published) =
-            crate::builder::build_facts_bundle(dir.path(), &builtin().0, &builtin().1).unwrap();
+        let (bytes, published) = crate::builder::build_facts_bundle(dir.path()).unwrap();
         let loaded = crate::format::load_bundle(&bytes).unwrap();
         let has_policy = loaded
             .learned_facts
@@ -545,7 +534,7 @@ mod policy_proposal_tests {
             families.iter().map(|f| &f.id).collect::<Vec<_>>()
         );
 
-        let (_, published) = extract_facts(&families, &config, &table);
+        let (_, published) = extract_facts_with_tables(&families, &config, &table);
 
         // The bundler must publish at least one Check or Policy fact for the
         // `delete_user_account` trigger with the guard.
@@ -578,7 +567,7 @@ mod policy_proposal_tests {
 
         // The learned fact table must separate the family: positive alerts,
         // negative stays silent.
-        let (learned, _) = extract_facts(&families, &config, &table);
+        let (learned, _) = extract_facts_with_tables(&families, &config, &table);
         let family = &families[0];
         let prep = gate::PreparedFamily::new(family).unwrap();
         assert!(
@@ -730,7 +719,7 @@ export function badSearch (req: any) {
             metadata: FamilyMetadata::default(),
         };
 
-        let (learned, published) = extract_facts(&[param, jwt], &config, &table);
+        let (learned, published) = extract_facts_with_tables(&[param, jwt], &config, &table);
 
         let query_fact = published.iter().any(
             |f| matches!(&f.entry, LearnedFactEntry::Sink { call, .. } if call.as_str() == "query"),

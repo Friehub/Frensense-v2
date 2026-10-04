@@ -12,8 +12,6 @@ use crate::format::{write_bundle, BundlePattern, BundlePayload};
 /// Returns the bundle plus a summary of the published facts for reporting.
 pub fn build_facts_bundle(
     corpus_dir: &std::path::Path,
-    config: &frensense_engine::analysis::taint::config::TaintConfig,
-    builtin: &frensense_engine::analysis::taint::facts::FactTable,
 ) -> Result<(Vec<u8>, Vec<crate::fact_extract::LearnedFact>), String> {
     let families = group_families(corpus_dir)?;
     eprintln!(
@@ -22,7 +20,7 @@ pub fn build_facts_bundle(
         corpus_dir.display()
     );
 
-    let (learned_table, published) = extract_facts(&families, config, builtin);
+    let (learned_table, published) = extract_facts(&families);
 
     // Payload: one metadata pattern per family + the published facts.
     let entries: Vec<frensense_engine::analysis::taint::facts::LearnedFactEntry> =

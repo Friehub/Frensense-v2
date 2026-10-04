@@ -216,6 +216,23 @@ pub enum SinkLabel {
     Unknown,
 }
 
+impl SinkLabel {
+    pub fn tags(&self) -> &'static [&'static str] {
+        match self {
+            Self::Xss | Self::XssDom | Self::XssReflected => &["xss"],
+            Self::PrototypePollution => &["prototype", "prototype_pollution"],
+            Self::Ssrf => &["ssrf"],
+            Self::OpenRedirect => &["redirect", "open_redirect"],
+            Self::SqlInjection => &["sql", "sqli"],
+            Self::CommandInjection => &["execution", "command_injection"],
+            Self::CodeExecution => &["execution", "code_execution"],
+            Self::PathTraversal => &["traversal", "path_traversal"],
+            Self::TemplateSsti => &["template", "ssti"],
+            _ => &[],
+        }
+    }
+}
+
 /// Broad origin of tainted data.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TaintOrigin {
@@ -263,7 +280,11 @@ pub struct PropagatorRule {
     /// Matched against the last segment of a member chain.
     pub call: &'static str,
     /// Argument index that carries taint into the return (0-based).
-    /// `None` means *any* argument taints the return.
+    /// `None` means *no* argument taints the return: only the receiver can
+    /// (per `tainted_receiver`). Arguments of such calls are typically the
+    /// changed data (replacement strings, match patterns, indices); letting
+    /// them inherit taint would re-flag outputs that only replaced the
+    /// tainted content - the zero-FP contract wins over recall here.
     pub tainted_arg: Option<usize>,
     /// If `true`, a tainted receiver taints the return value.
     pub tainted_receiver: bool,
@@ -564,7 +585,7 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// narrow the list.
     fn known_ambiguous_verbs(&self) -> &'static [&'static str] {
         &[
-            "get", "post", "put", "delete", "patch", "head", "options", "request", "set",
+            "get", "post", "put", "delete", "patch", "head", "options", "request", "set", "render",
         ]
     }
 

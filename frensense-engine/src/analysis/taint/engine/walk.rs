@@ -222,13 +222,12 @@ impl<'a> BackwardTaintEngine<'a> {
             .facts
             .role_for_call(name, receiver_root.as_deref())
             .unwrap_or(crate::analysis::taint::role::SinkRole::Other);
-        // Zero-FP: sinks at `info` level (Response: reflect-into-response
-        // APIs like `res.json`; Validation: jwt.decode & friends) consume
-        // data by design - tainted data reaching them is not a finding.
-        // Skip before exploration so they cost nothing.
-        if role.default_level() == "info" {
-            return;
-        }
+        // Engine purity: every fact-declared sink is explored and reported
+        // when tainted data reaches it, regardless of role. Severity policy
+        // (Response/Validation rank at `info`) is lang-declared ranking
+        // applied when findings become advisories - it must never gate the
+        // analysis itself, or no bundle knowledge can ever unblock a sink
+        // the built-in tables happen to rank low.
 
         // Collect (slot, var, arg-node) triplets. For virtual calls the
         // receiver is slot usize::MAX (matching the forward engine's arg_slots convention).
