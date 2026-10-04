@@ -14,9 +14,9 @@
 //!
 //! ## Why this matters for taint analysis
 //!
-//! The current `TaintEngine` runs a fixed-point loop over *all* instructions in
-//! *all* blocks, repeating until nothing changes. On a large codebase this visits
-//! huge amounts of irrelevant IR. The SVFG changes the cost model:
+//! The historical fixed-point `TaintEngine` ran a loop over *all* instructions
+//! in *all* blocks, repeating until nothing changed. On a large codebase this
+//! visits huge amounts of irrelevant IR. The SVFG changes the cost model:
 //!
 //!   * Taint propagation = BFS/DFS from **source nodes**, following edges.
 //!   * No fixed-point loop. No visiting blocks that aren't reachable from a source.
@@ -49,9 +49,9 @@
 //! The `use(J, v1) → def(J, v2)` edge is the *intra-instruction flow* edge: it
 //! is what makes taint survive an assignment, a binary op, or a call
 //! destination. Without it, BFS dies at the first use node. This mirrors
-//! exactly what `TaintEngine::process_instruction` does when it moves taint
-//! from operands to dests, the graph just makes it explicit and reusable for
-//! demand-driven backward traversal later (task 4.4).
+//! exactly what the fixed-point engine's `process_instruction` did when it
+//! moved taint from operands to dests, the graph just makes it explicit and
+//! reusable for demand-driven backward traversal (task 4.4).
 //!
 //! Memory states flow the same way: every instruction consuming `mem_in` and
 //! producing `mem_out` gets a `mem_in-use → mem_out-def` edge, so memory taint
@@ -164,7 +164,7 @@ impl SvfgNode {
 /// The Sparse Value-Flow Graph for a single function.
 ///
 /// Build it with [`SvfgBuilder::build`], then query it with the helper
-/// methods or use [`SvfgTaintEngine`] for source-to-sink analysis.
+/// methods.
 #[derive(Debug, Default, Clone)]
 pub struct Svfg {
     pub nodes: FxHashMap<NodeKey, SvfgNode>,
@@ -974,230 +974,6 @@ impl<'a> SvfgBuilder<'a> {
             _ => {}
         }
         v
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Graph-traversal taint engine
-// ---------------------------------------------------------------------------
-
-use crate::analysis::taint::config::TaintConfig;
-
-/// A taint engine that operates purely on the SVFG via BFS.
-///
-/// Unlike the fixed-point `TaintEngine`, this one:
-///   * Seeds the worklist with nodes whose defining instruction is a **source**.
-///   * Follows SVFG edges forward (def → use → def → …).
-///   * Checks each reached node against **sinks**.
-///   * Stops at **sanitizer** call sites.
-///   * Applies call pass-through (non-source, non-sanitizer call with a tainted
-///     arg taints the call's dest), matching `TaintEngine` semantics.
-///
-/// Because we follow only edges that exist in the graph, we naturally visit
-/// only variables reachable from a source, exactly the "5% of the program"
-/// mentioned in the spec.
-pub struct SvfgTaintEngine<'a> {
-    ir: &'a FunctionIR,
-    #[allow(dead_code)] // reserved for 4.3 (two-phase points-to integration)
-    heap: &'a PointsToAnalysis,
-    config: &'a TaintConfig,
-    graph: &'a Svfg,
-
-    /// Nodes that have been confirmed tainted.
-    tainted: FxHashSet<NodeKey>,
-
-    pub alerts: Vec<String>,
-}
-
-impl<'a> SvfgTaintEngine<'a> {
-    pub fn new(
-        ir: &'a FunctionIR,
-        heap: &'a PointsToAnalysis,
-        config: &'a TaintConfig,
-        graph: &'a Svfg,
-        _def_site: &'a FxHashMap<VarId, NodeKey>,
-    ) -> Self {
-        Self {
-            ir,
-            heap,
-            config,
-            graph,
-            tainted: FxHashSet::default(),
-            alerts: Vec::new(),
-        }
-    }
-
-    /// Run the BFS-based taint propagation.
-    ///
-    /// # Complexity
-    ///
-    /// O(|reachable nodes from sources|), proportional to taint paths,
-    /// not program size.
-    pub fn run(&mut self) {
-        let mut worklist: std::collections::VecDeque<NodeKey> = std::collections::VecDeque::new();
-
-        // Seed: find all InstrDef nodes whose instruction is a configured source.
-        // We iterate in deterministic key order so alerts come out stable.
-        let mut seed_keys: Vec<NodeKey> = self.graph.nodes.keys().copied().collect();
-        seed_keys.sort_by_key(|k| (k.block.0, k.instr_idx, k.var.0));
-        for key in seed_keys {
-            if self.node_is_source(&key) {
-                self.tainted.insert(key);
-                worklist.push_back(key);
-            }
-        }
-
-        // BFS
-        while let Some(current) = worklist.pop_front() {
-            let node = match self.graph.node(&current) {
-                Some(n) => n,
-                None => continue,
-            };
-
-            for succ_key in node.successors() {
-                // Check for sanitizer: if the successor node represents a
-                // sanitizer call-site use, stop propagation along this edge.
-                if self.node_is_sanitizer_use(&succ_key) {
-                    continue;
-                }
-
-                // Check for sink
-                self.check_sink(&succ_key);
-
-                if !self.tainted.contains(&succ_key) {
-                    self.tainted.insert(succ_key);
-                    worklist.push_back(succ_key);
-                }
-            }
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
-
-    /// Returns `true` if the node at `key` is a definition that is a taint
-    /// source (i.e. the defining instruction calls a configured source function).
-    fn node_is_source(&self, key: &NodeKey) -> bool {
-        let NodeKey {
-            block,
-            instr_idx: Some(idx),
-            var,
-        } = *key
-        else {
-            return false;
-        };
-
-        let block_data = match self.ir.blocks.get(&block) {
-            Some(b) => b,
-            None => return false,
-        };
-
-        // Guard: instruction index must be valid (not a sentinel)
-        if idx >= block_data.instructions.len() {
-            return false;
-        }
-
-        match &block_data.instructions[idx] {
-            Instruction::CallStatic {
-                func,
-                dest: Some(dest_var),
-                ..
-            } => self.config.sources.contains(func) && *dest_var == var,
-            Instruction::CallVirtual {
-                method,
-                dest: Some(dest_var),
-                ..
-            } => self.config.sources.contains(method) && *dest_var == var,
-            _ => false,
-        }
-    }
-
-    /// Returns `true` if the node at `key` is a *use* inside a sanitizer call.
-    fn node_is_sanitizer_use(&self, key: &NodeKey) -> bool {
-        let NodeKey {
-            block,
-            instr_idx: Some(idx),
-            ..
-        } = *key
-        else {
-            return false;
-        };
-
-        let block_data = match self.ir.blocks.get(&block) {
-            Some(b) => b,
-            None => return false,
-        };
-
-        if idx >= block_data.instructions.len() {
-            return false;
-        }
-
-        match &block_data.instructions[idx] {
-            Instruction::CallStatic { func, .. } => self.config.sanitizers.contains(func),
-            Instruction::CallVirtual { method, .. } => self.config.sanitizers.contains(method),
-            _ => false,
-        }
-    }
-
-    /// Emits an alert if `key` is a use inside a configured sink.
-    fn check_sink(&mut self, key: &NodeKey) {
-        let NodeKey {
-            block,
-            instr_idx: Some(idx),
-            var,
-        } = *key
-        else {
-            return;
-        };
-
-        let block_data = match self.ir.blocks.get(&block) {
-            Some(b) => b,
-            None => return,
-        };
-
-        if idx >= block_data.instructions.len() {
-            return;
-        }
-
-        let alert = match &block_data.instructions[idx] {
-            Instruction::CallStatic { func, args, .. } if self.config.sinks.contains(func) => args
-                .iter()
-                .position(|a| a == &Operand::Var(var))
-                .map(|pos| {
-                    format!(
-                        "CRITICAL VULNERABILITY: Tainted data reached sink '{}' at argument {}",
-                        func, pos
-                    )
-                }),
-            Instruction::CallVirtual {
-                method,
-                args,
-                receiver,
-                ..
-            } if self.config.sinks.contains(method) => {
-                if receiver == &Operand::Var(var) {
-                    Some(format!(
-                        "CRITICAL VULNERABILITY: Tainted data reached sink '{}' at receiver",
-                        method
-                    ))
-                } else {
-                    args.iter().position(|a| a == &Operand::Var(var)).map(|pos| {
-                        format!(
-                            "CRITICAL VULNERABILITY: Tainted data reached sink '{}' at argument {}",
-                            method, pos
-                        )
-                    })
-                }
-            }
-            _ => None,
-        };
-
-        if let Some(alert) = alert
-            && !self.alerts.contains(&alert)
-        {
-            self.alerts.push(alert);
-        }
     }
 }
 
