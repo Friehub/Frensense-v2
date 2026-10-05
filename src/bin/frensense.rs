@@ -241,6 +241,7 @@ fn run_lsp() -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    frensense_engine::debug_flags::DebugFlags::install_from(std::env::var_os);
     let args: Vec<String> = std::env::args().collect();
     if handle_early_args(&args) {
         return Ok(());

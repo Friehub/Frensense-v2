@@ -166,6 +166,7 @@ fn lower_file(
 }
 
 fn main() {
+    frensense_engine::debug_flags::DebugFlags::install_from(std::env::var_os);
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 2 {
         eprintln!("usage: e2e_taint <file.ts> [...]");

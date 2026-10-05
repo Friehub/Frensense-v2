@@ -4,6 +4,7 @@
 
 // Probe: dump named node kinds of a TS file to see what the lowering misses.
 fn main() {
+    frensense_engine::debug_flags::DebugFlags::install_from(std::env::var_os);
     let args: Vec<String> = std::env::args().collect();
     let src = std::fs::read_to_string(&args[1]).unwrap();
     let mut parser = tree_sitter::Parser::new();
