@@ -799,9 +799,7 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// Insecure config selectors through
     /// `FactTable::insecure_config_selectors`. Defaults to
     /// [`crate::policy::bootstrap_insecure_config_selectors`].
-    fn known_insecure_config_selectors(
-        &self,
-    ) -> &'static [(&'static str, &'static [&'static str], &'static str)] {
+    fn known_insecure_config_selectors(&self) -> &'static [crate::policy::InsecureConfigRule] {
         crate::policy::bootstrap_insecure_config_selectors()
     }
 

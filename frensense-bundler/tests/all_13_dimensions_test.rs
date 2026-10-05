@@ -365,6 +365,8 @@ fn test_dim_08_cryptographic_rules_weak_cipher() {
         call: "initCustomCipher".into(),
         selector_slot: Some(0),
         weak_selectors: vec!["des".into(), "rc4".into()],
+        severity: "warning".into(),
+        message: String::new(),
     })]);
 
     let cfg = TaintConfig::default();

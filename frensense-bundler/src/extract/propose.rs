@@ -483,6 +483,18 @@ pub fn propose_with_trace(
                         call: call.clone(),
                         selector_slot: Some(*slot),
                         weak_selectors: vec![pos_val.clone()],
+                        severity: family
+                            .metadata
+                            .severity
+                            .as_deref()
+                            .unwrap_or("warning")
+                            .to_ascii_lowercase(),
+                        message: family.metadata.observation.clone().unwrap_or_else(|| {
+                            format!(
+                                "Weak cryptography call `{call}` (learned from family {})",
+                                family.id
+                            )
+                        }),
                     },
                 });
             }
@@ -507,6 +519,18 @@ pub fn propose_with_trace(
                         call: call.clone(),
                         selector_slot: None,
                         weak_selectors: vec![],
+                        severity: family
+                            .metadata
+                            .severity
+                            .as_deref()
+                            .unwrap_or("warning")
+                            .to_ascii_lowercase(),
+                        message: family.metadata.observation.clone().unwrap_or_else(|| {
+                            format!(
+                                "Weak cryptography call `{call}` (learned from family {})",
+                                family.id
+                            )
+                        }),
                     },
                 });
             }

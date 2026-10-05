@@ -8,6 +8,9 @@ use std::collections::BTreeSet;
 use super::*;
 use crate::analysis::taint::config::TaintConfig;
 use crate::checks::memory_summary::CapacitySpec;
+use frensense_lang::policy::{
+    InsecureConfigRule, IntegerOverflowRule, KeySizeRule, WeakPrimitiveRule,
+};
 
 /// The merged fact table: built-in language tables + bundle-learned facts.
 ///
@@ -77,18 +80,18 @@ pub struct FactTable {
     pub credential_context_hints: FxHashSet<String>,
     /// Weak-hash policy rules (spec-seeded via
     /// `LanguageSpec::known_weak_hash_rules`).
-    pub weak_hash_rules: Vec<frensense_lang::policy::WeakPrimitiveRule>,
+    pub weak_hash_rules: Vec<WeakPrimitiveRule>,
     /// Corpus-extendable allocation-size overflow rules (CWE-190 -> CWE-680;
     /// spec-seeded via `LanguageSpec::known_integer_overflow_rules`, bundle
     /// extension via `LearnedFactEntry::IntegerOverflowRule` from a family's
     /// `[frensense] check-rule:` declaration).
-    pub integer_overflow_rules: Vec<(frensense_lang::policy::IntegerOverflowRule, Provenance)>,
+    pub integer_overflow_rules: Vec<(IntegerOverflowRule, Provenance)>,
     /// Insecure config selectors (spec-seeded via
     /// `LanguageSpec::known_insecure_config_selectors`).
-    pub insecure_config_selectors: Vec<(&'static str, &'static [&'static str], &'static str)>,
+    pub insecure_config_selectors: Vec<InsecureConfigRule>,
     /// Key-size policy rules (spec-seeded via
     /// `LanguageSpec::known_key_size_rules`).
-    pub key_size_rules: Vec<frensense_lang::policy::KeySizeRule>,
+    pub key_size_rules: Vec<KeySizeRule>,
     /// Suspicious hash-wrapper names (spec-seeded via
     /// `LanguageSpec::known_suspicious_hash_wrappers`).
     pub suspicious_hash_wrappers: FxHashSet<String>,
@@ -901,7 +904,7 @@ impl LearnedFactEntry {
                 severity,
                 message,
             } => {
-                let fact = frensense_lang::policy::IntegerOverflowRule {
+                let fact = IntegerOverflowRule {
                     rule_id: rule.clone(),
                     wrap_threshold: *wrap_threshold,
                     severity: severity.clone(),

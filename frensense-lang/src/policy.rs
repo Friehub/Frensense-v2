@@ -143,7 +143,18 @@ pub struct WeakPrimitiveRule {
     /// JS-shaped selector rules stay qualified; explicit weak-algorithm
     /// selectors like `hashlib.new('md5')` fire unconditionally.
     pub requires_credential_context: bool,
+    /// Advisory severity hint: "warning" or "critical".
+    pub severity: &'static str,
+    /// Advisory observation body (mirrors the lang observation template for
+    /// this rule id, without interpolation).
+    pub message: &'static str,
 }
+
+/// Shared advisory body for the bootstrap weak-hash rules (the `weak_hash`
+/// observation template's text, static form).
+const WEAK_HASH_MESSAGE: &str = "Weak hash primitive selected, not acceptable \
+                                 for passwords or security-sensitive digests \
+                                 (use bcrypt/argon2/scrypt or SHA-256+)";
 
 /// The bootstrap weak-hash policy table: universal crypto policy facts
 /// (Node `createHash`, Python `hashlib.new`, bare `md5`/`sha1`).
@@ -156,6 +167,8 @@ pub static BOOTSTRAP_WEAK_HASH_RULES: &[WeakPrimitiveRule] = &[
         selector_slot: 0,
         weak_selectors: &["md5", "md4", "sha1", "sha"],
         requires_credential_context: true,
+        severity: "warning",
+        message: WEAK_HASH_MESSAGE,
     },
     // Python hashlib / passlib: hashlib.new('md5', ...)
     WeakPrimitiveRule {
@@ -165,6 +178,8 @@ pub static BOOTSTRAP_WEAK_HASH_RULES: &[WeakPrimitiveRule] = &[
         selector_slot: 0,
         weak_selectors: &["md5", "md4", "sha1", "sha"],
         requires_credential_context: false,
+        severity: "warning",
+        message: WEAK_HASH_MESSAGE,
     },
 ];
 
@@ -209,11 +224,35 @@ pub static BOOTSTRAP_INTEGER_OVERFLOW_RULES: std::sync::LazyLock<Vec<IntegerOver
 
 /// Known *string-literal* insecure configuration selectors: calls whose
 /// argument literal itself selects an insecure mode regardless of
-/// algorithm. Tuple: `(callee prefix, selector literals, rule id)`.
-pub static BOOTSTRAP_INSECURE_CONFIG_SELECTORS: &[(&str, &[&str], &str)] = &[
+/// algorithm. The literal selector and its advisory travel together so the
+/// check stays fact-driven end to end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InsecureConfigRule {
+    /// Callee-path prefix the selector applies to (`jwt.verify`, ...).
+    pub prefix: &'static str,
+    /// Selector literals that select the insecure mode (lowercase match).
+    pub selectors: &'static [&'static str],
+    /// Finding rule id.
+    pub rule_id: &'static str,
+    /// Advisory severity hint: "warning" or "critical".
+    pub severity: &'static str,
+    /// Advisory observation body (mirrors the lang observation template for
+    /// this rule id, without interpolation).
+    pub message: &'static str,
+}
+
+/// The bootstrap insecure-config table.
+pub static BOOTSTRAP_INSECURE_CONFIG_SELECTORS: &[InsecureConfigRule] = &[
     // jwt.sign(payload, secret, { algorithm: 'none' }) style appears as a
     // string selector on some APIs; `none`/`HS1` in the `alg` slot.
-    ("jwt", &["none", "hs1"], "insecure_jwt_algorithm"),
+    InsecureConfigRule {
+        prefix: "jwt",
+        selectors: &["none", "hs1"],
+        rule_id: "insecure_jwt_algorithm",
+        severity: "warning",
+        message: "Insecure configuration: an insecure JWT algorithm selector \
+                  ('none'/'hs1') was accepted (use RS256/ES256)",
+    },
 ];
 
 /// A key-size rule: a generation call whose constant bit-length argument
@@ -231,6 +270,11 @@ pub struct KeySizeRule {
     pub min_bits: i64,
     /// Human label of what the key protects.
     pub kind: &'static str,
+    /// Advisory severity hint: "warning" or "critical".
+    pub severity: &'static str,
+    /// Advisory observation body (mirrors the lang observation template for
+    /// this rule id, without interpolation).
+    pub message: &'static str,
 }
 
 /// The bootstrap key-size policy table.
@@ -241,6 +285,9 @@ pub static BOOTSTRAP_KEY_SIZE_RULES: &[KeySizeRule] = &[
         slot: 0,
         min_bits: 2048,
         kind: "RSA",
+        severity: "warning",
+        message: "Key generation call with RSA key size below 2048 bits \
+                  (use >= 2048 bits for RSA)",
     },
     KeySizeRule {
         rule_id: "weak_rsa_key_size",
@@ -248,6 +295,9 @@ pub static BOOTSTRAP_KEY_SIZE_RULES: &[KeySizeRule] = &[
         slot: 0,
         min_bits: 128,
         kind: "symmetric keys",
+        severity: "warning",
+        message: "Key generation call with symmetric key size below 128 bits \
+                  (use >= 128 bits for symmetric keys)",
     },
 ];
 
@@ -337,8 +387,7 @@ pub fn bootstrap_integer_overflow_rules() -> &'static [IntegerOverflowRule] {
 }
 
 /// The default insecure config selectors (see [`BOOTSTRAP_INSECURE_CONFIG_SELECTORS`]).
-pub fn bootstrap_insecure_config_selectors(
-) -> &'static [(&'static str, &'static [&'static str], &'static str)] {
+pub fn bootstrap_insecure_config_selectors() -> &'static [InsecureConfigRule] {
     BOOTSTRAP_INSECURE_CONFIG_SELECTORS
 }
 

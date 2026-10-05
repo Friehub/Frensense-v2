@@ -428,6 +428,8 @@ export function hop (req: any, res: any) {
             call: "createCipher".into(),
             selector_slot: Some(0),
             weak_selectors: vec!["des".into(), "rc4".into()],
+            severity: "warning".into(),
+            message: String::new(),
         });
 
         // Positive sample: 'des' selected
@@ -468,6 +470,8 @@ export function encryptData (data: string, key: string) {
             call: "brokenCustomHash".into(),
             selector_slot: None,
             weak_selectors: vec![],
+            severity: "warning".into(),
+            message: String::new(),
         });
 
         // Positive sample: calls brokenCustomHash
@@ -494,6 +498,57 @@ export function hashToken (token: string) {
         assert!(
             neg_findings.is_empty(),
             "negative sample must stay silent, got: {neg_findings:?}"
+        );
+    }
+
+    /// Phase 2.2: a finding carries the severity declared by the rule that
+    /// fired - the spec bootstrap's declared level for spec rules, the
+    /// bundle-authored level for learned facts.
+    #[test]
+    fn findings_carry_rule_declared_severity() {
+        use crate::analysis::taint::facts::WeakCryptoFact;
+        let src = r#"
+import * as crypto from 'crypto'
+export function hashPassword (clearTextPassword: string): string {
+  return crypto.createHash('md5').update(clearTextPassword).digest('hex')
+}
+"#;
+        let fns = lower_source("test.ts", src, "ts").expect("lowering failed");
+        let spec_findings = check_all(fns.values(), &ts_facts());
+        let weak = spec_findings
+            .iter()
+            .find(|f| f.rule == "weak_hash")
+            .expect("weak_hash finding expected");
+        assert_eq!(
+            weak.severity, "warning",
+            "spec rule must report its declared severity, got {:?}",
+            weak
+        );
+
+        let mut facts = ts_facts();
+        facts.weak_crypto_rules.push(WeakCryptoFact {
+            rule_id: "learned_broken_hash_func".into(),
+            call: "brokenCustomHash".into(),
+            selector_slot: None,
+            weak_selectors: vec![],
+            severity: "critical".into(),
+            message: "authored observation".into(),
+        });
+        let pos_src = r#"
+export function hashToken (token: string) {
+  return brokenCustomHash(token);
+}
+"#;
+        let fns = lower_source("test.ts", pos_src, "ts").expect("lowering failed");
+        let learned_findings = check_all(fns.values(), &facts);
+        let learned = learned_findings
+            .iter()
+            .find(|f| f.rule == "learned_broken_hash_func")
+            .expect("learned finding expected");
+        assert_eq!(
+            learned.severity, "critical",
+            "learned fact must report its authored severity, got {:?}",
+            learned
         );
     }
 }

@@ -188,7 +188,7 @@ fn check_call(
                 message: String::new(),
                 params: vec![("callee", callee_seg.to_string()), ("sel", sel.to_string())],
                 span,
-                severity: String::new(),
+                severity: rule.severity.to_string(),
             });
             return; // one finding per call site
         }
@@ -205,7 +205,7 @@ fn check_call(
                 message: String::new(),
                 params: vec![("callee", callee_seg.to_string())],
                 span,
-                severity: String::new(),
+                severity: rule.severity.to_string(),
             });
             return;
         }
@@ -232,7 +232,7 @@ fn check_call(
                         message: String::new(),
                         params: vec![("callee", callee_seg.to_string()), ("sel", sel.to_string())],
                         span,
-                        severity: String::new(),
+                        severity: fact.severity.clone(),
                     });
                     return;
                 }
@@ -244,7 +244,7 @@ fn check_call(
                     message: String::new(),
                     params: vec![("callee", callee_seg.to_string())],
                     span,
-                    severity: String::new(),
+                    severity: fact.severity.clone(),
                 });
                 return;
             }
@@ -295,7 +295,7 @@ fn check_call(
                         ("kind", rule.kind.to_string()),
                     ],
                     span,
-                    severity: String::new(),
+                    severity: rule.severity.to_string(),
                 });
                 return;
             }
@@ -304,17 +304,14 @@ fn check_call(
 
     // Insecure literal selectors (`{ algorithm: 'none' }` shapes land here
     // once object literals are flattened; for now the string form).
-    for (prefix, selectors, rule_id, provenance) in facts
-        .insecure_config_selectors
-        .iter()
-        .map(|(prefix, selectors, rule_id)| (*prefix, *selectors, *rule_id, Provenance::Spec))
-    {
+    for rule in &facts.insecure_config_selectors {
+        let provenance = Provenance::Spec;
         // Match the full dotted call path (`jwt.verify`) or the callee
         // (`jwtChallenge`); only a *verifier* accepting an insecure
         // algorithm is the violation - token issuers that merely embed the
         // literal (`jwtChallenge(id, req, 'none', ...)`) are harness code.
         let path_lower = full_path.to_ascii_lowercase();
-        if !(path_lower.starts_with(prefix) || callee_lower.starts_with(prefix)) {
+        if !(path_lower.starts_with(rule.prefix) || callee_lower.starts_with(rule.prefix)) {
             continue;
         }
         if !jwt_algorithm_context(&path_lower, &callee_lower, facts) {
@@ -322,16 +319,16 @@ fn check_call(
         }
         for arg in args {
             if let Some(lit) = arg_str_literal(arg, values)
-                && selectors.contains(&lit.to_ascii_lowercase().as_str())
+                && rule.selectors.contains(&lit.to_ascii_lowercase().as_str())
             {
                 out.push(CheckerFinding {
                     provenance,
                     function: ir.name.clone(),
-                    rule: rule_id.to_string(),
+                    rule: rule.rule_id.to_string(),
                     message: String::new(),
                     params: vec![("callee", callee_seg.to_string()), ("sel", lit.to_string())],
                     span,
-                    severity: String::new(),
+                    severity: rule.severity.to_string(),
                 });
                 return;
             }

@@ -281,6 +281,12 @@ pub struct WeakCryptoFact {
     pub call: String,
     pub selector_slot: Option<usize>,
     pub weak_selectors: Vec<String>,
+    /// Advisory severity hint: "warning" or "critical".
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub severity: String,
+    /// Corpus-authored advisory observation.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub message: String,
 }
 
 /// One corpus-verified guard bypass fact (containment callee or credential sink).
