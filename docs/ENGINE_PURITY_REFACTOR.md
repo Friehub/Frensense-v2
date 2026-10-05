@@ -201,7 +201,7 @@ precision/recall vs `baseline_scorecard.json` + bundler round-trip
 (`pipeline.rs:97`). No PR may move these numbers unless the PR's intent says
 so.
 
-Status below reflects the tree at `fb42237`. The debt-cleanup series C1-C8
+Status below reflects the tree at `76a5226`. The debt-cleanup series C1-C8
 (formerly tracked in `ENGINE_AUDIT.md`, kept in git history) landed as
 `76deff0` .. `047fb94` on top of Phases 0-3.
 
@@ -296,9 +296,9 @@ and a UAF finding (fails today).
 
 **Status: partially done.** Check-time `bootstrap_*` unions are gone
 (engine refs = 0: `76deff0`, `9757ef7`, `43f7396`); provenance is
-per-entry in `FactTable` (`73bbc0f`). Remaining: CLI arg fix (5.1, D2
-cancelled - corpus-only), default pack (5.2), provenance-ordered merge
-flip (5.3). Phase 2 gate closed (`fb42237`).
+per-entry in `FactTable` (`73bbc0f`). 5.1 CLI arg fix done (`76a5226`,
+D2 cancelled - corpus-only). Remaining: default pack (5.2),
+provenance-ordered merge flip (5.3). Phase 2 gate closed (`fb42237`).
 
 | PR | Change | Key sites |
 |----|--------|-----------|
