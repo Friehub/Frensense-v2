@@ -42,25 +42,3 @@ pub struct FileId(pub u32);
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScopeId(pub u64);
-
-#[derive(Debug, thiserror::Error)]
-pub enum FrensenseError {
-    #[error("Parse failure: {0}")]
-    ParseFailure(String),
-    #[error("Config error: {0}")]
-    Config(String),
-    #[error("Parser error: {0}")]
-    ParserError(String),
-    #[error("Pattern error: {0}")]
-    Pattern(String),
-    #[error("Engine error: {0}")]
-    Engine(String),
-}
-
-impl From<tree_sitter::LanguageError> for FrensenseError {
-    fn from(e: tree_sitter::LanguageError) -> Self {
-        Self::ParserError(e.to_string())
-    }
-}
-
-pub type Result<T> = std::result::Result<T, FrensenseError>;

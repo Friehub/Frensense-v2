@@ -158,14 +158,4 @@ impl FactTable {
             .filter(|c| c.call.rsplit('.').next() == Some(seg))
             .collect()
     }
-
-    /// Co-occurrence policies whose trigger call's last segment matches
-    /// `call` (same last-segment matching as [`Self::learned_checks_for`]).
-    pub fn policies_for(&self, call: &str) -> Vec<&PolicyFact> {
-        let seg = call.rsplit('.').next().unwrap_or(call);
-        self.policy_facts
-            .iter()
-            .filter(|p| p.when_call.rsplit('.').next() == Some(seg))
-            .collect()
-    }
 }

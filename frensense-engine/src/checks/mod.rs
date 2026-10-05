@@ -327,9 +327,4 @@ pub(crate) mod learned {
         };
         ir.var_metadata.get(&dest)?.byte_range
     }
-
-    // Silence unused-import warning if Operand becomes unused in future
-    // refinements; kept in the destructure for symmetry with seed checks.
-    #[allow(dead_code)]
-    fn _assert_operand_used(_: &[Operand]) {}
 }

@@ -325,7 +325,6 @@ pub(crate) fn sink_alert_with_facts(
         if is_source(ir, config, key) {
             return None;
         }
-        #[allow(clippy::disallowed_methods)]
         {
             let is_source_accessor = config
                 .sources

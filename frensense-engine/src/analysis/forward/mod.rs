@@ -61,15 +61,11 @@ use crate::ir::function::*;
 pub mod bindings;
 pub mod edges;
 pub mod predicates;
-#[cfg(feature = "serialize")]
-pub mod serialize;
 pub mod summaries;
 
 pub use bindings::*;
 pub use predicates::SinkAlert;
 pub(crate) use predicates::*;
-#[cfg(feature = "serialize")]
-pub use serialize::*;
 pub use summaries::*;
 
 // ---------------------------------------------------------------------------

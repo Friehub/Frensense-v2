@@ -136,7 +136,6 @@ fn arg_str_literal<'a>(
 
 /// Resolve an argument operand to its integer-literal value: direct literal,
 /// or a var whose lattice value is a provable integer constant.
-#[allow(dead_code)] // consumed by value-aware rules added incrementally
 fn arg_int_literal(arg: &Operand, values: &crate::analysis::value::ValueInfo) -> Option<i64> {
     match arg {
         Operand::IntLiteral(n) => Some(*n),

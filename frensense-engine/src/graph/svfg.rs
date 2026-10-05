@@ -211,16 +211,6 @@ impl Svfg {
         self.nodes_where(|n| n.kind == NodeKind::FormalParam)
     }
 
-    /// Every node that is a definition (`InstrDef`, `Phi`, or `FormalParam`).
-    pub fn def_nodes(&self) -> Vec<&SvfgNode> {
-        self.nodes_where(|n| {
-            matches!(
-                n.kind,
-                NodeKind::InstrDef | NodeKind::Phi | NodeKind::FormalParam
-            )
-        })
-    }
-
     /// Add a directed edge `from → to`. O(1); dedup via hash set.
     fn add_edge(&mut self, from: NodeKey, to: NodeKey) {
         if let Some(f) = self.nodes.get_mut(&from) {
@@ -974,65 +964,5 @@ impl<'a> SvfgBuilder<'a> {
             _ => {}
         }
         v
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Statistics / Debug helpers
-// ---------------------------------------------------------------------------
-
-impl Svfg {
-    /// Returns a summary of the graph for debugging.
-    pub fn stats(&self) -> SvfgStats {
-        let mut def_count = 0;
-        let mut use_count = 0;
-        let mut phi_count = 0;
-        let mut param_count = 0;
-        let mut edge_count = 0;
-
-        for node in self.nodes.values() {
-            edge_count += node.successors.len();
-            match node.kind {
-                NodeKind::InstrDef => def_count += 1,
-                NodeKind::InstrUse => use_count += 1,
-                NodeKind::Phi => phi_count += 1,
-                NodeKind::FormalParam => param_count += 1,
-                _ => {}
-            }
-        }
-
-        SvfgStats {
-            node_count: self.nodes.len(),
-            def_count,
-            use_count,
-            phi_count,
-            param_count,
-            edge_count,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SvfgStats {
-    pub node_count: usize,
-    pub def_count: usize,
-    pub use_count: usize,
-    pub phi_count: usize,
-    pub param_count: usize,
-    pub edge_count: usize,
-}
-
-impl std::fmt::Display for SvfgStats {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "SVFG {{ nodes: {}, defs: {}, uses: {}, phis: {}, params: {}, edges: {} }}",
-            self.node_count,
-            self.def_count,
-            self.use_count,
-            self.phi_count,
-            self.param_count,
-            self.edge_count,
-        )
     }
 }

@@ -108,19 +108,6 @@ pub struct CallGraph {
 }
 
 impl CallGraph {
-    /// Direct internal callees of `fn` (sorted).
-    pub fn callees_of(&self, fn_name: &str) -> &[String] {
-        self.edges.get(fn_name).map(|v| v.as_slice()).unwrap_or(&[])
-    }
-
-    /// Direct internal callers of `fn` (sorted).
-    pub fn callers_of(&self, fn_name: &str) -> &[String] {
-        self.reverse_edges
-            .get(fn_name)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
-    }
-
     /// Targets for one call instruction inside `fn`.
     pub fn targets_at(&self, fn_name: &str, block: usize, instr_idx: usize) -> &[CallTarget] {
         self.sites
@@ -268,9 +255,10 @@ impl<'a> CallGraphBuilder<'a> {
                                             method: method.clone(),
                                         });
                                     } else if self.irs.contains_key(method) {
-                                        // Unqualified registration fallback.
+                                        // Unqualified registration fallback. The
+                                        // push makes the site internal, so no
+                                        // external name can be observed here.
                                         targets.push(CallTarget::Function(method.clone()));
-                                        external_name = Some(method.clone());
                                     } else {
                                         external_name = Some(method.clone());
                                     }
@@ -364,12 +352,10 @@ impl<'a> CallGraphBuilder<'a> {
             let f = &facts[fname.as_str()];
             for block in ir.blocks.values() {
                 for (idx, instr) in block.instructions.iter().enumerate() {
-                    let (callee_name, args): (Option<String>, &[Operand]) = match instr {
-                        Instruction::CallStatic { func, args, .. } => (Some(func.clone()), args),
-                        Instruction::CallVirtual { method, args, .. } => {
-                            (Some(method.clone()), args)
-                        }
-                        Instruction::CallPointer { args, .. } => (None, args),
+                    let args: &[Operand] = match instr {
+                        Instruction::CallStatic { args, .. }
+                        | Instruction::CallVirtual { args, .. }
+                        | Instruction::CallPointer { args, .. } => args,
                         _ => continue,
                     };
 
@@ -449,7 +435,6 @@ impl<'a> CallGraphBuilder<'a> {
                                 .push(CallTarget::Function(target_fn));
                         }
                     }
-                    let _ = callee_name; // resolved inline above
                 }
             }
         }

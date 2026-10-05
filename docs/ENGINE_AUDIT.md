@@ -123,9 +123,11 @@ Also dead: `signatures.rs:11-20` `is_session_accessor` (zero callers, and its
   `control_dependence`); `dominators`/`DomSets` are used and stay.
 - `ir/function.rs`: `Terminator::Unreachable` (never constructed),
   `unwind_to` (write-only).
-- `graph/heap.rs`: `var_locs` (write-only); `Default`/`new()` conflict
-  violates the `LocId(0)` reserved-global invariant (route `Default` through
-  `new()`).
+- `graph/heap.rs`: `Default`/`new()` conflict violates the `LocId(0)`
+  reserved-global invariant (route `Default` through `new()`); done.
+  `var_locs` KEPT: the single `entry()` use is the per-variable LocId
+  identity cache for AddressOf (dropping it would split same-var
+  allocations into distinct locs and change the points-to lattice).
 - `graph/svfg.rs`: `def_nodes`, `nodes_where`, `stats`/`SvfgStats`/`Display`
   (test-only or unused).
 - `graph/callgraph.rs`: `callees_of`/`callers_of` (test-only), dead
@@ -199,6 +201,6 @@ Also dead: `signatures.rs:11-20` `is_session_accessor` (zero callers, and its
 - [x] C4: memory fallbacks -> spec seeding + `FactTable.stack_allocators` (`9757ef7`)
 - [x] C5: hardcoded vocabulary -> spec/FactTable (table above)
 - [x] C6: per-entry provenance in `FactTable`
-- [ ] C7: dead-code sweep
+- [x] C7: dead-code sweep
 - [ ] C8: stale comments + duplication
 - [ ] Final gate (fmt, clippy, tests, ratchet, A/B)

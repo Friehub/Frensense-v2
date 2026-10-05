@@ -31,7 +31,6 @@ pub mod two_phase_tests {
                 rustc_hash::FxHashSet<crate::graph::heap::LocId>,
             >|
              -> Vec<(usize, usize)> {
-                #[allow(clippy::disallowed_methods)]
                 let mut v: Vec<(usize, usize)> = pts.iter().map(|(k, s)| (k.0, s.len())).collect();
                 v.sort_unstable();
                 v

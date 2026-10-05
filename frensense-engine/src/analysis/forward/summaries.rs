@@ -19,9 +19,6 @@ pub struct TaintSummary {
     /// Indexed by formal parameter slot. `true` if taint introduced at that
     /// parameter can reach any of the function's return values.
     pub param_taints_return: Vec<bool>,
-    /// Indexed by formal parameter slot. `true` if taint introduced at that
-    /// parameter can reach a configured sink inside this function.
-    pub param_reaches_sink: Vec<bool>,
 }
 
 impl TaintSummary {
@@ -139,10 +136,9 @@ impl<'a> ProgramSvfg<'a> {
         let fe = &self.functions[fi];
         let nparams = fe.ir.parameters.len();
         let mut param_taints_return = vec![false; nparams];
-        let mut param_reaches_sink = vec![false; nparams];
 
-        for p in 0..nparams {
-            let Some(&seed) = fe.def_site.get(&fe.ir.parameters[p]) else {
+        for (p, &param) in fe.ir.parameters.iter().enumerate() {
+            let Some(&seed) = fe.def_site.get(&param) else {
                 continue;
             };
             let mut visited: FxHashSet<NodeKey> = FxHashSet::default();
@@ -158,9 +154,6 @@ impl<'a> ProgramSvfg<'a> {
 
                 if node.kind == NodeKind::FormalRet {
                     param_taints_return[p] = true;
-                }
-                if sink_alert_with_facts(fe.ir, config, facts, &cur).is_some() {
-                    param_reaches_sink[p] = true;
                 }
 
                 // Apply a summarised callee at an ActualArg node instead of
@@ -211,7 +204,6 @@ impl<'a> ProgramSvfg<'a> {
         TaintSummary {
             function_name: fe.name.clone(),
             param_taints_return,
-            param_reaches_sink,
         }
     }
 }

@@ -132,7 +132,6 @@ pub mod interprocedural_tests {
         }
 
         let prog = build_program(vec![main, helper]);
-        let hi = prog.function_index("helper").unwrap();
 
         // Cross edge exists: main's ActualArg → helper's FormalParam.
         let _main_i = prog.function_index("main").unwrap();
@@ -149,10 +148,6 @@ pub mod interprocedural_tests {
             alerts
         );
         assert!(alerts[0].sink == "db.execute" && alerts[0].function == "helper");
-
-        // Summary: helper's param 0 reaches a sink.
-        let sum = prog.functions[hi].summary.as_ref().unwrap();
-        assert!(sum.param_reaches_sink[0], "helper param 0 reaches sink");
     }
 
     // -----------------------------------------------------------------------
@@ -839,9 +834,7 @@ pub mod interprocedural_tests {
         assert!(alerts[0].function == "main");
 
         // Also sanity-check the raw SvfgBuilder path is untouched.
-        let (graph, def_site) = SvfgBuilder::new(prog.functions[0].ir).build();
-        assert!(!graph.stats().edge_count.to_string().is_empty());
-        let _ = def_site;
+        let (_graph, _def_site) = SvfgBuilder::new(prog.functions[0].ir).build();
     }
 
     // -----------------------------------------------------------------------

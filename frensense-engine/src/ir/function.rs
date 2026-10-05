@@ -251,7 +251,6 @@ pub enum Terminator {
     Throw {
         src: Operand,
     },
-    Unreachable,
     None,
 }
 
@@ -264,7 +263,6 @@ pub struct BasicBlock {
     pub terminator: Terminator,
     pub predecessors: Vec<BlockId>,
     pub successors: Vec<BlockId>,
-    pub unwind_to: Option<BlockId>,
 }
 
 impl BasicBlock {
@@ -276,7 +274,6 @@ impl BasicBlock {
             terminator: Terminator::None,
             predecessors: Vec::new(),
             successors: Vec::new(),
-            unwind_to: None,
         }
     }
 }
