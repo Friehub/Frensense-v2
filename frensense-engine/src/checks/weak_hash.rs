@@ -20,6 +20,7 @@
 use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
 use crate::checks::Provenance;
+use crate::checks::last_segment;
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
 // Weak-hash, key-size and insecure-selector policy tables are FACT DATA:
@@ -40,22 +41,13 @@ fn strip_quotes(lit: &str) -> &str {
     core
 }
 
-fn last_segment(name: &str) -> &str {
-    name.rsplit('.').next().unwrap_or(name)
-}
-
-/// Resolve a dotted receiver path for a virtual call (`security.hash` →
-/// "security.hash") by walking the receiver var's defining chain.
-fn receiver_path(
-    ir: &FunctionIR,
-    _args: &[Operand],
-    _callee: &str,
-    facts: &FactTable,
-) -> Option<String> {
-    // Cheap static heuristic: only flag when the enclosing function name or
-    // module context suggests security code. The full receiver-chain walk
-    // needs cross-function info; the corpus replay gate (task 9) is the
-    // mechanism that learns wrapper→primitive mappings from pairs.
+/// Security-context qualification for the hash-wrapper rule: the
+/// enclosing function's name when it hints at security code
+/// (`facts.security_context_hints`), else `None`. A cheap static stand-in
+/// for the full receiver-chain walk, which needs cross-function
+/// information; the corpus replay gate learns wrapper-to-primitive
+/// mappings from pairs instead.
+fn receiver_path(ir: &FunctionIR, facts: &FactTable) -> Option<String> {
     let n = ir.name.to_ascii_lowercase();
     if facts.security_context_hints.iter().any(|h| n.contains(h)) {
         return Some(ir.name.clone());
@@ -63,10 +55,6 @@ fn receiver_path(
     None
 }
 
-/// Run every policy rule over one lowered function.
-/// The weak-hash / weak-crypto rule: scan one function for security-weak
-/// primitives.
-/// Run every policy rule over one lowered function.
 /// The weak-hash / weak-crypto rule: scan one function for security-weak
 /// primitives.
 pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
@@ -270,7 +258,7 @@ fn check_call(
     let spec_wrapper = facts
         .suspicious_hash_wrappers
         .contains(callee_lower.as_str());
-    if spec_wrapper && let Some(path) = receiver_path(ir, args, callee, facts) {
+    if spec_wrapper && let Some(path) = receiver_path(ir, facts) {
         out.push(CheckerFinding {
             provenance: Provenance::Spec,
             function: ir.name.clone(),
@@ -354,7 +342,7 @@ fn check_call(
 /// Algorithm-operation qualification for `insecure_jwt_algorithm`: the
 /// callee path must hint at an operation whose algorithm choice matters
 /// (verify/decode/sign/...), vocabulary from the spec
-/// (`known_jwt_algorithm_hints`, bootstrap fallback) - harness wrappers
+/// (`known_jwt_algorithm_hints`) - harness wrappers
 /// that merely embed the literal stay silent.
 fn jwt_algorithm_context(path: &str, callee: &str, facts: &FactTable) -> bool {
     let matches = |s: &str| facts.jwt_algorithm_hints.iter().any(|h| s.contains(h));

@@ -22,14 +22,10 @@ use crate::analysis::taint::facts::FactTable;
 use crate::analysis::value::{self, ValueInfo};
 use crate::checks::CheckerFinding;
 use crate::checks::Provenance;
+use crate::checks::last_segment;
 use crate::checks::memory_summary::{CapacitySpec, MemorySummaryRegistry};
 use crate::graph::steensgaard::{ClassId, Steensgaard};
 use crate::ir::function::{BasicBlock, BlockId, FunctionIR, Instruction, Operand, VarId};
-
-fn last_segment(call: &str) -> &str {
-    let s = call.rsplit('.').next().unwrap_or(call);
-    s.rsplit("::").next().unwrap_or(s)
-}
 
 /// A spatial memory safety violation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

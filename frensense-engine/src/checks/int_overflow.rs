@@ -11,11 +11,11 @@
 //! Built-in = how to look; learned = what to conclude: the prover below is
 //! the stable, language-agnostic "how" (provable ranges, wrap threshold,
 //! allocation-capacity provenance). Which rule fires - id, threshold, and
-//! advisory - comes from the rule table: the lang bootstrap seed unioned
-//! with `FactTable::integer_overflow_rules`, which a corpus bundle extends
-//! from a family's `[frensense] check-rule:` declaration
-//! (`LearnedFactEntry::IntegerOverflowRule`). New rules of this class are
-//! corpus-only; the engine does not change.
+//! advisory - comes from `FactTable::integer_overflow_rules`: seeded from
+//! the language spec (`known_integer_overflow_rules`) and extended by a
+//! corpus bundle from a family's `[frensense] check-rule:` declaration
+//! (`LearnedFactEntry::IntegerOverflowRule`). New rules of this class come
+//! from the spec or a corpus bundle; the engine does not change.
 //!
 //! Zero-FP by construction:
 //! - Both operand intervals must be provable and non-negative at the
@@ -34,13 +34,9 @@ use crate::analysis::taint::facts::FactTable;
 use crate::analysis::value::{self, ValueInfo};
 use crate::checks::CheckerFinding;
 use crate::checks::Provenance;
+use crate::checks::last_segment;
 use crate::checks::memory_summary::{CapacitySpec, MemorySummaryRegistry};
 use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand, VarId};
-
-fn last_segment(call: &str) -> &str {
-    let s = call.rsplit('.').next().unwrap_or(call);
-    s.rsplit("::").next().unwrap_or(s)
-}
 
 /// Evaluate an operand's inclusive integer interval at a block entry,
 /// mirroring the spatial checker's range lookup (block-entry sharpened
@@ -146,8 +142,8 @@ fn operand_label(ir: &FunctionIR, op: &Operand) -> String {
 }
 
 /// Run the allocation-size integer overflow check over one function for
-/// every active rule: the lang bootstrap seed unioned with the corpus
-/// (bundle-) extended rule table, deduplicated by id + threshold.
+/// every active rule in the spec-seeded, bundle-extended rule table
+/// (`FactTable::integer_overflow_rules`), deduplicated by id + threshold.
 pub fn check(
     ir: &FunctionIR,
     summaries: &MemorySummaryRegistry,

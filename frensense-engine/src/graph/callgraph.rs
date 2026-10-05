@@ -4,7 +4,7 @@
 
 //! Call-graph construction and dispatch resolution (§8.1)
 //!
-//! [`interprocedural::ProgramSvfg::discover_bindings`] resolves callees by
+//! `ProgramSvfg::discover_bindings` resolves callees by
 //! **exact string match** against a flat function-name index. That breaks on
 //! the three constructs real code is made of:
 //!

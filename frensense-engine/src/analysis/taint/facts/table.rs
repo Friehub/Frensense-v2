@@ -196,7 +196,7 @@ impl FactTable {
                 s.clone(),
                 SanitizerFact {
                     call: s.clone(),
-                    kind: "encode".into(),
+                    kind: DEFAULT_SANITIZER_KIND.into(),
                     sanitizes_args: Default::default(),
                     guard_style: false,
                 },
@@ -685,9 +685,7 @@ impl LearnedFactEntry {
                 // table already classifies this call, learned facts refine
                 // *slots*, they don't reclassify *semantics*.
                 let prior = table.sink_signatures.get(call);
-                let role = prior
-                    .map(|s| s.role)
-                    .unwrap_or(crate::analysis::taint::role::SinkRole::Other);
+                let role = prior.map(|s| s.role).unwrap_or_default();
                 let idor_keys = prior.map(|s| s.idor_keys.clone()).unwrap_or_default();
                 table.sink_signatures.insert(
                     call.clone(),

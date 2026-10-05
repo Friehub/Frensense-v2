@@ -104,25 +104,9 @@ pub(crate) fn member_access_path(ir: &FunctionIR, mut base: VarId, last_field: &
                 break;
             }
             None => {
-                // Find the instruction that defines `base`.
-                let mut found = None;
-                'outer: for b in ir.blocks.values() {
-                    for (idx, instr) in b.instructions.iter().enumerate() {
-                        if let Instruction::LoadField {
-                            dest: d,
-                            base: b2,
-                            field,
-                            ..
-                        } = instr
-                            && *d == base
-                        {
-                            found = Some((*b2, field.clone(), idx));
-                            break 'outer;
-                        }
-                    }
-                }
-                match found {
-                    Some((b2, field, _)) => {
+                // Continue through the LoadField that defines `base`.
+                match ir.loadfield_def(base) {
+                    Some((b2, field)) => {
                         segments.push(field);
                         base = b2;
                     }
@@ -628,7 +612,7 @@ fn exit_reachable_avoiding(ir: &FunctionIR, start: BlockId, avoid: BlockId) -> b
 /// auth-vocabulary call, which dominates the sink (the query is only
 /// reachable through the check) and which has a rejecting path
 /// (Return/Throw) that never reaches the sink. Vocabulary:
-/// `facts.auth_guard_hints` ∪ lang bootstrap defaults.
+/// `facts.auth_guard_hints`.
 pub(crate) fn idor_suppressed_by_auth_guard(
     ir: &FunctionIR,
     facts: &FactTable,

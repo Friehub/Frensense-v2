@@ -4,6 +4,13 @@
 
 use super::*;
 
+/// Deterministic edge order (call-site key, then node position) with
+/// duplicate edges dropped; every edge-install pass ends with this.
+fn sort_dedup_edges(edges: &mut Vec<(usize, NodeKey)>) {
+    edges.sort_by_key(|(f, k)| (*f, k.block.0, k.instr_idx, k.var.0));
+    edges.dedup();
+}
+
 impl<'a> ProgramSvfg<'a> {
     // -----------------------------------------------------------------------
     // Step 4: explicit interprocedural edges
@@ -76,8 +83,7 @@ impl<'a> ProgramSvfg<'a> {
 
         // Deterministic edge lists (sorted + deduped).
         for edges in self.cross_edges.values_mut() {
-            edges.sort_by_key(|(f, k)| (*f, k.block.0, k.instr_idx, k.var.0));
-            edges.dedup();
+            sort_dedup_edges(edges);
         }
     }
 
@@ -183,8 +189,7 @@ impl<'a> ProgramSvfg<'a> {
         // Re-establish determinism over the whole map (closure edges join
         // the parameter/return/heap edges).
         for edges in self.cross_edges.values_mut() {
-            edges.sort_by_key(|(f, k)| (*f, k.block.0, k.instr_idx, k.var.0));
-            edges.dedup();
+            sort_dedup_edges(edges);
         }
     }
 }
@@ -375,8 +380,7 @@ impl<'a> ProgramSvfg<'a> {
         // Re-establish determinism over the whole map (heap edges join the
         // parameter/return edges installed by Step 4).
         for edges in self.cross_edges.values_mut() {
-            edges.sort_by_key(|(f, k)| (*f, k.block.0, k.instr_idx, k.var.0));
-            edges.dedup();
+            sort_dedup_edges(edges);
         }
     }
 }

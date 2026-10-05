@@ -77,7 +77,7 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
             .sink_signatures
             .get(*call)
             .map(|s| s.role)
-            .unwrap_or(crate::analysis::taint::role::SinkRole::Other);
+            .unwrap_or_default();
         let entry = SinkSignature {
             call: (*call).to_string(),
             dangerous_args: dangerous_slots.iter().copied().collect(),
@@ -258,11 +258,13 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
     // classification) is spec-owned: `LanguageSpec::is_predicate_guard`.
     for name in spec.known_sanitizer_names() {
         let classified = spec.classify_sanitizer(name);
-        let kind = classified
-            .as_ref()
-            .map(|k| format!("{k:?}"))
-            .unwrap_or_else(|| "encode".into());
         let guard_style = spec.is_predicate_guard(name, classified.as_ref());
+        let kind = if guard_style {
+            ALLOWLIST_SANITIZER_KIND
+        } else {
+            DEFAULT_SANITIZER_KIND
+        }
+        .to_string();
         t.sanitizer_facts
             .entry((*name).to_string())
             .or_insert_with(|| SanitizerFact {

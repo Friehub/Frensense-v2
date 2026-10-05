@@ -150,33 +150,61 @@ Also dead: `signatures.rs:11-20` `is_session_accessor` (zero callers, and its
 
 ### Stale comments to fix (C8)
 
+All resolved (C8 unless noted):
+
 - `taint/facts/table.rs:124-127` (leak claim now false, rewritten by C3).
-- `forward/predicates.rs:638` ("union lang bootstrap defaults" - removed).
-- `checks/int_overflow.rs:14-15,149-150` (claims a lang bootstrap union).
-- `checks/weak_hash.rs:357-359` (claims a bootstrap fallback), `:47-48`
-  (doc/behavior mismatch), `:66-71` (duplicated doc block).
+- `forward/predicates.rs:638` ("union lang bootstrap defaults" - removed;
+  the fn reads only `facts.auth_guard_hints`).
+- `checks/int_overflow.rs:14-15,149-150` (claimed a lang bootstrap union;
+  now describes spec seeding + bundle extension).
+- `checks/weak_hash.rs:357-359` (claimed a bootstrap fallback), `:47-48`
+  (doc/behavior mismatch: doc now matches the security-context
+  heuristic; dead `_args`/`_callee` params dropped), `:66-71`
+  (duplicated doc block).
 - `graph/callgraph.rs:7` (broken intra-doc link to nonexistent
-  `interprocedural` module).
-- `taint/engine/mod.rs:25-28` vs `:387-392` ("9,988 functions untouched" vs
-  eager guard-map/dominator build).
-- `taint/engine/context.rs:8-10` (doc copied onto the wrong function).
-- `checks/guard_bypass.rs:294-299` (doc attached to `allocation_of`, real fn
-  undocumented).
-- `frensense-engine/Cargo.toml:6` description names modules the crate does
-  not have.
-- Inconsistent `#[cfg(test)]`: `taint/mod.rs:28` `mod session_trust_tests;`
-  missing the attribute its siblings carry.
+  `interprocedural` module - now a plain code span).
+- `taint/engine/mod.rs:25-28` vs `:387-392` (removed the hardcoded
+  "9,988" claim; doc now separates the eager per-function pre-pass from
+  the sink-reachable backward walks).
+- `taint/engine/context.rs:8-10` (stray doc moved onto
+  `ensure_reverse_index`).
+- `checks/guard_bypass.rs:294-299` (Program-level doc moved onto
+  `check_allowlist_definitions`; `allocation_of` keeps its own).
+- `frensense-engine/Cargo.toml:6` (description rewritten to the modules
+  the crate actually has).
+- Inconsistent `#[cfg(test)]`: `taint/mod.rs` `mod session_trust_tests;`
+  now carries the attribute its siblings carry.
 
 ### Duplication to consolidate (C8)
 
-- `last_segment` defined 7x across checks (one `pub(crate)` helper).
-- Member-path walkers triplicated with different hop bounds
-  (`predicates.rs:94/465`, `facts/signatures.rs:43/136`).
-- `"encode"` sanitizer-kind default x2; `SinkRole::Other` default x3;
-  `self`/`this` receiver check x2; cross-edge sort+dedup loop x3.
-- `signatures.rs` `kind == "session"` never matches any producer (the kind
-  dialect is `"Full"`/`"SessionTrust"`/`"encode"`/`"allowlist"`: four
-  dialects for one field; needs one convention).
+- `last_segment` defined 7x across checks -> single
+  `checks::last_segment` (dot, then `::` for Rust/C++ paths). The 7th
+  copy (`uaf/discovery.rs`) had no callers and was deleted together with
+  its `pub use` re-export. Note: guard_bypass/weak_hash previously used
+  the dot-only body; they now also strip `::` segments (superset
+  semantics; A/B byte-identical on the samples).
+- Member-path walkers: the `LoadField` def-search is shared as
+  `FunctionIR::loadfield_def` (used by `predicates::member_access_path`
+  and both `facts::signatures` receiver walkers). The recursive family
+  at `predicates.rs` (`var_member_path`/`operand_member_path`) is kept:
+  it deliberately also follows `Assign`/`LoadGlobal` defs, so folding it
+  into the LoadField-only walker would change path-matching behavior
+  (e2e-gated). Hop bounds stay 16 (predicates path rebuilding) vs 8
+  (signatures receiver resolution) for the same reason.
+- `"encode"` sanitizer-kind default x2 -> `DEFAULT_SANITIZER_KIND` /
+  `ALLOWLIST_SANITIZER_KIND` consts, and the kind dialect is unified to
+  one convention across every producer (spec seeding, built-in table,
+  bundles): guard-style -> `"allowlist"`, everything else -> `"encode"`
+  (spec seeding previously wrote `SanitizerKind` debug names). The
+  field is advisory: the engine branches on `guard_style`, never on
+  `kind` (dropping the strength labels loses nothing).
+- `SinkRole::Other` default x3 -> `.unwrap_or_default()` (the enum
+  already derives `Default` with `#[default] Other`).
+- `self`/`this` receiver check x2: already consolidated in C5
+  (`FactTable::is_receiver_param`); no hardcoded sites remain.
+- Cross-edge sort+dedup loop x3 -> `edges::sort_dedup_edges`.
+- `signatures.rs` `kind == "session"`: reader deleted with the dead
+  session-accessor helpers; producer dialect unified as above.
 
 ## Verification protocol (after every cleanup commit)
 
@@ -202,5 +230,5 @@ Also dead: `signatures.rs:11-20` `is_session_accessor` (zero callers, and its
 - [x] C5: hardcoded vocabulary -> spec/FactTable (table above)
 - [x] C6: per-entry provenance in `FactTable`
 - [x] C7: dead-code sweep
-- [ ] C8: stale comments + duplication
+- [x] C8: stale comments + duplication
 - [ ] Final gate (fmt, clippy, tests, ratchet, A/B)

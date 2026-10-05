@@ -60,6 +60,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checks::CheckerFinding;
 use crate::checks::Provenance;
+use crate::checks::last_segment;
 use crate::checks::memory_summary::MemorySummaryRegistry;
 use crate::ir::control::{DomSets, dominators};
 use crate::ir::function::{
@@ -88,11 +89,6 @@ struct Edge {
 /// flow there, and releases/stores remove the allocation from every
 /// variable holding it.
 type PointsTo = FxHashMap<VarId, FxHashSet<VarId>>;
-
-fn last_segment(call: &str) -> &str {
-    let s = call.rsplit('.').next().unwrap_or(call);
-    s.rsplit("::").next().unwrap_or(s)
-}
 
 fn var_span(ir: &FunctionIR, var: VarId) -> Option<(usize, usize)> {
     ir.var_metadata.get(&var).and_then(|m| m.byte_range)

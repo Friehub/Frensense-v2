@@ -221,7 +221,7 @@ impl<'a> BackwardTaintEngine<'a> {
         let role = self
             .facts
             .role_for_call(name, receiver_root.as_deref())
-            .unwrap_or(crate::analysis::taint::role::SinkRole::Other);
+            .unwrap_or_default();
         // Engine purity: every fact-declared sink is explored and reported
         // when tainted data reaches it, regardless of role. Severity policy
         // (Response/Validation rank at `info`) is lang-declared ranking

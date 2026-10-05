@@ -29,7 +29,7 @@ use crate::ir::function::{BlockId, FunctionIR, VarId};
 
 pub use discovery::{
     TWO_PHASE_MIN_INSTRS, collect_frees, collect_start_sites, free_of, free_slot, instr_at,
-    last_segment, may_alias, reverse_cross,
+    may_alias, reverse_cross,
 };
 pub use must_exec::{callee_always_frees, must_out, must_reach, must_reach_any};
 pub use types::{CrossCtx, FreeSite, Pair, PairCheck, Violation, finding};

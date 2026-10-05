@@ -66,13 +66,23 @@ impl SinkSignature {
     }
 }
 
+/// Sanitizer-kind label for non-guard sanitizers: one dialect across every
+/// producer (spec seeding, the built-in table, bundle-learned facts).
+/// Advisory only; the engine cuts on every kind and branches on
+/// [`SanitizerFact::guard_style`].
+pub const DEFAULT_SANITIZER_KIND: &str = "encode";
+/// Sanitizer-kind label for guard-style sanitizers (the other half of the
+/// single producer dialect; see [`DEFAULT_SANITIZER_KIND`]).
+pub const ALLOWLIST_SANITIZER_KIND: &str = "allowlist";
+
 /// One learned/built-in sanitizer fact: a call that neutralizes taint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct SanitizerFact {
     pub call: String,
-    /// Per-kind strength label (advisory; the engine treats all kinds as cut).
-    /// e.g. "encode", "validate", "allowlist", "parameterize".
+    /// Strength/style label (advisory; the engine cuts on every kind and
+    /// branches on `guard_style`). One dialect across every producer:
+    /// [`DEFAULT_SANITIZER_KIND`] / [`ALLOWLIST_SANITIZER_KIND`].
     pub kind: String,
     /// Argument slots whose taint is removed. Empty = all arguments.
     pub sanitizes_args: BTreeSet<usize>,

@@ -15,12 +15,8 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::analysis::value;
+use crate::checks::last_segment;
 use crate::ir::function::{FunctionIR, Instruction, Operand, Terminator, VarId};
-
-fn last_segment(call: &str) -> &str {
-    let s = call.rsplit('.').next().unwrap_or(call);
-    s.rsplit("::").next().unwrap_or(s)
-}
 
 /// Buffer capacity specification for an allocation contract.
 ///

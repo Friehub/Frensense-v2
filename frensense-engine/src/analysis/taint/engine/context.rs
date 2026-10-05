@@ -5,7 +5,6 @@
 use super::*;
 
 impl<'a> BackwardTaintEngine<'a> {
-    /// Build the reverse cross-edge index once.
     /// The `(caller_fn, call_site)` through which the function under walk was
     /// entered, or `None` for the empty (k=0) context.
     pub(super) fn ctx_last(&self, ctx: u32) -> Option<(usize, NodeKey)> {

@@ -22,10 +22,11 @@
 //!          - anything else (literal, external, allocate) → clean root
 //! ```
 //!
-//! Only functions actually on some sink's backward-reachable subgraph are
-//! ever visited, the other 9,988 are untouched. There is no pre-computed
-//! whole-program call graph requirement: cross edges are consulted lazily
-//! per node via a reverse index built on demand.
+//! `run` precomputes guard maps (guards + dominators) for every function
+//! and probes every call site for configured sink arguments; the backward
+//! walks then only expand nodes on some sink's reverse-reachable subgraph.
+//! Cross edges are consulted lazily per node through a reverse index built
+//! once on demand - no whole-program call graph is materialized.
 //!
 //! ## Soundness note
 //!
@@ -353,6 +354,7 @@ impl<'a> BackwardTaintEngine<'a> {
         self
     }
 
+    /// Build the reverse cross-edge index once.
     fn ensure_reverse_index(&mut self) {
         if !self.reverse_cross.is_empty() {
             return;

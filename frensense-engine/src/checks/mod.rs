@@ -55,6 +55,15 @@ use rustc_hash::FxHashSet;
 
 pub use crate::analysis::taint::facts::Provenance;
 
+/// Last segment of a call reference: everything after the last `.`, then
+/// after the last `::` (Rust/C++ paths), so `security.hash`, `sha2::digest`
+/// and `ns::mod.fn` all reduce to the bare method name the check
+/// vocabularies are keyed by.
+pub(crate) fn last_segment(call: &str) -> &str {
+    let s = call.rsplit('.').next().unwrap_or(call);
+    s.rsplit("::").next().unwrap_or(s)
+}
+
 /// One non-dataflow policy finding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckerFinding {

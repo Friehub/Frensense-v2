@@ -39,22 +39,10 @@ impl FactTable {
                 segments.push(name.clone());
                 break;
             }
-            // Find the LoadField that defines `cur`, continue through its base.
-            let mut found = None;
-            'outer: for b in ir.blocks.values() {
-                for instr in b.instructions.iter() {
-                    if let crate::ir::function::Instruction::LoadField {
-                        dest, base, field, ..
-                    } = instr
-                        && *dest == cur
-                    {
-                        segments.push(field.clone());
-                        found = Some(*base);
-                        break 'outer;
-                    }
-                }
-            }
-            cur = found?;
+            // Continue through the LoadField that defines `cur`.
+            let (base, field) = ir.loadfield_def(cur)?;
+            segments.push(field);
+            cur = base;
         }
         if segments.is_empty() {
             return None;
@@ -130,19 +118,7 @@ impl FactTable {
             {
                 return Some(name.split('.').next().unwrap_or(name).to_string());
             }
-            // Find the LoadField that defines `cur`, continue through its base.
-            let mut found = None;
-            'outer: for b in ir.blocks.values() {
-                for instr in b.instructions.iter() {
-                    if let crate::ir::function::Instruction::LoadField { dest, base, .. } = instr
-                        && *dest == cur
-                    {
-                        found = Some(*base);
-                        break 'outer;
-                    }
-                }
-            }
-            cur = found?;
+            cur = ir.loadfield_def(cur)?.0;
         }
         None
     }

@@ -17,12 +17,9 @@
 use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
 use crate::checks::Provenance;
+use crate::checks::last_segment;
 use crate::ir::function::{FunctionIR, Instruction, Operand, Terminator, VarId};
 use rustc_hash::FxHashSet;
-
-fn last_segment(name: &str) -> &str {
-    name.rsplit('.').next().unwrap_or(name)
-}
 
 /// Rule 1: substring-containment guard. Fires on `includes`/`indexOf` calls
 /// where the receiver OR the argument is a function parameter named like a
@@ -275,12 +272,6 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
     findings
 }
 
-/// Program-level rule: when a substring-containment guard exists somewhere
-/// in the program AND a static initializer builds an allowlist collection
-/// (`new Set([...])` / `new Map(...)`) of URL-ish strings, the *definition*
-/// itself is part of the vulnerability, attacker URLs embed allowed
-/// entries. One finding per allowlist definition, spanned at the
-/// definition.
 /// Resolve `var` to the allocation it (transitively) binds through `Assign`
 /// copies - `const a = [..]` lowers to `Allocate` + a binding copy, and the
 /// allowlist collections are constructed from their stored elements.
@@ -324,6 +315,12 @@ fn allocation_of(ir: &FunctionIR, mut var: VarId) -> Option<VarId> {
     None
 }
 
+/// Program-level rule: when a substring-containment guard exists somewhere
+/// in the program AND a static initializer builds an allowlist collection
+/// (`new Set([...])` / `new Map(...)`) of URL-ish strings, the *definition*
+/// itself is part of the vulnerability, attacker URLs embed allowed
+/// entries. One finding per allowlist definition, spanned at the
+/// definition.
 pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFinding> {
     // The definition finding inherits the guards' knowledge source: a
     // program whose substring guards all come from bundle-learned

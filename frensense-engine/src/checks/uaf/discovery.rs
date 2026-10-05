@@ -16,10 +16,6 @@ use super::types::FreeSite;
 /// (Steensgaard-gated Andersen) mode, mirroring `SvfgBuilder`'s choice.
 pub const TWO_PHASE_MIN_INSTRS: usize = 4096;
 
-pub fn last_segment(call: &str) -> &str {
-    call.rsplit('.').next().unwrap_or(call)
-}
-
 /// Every (block, idx, var) that releases `var` in this function.
 pub fn collect_frees(ir: &FunctionIR, summaries: &MemorySummaryRegistry) -> Vec<FreeSite> {
     let mut out = Vec::new();

@@ -375,4 +375,22 @@ impl FunctionIR {
             t.predecessors.push(from);
         }
     }
+
+    /// The `LoadField` instruction defining `var`, if any (first match - IR
+    /// is SSA-shaped): returns the base var and the loaded field. Shared
+    /// walk step for member-access path reconstruction.
+    pub(crate) fn loadfield_def(&self, var: VarId) -> Option<(VarId, String)> {
+        for b in self.blocks.values() {
+            for instr in &b.instructions {
+                if let Instruction::LoadField {
+                    dest, base, field, ..
+                } = instr
+                    && *dest == var
+                {
+                    return Some((*base, field.clone()));
+                }
+            }
+        }
+        None
+    }
 }
