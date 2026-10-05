@@ -47,11 +47,6 @@ pub struct PreparedProgram {
     irs: FxHashMap<String, FunctionIR>,
     fn_file: FxHashMap<String, String>,
     file_source: FxHashMap<String, String>,
-    /// Lazily built ONCE per program: `Box::leak` clones of the IRs that the
-    /// program graph borrows. Before this cache every [`scan_prepared`] call
-    /// leaked a full IR-set clone, so long-lived processes (MCP/LSP servers,
-    /// the bundler's replay gate) grew without bound across scans.
-    static_irs: std::sync::OnceLock<FxHashMap<String, &'static FunctionIR>>,
 }
 
 /// Lower every file once, remembering which file each function came from
@@ -102,19 +97,16 @@ pub fn prepare_with_facts(
         irs,
         fn_file,
         file_source,
-        static_irs: std::sync::OnceLock::new(),
     })
 }
 
 impl PreparedProgram {
-    /// The leaked IR views for [`ProgramSvfg::new`], built on first use.
-    fn static_irs(&self) -> &FxHashMap<String, &'static FunctionIR> {
-        self.static_irs.get_or_init(|| {
-            self.irs
-                .iter()
-                .map(|(name, ir)| (name.clone(), Box::leak(Box::new(ir.clone())) as &FunctionIR))
-                .collect()
-        })
+    /// Borrow the IRs for the program graph's lifetime.
+    fn ir_views(&self) -> FxHashMap<String, &FunctionIR> {
+        self.irs
+            .iter()
+            .map(|(name, ir)| (name.clone(), ir))
+            .collect()
     }
 }
 
@@ -132,12 +124,14 @@ pub fn scan_prepared(
     config.sources.extend(facts.learned_sources.iter().cloned());
     let config = &config;
 
-    // The program graph borrows IRs for its lifetime; the leaked clones are
-    // cached on the program (built once), not re-leaked per scan call.
-    let statics = prepared.static_irs();
-
-    let fn_file = &prepared.fn_file;
-    let file_source = &prepared.file_source;
+    // The program graph borrows the program's own IRs for the duration of
+    // this scan. No `Box::leak`: a leaked IR set accumulated per program in
+    // every long-lived consumer (MCP/LSP servers build one `PreparedProgram`
+    // per scan; the bundler's replay gate holds one per family, re-scanned
+    // per candidate fact), so resident memory grew without bound across
+    // scans. Borrowing is scoped to the call instead.
+    let statics = prepared.ir_views();
+    let statics = &statics;
 
     // The program graph is built first: non-dataflow checks that walk
     // interprocedural value flow (UAF free/use pairs) reuse it, and the
@@ -149,6 +143,9 @@ pub fn scan_prepared(
     // `facts` also carries corpus-learned checks installed by the bundle.
     let checker_findings =
         checks::check_all_with_graph(statics.values().copied(), facts, Some(&prog));
+
+    let fn_file = &prepared.fn_file;
+    let file_source = &prepared.file_source;
     let mut engine = BackwardTaintEngine::new(&prog, config)
         .with_fact_table(facts)
         .with_fn_file(fn_file);
