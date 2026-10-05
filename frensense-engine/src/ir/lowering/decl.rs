@@ -12,8 +12,8 @@ impl<'a> LoweringContext<'a> {
     pub fn visit_declaration(
         &mut self,
         node: Node,
-        name_field: &'static str,
-        value_field: &'static str,
+        name_field: &str,
+        value_field: &str,
     ) -> Option<Operand> {
         // `const name = value;`, bind the name in the current scope.
         // If the node itself carries a name (variable_declarator),

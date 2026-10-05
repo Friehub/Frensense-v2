@@ -29,9 +29,9 @@ fn classify_python(kind: &str) -> NodeRole {
         // Both were missing from the engine's hardcoded match before this crate.
         "function_definition" | "async_function_definition" => NodeRole::Function {
             is_method: false, // determined by parent (class_definition body)
-            name_field: Some("name"),
-            params_field: "parameters",
-            body_field: "body",
+            name_field: Some("name".into()),
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
         // `decorated_definition` wraps a `function_definition` with decorators.
         // Fingerprint extraction must descend into it to find the real function.
@@ -39,47 +39,47 @@ fn classify_python(kind: &str) -> NodeRole {
         "decorated_definition" => NodeRole::Function {
             is_method: false,
             name_field: None, // name is on the inner function_definition
-            params_field: "parameters",
-            body_field: "body",
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
         "lambda" => NodeRole::Function {
             is_method: false,
             name_field: None,
-            params_field: "parameters",
-            body_field: "body",
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
 
         // ── Assignments ──────────────────────────────────────────────────
         // Python has no separate "declaration" concept - `x = expr` is both.
         "assignment" | "annotated_assignment" => NodeRole::Declaration {
-            name_field: "left",
-            value_field: "right",
+            name_field: "left".into(),
+            value_field: "right".into(),
         },
         "augmented_assignment" => NodeRole::Assignment {
-            lhs_field: "left",
-            rhs_field: "right",
+            lhs_field: "left".into(),
+            rhs_field: "right".into(),
         },
         // Walrus operator `:=` - e.g. `if (m := re.match(...))`
         "named_expression" => NodeRole::Declaration {
-            name_field: "name",
-            value_field: "value",
+            name_field: "name".into(),
+            value_field: "value".into(),
         },
 
         // ── Calls ────────────────────────────────────────────────────────
         // Python uses `call`, NOT `call_expression`
         "call" => NodeRole::Call {
-            callee_field: "function",
-            args_field: "arguments",
+            callee_field: "function".into(),
+            args_field: "arguments".into(),
         },
         // Python member access is `attribute`, NOT `member_expression`
         "attribute" => NodeRole::MemberAccess {
-            object_field: "object",
-            property_field: "attribute",
+            object_field: "object".into(),
+            property_field: "attribute".into(),
         },
         "conditional_expression" => NodeRole::Conditional,
         "subscript" => NodeRole::MemberAccess {
-            object_field: "value",
-            property_field: "subscript",
+            object_field: "value".into(),
+            property_field: "subscript".into(),
         },
 
         // ── Control flow ─────────────────────────────────────────────────

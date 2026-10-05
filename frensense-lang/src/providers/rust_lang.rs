@@ -19,47 +19,47 @@ fn classify_rust(kind: &str) -> NodeRole {
         // they appear at top level or inside an `impl` block.
         "function_item" => NodeRole::Function {
             is_method: false, // impl context determined by parent
-            name_field: Some("name"),
-            params_field: "parameters",
-            body_field: "body",
+            name_field: Some("name".into()),
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
         "closure_expression" => NodeRole::Function {
             is_method: false,
             name_field: None,
-            params_field: "parameters",
-            body_field: "body",
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
 
         // ── Declarations / assignments ───────────────────────────────────
         "let_declaration" => NodeRole::Declaration {
-            name_field: "pattern",
-            value_field: "value",
+            name_field: "pattern".into(),
+            value_field: "value".into(),
         },
         "assignment_expression" => NodeRole::Assignment {
-            lhs_field: "left",
-            rhs_field: "right",
+            lhs_field: "left".into(),
+            rhs_field: "right".into(),
         },
         "compound_assignment_expr" => NodeRole::Assignment {
-            lhs_field: "left",
-            rhs_field: "right",
+            lhs_field: "left".into(),
+            rhs_field: "right".into(),
         },
 
         // ── Calls ────────────────────────────────────────────────────────
         "call_expression" => NodeRole::Call {
-            callee_field: "function",
-            args_field: "arguments",
+            callee_field: "function".into(),
+            args_field: "arguments".into(),
         },
         "method_call_expression" => NodeRole::Call {
-            callee_field: "method",
-            args_field: "arguments",
+            callee_field: "method".into(),
+            args_field: "arguments".into(),
         },
         "macro_invocation" => NodeRole::Call {
-            callee_field: "macro",
-            args_field: "token_tree",
+            callee_field: "macro".into(),
+            args_field: "token_tree".into(),
         },
         "field_expression" => NodeRole::MemberAccess {
-            object_field: "value",
-            property_field: "field",
+            object_field: "value".into(),
+            property_field: "field".into(),
         },
 
         // ── Control flow ─────────────────────────────────────────────────

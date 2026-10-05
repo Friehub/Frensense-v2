@@ -12,8 +12,8 @@ impl<'a> LoweringContext<'a> {
     pub fn visit_call(
         &mut self,
         node: Node,
-        callee_field: &'static str,
-        args_field: &'static str,
+        callee_field: &str,
+        args_field: &str,
     ) -> Option<Operand> {
         let callee_node = node.child_by_field_name(callee_field)?;
         // Some grammars don't give the args child a field name

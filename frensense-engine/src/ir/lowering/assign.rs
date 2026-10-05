@@ -42,8 +42,8 @@ impl<'a> LoweringContext<'a> {
     pub fn visit_assignment(
         &mut self,
         node: Node,
-        lhs_field: &'static str,
-        rhs_field: &'static str,
+        lhs_field: &str,
+        rhs_field: &str,
     ) -> Option<Operand> {
         let left_node = node.child_by_field_name(lhs_field)?;
         let right_node = node.child_by_field_name(rhs_field)?;

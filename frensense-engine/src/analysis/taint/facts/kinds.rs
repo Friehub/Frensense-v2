@@ -2,6 +2,7 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use crate::checks::memory_summary::CapacitySpec;
@@ -368,11 +369,9 @@ pub enum TeachableNodeRole {
 
 impl TeachableNodeRole {
     /// Convert this owned teachable role into the engine's standard [`frensense_lang::NodeRole`].
+    /// Bundle field names become `Cow::Owned` (allocated per fact, never
+    /// leaked); spec-provided roles stay `Cow::Borrowed` upstream.
     pub fn to_node_role(&self) -> frensense_lang::NodeRole {
-        fn leak_field(s: &str) -> &'static str {
-            Box::leak(s.to_string().into_boxed_str())
-        }
-
         match self {
             TeachableNodeRole::Function {
                 is_method,
@@ -381,37 +380,37 @@ impl TeachableNodeRole {
                 body_field,
             } => frensense_lang::NodeRole::Function {
                 is_method: *is_method,
-                name_field: name_field.as_deref().map(leak_field),
-                params_field: leak_field(params_field),
-                body_field: leak_field(body_field),
+                name_field: name_field.as_ref().map(|s| Cow::Owned(s.clone())),
+                params_field: Cow::Owned(params_field.clone()),
+                body_field: Cow::Owned(body_field.clone()),
             },
             TeachableNodeRole::Declaration {
                 name_field,
                 value_field,
             } => frensense_lang::NodeRole::Declaration {
-                name_field: leak_field(name_field),
-                value_field: leak_field(value_field),
+                name_field: Cow::Owned(name_field.clone()),
+                value_field: Cow::Owned(value_field.clone()),
             },
             TeachableNodeRole::Assignment {
                 lhs_field,
                 rhs_field,
             } => frensense_lang::NodeRole::Assignment {
-                lhs_field: leak_field(lhs_field),
-                rhs_field: leak_field(rhs_field),
+                lhs_field: Cow::Owned(lhs_field.clone()),
+                rhs_field: Cow::Owned(rhs_field.clone()),
             },
             TeachableNodeRole::Call {
                 callee_field,
                 args_field,
             } => frensense_lang::NodeRole::Call {
-                callee_field: leak_field(callee_field),
-                args_field: leak_field(args_field),
+                callee_field: Cow::Owned(callee_field.clone()),
+                args_field: Cow::Owned(args_field.clone()),
             },
             TeachableNodeRole::MemberAccess {
                 object_field,
                 property_field,
             } => frensense_lang::NodeRole::MemberAccess {
-                object_field: leak_field(object_field),
-                property_field: leak_field(property_field),
+                object_field: Cow::Owned(object_field.clone()),
+                property_field: Cow::Owned(property_field.clone()),
             },
             TeachableNodeRole::Branch => frensense_lang::NodeRole::Branch,
             TeachableNodeRole::Conditional => frensense_lang::NodeRole::Conditional,
@@ -454,7 +453,7 @@ impl From<&frensense_lang::NodeRole> for TeachableNodeRole {
                 body_field,
             } => TeachableNodeRole::Function {
                 is_method: *is_method,
-                name_field: name_field.map(|s| s.to_string()),
+                name_field: name_field.as_ref().map(|s| s.to_string()),
                 params_field: params_field.to_string(),
                 body_field: body_field.to_string(),
             },

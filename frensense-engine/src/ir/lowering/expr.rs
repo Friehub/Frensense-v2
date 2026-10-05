@@ -286,8 +286,8 @@ impl<'a> LoweringContext<'a> {
     pub fn visit_member_access(
         &mut self,
         node: Node,
-        object_field: &'static str,
-        property_field: &'static str,
+        object_field: &str,
+        property_field: &str,
     ) -> Option<Operand> {
         let obj_node = node.child_by_field_name(object_field)?;
         let prop_node = node.child_by_field_name(property_field)?;

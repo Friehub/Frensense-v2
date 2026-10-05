@@ -47,8 +47,8 @@ fn test_dynamic_grammar_role_and_feature_roundtrip() {
     assert_eq!(
         role,
         frensense_lang::NodeRole::Declaration {
-            name_field: "target",
-            value_field: "source",
+            name_field: "target".into(),
+            value_field: "source".into(),
         }
     );
 

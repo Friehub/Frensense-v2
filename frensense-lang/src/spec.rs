@@ -14,6 +14,8 @@
 //! forget to implement one. A single trait with good defaults makes the
 //! "forgot to implement" case a compile error, not a silent empty result.
 
+use std::borrow::Cow;
+
 use tree_sitter::Node;
 
 // ── Supporting types ─────────────────────────────────────────────────────────
@@ -21,8 +23,10 @@ use tree_sitter::Node;
 /// What role does a tree-sitter node play in the language?
 ///
 /// Variants carry the **field names** needed to walk child nodes so callers
-/// never need a second lookup.  All `*_field` values are `'static str` - they
-/// come from tree-sitter grammar constants and never allocate.
+/// never need a second lookup. All `*_field` values are `Cow<'static, str>`:
+/// `Borrowed` for spec vocabulary (tree-sitter grammar constants, no
+/// allocation), `Owned` for bundle-learned roles (allocated once per fact,
+/// never leaked).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeRole {
     // ── Definitions ──────────────────────────────────────────────────────
@@ -33,38 +37,38 @@ pub enum NodeRole {
         is_method: bool,
         /// Field holding the function's name identifier, if any.
         /// `None` for arrow functions, lambdas, anonymous closures.
-        name_field: Option<&'static str>,
+        name_field: Option<Cow<'static, str>>,
         /// Field holding the parameter list node.
-        params_field: &'static str,
+        params_field: Cow<'static, str>,
         /// Field holding the body block node.
-        body_field: &'static str,
+        body_field: Cow<'static, str>,
     },
 
     // ── Assignments / declarations ────────────────────────────────────────
     /// A variable declaration with an initializer.
     /// `let x = expr` (JS/Rust), `x := expr` (Go).
     Declaration {
-        name_field: &'static str,
-        value_field: &'static str,
+        name_field: Cow<'static, str>,
+        value_field: Cow<'static, str>,
     },
     /// A mutation of an existing binding.
     /// `x = expr` (all languages), `x += expr`.
     Assignment {
-        lhs_field: &'static str,
-        rhs_field: &'static str,
+        lhs_field: Cow<'static, str>,
+        rhs_field: Cow<'static, str>,
     },
 
     // ── Calls ─────────────────────────────────────────────────────────────
     /// Any function / method invocation.
     Call {
-        callee_field: &'static str,
-        args_field: &'static str,
+        callee_field: Cow<'static, str>,
+        args_field: Cow<'static, str>,
     },
     /// Member / field access producing a value (not a call).
     /// `obj.field`, `obj->field`, `obj.attribute`.
     MemberAccess {
-        object_field: &'static str,
-        property_field: &'static str,
+        object_field: Cow<'static, str>,
+        property_field: Cow<'static, str>,
     },
 
     // ── Control flow ──────────────────────────────────────────────────────

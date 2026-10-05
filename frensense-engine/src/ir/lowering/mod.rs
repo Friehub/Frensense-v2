@@ -34,23 +34,23 @@ impl<'a> LoweringContext<'a> {
             NodeRole::Declaration {
                 name_field,
                 value_field,
-            } => self.visit_declaration(node, name_field, value_field),
+            } => self.visit_declaration(node, &name_field, &value_field),
 
             NodeRole::Assignment {
                 lhs_field,
                 rhs_field,
-            } => self.visit_assignment(node, lhs_field, rhs_field),
+            } => self.visit_assignment(node, &lhs_field, &rhs_field),
 
             NodeRole::MemberAccess {
                 object_field,
                 property_field,
-            } => self.visit_member_access(node, object_field, property_field),
+            } => self.visit_member_access(node, &object_field, &property_field),
 
             // ─── CALLS ────────────────────────────────────────────────────────
             NodeRole::Call {
                 callee_field,
                 args_field,
-            } => self.visit_call(node, callee_field, args_field),
+            } => self.visit_call(node, &callee_field, &args_field),
 
             // ─── CONTROL FLOW ─────────────────────────────────────────────────
             NodeRole::Loop => self.visit_loop(node),

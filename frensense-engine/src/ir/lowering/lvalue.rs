@@ -46,8 +46,8 @@ impl<'a> LoweringContext<'a> {
                 object_field,
                 property_field,
             } => {
-                let obj_node = node.child_by_field_name(object_field)?;
-                let prop_node = node.child_by_field_name(property_field)?;
+                let obj_node = node.child_by_field_name(object_field.as_ref())?;
+                let prop_node = node.child_by_field_name(property_field.as_ref())?;
 
                 let base_op = self.visit_node(obj_node)?;
 

@@ -19,33 +19,33 @@ fn classify_c(kind: &str) -> NodeRole {
         // ── Functions ────────────────────────────────────────────────────
         "function_definition" => NodeRole::Function {
             is_method: false,
-            name_field: Some("declarator"),
-            params_field: "declarator", // walked from the declarator
-            body_field: "body",
+            name_field: Some("declarator".into()),
+            params_field: "declarator".into(), // walked from the declarator
+            body_field: "body".into(),
         },
 
         // ── Declarations / assignments ───────────────────────────────────
         "declaration" | "init_declarator" => NodeRole::Declaration {
-            name_field: "declarator",
-            value_field: "value",
+            name_field: "declarator".into(),
+            value_field: "value".into(),
         },
         "assignment_expression" => NodeRole::Assignment {
-            lhs_field: "left",
-            rhs_field: "right",
+            lhs_field: "left".into(),
+            rhs_field: "right".into(),
         },
 
         // ── Calls ────────────────────────────────────────────────────────
         "call_expression" => NodeRole::Call {
-            callee_field: "function",
-            args_field: "arguments",
+            callee_field: "function".into(),
+            args_field: "arguments".into(),
         },
         "field_expression" => NodeRole::MemberAccess {
-            object_field: "argument",
-            property_field: "field",
+            object_field: "argument".into(),
+            property_field: "field".into(),
         },
         "subscript_expression" => NodeRole::MemberAccess {
-            object_field: "argument",
-            property_field: "index",
+            object_field: "argument".into(),
+            property_field: "index".into(),
         },
 
         // ── Control flow ─────────────────────────────────────────────────

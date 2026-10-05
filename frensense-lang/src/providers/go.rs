@@ -27,55 +27,55 @@ fn classify_go(kind: &str) -> NodeRole {
         // ── Functions ────────────────────────────────────────────────────
         "function_declaration" => NodeRole::Function {
             is_method: false,
-            name_field: Some("name"),
-            params_field: "parameters",
-            body_field: "body",
+            name_field: Some("name".into()),
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
         // This was the critical missing case - ALL Go struct methods
         "method_declaration" => NodeRole::Function {
             is_method: true,
-            name_field: Some("name"),
-            params_field: "parameters",
-            body_field: "body",
+            name_field: Some("name".into()),
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
         "func_literal" => NodeRole::Function {
             is_method: false,
             name_field: None,
-            params_field: "parameters",
-            body_field: "body",
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
 
         // ── Declarations / assignments ───────────────────────────────────
         // Go := operator - was missing everywhere in the engine before this crate
         "short_var_declaration" => NodeRole::Declaration {
-            name_field: "left",
-            value_field: "right",
+            name_field: "left".into(),
+            value_field: "right".into(),
         },
         // Go = operator (mutation of existing variable)
         "assignment_statement" => NodeRole::Assignment {
-            lhs_field: "left",
-            rhs_field: "right",
+            lhs_field: "left".into(),
+            rhs_field: "right".into(),
         },
         // var x type = expr  (top-level or function-scoped)
         "var_spec" => NodeRole::Declaration {
-            name_field: "name",
-            value_field: "value",
+            name_field: "name".into(),
+            value_field: "value".into(),
         },
         // const x = expr
         "const_spec" => NodeRole::Declaration {
-            name_field: "name",
-            value_field: "value",
+            name_field: "name".into(),
+            value_field: "value".into(),
         },
 
         // ── Calls ────────────────────────────────────────────────────────
         "call_expression" => NodeRole::Call {
-            callee_field: "function",
-            args_field: "arguments",
+            callee_field: "function".into(),
+            args_field: "arguments".into(),
         },
         // pkg.Function or receiver.Method - NOT `member_expression`
         "selector_expression" => NodeRole::MemberAccess {
-            object_field: "operand",
-            property_field: "field",
+            object_field: "operand".into(),
+            property_field: "field".into(),
         },
 
         // ── Control flow ─────────────────────────────────────────────────

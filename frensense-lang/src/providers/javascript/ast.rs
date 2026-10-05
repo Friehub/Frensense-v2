@@ -16,64 +16,64 @@ pub(super) fn classify_js(kind: &str) -> NodeRole {
         | "async_function_declaration"
         | "generator_function_declaration" => NodeRole::Function {
             is_method: false,
-            name_field: Some("name"),
-            params_field: "parameters",
-            body_field: "body",
+            name_field: Some("name".into()),
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
         "function_expression" | "async_function_expression" => NodeRole::Function {
             is_method: false,
             name_field: None,
-            params_field: "parameters",
-            body_field: "body",
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
         "arrow_function" => NodeRole::Function {
             is_method: false,
             name_field: None,
-            params_field: "parameters",
-            body_field: "body",
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
         "method_definition" => NodeRole::Function {
             is_method: true,
-            name_field: Some("name"),
-            params_field: "parameters",
-            body_field: "body",
+            name_field: Some("name".into()),
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
 
         // ── Declarations / assignments ───────────────────────────────────
         "variable_declarator" | "lexical_declarator" => NodeRole::Declaration {
-            name_field: "name",
-            value_field: "value",
+            name_field: "name".into(),
+            value_field: "value".into(),
         },
         "assignment_expression" => NodeRole::Assignment {
-            lhs_field: "left",
-            rhs_field: "right",
+            lhs_field: "left".into(),
+            rhs_field: "right".into(),
         },
         // `x += 1`, `x **= 2`, ... - JS uses a distinct node kind with the
         // compound operator; unmapped it was dropped (x never changed).
         "augmented_assignment_expression" => NodeRole::Assignment {
-            lhs_field: "left",
-            rhs_field: "right",
+            lhs_field: "left".into(),
+            rhs_field: "right".into(),
         },
 
         // ── Calls ────────────────────────────────────────────────────────
         "call_expression" => NodeRole::Call {
-            callee_field: "function",
-            args_field: "arguments",
+            callee_field: "function".into(),
+            args_field: "arguments".into(),
         },
         // tree-sitter-javascript names the callee of `new X(...)` field
         // "constructor", not "function", sharing the call_expression arm
         // made every `new X(...)` expression lower to nothing.
         "new_expression" => NodeRole::Call {
-            callee_field: "constructor",
-            args_field: "arguments",
+            callee_field: "constructor".into(),
+            args_field: "arguments".into(),
         },
         "member_expression" => NodeRole::MemberAccess {
-            object_field: "object",
-            property_field: "property",
+            object_field: "object".into(),
+            property_field: "property".into(),
         },
         "subscript_expression" => NodeRole::MemberAccess {
-            object_field: "object",
-            property_field: "index",
+            object_field: "object".into(),
+            property_field: "index".into(),
         },
 
         // ── Control flow ─────────────────────────────────────────────────
