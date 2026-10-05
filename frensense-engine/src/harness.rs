@@ -275,9 +275,19 @@ fn enclosing_extracted_name(
 }
 
 fn is_route_registration(callee_text: &str, spec: &dyn frensense_lang::spec::LanguageSpec) -> bool {
-    spec.known_route_verbs()
+    if spec
+        .known_route_verbs()
         .iter()
         .any(|s| callee_text.ends_with(s))
+    {
+        return true;
+    }
+    // Receiver-qualified patterns (`app.patch(`) match on their stem, so
+    // they extend the verb list wherever the spec is narrower than the
+    // source dialect.
+    spec.route_registration_patterns()
+        .iter()
+        .any(|p| callee_text.ends_with(p.trim_end_matches('(')))
 }
 
 fn lower_one(
@@ -411,6 +421,23 @@ mod tests {
         let mut ks: Vec<String> = fns.keys().cloned().collect();
         ks.sort();
         ks
+    }
+
+    /// The spec's route-registration patterns extend the verb suffix list:
+    /// `.patch` is not in `known_route_verbs`, so an `app.patch(...)` arrow
+    /// handler only extracts under the pattern stem (`app.patch(`).
+    #[test]
+    fn route_registration_pattern_extracts_handler() {
+        let src = r#"
+import express from "express";
+const app = express();
+app.patch("/item", (req, res) => {
+  res.send("ok");
+});
+"#;
+        let fns = lower_source("t.ts", src, "ts").unwrap();
+        let handlers: Vec<&String> = fns.keys().filter(|k| k.contains("handler@")).collect();
+        assert!(!handlers.is_empty(), "app.patch handler missing: {fns:?}");
     }
 
     /// Regression: `const r = runTool(cmd)` nested in a handler must NOT be

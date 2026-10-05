@@ -197,9 +197,9 @@ fn check_impl(
     }
 
     // Deterministic order: by span start (falling back to function order is
-    // fine - findings come from one function).
+    // fine - findings come from one function). Dedup happens once, in
+    // `checks::check_all`, on the shared finding key.
     findings.sort_by_key(|f| f.span.map(|s| s.0).unwrap_or(usize::MAX));
-    findings.dedup_by(|a, b| a.span == b.span && a.rule == b.rule);
     findings
 }
 

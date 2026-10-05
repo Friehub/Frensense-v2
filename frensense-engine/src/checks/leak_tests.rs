@@ -24,6 +24,41 @@ pub mod leak_spec {
         out
     }
 
+    /// Phase 4 teachability: a hand-built bundle drives the leak checker.
+    /// `talloc` is invisible to the spec-only table (no allocation, no
+    /// finding); the bundle's `custom_allocators` makes it a leak
+    /// candidate; teaching it as a stack allocator suppresses it again.
+    #[test]
+    fn bundle_teaches_allocation_and_suppression() {
+        let src = r#"
+void handler(void)
+{
+    char *p = talloc(64);
+    (void)p;
+}
+"#;
+        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
+        let mut facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        let fns = crate::harness::lower_source("t.c", src, "c").unwrap();
+        let leak_fires = |facts: &crate::analysis::taint::facts::FactTable| -> bool {
+            let summaries = MemorySummaryRegistry::from_facts(facts);
+            fns.values()
+                .flat_map(|ir| leak::check(ir, &summaries, facts))
+                .any(|f| f.rule == "memory_leak")
+        };
+        assert!(
+            !leak_fires(&facts),
+            "unknown callee must not allocate: bundle not applied yet"
+        );
+        facts.custom_allocators.insert("talloc".to_string());
+        assert!(leak_fires(&facts), "bundle allocator must teach a leak");
+        facts.stack_allocators.push("talloc".to_string());
+        assert!(
+            !leak_fires(&facts),
+            "bundle stack allocator must suppress the leak"
+        );
+    }
+
     /// The corpus training shape: failure path releases, success path
     /// returns with the allocation still frame-owned.
     #[test]

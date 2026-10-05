@@ -93,6 +93,17 @@ pub struct CheckerFinding {
     pub provenance: Provenance,
 }
 
+/// The single finding identity: two findings from the same function with
+/// the same rule at the same span are the same finding. This is the only
+/// dedup key - [`check_all`] is the one place findings are deduplicated.
+fn finding_key(f: &CheckerFinding) -> (String, String, usize) {
+    (
+        f.function.clone(),
+        f.rule.clone(),
+        f.span.map(|s| s.0).unwrap_or(usize::MAX),
+    )
+}
+
 /// Run every registered check over every function, deduped and ordered by
 /// (function, span) so output is deterministic.
 ///
@@ -119,11 +130,7 @@ pub fn check_all_with_graph<'a>(
     // Program-level rules run once over the whole IR set (they correlate
     // guards in one function with definitions in another).
     for f in guard_bypass::check_allowlist_definitions(&irs, facts) {
-        let key = (
-            f.function.clone(),
-            f.rule.clone(),
-            f.span.map(|s| s.0).unwrap_or(usize::MAX),
-        );
+        let key = finding_key(&f);
         if seen.insert(key) {
             all.push(f);
         }
@@ -132,11 +139,7 @@ pub fn check_all_with_graph<'a>(
     // module-scoped ones run once over the whole scanned set. Legacy
     // learned checks fire through the same evaluator after conversion.
     for f in policy::check_program(&irs, facts) {
-        let key = (
-            f.function.clone(),
-            f.rule.clone(),
-            f.span.map(|s| s.0).unwrap_or(usize::MAX),
-        );
+        let key = finding_key(&f);
         if seen.insert(key) {
             all.push(f);
         }
@@ -160,11 +163,7 @@ pub fn check_all_with_graph<'a>(
             .chain(leak::check(ir, &mem_summaries, facts))
             .chain(learned::check(ir, facts));
         for f in findings {
-            let key = (
-                f.function.clone(),
-                f.rule.clone(),
-                f.span.map(|s| s.0).unwrap_or(usize::MAX),
-            );
+            let key = finding_key(&f);
             if seen.insert(key) {
                 all.push(f);
             }

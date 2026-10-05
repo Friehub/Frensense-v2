@@ -30,6 +30,38 @@ pub mod uaf_spec {
         rules
     }
 
+    /// Phase 4 teachability: a hand-built bundle teaches the UAF checker a
+    /// deallocator. `my_free` is invisible to the spec-only table (no free,
+    /// no finding); the bundle's `custom_deallocators` recognises it and
+    /// the free-then-use pair fires.
+    #[test]
+    fn bundle_teaches_deallocator() {
+        let src = r#"
+#include <stdlib.h>
+void handler () {
+  char *p;
+  p = malloc(16);
+  my_free(p);
+  p[0] = 1;
+}
+"#;
+        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
+        let mut facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        let fns = lower_source("t.c", src, "c").unwrap();
+        let uaf_fires = |facts: &crate::analysis::taint::facts::FactTable| -> bool {
+            let summaries = crate::checks::memory_summary::MemorySummaryRegistry::from_facts(facts);
+            fns.values()
+                .flat_map(|ir| uaf::check_with_summaries(ir, &summaries))
+                .any(|f| f.rule == "use_after_free")
+        };
+        assert!(
+            !uaf_fires(&facts),
+            "unknown callee must not free: bundle not applied yet"
+        );
+        facts.custom_deallocators.insert("my_free".to_string());
+        assert!(uaf_fires(&facts), "bundle deallocator must teach the UAF");
+    }
+
     /// The canonical UAF: malloc → free → use through the same pointer.
     #[test]
     fn free_then_use_fires() {

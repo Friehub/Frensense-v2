@@ -517,7 +517,8 @@ pub fn check_with_summaries(
         }
     }
 
+    // Sorted for deterministic standalone output; dedup happens once, in
+    // `checks::check_all`, on the shared finding key.
     findings.sort_by_key(|f| f.span.map(|s| s.0).unwrap_or(usize::MAX));
-    findings.dedup_by(|a, b| a.span == b.span && a.rule == b.rule && a.message == b.message);
     findings
 }

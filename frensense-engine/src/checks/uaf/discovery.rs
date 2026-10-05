@@ -85,8 +85,9 @@ pub fn free_of(instr: &Instruction, var: VarId, summaries: &MemorySummaryRegistr
 
 /// True when argument slot `slot` of `instr` is a consumed (freed) slot.
 ///
-/// Deallocator vocabulary lives in the registry (spec's
-/// `known_memory_functions`, bootstrap fallback): `free(p)` consumes
+/// Deallocator vocabulary lives in the registry (the spec's
+/// `known_memory_functions` and bundle `custom_deallocators`, both seeded
+/// through `MemorySummaryRegistry::from_facts`): `free(p)` consumes
 /// slot 0 because the vocabulary says so, not because the engine
 /// hardcodes the name.
 pub fn free_slot(instr: &Instruction, slot: usize, summaries: &MemorySummaryRegistry) -> bool {
