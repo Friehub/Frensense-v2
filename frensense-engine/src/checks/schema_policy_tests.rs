@@ -45,8 +45,14 @@ export const tools = {
             .find(|f| f.rule == "unbounded_number_schema")
             .expect("unbounded schema must fire");
         assert!(
-            f.message.contains("maximum 10"),
-            "message quotes the declared policy"
+            f.params
+                .iter()
+                .any(|(k, v)| *k == "text" && v.contains("maximum 10")),
+            "text param quotes the declared policy"
+        );
+        assert!(
+            f.message.is_empty(),
+            "spec findings carry params, not prose"
         );
         assert!(f.span.is_some(), "span recorded for line reporting");
     }

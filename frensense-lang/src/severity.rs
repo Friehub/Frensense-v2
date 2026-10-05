@@ -340,6 +340,15 @@ fn builtin_observation(rule: &str, params: &[(&'static str, String)]) -> Option<
             "Memory leak: `{alloc}` result in `{function}` is never released, \
              returned, or stored before the function returns"
         }
+        crate::rules::INTEGER_OVERFLOW_ALLOC if has("message") => {
+            "{message}: `{lhs}` ({al}..{ah}) * `{rhs}` ({bl}..{bh}) can wrap past \
+             {threshold}, undersizing the `{allocator}` result"
+        }
+        crate::rules::UNBOUNDED_NUMBER_SCHEMA if has("text") => {
+            "Schema declares a numeric policy in prose (`{text}`) but the builder \
+             chain applies no `.max()`/`.min()` enforcement, the declared bound is \
+             decorative. Add the constraint to the schema and validate in the handler."
+        }
         _ => return None,
     })
 }
@@ -594,6 +603,35 @@ mod checker_observation_tests {
             observation(crate::rules::OUT_OF_BOUNDS_READ, size),
             "Out-of-bounds read: read size [0, 63] exceeds source buffer `dst` \
              capacity [0, 7]"
+        );
+    }
+
+    #[test]
+    fn integer_overflow_and_schema_templates_render_params() {
+        let ovf = &[
+            ("message", "Allocation size overflow".into()),
+            ("lhs", "count".into()),
+            ("al", "0".into()),
+            ("ah", "8".into()),
+            ("rhs", "size".into()),
+            ("bl", "0".into()),
+            ("bh", "9223372036854775807".into()),
+            ("threshold", "18446744073709551615".into()),
+            ("allocator", "buf".into()),
+        ];
+        assert_eq!(
+            observation(crate::rules::INTEGER_OVERFLOW_ALLOC, ovf),
+            "Allocation size overflow: `count` (0..8) * `size` (0..9223372036854775807) \
+             can wrap past 18446744073709551615, undersizing the `buf` result"
+        );
+        assert_eq!(
+            observation(
+                crate::rules::UNBOUNDED_NUMBER_SCHEMA,
+                &[("text", "maximum 10 percent".into())]
+            ),
+            "Schema declares a numeric policy in prose (`maximum 10 percent`) but the \
+             builder chain applies no `.max()`/`.min()` enforcement, the declared bound \
+             is decorative. Add the constraint to the schema and validate in the handler."
         );
     }
 

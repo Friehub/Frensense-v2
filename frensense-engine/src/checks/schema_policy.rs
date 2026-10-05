@@ -105,13 +105,8 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                         },
                         function: ir.name.clone(),
                         rule: frensense_lang::rules::UNBOUNDED_NUMBER_SCHEMA.to_string(),
-                        message: format!(
-                            "Schema declares a numeric policy in prose (`{text}`) but the \
-                             builder chain applies no `.max()`/`.min()` enforcement, the \
-                             declared bound is decorative. Add the constraint to the schema \
-                             and validate in the handler."
-                        ),
-                        params: Vec::new(),
+                        message: String::new(),
+                        params: vec![("text", text.clone())],
                         span: *span,
                         severity: String::new(),
                     });
