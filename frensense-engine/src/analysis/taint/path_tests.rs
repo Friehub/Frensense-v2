@@ -135,25 +135,6 @@ function handler(req: any): void {
         };
         assert_eq!(a.shape_id(), b.shape_id());
     }
-
-    #[test]
-    fn render_text_is_numbered_source_first() {
-        let p = super::super::path::TaintPath {
-            steps: vec![
-                PathStep::Source {
-                    description: "req.body".into(),
-                },
-                PathStep::Assignment {
-                    function: "f".into(),
-                    variable: 1,
-                },
-            ],
-            spans: vec![None, None],
-        };
-        let text = p.render_text();
-        assert!(text.contains("1. source:"));
-        assert!(text.contains("2. `f`"));
-    }
 }
 
 #[cfg(test)]

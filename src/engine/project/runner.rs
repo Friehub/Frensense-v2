@@ -236,7 +236,7 @@ fn advisory_from_finding(
         &f.sink,
         src,
     );
-    let flow = f.path.render_text();
+    let flow = crate::reporter::render_taint_path(&f.path);
     let observation = format!(
         "Tainted value from `{src}` flows to sink `{}` (argument {}) in function `{}`.\nTaint path:\n{}",
         f.sink,
@@ -268,7 +268,7 @@ fn advisory_from_finding(
         .zip(&f.path.spans)
         .map(|(step, span)| {
             (
-                step.describe(),
+                crate::reporter::describe_path_step(step),
                 span.as_ref()
                     .map(|(file, (start, _))| (file.clone(), *start)),
             )

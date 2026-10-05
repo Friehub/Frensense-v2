@@ -7,11 +7,9 @@
 //! A taint path is the ordered chain of SVFG nodes the
 //! [`BackwardTaintEngine`](super::engine::BackwardTaintEngine) walked from a
 //! sink argument back to a source. It is intentionally *data*: the engine only
-//! records it; rendering (text/SARIF/LSP) lives in the consumer. Keeping
-//! capture and rendering apart means new output formats never touch the
-//! engine.
-
-use std::fmt::Write as _;
+//! records it; rendering (text/SARIF/LSP) lives in the consumer (see the
+//! root crate's `reporter` module). Keeping capture and rendering apart means
+//! new output formats never touch the engine.
 
 use rustc_hash::FxHashMap;
 
@@ -70,48 +68,6 @@ impl PathStep {
             | PathStep::CallArgument { function, .. }
             | PathStep::FormalParam { function, .. }
             | PathStep::Assignment { function, .. } => Some(function),
-        }
-    }
-
-    /// Deterministic one-line description (used by both text and SARIF output).
-    pub fn describe(&self) -> String {
-        match self {
-            PathStep::Source { description } => {
-                format!("source: `{description}`")
-            }
-            PathStep::Phi { function, variable } => {
-                format!("`{function}`: merge of incoming values (v{variable})")
-            }
-            PathStep::FieldLoad {
-                function,
-                base,
-                field,
-            } => format!("`{function}`: reads `{base}.{field}`"),
-            PathStep::CallReturn {
-                function,
-                callee,
-                external,
-            } => {
-                if *external {
-                    format!("`{function}`: value from unresolvable call `{callee}`")
-                } else {
-                    format!("`{function}`: value returned by `{callee}`")
-                }
-            }
-            PathStep::CallArgument {
-                function,
-                callee,
-                slot,
-            } => format!("`{function}`: passes value to `{callee}` (arg {slot})"),
-            PathStep::FormalParam { function, param } => {
-                format!("`{function}`: enters as parameter `{param}`")
-            }
-            PathStep::ReturnToCaller { caller } => {
-                format!("returns into `{caller}`")
-            }
-            PathStep::Assignment { function, variable } => {
-                format!("`{function}`: flows through v{variable}")
-            }
         }
     }
 }
@@ -191,15 +147,6 @@ impl TaintPath {
             }
         }
         format!("{:016x}", h.finish())
-    }
-
-    /// Render as an indented multi-line text block (CLI output).
-    pub fn render_text(&self) -> String {
-        let mut out = String::new();
-        for (i, step) in self.steps.iter().enumerate() {
-            let _ = writeln!(out, "  {:>2}. {}", i + 1, step.describe());
-        }
-        out
     }
 }
 
