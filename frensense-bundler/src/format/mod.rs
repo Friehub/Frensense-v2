@@ -11,5 +11,7 @@
 mod frc;
 mod types;
 
-pub use frc::{read_bundle, write_bundle, BundleHeader, BUNDLE_MAGIC, BUNDLE_VERSION};
-pub use types::{load_bundle, BundlePattern, BundlePayload, LoadedBundle};
+pub use frc::{
+    read_bundle, read_bundle_parts, write_bundle, BundleHeader, BUNDLE_MAGIC, BUNDLE_VERSION,
+};
+pub use types::{load_bundle, BundlePattern, BundlePayloadV5, LoadedBundle};

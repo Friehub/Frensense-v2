@@ -22,7 +22,7 @@
 use std::collections::BTreeSet;
 
 use frensense_bundler::extract::alerts;
-use frensense_bundler::format::{load_bundle, write_bundle, BundlePayload};
+use frensense_bundler::format::{load_bundle, write_bundle, BundlePayloadV5};
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::engine::FindingClass;
 use frensense_engine::analysis::taint::facts::{
@@ -42,9 +42,10 @@ fn make_bundle(facts: Vec<LearnedFactEntry>) -> FactTable {
         let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
         frensense_engine::analysis::taint::facts::fact_table_from_spec(spec)
     };
-    let payload = BundlePayload {
+    let payload = BundlePayloadV5 {
         patterns: vec![],
         learned_facts: facts,
+        policy_pack: vec![],
     };
     let bytes = write_bundle(&payload, 0).expect("write bundle");
     let loaded = load_bundle(&bytes).expect("load bundle");

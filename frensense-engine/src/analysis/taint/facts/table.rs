@@ -929,3 +929,24 @@ pub fn fact_table_from_entries(entries: &[LearnedFactEntry]) -> FactTable {
     }
     t
 }
+
+/// One hand-authored rule as persisted in a bundle's `policy_pack` section
+/// (`.frc` v5). `policy.toml` (D2) parses into these; presence in the
+/// section is what marks an entry's provenance [`Provenance::Authored`],
+/// mirroring `learned_facts` -> [`Provenance::Learned`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub enum AuthoredPolicyEntry {
+    /// A generalized co-occurrence policy: same fields as [`PolicyFact`],
+    /// carried whole so the author's severity/message travel with it.
+    Policy(PolicyFact),
+    /// An allocation-size integer-overflow rule: same fields as
+    /// [`LearnedFactEntry::IntegerOverflowRule`] (the hand-authored
+    /// precedent: `[frensense] wrap-max:` metadata, now also `policy.toml`).
+    IntegerOverflowRule {
+        rule: String,
+        wrap_threshold: u128,
+        severity: String,
+        message: String,
+    },
+}
