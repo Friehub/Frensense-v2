@@ -201,7 +201,13 @@ precision/recall vs `baseline_scorecard.json` + bundler round-trip
 (`pipeline.rs:97`). No PR may move these numbers unless the PR's intent says
 so.
 
+Status below reflects the tree at `9b5ea23`. The debt-cleanup series C1-C8
+(formerly tracked in `ENGINE_AUDIT.md`, kept in git history) landed as
+`76deff0` .. `047fb94` on top of Phases 0-3.
+
 ### Phase 0 - Safety net + dead weight (no behavior change)
+
+**Status: done** (`d7d5ea7`, `4966358`, `deeec1b`, `d7b80a4`, `4d4696d`).
 
 | PR | Change | Key sites |
 |----|--------|-----------|
@@ -215,6 +221,8 @@ so.
 
 ### Phase 1 - Verdict contract: engine stops deciding
 
+**Status: done** (`7418af1`, `c2be15c`, `6c7a123`).
+
 | PR | Change | Key sites |
 |----|--------|-----------|
 | 1.1 | Add `severity: String` to `CheckerFinding`; copy `fact.severity` at the two drop points. | `checks/mod.rs:57-72`, `policy.rs:119-125`, `mod.rs:292-298` |
@@ -225,6 +233,9 @@ so.
 pass with unchanged behavior; CLI output byte-identical.
 
 ### Phase 2 - Bundle format v5 (before all knowledge moves)
+
+**Status: pending.** 2.1 designed (version-branched load + `policy_pack`);
+must land before any wire-affecting knowledge change.
 
 | PR | Change | Key sites |
 |----|--------|-----------|
@@ -237,6 +248,9 @@ error; round-trip green.
 
 ### Phase 3 - Presentation leaves the engine
 
+**Status: done** (`9a50920`, `31e4a0e`, `02da5b5`, `f51fb6e`, `b6db2e8`,
+`858210d`).
+
 | PR | Change | Key sites |
 |----|--------|-----------|
 | 3.1 | Delete `render_text()`/`sarif_locations()` -> root `reporter.rs`; `describe()` becomes CLI-owned presentation from structured steps. | `path.rs:77-116,197-225`; `runner.rs:248` |
@@ -246,6 +260,12 @@ error; round-trip green.
 e2e_batch identical after each sub-PR.
 
 ### Phase 4 - Schema completion: every check fact-driven
+
+**Status: partially done.** 4.1 complete (`9757ef7`, `43f7396`); 4.2/4.3
+partly addressed there (oob/leak read the registry and `FactTable`; null
+tokens, receiver params and route verbs seeded from the spec). Remaining:
+thread `FactTable` through `uaf/`, unify the three dedup keys, wire or
+drop `route_registration_patterns()`.
 
 | PR | Change | Gaps |
 |----|--------|------|
@@ -259,6 +279,11 @@ and a UAF finding (fails today).
 
 ### Phase 5 - The authored path + default pack (heart of the principle)
 
+**Status: partially done.** Check-time `bootstrap_*` unions are gone
+(engine refs = 0: `76deff0`, `9757ef7`, `43f7396`); provenance is
+per-entry in `FactTable` (`73bbc0f`). Remaining: default pack, authored
+ingestion (5.1), provenance-ordered merge flip (5.3) - gated on Phase 2.
+
 | PR | Change | Key sites |
 |----|--------|-----------|
 | 5.1 | **Authored ingestion (D2)**: `policy.toml` (schema-versioned) -> `frensense bundle --policy policy.toml`; fix bundler arg parsing (`main.rs` advertises flags it does not parse; CI passes `-c`/`-o` it ignores); structural validation (schema, known rule ids) + replay where observable; **`authored` branch at the existential-vote rule** (skip vote requirement, keep cross-family regression); status `"authored"` ships into `policy_pack`. | `mod.rs:305-313`, `:291-303`; `main.rs:13-32` |
@@ -270,6 +295,8 @@ replaces/extends; empty pack = zero policies.
 
 ### Phase 6 - Lang purge
 
+**Status: pending** (`frensense-lang/src/policy.rs` still present).
+
 | PR | Change |
 |----|--------|
 | 6.1 | Move fact types (`WeakPrimitiveRule`, `IntegerOverflowRule`, `KeySizeRule`, `MemoryFuncSpec`, `BufferBuiltinSpec`) -> `engine::facts::kinds`; **delete `frensense-lang/src/policy.rs`**; delete the 18 never-overridden `known_*` trait methods (`spec.rs:660-778`); bundler import site updates (`candidate.rs:263`). |
@@ -278,6 +305,10 @@ replaces/extends; empty pack = zero policies.
 **Accept:** lang ~= mechanism only; `grep bootstrap_ workspace` -> 0.
 
 ### Phase 7 - Enforcement + hardening
+
+**Status: partially done.** `Box::leak` eliminated (scan borrows `self.irs`;
+`serialize.rs` deleted in `c551412`); debug-flag env reads live in consumer
+bins (`0f1c186`). Remaining: ratchet -> hard 0, `Limits` budget struct.
 
 - Ratchet -> **hard 0**: CI fails on `bootstrap_` in engine, prose `format!`
   in engine, tier strings in engine, `std::fs`/`std::env` in engine lib,
