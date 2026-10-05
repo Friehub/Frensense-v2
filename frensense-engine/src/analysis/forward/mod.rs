@@ -66,6 +66,7 @@ pub mod serialize;
 pub mod summaries;
 
 pub use bindings::*;
+pub use predicates::SinkAlert;
 pub(crate) use predicates::*;
 #[cfg(feature = "serialize")]
 pub use serialize::*;
@@ -242,7 +243,7 @@ pub struct InterproceduralTaintEngine<'a> {
     config: &'a TaintConfig,
     facts: FactTable,
     tainted: FxHashSet<(usize, NodeKey)>,
-    pub alerts: Vec<String>,
+    pub alerts: Vec<SinkAlert>,
 }
 
 impl<'a> InterproceduralTaintEngine<'a> {
@@ -283,7 +284,7 @@ impl<'a> InterproceduralTaintEngine<'a> {
             let fe = &self.prog.functions[fi];
 
             // Sink check at every visited node.
-            if let Some((_, alert)) = sink_alert_with_facts(fe.ir, self.config, &self.facts, &cur)
+            if let Some(alert) = sink_alert_with_facts(fe.ir, self.config, &self.facts, &cur)
                 && !self.alerts.contains(&alert)
             {
                 self.alerts.push(alert);

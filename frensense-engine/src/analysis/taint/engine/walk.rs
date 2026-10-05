@@ -247,11 +247,11 @@ impl<'a> BackwardTaintEngine<'a> {
         self.stats.sink_args_explored += triplets.len();
 
         for (arg_slot, var, arg_node) in triplets {
-            let sink_eval = sink_alert_with_facts(ir, self.config, &self.facts, &arg_node);
-            let (finding_class, alert) = match sink_eval {
-                Some((class, msg)) => (class, Some(msg)),
-                None => continue,
+            let Some(alert_info) = sink_alert_with_facts(ir, self.config, &self.facts, &arg_node)
+            else {
+                continue;
             };
+            let finding_class = alert_info.class;
             let mut state = ExploreState::default();
             state.seen_nodes.insert((fi, arg_node));
             self.current_parents.clear();
@@ -283,7 +283,7 @@ impl<'a> BackwardTaintEngine<'a> {
             }
 
             let alert = if verdict == BackwardVerdict::Vulnerable {
-                alert
+                Some(alert_info)
             } else {
                 None
             };

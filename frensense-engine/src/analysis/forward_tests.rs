@@ -6,7 +6,7 @@
 
 #[cfg(test)]
 pub mod interprocedural_tests {
-    use crate::analysis::forward::{InterproceduralTaintEngine, ProgramSvfg};
+    use crate::analysis::forward::{InterproceduralTaintEngine, ProgramSvfg, SinkAlert};
     use crate::analysis::taint::config::TaintConfig;
     use crate::graph::svfg::{NodeKey, NodeKind, SvfgBuilder};
     use crate::ir::function::*;
@@ -56,7 +56,7 @@ pub mod interprocedural_tests {
         ProgramSvfg::new(&map, &config())
     }
 
-    fn run_engine(prog: &ProgramSvfg) -> Vec<String> {
+    fn run_engine(prog: &ProgramSvfg) -> Vec<SinkAlert> {
         let cfg = config();
         let mut engine = InterproceduralTaintEngine::new(prog, &cfg);
         engine.run();
@@ -148,7 +148,7 @@ pub mod interprocedural_tests {
             "arg edge must carry taint into helper's sink; got {:?}",
             alerts
         );
-        assert!(alerts[0].contains("db.execute") && alerts[0].contains("[in helper]"));
+        assert!(alerts[0].sink == "db.execute" && alerts[0].function == "helper");
 
         // Summary: helper's param 0 reaches a sink.
         let sum = prog.functions[hi].summary.as_ref().unwrap();
@@ -226,7 +226,7 @@ pub mod interprocedural_tests {
             "return edge must carry taint from get() into main's sink; got {:?}",
             alerts
         );
-        assert!(alerts[0].contains("db.execute") && alerts[0].contains("[in main]"));
+        assert!(alerts[0].sink == "db.execute" && alerts[0].function == "main");
     }
 
     // -----------------------------------------------------------------------
@@ -343,7 +343,7 @@ pub mod interprocedural_tests {
             "taint must flow source_fn → middle → main via summaries + ret edges; got {:?}",
             alerts
         );
-        assert!(alerts[0].contains("[in main]"));
+        assert!(alerts[0].function == "main");
     }
 
     // -----------------------------------------------------------------------
@@ -529,7 +529,7 @@ pub mod interprocedural_tests {
             "only the raw (unsanitized) path should alert; got {:?}",
             alerts
         );
-        assert!(alerts[0].contains("argument 0"));
+        assert!(alerts[0].slot == 0);
     }
 
     // -----------------------------------------------------------------------
@@ -612,7 +612,7 @@ pub mod interprocedural_tests {
             "cycle handling must stay sound: expected exactly 1 alert; got {:?}",
             alerts
         );
-        assert!(alerts[0].contains("[in rec]"));
+        assert!(alerts[0].function == "rec");
     }
 
     // -----------------------------------------------------------------------
@@ -836,7 +836,7 @@ pub mod interprocedural_tests {
             "local source→sink path still fires; got {:?}",
             alerts
         );
-        assert!(alerts[0].contains("[in main]"));
+        assert!(alerts[0].function == "main");
 
         // Also sanity-check the raw SvfgBuilder path is untouched.
         let (graph, def_site) = SvfgBuilder::new(prog.functions[0].ir).build();

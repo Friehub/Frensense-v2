@@ -242,26 +242,31 @@ pub(crate) fn is_sanitizer_use_with_facts(
     }
 }
 
-/// Alert message if the node is a tainted use inside a configured sink call.
-/// Honours [`FactTable`] sink signatures when one matches: a tainted arg in a
-/// *non-dangerous* slot (e.g. a parameterized query's binding array) does not
-/// alert.
-pub(crate) fn sink_alert(
-    ir: &FunctionIR,
-    config: &TaintConfig,
-    key: &NodeKey,
-) -> Option<(crate::analysis::taint::engine::FindingClass, String)> {
-    sink_alert_with_facts(ir, config, &FactTable::from_config(config), key)
+/// A structured sink alert: which sink fired, in which function, in which
+/// argument slot, and how it classifies. Consumers render their own prose;
+/// the engine never formats messages.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SinkAlert {
+    /// Sink name as configured (`db.execute`, `res.send`, ...).
+    pub sink: String,
+    /// Formal slot of the tainted argument (`usize::MAX` = receiver).
+    pub slot: usize,
+    /// Function in which the sink call lives.
+    pub function: String,
+    /// Shape classification (Idor for identity-payload query objects).
+    pub class: crate::analysis::taint::engine::FindingClass,
 }
 
-/// Like [`sink_alert`] but consults a pre-built [`FactTable`] (no per-node
-/// rebuild). Callers looping over many nodes should build the table once.
+/// Alert if the node is a tainted use inside a configured sink call.
+/// Honours [`FactTable`] sink signatures when one matches: a tainted arg in a
+/// *non-dangerous* slot (e.g. a parameterized query's binding array) does not
+/// alert. Callers build the [`FactTable`] once and pass it in.
 pub(crate) fn sink_alert_with_facts(
     ir: &FunctionIR,
     config: &TaintConfig,
     facts: &FactTable,
     key: &NodeKey,
-) -> Option<(crate::analysis::taint::engine::FindingClass, String)> {
+) -> Option<SinkAlert> {
     let NodeKey {
         block,
         instr_idx: Some(idx),
@@ -363,11 +368,6 @@ pub(crate) fn sink_alert_with_facts(
     {
         return None;
     }
-    let where_ = if slot == usize::MAX {
-        "at receiver".to_string()
-    } else {
-        format!("at argument {}", slot)
-    };
     // Arg-shape classification: a tainted identity payload at an
     // IDOR-class sink is an access-control query, not an injection - the
     // driver parameterizes object values. Reported with the Idor class so
@@ -389,18 +389,12 @@ pub(crate) fn sink_alert_with_facts(
     } else {
         crate::analysis::taint::engine::FindingClass::Injection
     };
-    let message = if class == crate::analysis::taint::engine::FindingClass::Idor {
-        format!(
-            "IDOR-CLASS: Tainted data controls a query-object field at sink '{}' {} [in {}]",
-            name, where_, ir.name
-        )
-    } else {
-        format!(
-            "CRITICAL VULNERABILITY: Tainted data reached sink '{}' {} [in {}]",
-            name, where_, ir.name
-        )
-    };
-    Some((class, message))
+    Some(SinkAlert {
+        sink: name.to_string(),
+        slot,
+        function: ir.name.clone(),
+        class,
+    })
 }
 
 /// Does the tainted var originate from an object literal whose pair keys

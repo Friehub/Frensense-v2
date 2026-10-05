@@ -163,7 +163,12 @@ pub mod demand_tests {
         );
         assert_eq!(vulns[0].function, "helper");
         assert_eq!(vulns[0].sink, "db.execute");
-        assert!(vulns[0].alert.as_deref().unwrap().contains("[in helper]"));
+        assert!(
+            vulns[0]
+                .alert
+                .as_ref()
+                .is_some_and(|a| a.function == "helper")
+        );
 
         // Demand-driven cost: helper must be visited, main must be entered
         // only via the backward walk from its own sink... main has no sink,
@@ -608,7 +613,7 @@ pub mod demand_tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_backward_agrees_with_forward() {
-        use crate::analysis::forward::InterproceduralTaintEngine;
+        use crate::analysis::forward::{InterproceduralTaintEngine, SinkAlert};
 
         let mut main = FunctionIR::new("main".into());
         {
@@ -650,13 +655,14 @@ pub mod demand_tests {
         // Backward.
         let cfg = config();
         let (bwd, _stats) = run_backward(&cfg, &prog);
-        let bwd_alerts: Vec<String> = bwd.iter().filter_map(|f| f.alert.clone()).collect();
+        let bwd_alerts: Vec<SinkAlert> = bwd.iter().filter_map(|f| f.alert.clone()).collect();
 
         assert_eq!(fwd.alerts.len(), 1);
         assert_eq!(bwd_alerts.len(), 1);
-        // Same alert text modulo the message wording (both mention the sink).
-        assert!(fwd.alerts[0].contains("db.execute"));
-        assert!(bwd_alerts[0].contains("db.execute"));
+        // Same alert (sink, slot, function, class) from both directions.
+        assert!(fwd.alerts[0].sink == "db.execute");
+        assert!(bwd_alerts[0].sink == "db.execute");
+        assert_eq!(fwd.alerts[0], bwd_alerts[0]);
     }
 
     // -----------------------------------------------------------------------

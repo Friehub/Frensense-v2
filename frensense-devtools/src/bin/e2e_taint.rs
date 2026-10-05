@@ -253,7 +253,7 @@ fn main() {
             f.function, f.sink, f.arg_slot, f.verdict
         );
         if let Some(a) = &f.alert {
-            println!("      {a}");
+            println!("      {a:?}");
         }
     }
 }

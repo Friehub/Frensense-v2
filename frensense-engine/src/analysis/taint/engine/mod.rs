@@ -45,7 +45,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::analysis::forward::{ProgramSvfg, member_access_path, source_path_matches};
+use crate::analysis::forward::{ProgramSvfg, SinkAlert, member_access_path, source_path_matches};
 use crate::analysis::taint::config::TaintConfig;
 use crate::analysis::taint::facts::FactTable;
 use crate::analysis::taint::path::TaintPath;
@@ -97,8 +97,9 @@ pub struct SinkFinding {
     pub sink: String,
     /// Formal slot of the tainted argument (receiver = slot 0 on virtual calls).
     pub arg_slot: usize,
-    /// Message identical in shape to the forward engine's alert.
-    pub alert: Option<String>,
+    /// Structured sink alert (present exactly when the slot is dangerous);
+    /// `None` when the slot is a safe channel.
+    pub alert: Option<SinkAlert>,
     pub verdict: BackwardVerdict,
     /// Shape classification of the finding (`"idor"` for access-control
     /// query payloads, `"injection"` for everything else). Consumers rank
@@ -400,13 +401,5 @@ impl<'a> BackwardTaintEngine<'a> {
                 }
             }
         }
-    }
-
-    /// Convenience: just the vulnerable alerts (compatible with forward engines).
-    pub fn alerts(&self) -> Vec<String> {
-        self.findings
-            .iter()
-            .filter_map(|f| f.alert.clone())
-            .collect()
     }
 }

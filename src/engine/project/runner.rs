@@ -357,6 +357,7 @@ fn dedup_keep_richest(candidates: &[&LocatedFinding]) -> Vec<usize> {
 #[cfg(test)]
 mod shape_dedup_tests {
     use super::dedup_keep_richest;
+    use frensense_engine::analysis::forward::SinkAlert;
     use frensense_engine::analysis::taint::engine::{BackwardVerdict, FindingClass, SinkFinding};
     use frensense_engine::analysis::taint::path::{PathStep, TaintPath};
     use frensense_engine::analysis::taint::role::SinkRole;
@@ -370,7 +371,12 @@ mod shape_dedup_tests {
             function: "handler".to_string(),
             sink: "exec".to_string(),
             arg_slot: 0,
-            alert: Some("test".to_string()),
+            alert: Some(SinkAlert {
+                sink: "exec".to_string(),
+                slot: 0,
+                function: "handler".to_string(),
+                class: FindingClass::Injection,
+            }),
             verdict: BackwardVerdict::Vulnerable,
             finding_class: FindingClass::Injection,
             role: SinkRole::Execution,

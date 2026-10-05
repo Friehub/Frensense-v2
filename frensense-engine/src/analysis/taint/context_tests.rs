@@ -60,11 +60,11 @@ pub mod context_tests {
         v
     }
 
-    fn run_k1(prog: &ProgramSvfg) -> Vec<String> {
+    fn run_k1(prog: &ProgramSvfg) -> Vec<crate::analysis::forward::SinkAlert> {
         let cfg = config();
         let mut e = ContextSensitiveTaintEngine::new(prog, &cfg);
         e.run();
-        e.alert_messages()
+        e.alerts().iter().map(|a| a.alert.clone()).collect()
     }
 
     /// The FP scenario: a callee invoked from a tainted site and a clean site.
@@ -80,8 +80,8 @@ pub mod context_tests {
     /// k=0 merges both `id` invocations into one FormalParam state, so the
     /// FormalRet → ActualRet edges fan taint out to BOTH call sites' dest
     /// nodes, the clean `b` is wrongly tainted (observable in the taint
-    /// state set; the alert strings are identical so the alert count alone
-    /// can't show it). k=1 splits by call site: the return from ctx(id, dirty
+    /// state set; both call sites produce identical alerts, deduped to one,
+    /// so the alert count alone can't show it). k=1 splits by call site: the return from ctx(id, dirty
     /// site) may only reach the dirty site's ActualRet, so the clean site
     /// stays clean.
     #[test]
@@ -201,14 +201,14 @@ pub mod context_tests {
             "k=1 must keep the clean call site's result clean in all contexts"
         );
 
-        let alerts = k1.alert_messages();
+        let alerts = k1.alerts();
         assert_eq!(
             alerts.len(),
             1,
             "k=1 must alert only on the real path; got {:?}",
             alerts
         );
-        assert!(alerts[0].contains("[in main]"));
+        assert!(alerts[0].alert.function == "main");
 
         // Precision bookkeeping: contexts are interned lazily, only when
         // taint actually crosses an arg edge. Here exactly one context is
@@ -457,10 +457,10 @@ pub mod context_tests {
             st.relevant_functions <= st.total_functions,
             "relevance set must be a subset of all functions"
         );
-        assert_eq!(engine.alert_messages().len(), 1, "dirty's sink fires");
+        assert_eq!(engine.alerts().len(), 1, "dirty's sink fires");
 
         // The real path is found: source in dirty reaches dirty's sink.
-        assert!(engine.alert_messages()[0].contains("db.execute"));
+        assert!(engine.alerts()[0].alert.sink == "db.execute");
         let _ = ROOT_CTX;
     }
 }
