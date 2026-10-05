@@ -20,7 +20,10 @@ pub mod int_overflow_spec {
 
     fn hits(src: &str, facts: &FactTable) -> Vec<String> {
         let fns = lower_source("t.c", src, "c").unwrap();
-        let summaries = MemorySummaryRegistry::default();
+        let c_spec = frensense_lang::spec_for_ext("c").expect("c spec");
+        let summaries = MemorySummaryRegistry::from_facts(
+            &crate::analysis::taint::facts::fact_table_from_spec(c_spec),
+        );
         let mut rules: Vec<String> = fns
             .values()
             .flat_map(|ir| int_overflow::check(ir, &summaries, facts))

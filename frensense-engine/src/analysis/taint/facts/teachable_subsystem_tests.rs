@@ -9,8 +9,7 @@ use crate::checks::memory_summary::MemorySummaryRegistry;
 #[test]
 fn test_teachable_allocator_and_deallocator() {
     // Memory vocabulary is spec/bundle-owned: the spec seeds the fact
-    // table, and the registry falls back to frensense-lang's bootstrap
-    // table when no spec is present.
+    // table; there is no implicit bootstrap fallback.
     let spec = frensense_lang::spec_for_ext("c").expect("c spec");
     let seeded = crate::analysis::taint::facts::fact_table_from_spec(spec);
     let seeded_reg = MemorySummaryRegistry::from_facts(&seeded);
@@ -19,13 +18,17 @@ fn test_teachable_allocator_and_deallocator() {
     assert_eq!(seeded_reg.consumes_params("free"), &[0]);
     assert!(!seeded_reg.returns_fresh("custom_arena_alloc"));
 
-    // No facts at all: bootstrap fallback, same vocabulary.
-    let bootstrap_reg = MemorySummaryRegistry::default();
-    assert!(bootstrap_reg.returns_fresh("malloc"));
-    assert_eq!(bootstrap_reg.consumes_params("free"), &[0]);
+    // A bare table carries no vocabulary at all - seeding is the caller's
+    // job (`fact_table_from_spec`, exactly like a production scan).
+    let bare_reg = MemorySummaryRegistry::from_facts(&FactTable::default());
+    assert!(!bare_reg.returns_fresh("malloc"));
+    assert!(bare_reg.consumes_params("free").is_empty());
 
-    // Learn custom primitives from bundle
-    let mut table = FactTable::default();
+    // Learn custom primitives from a bundle over the spec-seeded table
+    // (production merge order: spec first, bundle facts on top).
+    let mut table = crate::analysis::taint::facts::fact_table_from_spec(
+        frensense_lang::spec_for_ext("c").expect("c spec"),
+    );
     let alloc_fact = LearnedFactEntry::Allocator {
         name: "custom_arena_alloc".into(),
     };
@@ -39,7 +42,7 @@ fn test_teachable_allocator_and_deallocator() {
     let reg = MemorySummaryRegistry::from_facts(&table);
     assert!(reg.returns_fresh("custom_arena_alloc"));
     assert_eq!(reg.consumes_params("custom_arena_free"), &[0]);
-    // Bootstrap vocabulary intact alongside learned facts.
+    // Spec vocabulary intact alongside learned facts.
     assert!(reg.returns_fresh("malloc"));
     assert_eq!(reg.consumes_params("free"), &[0]);
 }

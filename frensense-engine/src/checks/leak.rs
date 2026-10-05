@@ -11,13 +11,14 @@
 //!
 //! Lang declares / corpus teaches / engine computes: which calls allocate
 //! fresh memory and which consume their arguments comes from the
-//! lang-declared memory vocabulary merged into the registry
-//! (`MemorySummaryRegistry::from_facts` - bootstrap `MemoryFuncSpec`s plus
-//! bundle-learned contracts), never from hardcoded names here. Stack
-//! allocators (`alloca` and friends) come from the lang-declared
-//! `BOOTSTRAP_STACK_ALLOCATORS` list and are never leak candidates: their
-//! storage dies with the frame. The analysis itself (join, phi merge,
-//! escape, null-guard skip) is the stable engine "how".
+//! lang-declared memory vocabulary seeded into the [`FactTable`] and
+//! merged into the registry (`MemorySummaryRegistry::from_facts` -
+//! spec vocab plus bundle-learned contracts), never from hardcoded names
+//! here. Stack allocators (`alloca` and friends) come from
+//! `FactTable::stack_allocators` (spec-seeded via `known_stack_allocators`)
+//! and are never leak candidates: their storage dies with the frame. The
+//! analysis itself (join, phi merge, escape, null-guard skip) is the
+//! stable engine "how".
 //!
 //! Zero-FP by construction:
 //! - The live state is a flow-sensitive variable -> allocations map:
@@ -97,12 +98,13 @@ fn var_span(ir: &FunctionIR, var: VarId) -> Option<(usize, usize)> {
     ir.var_metadata.get(&var).and_then(|m| m.byte_range)
 }
 
-/// Fresh allocations (lang vocabulary) and the alias edges between
+/// Fresh allocations (vocab from `facts`) and the alias edges between
 /// variables that can denote them. Stack allocators are excluded: their
 /// storage is frame-local by definition and can never leak.
 fn collect(
     ir: &FunctionIR,
     summaries: &MemorySummaryRegistry,
+    facts: &crate::analysis::taint::facts::FactTable,
 ) -> (FxHashMap<VarId, Alloc>, Vec<Edge>) {
     let mut allocs: FxHashMap<VarId, Alloc> = FxHashMap::default();
     let mut edges: Vec<Edge> = Vec::new();
@@ -121,9 +123,7 @@ fn collect(
                     dest: Some(dest),
                     func,
                     ..
-                } if summaries.returns_fresh(func)
-                    && !frensense_lang::memory::is_stack_allocator(func) =>
-                {
+                } if summaries.returns_fresh(func) && !facts.is_stack_allocator(func) => {
                     allocs.insert(
                         *dest,
                         Alloc {
@@ -135,9 +135,7 @@ fn collect(
                     dest: Some(dest),
                     method,
                     ..
-                } if summaries.returns_fresh(method)
-                    && !frensense_lang::memory::is_stack_allocator(method) =>
-                {
+                } if summaries.returns_fresh(method) && !facts.is_stack_allocator(method) => {
                     allocs.insert(
                         *dest,
                         Alloc {
@@ -461,8 +459,12 @@ fn extend_leaks(
 }
 
 /// Run the allocation-lifetime check over one function.
-pub fn check(ir: &FunctionIR, summaries: &MemorySummaryRegistry) -> Vec<CheckerFinding> {
-    let (allocs, edges) = collect(ir, summaries);
+pub fn check(
+    ir: &FunctionIR,
+    summaries: &MemorySummaryRegistry,
+    facts: &crate::analysis::taint::facts::FactTable,
+) -> Vec<CheckerFinding> {
+    let (allocs, edges) = collect(ir, summaries, facts);
     if allocs.is_empty() {
         return Vec::new();
     }

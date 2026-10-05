@@ -36,13 +36,8 @@ pub use types::{CrossCtx, FreeSite, Pair, PairCheck, Violation, finding};
 pub use uninit::check_uninitialized_frees;
 pub use walker::{MAX_SCAN_NODES, MAX_WALK_NODES, Walker};
 
-/// Run the UAF / double-free check over one function with default summaries.
-pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
-    check_with_summaries(ir, &MemorySummaryRegistry::default())
-}
-
-/// Run the UAF / double-free check over one function with an interprocedural
-/// memory summary registry (intraprocedural graph mode: frees of parameters
+/// Run the UAF / double-free check over one function with an
+/// interprocedural memory summary registry (intraprocedural graph mode: frees of parameters
 /// are recognised at consuming call sites via `summaries.consumes_params`).
 pub fn check_with_summaries(
     ir: &FunctionIR,

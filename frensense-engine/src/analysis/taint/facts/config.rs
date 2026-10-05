@@ -145,8 +145,15 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
     // Buffer builtins (copy/fill/read with dst/src/len slots): spec-owned,
     // consumed by the spatial (OOB) check.
     t.buffer_builtins = spec.known_buffer_builtins().to_vec();
+    // Stack-frame allocators (alloca, ...): spec-owned, consumed by the
+    // allocation-lifetime (leak) check.
+    t.stack_allocators = spec
+        .known_stack_allocators()
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
     // Guard/allowlist, credential, schema and URL-hint policy vocabulary:
-    // spec-owned; the checks union these with the lang bootstrap defaults.
+    // spec-owned, read directly by the checks through these fields.
     t.containment_callees = spec
         .known_containment_callees()
         .iter()

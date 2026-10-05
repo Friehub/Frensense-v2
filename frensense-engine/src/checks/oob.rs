@@ -200,11 +200,6 @@ fn finding(
     }
 }
 
-/// Run spatial memory safety checks over one function with default summaries.
-pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
-    check_with_summaries(ir, &MemorySummaryRegistry::default(), &FactTable::default())
-}
-
 /// Run spatial memory safety checks over one function with an
 /// interprocedural memory summary registry and the spec/bundle vocabulary
 /// (memory contracts, buffer builtins) resolved from `facts`.
@@ -213,16 +208,9 @@ pub fn check_with_summaries(
     summaries: &MemorySummaryRegistry,
     facts: &FactTable,
 ) -> Vec<CheckerFinding> {
-    // Buffer vocabulary: spec-seeded via `fact_table_from_spec`. An empty
-    // field means the caller built a bare table (tests, tools); the lang
-    // bootstrap table then provides the C baseline so the check stays
-    // usable without a spec. Production scans always seed the field.
-    let buffer_builtins: &[frensense_lang::memory::BufferBuiltinSpec] =
-        if facts.buffer_builtins.is_empty() {
-            frensense_lang::memory::bootstrap_buffer_builtins()
-        } else {
-            &facts.buffer_builtins
-        };
+    // Buffer vocabulary: spec-seeded via `fact_table_from_spec` into
+    // `facts.buffer_builtins` (empty table = no vocabulary = no findings).
+    let buffer_builtins: &[frensense_lang::memory::BufferBuiltinSpec] = &facts.buffer_builtins;
     let pts = Steensgaard::analyze(ir);
     let val_info = value::analyze(ir);
     let mut findings: Vec<CheckerFinding> = Vec::new();

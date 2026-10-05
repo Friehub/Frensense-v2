@@ -136,14 +136,17 @@ pub struct FactTable {
     pub custom_deallocators: FxHashSet<String>,
     /// Memory-function vocabulary (allocators/deallocators and their
     /// capacity contracts) seeded from the spec's
-    /// `known_memory_functions`. When empty, the memory checks fall back
-    /// to `frensense_lang::memory::bootstrap_memory_functions()`.
+    /// `known_memory_functions`. Empty means the caller built a bare
+    /// table; the checks then see no memory vocabulary at all.
     pub memory_functions: Vec<frensense_lang::memory::MemoryFuncSpec>,
     /// Buffer-manipulation vocabulary (copy/fill/read builtins with their
     /// dst/src/len argument slots) seeded from the spec's
-    /// `known_buffer_builtins`. When empty, the OOB check falls back to
-    /// `frensense_lang::memory::bootstrap_buffer_builtins()`.
+    /// `known_buffer_builtins`. Empty means the caller built a bare
+    /// table; the OOB check then sees no buffer vocabulary.
     pub buffer_builtins: Vec<frensense_lang::memory::BufferBuiltinSpec>,
+    /// Stack-frame allocators (`alloca`, ...) seeded from the spec's
+    /// `known_stack_allocators`; leak-style checkers exclude them.
+    pub stack_allocators: Vec<String>,
     /// Dynamic IDOR-class query keys learned from a bundle or specification.
     pub idor_keys: FxHashSet<String>,
     /// Dynamic IDOR-class finder sinks learned from a bundle or specification.
@@ -334,6 +337,9 @@ impl FactTable {
         if !other.buffer_builtins.is_empty() {
             self.buffer_builtins = other.buffer_builtins.clone();
         }
+        if !other.stack_allocators.is_empty() {
+            self.stack_allocators = other.stack_allocators.clone();
+        }
         self.idor_keys.extend(other.idor_keys.iter().cloned());
         self.idor_finder_sinks
             .extend(other.idor_finder_sinks.iter().cloned());
@@ -399,6 +405,15 @@ impl FactTable {
     pub fn is_idor_finder_sink(&self, sink: &str) -> bool {
         let last = sink.rsplit('.').next().unwrap_or(sink);
         self.idor_finder_sinks.contains(sink) || self.idor_finder_sinks.contains(last)
+    }
+
+    /// Is `name` (bare, dotted, or `::`-qualified) a spec-declared stack
+    /// allocator? Frame-local storage is never a leak candidate; the
+    /// vocabulary is seeded via `known_stack_allocators`.
+    pub fn is_stack_allocator(&self, name: &str) -> bool {
+        let s = name.rsplit('.').next().unwrap_or(name);
+        let s = s.rsplit("::").next().unwrap_or(s);
+        self.stack_allocators.iter().any(|a| a == s)
     }
 
     /// Look up input argument slots that propagate taint through `call`.

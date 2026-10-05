@@ -658,6 +658,15 @@ pub trait LanguageSpec: Send + Sync + 'static {
         crate::memory::bootstrap_buffer_builtins()
     }
 
+    /// Stack-frame allocator vocabulary (`alloca`, ...) through
+    /// `FactTable::stack_allocators`, so leak-style checkers never treat
+    /// frame-local storage as leakable.
+    ///
+    /// Defaults to [`crate::memory::BOOTSTRAP_STACK_ALLOCATORS`].
+    fn known_stack_allocators(&self) -> &'static [&'static str] {
+        crate::memory::BOOTSTRAP_STACK_ALLOCATORS
+    }
+
     /// Containment-test callees (guard/allowlist checks) through
     /// `FactTable::containment_callees`. Defaults to
     /// [`crate::policy::bootstrap_containment_callees`].

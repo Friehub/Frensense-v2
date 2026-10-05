@@ -10,10 +10,15 @@ pub mod memory_summary_spec {
     use crate::checks::check_all;
     use crate::harness::lower_source;
 
+    fn c_facts() -> FactTable {
+        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
+        crate::analysis::taint::facts::fact_table_from_spec(spec)
+    }
+
     fn hits(src: &str) -> Vec<String> {
         let fns = lower_source("t.c", src, "c").unwrap();
         let ir_refs: Vec<_> = fns.values().collect();
-        let findings = check_all(ir_refs, &FactTable::default());
+        let findings = check_all(ir_refs, &c_facts());
         let mut rules: Vec<String> = findings.into_iter().map(|f| f.rule).collect();
         rules.sort();
         rules
@@ -214,10 +219,10 @@ void caller() {
     /// Corpus/bundle-learned allocation contract: positive sample fires OOB, negative sample stays silent.
     #[test]
     fn bundle_learned_allocator_fires_oob() {
-        use crate::analysis::taint::facts::{FactTable, MemoryContractFact};
+        use crate::analysis::taint::facts::MemoryContractFact;
         use crate::checks::memory_summary::CapacitySpec;
 
-        let mut facts = FactTable::default();
+        let mut facts = c_facts();
         facts.memory_contracts.push(MemoryContractFact {
             name: "custom_kalloc".to_string(),
             returns_fresh: true,
@@ -268,10 +273,10 @@ void caller_negative() {
     /// Corpus/bundle-learned deallocator contract: positive sample fires UAF, negative sample stays silent.
     #[test]
     fn bundle_learned_deallocator_fires_uaf() {
-        use crate::analysis::taint::facts::{FactTable, MemoryContractFact};
+        use crate::analysis::taint::facts::MemoryContractFact;
         use crate::checks::memory_summary::CapacitySpec;
 
-        let mut facts = FactTable::default();
+        let mut facts = c_facts();
         facts.memory_contracts.push(MemoryContractFact {
             name: "external_release".to_string(),
             returns_fresh: false,

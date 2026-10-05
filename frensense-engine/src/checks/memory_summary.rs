@@ -59,25 +59,15 @@ pub struct MemorySummary {
 
 /// Registry storing interprocedural memory contracts for library primitives
 /// and program functions.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MemorySummaryRegistry {
     pub summaries: FxHashMap<String, MemorySummary>,
 }
 
-impl Default for MemorySummaryRegistry {
-    fn default() -> Self {
-        Self::from_vocabulary(frensense_lang::memory::bootstrap_memory_functions())
-    }
-}
-
 impl MemorySummaryRegistry {
-    /// Create a registry seeded with the bootstrap memory vocabulary.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Build a registry from a memory-function vocabulary (spec-provided
-    /// or the bootstrap default): one summary per entry, mapping the
+    /// Build a registry from a memory-function vocabulary (seeded into a
+    /// [`crate::analysis::taint::facts::FactTable`] via the spec's
+    /// `known_memory_functions`): one summary per entry, mapping the
     /// spec's capacity shape onto [`CapacitySpec`].
     fn from_vocabulary(vocab: &[frensense_lang::memory::MemoryFuncSpec]) -> Self {
         use frensense_lang::memory::AllocCapacity;
@@ -100,16 +90,8 @@ impl MemorySummaryRegistry {
         Self { summaries }
     }
 
-    /// Returns true if `name` is one of the bootstrap vocabulary contracts.
-    ///
-    /// The bundler uses this to skip re-emitting builtins into the `.frc`
-    /// (they're already in the spec vocabulary, no need to inflate bundle size).
-    pub fn is_builtin(name: &str) -> bool {
-        frensense_lang::memory::is_bootstrap_memory_func(name)
-    }
-
-    /// Seed a registry from the spec's memory vocabulary (falling back to
-    /// the bootstrap table when the facts carry none), then layer
+    /// Seed a registry from the spec's memory vocabulary in `facts`
+    /// (spec-seeded via `fact_table_from_spec`), then layer
     /// bundle-learned contracts on top. Learned contracts override the
     /// vocabulary on name collision (more specific corpus knowledge wins).
     ///
@@ -117,13 +99,7 @@ impl MemorySummaryRegistry {
     /// follow up with `infer_program_summaries_into` for the current project's
     /// per-file fixpoint.
     pub fn from_facts(facts: &crate::analysis::taint::facts::FactTable) -> Self {
-        let vocabulary: &[frensense_lang::memory::MemoryFuncSpec] =
-            if facts.memory_functions.is_empty() {
-                frensense_lang::memory::bootstrap_memory_functions()
-            } else {
-                &facts.memory_functions
-            };
-        let mut reg = Self::from_vocabulary(vocabulary);
+        let mut reg = Self::from_vocabulary(&facts.memory_functions);
         for contract in &facts.memory_contracts {
             reg.summaries.insert(
                 contract.name.clone(),
@@ -167,14 +143,6 @@ impl MemorySummaryRegistry {
         self
     }
 
-    /// Static entry point that starts from a fresh default registry and runs
-    /// fixpoint inference.  Kept for call-sites that have no bundle.
-    pub fn infer_program_summaries(irs: &[&FunctionIR]) -> Self {
-        let mut registry = Self::default();
-        registry.run_fixpoint(irs);
-        registry
-    }
-
     /// Insert or update a summary contract for a function name.
     pub fn insert(&mut self, name: String, summary: MemorySummary) {
         self.summaries.insert(name, summary);
@@ -189,7 +157,7 @@ impl MemorySummaryRegistry {
 
     /// Returns true if calling `name` returns a freshly allocated object.
     /// Vocabulary-driven: the registry was seeded from the spec's
-    /// `known_memory_functions` (or the bootstrap table).
+    /// `known_memory_functions` through `FactTable::memory_functions`.
     pub fn returns_fresh(&self, name: &str) -> bool {
         self.get(name).is_some_and(|s| s.returns_fresh)
     }

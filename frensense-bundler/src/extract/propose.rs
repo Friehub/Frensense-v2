@@ -67,7 +67,7 @@ pub fn propose_with_trace(
         let summaries =
             MemorySummaryRegistry::from_facts(builtin).infer_program_summaries_into(&ir_refs);
         for (name, summary) in summaries.summaries {
-            if MemorySummaryRegistry::is_builtin(&name) {
+            if frensense_lang::memory::is_bootstrap_memory_func(&name) {
                 continue;
             }
             if summary.returns_fresh || !summary.consumes_params.is_empty() {

@@ -10,8 +10,15 @@ pub mod oob_spec {
     use crate::harness::lower_source;
 
     fn hits(src: &str) -> Vec<String> {
+        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
+        let facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        let summaries = crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&facts);
         let fns = lower_source("t.c", src, "c").unwrap();
-        let mut rules: Vec<String> = fns.values().flat_map(oob::check).map(|f| f.rule).collect();
+        let mut rules: Vec<String> = fns
+            .values()
+            .flat_map(|ir| oob::check_with_summaries(ir, &summaries, &facts))
+            .map(|f| f.rule)
+            .collect();
         rules.sort();
         rules
     }
@@ -276,8 +283,15 @@ pub mod oob_lowering_regressions {
     use crate::harness::lower_source;
 
     fn hits(src: &str) -> Vec<String> {
+        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
+        let facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        let summaries = crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&facts);
         let fns = lower_source("t.c", src, "c").unwrap();
-        let mut rules: Vec<String> = fns.values().flat_map(oob::check).map(|f| f.rule).collect();
+        let mut rules: Vec<String> = fns
+            .values()
+            .flat_map(|ir| oob::check_with_summaries(ir, &summaries, &facts))
+            .map(|f| f.rule)
+            .collect();
         rules.sort();
         rules
     }

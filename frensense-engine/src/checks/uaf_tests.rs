@@ -6,13 +6,26 @@
 //! points-to classes.
 
 #[cfg(test)]
+fn c_facts() -> crate::analysis::taint::facts::FactTable {
+    let spec = frensense_lang::spec_for_ext("c").expect("c spec");
+    crate::analysis::taint::facts::fact_table_from_spec(spec)
+}
+
+#[cfg(test)]
 pub mod uaf_spec {
     use crate::checks::uaf;
     use crate::harness::lower_source;
 
     fn hits(src: &str) -> Vec<String> {
+        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
+        let facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        let summaries = crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&facts);
         let fns = lower_source("t.c", src, "c").unwrap();
-        let mut rules: Vec<String> = fns.values().flat_map(uaf::check).map(|f| f.rule).collect();
+        let mut rules: Vec<String> = fns
+            .values()
+            .flat_map(|ir| uaf::check_with_summaries(ir, &summaries))
+            .map(|f| f.rule)
+            .collect();
         rules.sort();
         rules
     }
@@ -437,8 +450,9 @@ int apply_entry(void) {
 "#;
         let fns = lower_source("t.c", src, "c").unwrap();
         let irs: Vec<_> = fns.values().collect();
-        let summaries = crate::checks::memory_summary::MemorySummaryRegistry::default()
-            .infer_program_summaries_into(&irs);
+        let summaries =
+            crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&super::c_facts())
+                .infer_program_summaries_into(&irs);
         let rules: Vec<String> = fns
             .values()
             .flat_map(|ir| uaf::check_with_summaries(ir, &summaries))
@@ -549,8 +563,9 @@ void handler(void) {
         ) {
             let vuln_fns = lower_source("conf.c", &vuln, "c").unwrap();
             let vuln_vec: Vec<_> = vuln_fns.values().collect();
-            let vuln_summaries = crate::checks::memory_summary::MemorySummaryRegistry::default()
-                .infer_program_summaries_into(&vuln_vec);
+            let vuln_summaries =
+                crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&super::c_facts())
+                    .infer_program_summaries_into(&vuln_vec);
             let vuln_hits: Vec<_> = vuln_fns
                 .values()
                 .flat_map(|ir| uaf::check_with_summaries(ir, &vuln_summaries))
@@ -564,8 +579,9 @@ void handler(void) {
 
             let fixed_fns = lower_source("conf.c", &fixed, "c").unwrap();
             let fixed_vec: Vec<_> = fixed_fns.values().collect();
-            let fixed_summaries = crate::checks::memory_summary::MemorySummaryRegistry::default()
-                .infer_program_summaries_into(&fixed_vec);
+            let fixed_summaries =
+                crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&super::c_facts())
+                    .infer_program_summaries_into(&fixed_vec);
             let fixed_hits: Vec<_> = fixed_fns
                 .values()
                 .flat_map(|ir| uaf::check_with_summaries(ir, &fixed_summaries))

@@ -10,7 +10,7 @@ use frensense_bundler::fact_extract::{
 use frensense_bundler::format::load_bundle;
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::facts::{
-    fact_table_from_entries, FactTable, LearnedFactEntry, PolicyRequirement,
+    fact_table_from_entries, fact_table_from_spec, FactTable, LearnedFactEntry, PolicyRequirement,
 };
 
 fn config() -> TaintConfig {
@@ -141,7 +141,13 @@ void caller() {
     assert_eq!(fams.len(), 1);
 
     let cfg = config();
-    let builtin = FactTable::default();
+    // Production extraction runs under the family's language spec tables
+    // (`extract_facts`); mirror that here so the registry carries the C
+    // memory vocabulary the fixpoint needs to recognise `free` as consuming.
+    let builtin = {
+        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
+        frensense_engine::analysis::taint::facts::fact_table_from_spec(spec)
+    };
 
     // 2. Fact Extraction:
     // Bundler extracts memory contract from corpus pairs, replay-gates it,
@@ -207,8 +213,15 @@ void test_app() {
     );
 
     // With learned facts (from the bundle), the engine knows `my_free` consumes param 0:
-    // Positive consumer sample ALERTS on use_after_free.
-    let scan_pos = frensense_engine::scan::scan(&consumer_pos, &cfg, &learned);
+    // Positive consumer sample ALERTS on use_after_free. The consumer CLI scans
+    // under spec-seeded tables merged with the bundle - mirror that here.
+    let scan_facts = {
+        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
+        let mut t = fact_table_from_spec(spec);
+        t.merge(&learned);
+        t
+    };
+    let scan_pos = frensense_engine::scan::scan(&consumer_pos, &cfg, &scan_facts);
     assert!(
         alerts(&scan_pos),
         "consumer positive sample MUST alert on use_after_free with learned contract; findings: {:?}",
@@ -216,7 +229,7 @@ void test_app() {
     );
 
     // Negative consumer sample remains completely SILENT.
-    let scan_neg = frensense_engine::scan::scan(&consumer_neg, &cfg, &learned);
+    let scan_neg = frensense_engine::scan::scan(&consumer_neg, &cfg, &scan_facts);
     assert!(
         !alerts(&scan_neg),
         "consumer negative sample MUST stay silent with learned contract; findings: {:?}",

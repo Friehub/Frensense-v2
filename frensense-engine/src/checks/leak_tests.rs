@@ -11,11 +11,13 @@ pub mod leak_spec {
     use crate::harness::lower_source;
 
     fn rules(src: &str) -> Vec<String> {
+        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
+        let facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        let summaries = MemorySummaryRegistry::from_facts(&facts);
         let fns = lower_source("t.c", src, "c").unwrap();
-        let summaries = MemorySummaryRegistry::default();
         let mut out: Vec<String> = fns
             .values()
-            .flat_map(|ir| leak::check(ir, &summaries))
+            .flat_map(|ir| leak::check(ir, &summaries, &facts))
             .map(|f| f.rule)
             .collect();
         out.sort();
