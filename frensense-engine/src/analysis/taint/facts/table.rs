@@ -120,8 +120,13 @@ pub struct FactTable {
     /// bundles teach new frameworks without touching the built-in tables.
     pub learned_sources: FxHashSet<String>,
     /// Dynamic node role classifications learned from a `.frc` bundle:
-    /// `(language, node_kind) -> NodeRole`.
-    pub grammar_roles: FxHashMap<(String, String), frensense_lang::NodeRole>,
+    /// `(language, node_kind) -> role`. Stored as the owned
+    /// [`TeachableNodeRole`] (bundle payload type) and converted to a
+    /// `frensense_lang::NodeRole` on lookup, so applying a fact never
+    /// allocates `'static` memory (the previous `Box::leak` intern leaked
+    /// per merge, growing unboundedly in long-lived MCP/LSP processes).
+    pub grammar_roles:
+        FxHashMap<(String, String), crate::analysis::taint::facts::TeachableNodeRole>,
     /// Dynamic grammar features learned from a `.frc` bundle:
     /// `(language, node_kind) -> Set<GrammarFeature>`.
     pub grammar_features: FxHashMap<(String, String), FxHashSet<GrammarFeature>>,
@@ -349,7 +354,7 @@ impl FactTable {
         &self,
         language: &str,
         node_kind: &str,
-    ) -> Option<&frensense_lang::NodeRole> {
+    ) -> Option<frensense_lang::NodeRole> {
         let lang = language.to_lowercase();
         self.grammar_roles
             .get(&(lang, node_kind.to_string()))
@@ -357,6 +362,7 @@ impl FactTable {
                 self.grammar_roles
                     .get(&("*".to_string(), node_kind.to_string()))
             })
+            .map(|r| r.to_node_role())
     }
 
     /// Check if a dynamic AST grammar feature is learned from a `.frc` bundle.
@@ -689,10 +695,9 @@ impl LearnedFactEntry {
                 node_kind,
                 role,
             } => {
-                table.grammar_roles.insert(
-                    (language.to_lowercase(), node_kind.clone()),
-                    role.to_node_role(),
-                );
+                table
+                    .grammar_roles
+                    .insert((language.to_lowercase(), node_kind.clone()), role.clone());
             }
             LearnedFactEntry::GrammarFeature {
                 language,

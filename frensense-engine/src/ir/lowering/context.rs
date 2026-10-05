@@ -88,7 +88,7 @@ impl<'a> LoweringContext<'a> {
         if let Some(facts) = self.facts
             && let Some(role) = facts.get_grammar_role(lang, kind)
         {
-            return role.clone();
+            return role;
         }
         self.spec.classify(kind)
     }

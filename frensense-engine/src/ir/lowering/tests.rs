@@ -45,7 +45,7 @@ fn test_dynamic_grammar_role_and_feature_roundtrip() {
         .get_grammar_role("typescript", "custom_decl")
         .expect("role found");
     assert_eq!(
-        *role,
+        role,
         frensense_lang::NodeRole::Declaration {
             name_field: "target",
             value_field: "source",
@@ -183,11 +183,11 @@ fn test_fact_table_merge_grammar_roles_and_features() {
     // Both roles should be present
     assert_eq!(
         table1.get_grammar_role("javascript", "kind_a"),
-        Some(&frensense_lang::NodeRole::Loop)
+        Some(frensense_lang::NodeRole::Loop)
     );
     assert_eq!(
         table1.get_grammar_role("javascript", "kind_b"),
-        Some(&frensense_lang::NodeRole::Return)
+        Some(frensense_lang::NodeRole::Return)
     );
 
     // Both features on kind_a should be accumulated

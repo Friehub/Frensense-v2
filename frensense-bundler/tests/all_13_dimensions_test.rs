@@ -515,11 +515,11 @@ fn test_dim_11_grammar_syntax_role_mapping() {
 
     assert_eq!(
         facts.get_grammar_role("javascript", "custom_iteration_statement"),
-        Some(&frensense_lang::NodeRole::Loop)
+        Some(frensense_lang::NodeRole::Loop)
     );
     assert_eq!(
         facts.get_grammar_role("python", "yield_expression"),
-        Some(&frensense_lang::NodeRole::Return)
+        Some(frensense_lang::NodeRole::Return)
     );
     assert_eq!(facts.get_grammar_role("javascript", "unknown_node"), None);
 }
