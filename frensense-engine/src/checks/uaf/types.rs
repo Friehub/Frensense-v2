@@ -83,34 +83,16 @@ pub fn finding(
         .and_then(|m| m.source_name.clone())
         .unwrap_or_else(|| format!("v{}", var.0));
     let span = span_var.and_then(|v| ir.var_metadata.get(&v).and_then(|m| m.byte_range));
-    let (rule, message) = match violation {
-        Violation::UseAfterFree => (
-            frensense_lang::rules::USE_AFTER_FREE,
-            format!(
-                "`{name}` is used after the memory it points to was freed \
-                 (free-then-use). Remove the use or the free."
-            ),
-        ),
-        Violation::DoubleFree => (
-            frensense_lang::rules::DOUBLE_FREE,
-            format!(
-                "`{name}` is freed twice (double-free). Remove the second \
-                 free or null the pointer after the first."
-            ),
-        ),
-        Violation::UninitializedFree => (
-            frensense_lang::rules::UNINITIALIZED_FREE,
-            format!(
-                "`{name}` is freed without guaranteed initialization \
-                 (uninitialized pointer free). Initialize before use."
-            ),
-        ),
+    let rule = match violation {
+        Violation::UseAfterFree => frensense_lang::rules::USE_AFTER_FREE,
+        Violation::DoubleFree => frensense_lang::rules::DOUBLE_FREE,
+        Violation::UninitializedFree => frensense_lang::rules::UNINITIALIZED_FREE,
     };
     CheckerFinding {
         function: ir.name.clone(),
         rule: rule.to_string(),
-        message,
-        params: Vec::new(),
+        message: String::new(),
+        params: vec![("name", name)],
         span,
         severity: String::new(),
         provenance: Provenance::Spec,

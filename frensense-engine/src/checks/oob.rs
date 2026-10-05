@@ -181,7 +181,7 @@ fn format_range(lo: i64, hi: i64) -> String {
 fn finding(
     ir: &FunctionIR,
     violation: Violation,
-    message: String,
+    params: Vec<(&'static str, String)>,
     span: Option<(usize, usize)>,
 ) -> CheckerFinding {
     let rule = match violation {
@@ -192,8 +192,8 @@ fn finding(
     CheckerFinding {
         function: ir.name.clone(),
         rule: rule.to_string(),
-        message,
-        params: Vec::new(),
+        message: String::new(),
+        params,
         span,
         severity: String::new(),
         provenance: Provenance::Spec,
@@ -240,29 +240,23 @@ pub fn check_with_summaries(
             findings.push(finding(
                 ir,
                 Violation::OutOfBoundsAccess,
-                format!(
-                    "Out-of-bounds access: index {} for buffer `{}` is negative",
-                    format_range(idx_lo, idx_hi),
-                    name
-                ),
+                vec![("index", format_range(idx_lo, idx_hi)), ("buffer", name)],
                 span,
             ));
         } else if idx_hi >= buf.capacity_lo {
-            let (violation, prefix) = if is_write {
-                (Violation::BufferOverflow, "Buffer overflow")
+            let violation = if is_write {
+                Violation::BufferOverflow
             } else {
-                (Violation::OutOfBoundsRead, "Out-of-bounds read")
+                Violation::OutOfBoundsRead
             };
             findings.push(finding(
                 ir,
                 violation,
-                format!(
-                    "{}: index {} exceeds buffer `{}` capacity {}",
-                    prefix,
-                    format_range(idx_lo, idx_hi),
-                    name,
-                    format_range(buf.capacity_lo, buf.capacity_hi)
-                ),
+                vec![
+                    ("index", format_range(idx_lo, idx_hi)),
+                    ("buffer", name),
+                    ("capacity", format_range(buf.capacity_lo, buf.capacity_hi)),
+                ],
                 span,
             ));
         }
@@ -333,14 +327,15 @@ pub fn check_with_summaries(
                             let cap_desc = format_range(buf.capacity_lo, buf.capacity_hi);
                             let span = var_span(ir, *dst_var).or_else(|| operand_span(ir, len_op));
                             findings.push(finding(
-                                                        ir,
-                                                        Violation::BufferOverflow,
-                                                        format!(
-                                                            "Buffer overflow: write size {} exceeds destination buffer `{}` capacity {}",
-                                                            size_desc, name, cap_desc
-                                                        ),
-                                                        span,
-                                                    ));
+                                ir,
+                                Violation::BufferOverflow,
+                                vec![
+                                    ("size", size_desc),
+                                    ("buffer", name),
+                                    ("capacity", cap_desc),
+                                ],
+                                span,
+                            ));
                         }
 
                         // Check source read bounds
@@ -357,14 +352,15 @@ pub fn check_with_summaries(
                             let cap_desc = format_range(buf.capacity_lo, buf.capacity_hi);
                             let span = var_span(ir, *src_var).or_else(|| operand_span(ir, len_op));
                             findings.push(finding(
-                                                        ir,
-                                                        Violation::OutOfBoundsRead,
-                                                        format!(
-                                                            "Out-of-bounds read: read size {} exceeds source buffer `{}` capacity {}",
-                                                            size_desc, name, cap_desc
-                                                        ),
-                                                        span,
-                                                    ));
+                                ir,
+                                Violation::OutOfBoundsRead,
+                                vec![
+                                    ("size", size_desc),
+                                    ("buffer", name),
+                                    ("capacity", cap_desc),
+                                ],
+                                span,
+                            ));
                         }
                     }
                 }

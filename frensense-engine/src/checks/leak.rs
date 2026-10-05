@@ -553,12 +553,8 @@ pub fn check(ir: &FunctionIR, summaries: &MemorySummaryRegistry) -> Vec<CheckerF
             provenance: Provenance::Spec,
             function: ir.name.clone(),
             rule: frensense_lang::rules::MEMORY_LEAK.to_string(),
-            message: format!(
-                "Memory leak: `{}` result in `{}` is never released, returned, \
-                 or stored before the function returns",
-                alloc.name, ir.name
-            ),
-            params: Vec::new(),
+            message: String::new(),
+            params: vec![("alloc", alloc.name.clone())],
             span,
             severity: String::new(),
         });

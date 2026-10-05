@@ -261,9 +261,12 @@ fn render_observation(
     out
 }
 
-/// Observation templates for the cross-cutting crypto-policy rules no
-/// language registry owns. Returns `None` for rule ids these templates do
-/// not cover (learned bundle rule ids fall through to the generic shape).
+/// Observation templates for the cross-cutting rules no language registry
+/// owns the observation body for (crypto policy, memory safety). Each arm
+/// guards on the params it needs so a finding without them falls through
+/// to the generic shape instead of rendering unfilled placeholders.
+/// Returns `None` for rule ids these templates do not cover (learned
+/// bundle rule ids fall through to the generic shape).
 fn builtin_observation(rule: &str, params: &[(&'static str, String)]) -> Option<&'static str> {
     let has = |key: &str| params.iter().any(|(k, _)| *k == key);
     Some(match rule {
@@ -272,28 +275,28 @@ fn builtin_observation(rule: &str, params: &[(&'static str, String)]) -> Option<
              for passwords or security-sensitive digests (use bcrypt/argon2/scrypt \
              or SHA-256+)"
         }
-        "weak_hash" => {
+        "weak_hash" if has("callee") => {
             "Weak hash function `{callee}`, not acceptable for passwords or \
              security-sensitive digests (use bcrypt/argon2/scrypt or SHA-256+)"
         }
-        crate::rules::WEAK_HASH_WRAPPER => {
+        crate::rules::WEAK_HASH_WRAPPER if has("path") => {
             "Password hashing routed through opaque wrapper `{path}`, verify it \
              uses bcrypt/argon2/scrypt, not MD5/SHA-1"
         }
-        "weak_rsa_key_size" => {
+        "weak_rsa_key_size" if has("min_bits") => {
             "Weak key size passed to `{callee}`: provably below {min_bits} bits \
              (use >= {min_bits} bits for {kind})"
         }
-        "insecure_jwt_algorithm" => {
+        "insecure_jwt_algorithm" if has("sel") => {
             "Insecure configuration: `{callee}` called with insecure selector '{sel}'"
         }
-        crate::rules::SUBSTRING_ALLOWLIST_GUARD => {
+        crate::rules::SUBSTRING_ALLOWLIST_GUARD if has("seg") => {
             "Allowlist validation uses substring containment `{seg}`, bypassable by \
              embedding an allowed URL inside an attacker host \
              (`https://evil.com?https://allowed`). Use exact-match or \
              parse-and-compare-origin instead."
         }
-        crate::rules::CREDENTIAL_KDF_POLICY => {
+        crate::rules::CREDENTIAL_KDF_POLICY if has("seg") => {
             "Credential `{seg}` call receives a plaintext password, password storage \
              must use a memory-hard KDF (bcrypt/argon2/scrypt), not a fast digest \
              wrapper."
@@ -303,6 +306,39 @@ fn builtin_observation(rule: &str, params: &[(&'static str, String)]) -> Option<
              the program, any URL embedding one of these entries passes the guard \
              (`https://evil.com?https://allowed`). Enforce origin-exact matching at \
              the guard."
+        }
+        crate::rules::OUT_OF_BOUNDS_ACCESS if has("index") => {
+            "Out-of-bounds access: index {index} for buffer `{buffer}` is negative"
+        }
+        crate::rules::BUFFER_OVERFLOW if has("index") => {
+            "Buffer overflow: index {index} exceeds buffer `{buffer}` capacity {capacity}"
+        }
+        crate::rules::BUFFER_OVERFLOW if has("size") => {
+            "Buffer overflow: write size {size} exceeds destination buffer `{buffer}` \
+             capacity {capacity}"
+        }
+        crate::rules::OUT_OF_BOUNDS_READ if has("index") => {
+            "Out-of-bounds read: index {index} exceeds buffer `{buffer}` capacity {capacity}"
+        }
+        crate::rules::OUT_OF_BOUNDS_READ if has("size") => {
+            "Out-of-bounds read: read size {size} exceeds source buffer `{buffer}` \
+             capacity {capacity}"
+        }
+        crate::rules::USE_AFTER_FREE if has("name") => {
+            "`{name}` is used after the memory it points to was freed \
+             (free-then-use). Remove the use or the free."
+        }
+        crate::rules::DOUBLE_FREE if has("name") => {
+            "`{name}` is freed twice (double-free). Remove the second \
+             free or null the pointer after the first."
+        }
+        crate::rules::UNINITIALIZED_FREE if has("name") => {
+            "`{name}` is freed without guaranteed initialization \
+             (uninitialized pointer free). Initialize before use."
+        }
+        crate::rules::MEMORY_LEAK if has("alloc") => {
+            "Memory leak: `{alloc}` result in `{function}` is never released, \
+             returned, or stored before the function returns"
         }
         _ => return None,
     })
@@ -496,6 +532,68 @@ mod checker_observation_tests {
              the program, any URL embedding one of these entries passes the guard \
              (`https://evil.com?https://allowed`). Enforce origin-exact matching at \
              the guard."
+        );
+    }
+
+    #[test]
+    fn memory_safety_templates_render_params() {
+        let name = &[("name", "p".into())];
+        assert_eq!(
+            observation(crate::rules::USE_AFTER_FREE, name),
+            "`p` is used after the memory it points to was freed \
+             (free-then-use). Remove the use or the free."
+        );
+        assert_eq!(
+            observation(crate::rules::DOUBLE_FREE, name),
+            "`p` is freed twice (double-free). Remove the second \
+             free or null the pointer after the first."
+        );
+        assert_eq!(
+            observation(crate::rules::UNINITIALIZED_FREE, name),
+            "`p` is freed without guaranteed initialization \
+             (uninitialized pointer free). Initialize before use."
+        );
+        let leak = &[("alloc", "p".into())];
+        assert_eq!(
+            observation(crate::rules::MEMORY_LEAK, leak),
+            "Memory leak: `p` result in `handler` is never released, \
+             returned, or stored before the function returns"
+        );
+    }
+
+    #[test]
+    fn out_of_bounds_templates_pick_shape_by_params() {
+        let index = &[
+            ("index", "[0, 3]".into()),
+            ("buffer", "data".into()),
+            ("capacity", "[0, 7]".into()),
+        ];
+        assert_eq!(
+            observation(crate::rules::OUT_OF_BOUNDS_ACCESS, index),
+            "Out-of-bounds access: index [0, 3] for buffer `data` is negative"
+        );
+        assert_eq!(
+            observation(crate::rules::BUFFER_OVERFLOW, index),
+            "Buffer overflow: index [0, 3] exceeds buffer `data` capacity [0, 7]"
+        );
+        assert_eq!(
+            observation(crate::rules::OUT_OF_BOUNDS_READ, index),
+            "Out-of-bounds read: index [0, 3] exceeds buffer `data` capacity [0, 7]"
+        );
+        let size = &[
+            ("size", "[0, 63]".into()),
+            ("buffer", "dst".into()),
+            ("capacity", "[0, 7]".into()),
+        ];
+        assert_eq!(
+            observation(crate::rules::BUFFER_OVERFLOW, size),
+            "Buffer overflow: write size [0, 63] exceeds destination buffer `dst` \
+             capacity [0, 7]"
+        );
+        assert_eq!(
+            observation(crate::rules::OUT_OF_BOUNDS_READ, size),
+            "Out-of-bounds read: read size [0, 63] exceeds source buffer `dst` \
+             capacity [0, 7]"
         );
     }
 
