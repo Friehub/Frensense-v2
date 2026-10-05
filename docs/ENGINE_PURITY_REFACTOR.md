@@ -201,7 +201,7 @@ precision/recall vs `baseline_scorecard.json` + bundler round-trip
 (`pipeline.rs:97`). No PR may move these numbers unless the PR's intent says
 so.
 
-Status below reflects the tree at `6f1d3cc`. The debt-cleanup series C1-C8
+Status below reflects the tree at `fb42237`. The debt-cleanup series C1-C8
 (formerly tracked in `ENGINE_AUDIT.md`, kept in git history) landed as
 `76deff0` .. `047fb94` on top of Phases 0-3.
 
@@ -234,8 +234,19 @@ pass with unchanged behavior; CLI output byte-identical.
 
 ### Phase 2 - Bundle format v5 (before all knowledge moves)
 
-**Status: pending.** 2.1 designed (version-branched load + `policy_pack`);
-must land before any wire-affecting knowledge change.
+**Status: done** (`2ebe800`, `3850a6f`, `fb42237`). 2.1: version-branched
+load + `policy_pack`. 2.2: `WeakPrimitiveRule`, `KeySizeRule`, the
+insecure-config tuple (promoted to `InsecureConfigRule`) and
+`WeakCryptoFact` carry `severity` + `message`; `weak_hash` findings copy
+the declared severity (`IntegerOverflowRule` reference pattern), the
+ratchet's `lang_policy_refs` tightened 6 -> 3. 2.3: `BundlePattern`
+gains a `rules` join (finding identities from
+`LearnedFactEntry::finding_identities`), v4 patterns load with an empty
+join, and the runner overlays matched patterns onto checker and taint
+advisories (CVSS severity labels -> CLI tiers; observation precedence:
+fact prose > pattern prose > lang template). Accept: v4 bundles load,
+old readers reject v5 with the clean version error, round-trip green,
+A/B 36/36 identical after every PR.
 
 | PR | Change | Key sites |
 |----|--------|-----------|
@@ -286,7 +297,8 @@ and a UAF finding (fails today).
 **Status: partially done.** Check-time `bootstrap_*` unions are gone
 (engine refs = 0: `76deff0`, `9757ef7`, `43f7396`); provenance is
 per-entry in `FactTable` (`73bbc0f`). Remaining: default pack, authored
-ingestion (5.1), provenance-ordered merge flip (5.3) - gated on Phase 2.
+ingestion (5.1), provenance-ordered merge flip (5.3) - Phase 2 gate open
+(`fb42237`).
 
 | PR | Change | Key sites |
 |----|--------|-----------|
