@@ -211,6 +211,7 @@ fn check_rule(
                 learned: false,
                 function: ir.name.clone(),
                 rule: rule.rule_id.clone(),
+                severity: rule.severity.clone(),
                 message: format!(
                     "{}: `{}` ({}..{}) * `{}` ({}..{}) can wrap past {}, \
                      undersizing the `{}` result",

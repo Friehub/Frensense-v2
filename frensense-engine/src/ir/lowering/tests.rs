@@ -8,6 +8,7 @@ use crate::analysis::taint::facts::{
 use crate::harness::lower_source_with_facts;
 use crate::ir::lowering::LoweringContext;
 
+#[cfg(feature = "serialize")]
 #[test]
 fn test_dynamic_grammar_role_and_feature_roundtrip() {
     let entries = vec![

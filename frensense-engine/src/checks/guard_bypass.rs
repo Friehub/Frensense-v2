@@ -119,6 +119,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                          or parse-and-compare-origin instead."
                     ),
                     span,
+                    severity: String::new(),
                 });
             }
         }
@@ -299,6 +300,7 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                          (bcrypt/argon2/scrypt), not a fast digest wrapper."
                     ),
                     span,
+                    severity: String::new(),
                 });
             }
         }
@@ -436,6 +438,7 @@ pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Ve
                         ir.name
                     ),
                     span,
+                    severity: String::new(),
                 });
             }
         }

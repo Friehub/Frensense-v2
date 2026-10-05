@@ -110,6 +110,7 @@ pub fn finding(
         rule: rule.to_string(),
         message,
         span,
+        severity: String::new(),
         learned: false,
     }
 }

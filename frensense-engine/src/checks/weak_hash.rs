@@ -209,6 +209,7 @@ fn check_call(
                     sel, callee_seg
                 ),
                 span,
+                severity: String::new(),
             });
             return; // one finding per call site
         }
@@ -229,6 +230,7 @@ fn check_call(
                     callee_seg
                 ),
                 span,
+                severity: String::new(),
             });
             return;
         }
@@ -257,6 +259,7 @@ fn check_call(
                             sel, callee_seg
                         ),
                         span,
+                        severity: String::new(),
                     });
                     return;
                 }
@@ -270,6 +273,7 @@ fn check_call(
                         callee_seg
                     ),
                     span,
+                    severity: String::new(),
                 });
                 return;
             }
@@ -295,6 +299,7 @@ fn check_call(
                  verify it uses bcrypt/argon2/scrypt, not MD5/SHA-1",
             ),
             span,
+            severity: String::new(),
         });
     }
 
@@ -326,6 +331,7 @@ fn check_call(
                         rule.kind
                     ),
                     span,
+                    severity: String::new(),
                 });
                 return;
             }
@@ -364,6 +370,7 @@ fn check_call(
                         callee_seg
                     ),
                     span,
+                    severity: String::new(),
                 });
                 return;
             }

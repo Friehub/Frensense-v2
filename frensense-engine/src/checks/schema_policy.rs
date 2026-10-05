@@ -107,6 +107,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                              and validate in the handler."
                         ),
                         span: *span,
+                        severity: String::new(),
                     });
                     break;
                 }

@@ -168,6 +168,7 @@ void handler(unsigned long count) {
     }
 
     /// The bundle entry round-trips losslessly through bincode (the .frc codec).
+    #[cfg(feature = "serialize")]
     #[test]
     fn integer_overflow_entry_bincode_roundtrip() {
         use crate::analysis::taint::facts::LearnedFactEntry;

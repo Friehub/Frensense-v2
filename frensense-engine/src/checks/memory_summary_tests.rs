@@ -322,6 +322,7 @@ void caller_negative() {
     }
 
     /// LearnedFactEntry::MemoryContract round-trips losslessly through bincode.
+    #[cfg(feature = "serialize")]
     #[test]
     fn bundle_contract_roundtrip_bincode() {
         use crate::analysis::taint::facts::LearnedFactEntry;

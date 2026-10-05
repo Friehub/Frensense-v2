@@ -66,6 +66,11 @@ pub struct CheckerFinding {
     pub message: String,
     /// Byte range of the violating call in the source file, when known.
     pub span: Option<(usize, usize)>,
+    /// Advisory severity declared by the driving fact (learned check,
+    /// authored policy, or spec rule), copied verbatim. Empty when the
+    /// driving rule declares none; consumers then resolve severity from
+    /// their own rule registry.
+    pub severity: String,
     /// `true` when this finding comes from a corpus-learned rule in the
     /// fact table rather than a built-in seed check.
     pub learned: bool,
@@ -294,6 +299,7 @@ pub(crate) mod learned {
                         rule: fact.rule.clone(),
                         message: fact.message.clone(),
                         span: instr_span(ir, instr),
+                        severity: fact.severity.clone(),
                         learned: true,
                     });
                 }
