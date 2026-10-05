@@ -107,48 +107,25 @@ fn eval_alloc_capacity(
     val_info: &ValueInfo,
     summaries: &MemorySummaryRegistry,
 ) -> Option<(i64, i64)> {
-    let seg = last_segment(func);
-    match seg {
-        "malloc" | "valloc" | "alloca" => {
-            let (lo, hi) = eval_range(args.first()?, block, val_info)?;
+    // Capacity contracts come from the memory-function vocabulary in the
+    // registry (`fact_table_from_spec` seeds it per language; `get`
+    // resolves full names and last segments alike).
+    match summaries.return_capacity(func) {
+        Some(CapacitySpec::Exact(k)) => Some((*k, *k)),
+        Some(CapacitySpec::Param(p_idx)) => {
+            let (lo, hi) = eval_range(args.get(*p_idx)?, block, val_info)?;
             if lo >= 0 { Some((lo, hi)) } else { None }
         }
-        "calloc" => {
-            let (n_lo, n_hi) = eval_range(args.first()?, block, val_info)?;
-            let (sz_lo, sz_hi) = eval_range(args.get(1)?, block, val_info)?;
+        Some(CapacitySpec::ParamProduct(p1, p2)) => {
+            let (n_lo, n_hi) = eval_range(args.get(*p1)?, block, val_info)?;
+            let (sz_lo, sz_hi) = eval_range(args.get(*p2)?, block, val_info)?;
             if n_lo >= 0 && sz_lo >= 0 {
                 Some((n_lo.saturating_mul(sz_lo), n_hi.saturating_mul(sz_hi)))
             } else {
                 None
             }
         }
-        "realloc" | "aligned_alloc" => {
-            let (lo, hi) = eval_range(args.get(1)?, block, val_info)?;
-            if lo >= 0 { Some((lo, hi)) } else { None }
-        }
-        _ => {
-            if let Some(spec) = summaries.return_capacity(func) {
-                match spec {
-                    CapacitySpec::Exact(k) => Some((*k, *k)),
-                    CapacitySpec::Param(p_idx) => {
-                        let (lo, hi) = eval_range(args.get(*p_idx)?, block, val_info)?;
-                        if lo >= 0 { Some((lo, hi)) } else { None }
-                    }
-                    CapacitySpec::ParamProduct(p1, p2) => {
-                        let (n_lo, n_hi) = eval_range(args.get(*p1)?, block, val_info)?;
-                        let (sz_lo, sz_hi) = eval_range(args.get(*p2)?, block, val_info)?;
-                        if n_lo >= 0 && sz_lo >= 0 {
-                            Some((n_lo.saturating_mul(sz_lo), n_hi.saturating_mul(sz_hi)))
-                        } else {
-                            None
-                        }
-                    }
-                    CapacitySpec::Unknown => None,
-                }
-            } else {
-                None
-            }
-        }
+        Some(CapacitySpec::Unknown) | None => None,
     }
 }
 

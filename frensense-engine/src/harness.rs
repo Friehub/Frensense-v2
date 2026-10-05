@@ -131,7 +131,7 @@ pub fn lower_source_with_facts(
             )
         {
             let callee_text = &source[callee.start_byte()..callee.end_byte()];
-            if is_route_registration(callee_text) {
+            if is_route_registration(callee_text, spec) {
                 let mut ac = args.walk();
                 let arg_nodes: Vec<_> = args.named_children(&mut ac).collect();
                 for a in &arg_nodes {
@@ -218,7 +218,12 @@ fn function_name_of(node: tree_sitter::Node, source: &str) -> Option<String> {
 /// extraction branch in [`lower_source_with_facts`]. Always `Some` for a
 /// function node - nameless, unbound ones get the positional `<fn@byte>`
 /// name. Used to resolve an extracted function's lexical parent.
-fn extracted_ancestor_name(fn_node: tree_sitter::Node, source: &str, path: &str) -> Option<String> {
+fn extracted_ancestor_name(
+    fn_node: tree_sitter::Node,
+    source: &str,
+    path: &str,
+    spec: &dyn frensense_lang::spec::LanguageSpec,
+) -> Option<String> {
     // Direct declaration name (function_declaration, method_definition,
     // named function expression) - same order as extraction.
     if let Some(name) = function_name_of(fn_node, source) {
@@ -243,7 +248,7 @@ fn extracted_ancestor_name(fn_node: tree_sitter::Node, source: &str, path: &str)
         && let Some(call) = args.parent()
         && call.kind() == "call_expression"
         && let Some(callee) = call.child_by_field_name("function")
-        && is_route_registration(&source[callee.start_byte()..callee.end_byte()])
+        && is_route_registration(&source[callee.start_byte()..callee.end_byte()], spec)
     {
         return Some(format!("<{}:handler@{}>", path, fn_node.start_byte()));
     }
@@ -262,15 +267,15 @@ fn enclosing_extracted_name(
     let mut cur = node.parent();
     while let Some(ancestor) = cur {
         if spec.is_function_node(ancestor.kind()) {
-            return extracted_ancestor_name(ancestor, source, path);
+            return extracted_ancestor_name(ancestor, source, path, spec);
         }
         cur = ancestor.parent();
     }
     None
 }
 
-fn is_route_registration(callee_text: &str) -> bool {
-    [".post", ".get", ".put", ".delete", ".use", ".all"]
+fn is_route_registration(callee_text: &str, spec: &dyn frensense_lang::spec::LanguageSpec) -> bool {
+    spec.known_route_verbs()
         .iter()
         .any(|s| callee_text.ends_with(s))
 }

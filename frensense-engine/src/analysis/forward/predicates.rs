@@ -133,7 +133,7 @@ pub(crate) fn member_access_path(ir: &FunctionIR, mut base: VarId, last_field: &
     }
     segments.reverse();
     // Drop leading mem-state artifacts if any leaked in.
-    while segments.len() > 1 && segments[0] == "InitialHeapState" {
+    while segments.len() > 1 && segments[0] == crate::ir::function::INITIAL_HEAP_STATE {
         segments.remove(0);
     }
     segments.join(".")

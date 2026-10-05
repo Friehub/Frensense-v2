@@ -175,7 +175,7 @@ impl<'a> ProgramSvfg<'a> {
                                     .var_metadata
                                     .get(&p)
                                     .and_then(|m| m.source_name.as_deref())
-                                    .is_some_and(|name| name == "self" || name == "this")
+                                    .is_some_and(|name| facts.is_receiver_param(name))
                             });
                         let callee_slot = if slot == usize::MAX {
                             if callee_has_recv { Some(0) } else { None }

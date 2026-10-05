@@ -19,6 +19,11 @@ use rustc_hash::FxHashMap;
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct VarId(pub usize);
 
+/// Source name of the hidden memory-state parameter every [`FunctionIR`]
+/// allocates as its `VarId(0)`. Shared by the IR builder (which names the
+/// variable) and path reconstruction (which strips the artifact).
+pub const INITIAL_HEAP_STATE: &str = "InitialHeapState";
+
 /// A unique identifier for a Basic Block in the CFG.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
@@ -318,7 +323,7 @@ impl FunctionIR {
 
         // Allocate the hidden Memory State parameter
         f.initial_memory_state = f.new_var(VarMetadata {
-            source_name: Some("InitialHeapState".into()),
+            source_name: Some(INITIAL_HEAP_STATE.into()),
             type_name: None,
             byte_range: None,
             is_memory_state: true,

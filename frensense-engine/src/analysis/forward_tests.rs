@@ -1050,7 +1050,10 @@ pub mod interprocedural_tests {
             (NodeKey::instr(b, 1, obj), NodeKey::instr(b, 1, val))
         };
 
-        let prog = ProgramSvfg::new(
+        let facts = crate::analysis::taint::facts::fact_table_from_spec(
+            frensense_lang::spec_for_ext("ts").unwrap(),
+        );
+        let prog = ProgramSvfg::new_with_facts(
             &[
                 ("MyClass.method".into(), &callee),
                 ("caller".into(), &caller),
@@ -1058,6 +1061,7 @@ pub mod interprocedural_tests {
             .into_iter()
             .collect(),
             &TaintConfig::default(),
+            &facts,
         );
 
         let caller_idx = prog.function_index("caller").unwrap();

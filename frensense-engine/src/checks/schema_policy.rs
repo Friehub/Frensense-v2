@@ -39,7 +39,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
             } = instr
             {
                 let seg = method.rsplit('.').next().unwrap_or(method);
-                if seg == "describe" || seg == "description" {
+                if facts.is_schema_describe_method(seg) {
                     let text = args.first().and_then(|a| match a {
                         Operand::StringLiteral(s) => Some(s.clone()),
                         _ => None,

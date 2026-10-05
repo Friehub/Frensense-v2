@@ -5,26 +5,12 @@
 use super::*;
 
 impl FactTable {
-    /// Is `last(receiver_root)` a trusted session-store accessor?
-    /// Receiver-aware like [`Self::is_sink_call`]: `authenticatedUsers.get(t)`
-    /// is a session read; `myMap.get(t)` is not.
-    pub fn is_session_accessor(&self, last: &str, receiver_root: Option<&str>) -> bool {
-        self.sanitizer_facts
-            .get(last)
-            .map(|f| f.kind == "session")
-            .unwrap_or(false)
-            || match receiver_root {
-                Some(root) => self.session_roots.contains(root) && last == "get",
-                None => false,
-            }
-    }
-
     /// Session-accessor check over the receiver's full access path.
     /// Session stores are usually namespaced (`security.authenticatedUsers`),
     /// so ANY dotted segment matching a declared root qualifies:
     /// `security.authenticatedUsers.get(t)` hits root `authenticatedUsers`.
     pub fn is_session_path(&self, last: &str, receiver_path: Option<&str>) -> bool {
-        if last != "get" {
+        if !self.is_session_accessor(last) {
             return false;
         }
         let Some(path) = receiver_path else {

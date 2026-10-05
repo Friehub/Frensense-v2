@@ -147,6 +147,22 @@ pub struct FactTable {
     /// Stack-frame allocators (`alloca`, ...) seeded from the spec's
     /// `known_stack_allocators`; leak-style checkers exclude them.
     pub stack_allocators: Vec<String>,
+    /// Collection constructors (`Set`, `Map`) seeded from the spec's
+    /// `known_collection_constructors`; the allowlist-definition check
+    /// reads their literal elements.
+    pub collection_constructors: FxHashSet<String>,
+    /// Schema-describing methods (`describe`, `description`) seeded from
+    /// the spec's `known_schema_describe_methods`.
+    pub schema_describe_methods: FxHashSet<String>,
+    /// String literals that compare as the null pointer (`NULL`) seeded
+    /// from the spec's `known_null_tokens`.
+    pub null_tokens: FxHashSet<String>,
+    /// Read-accessor method names of trusted session stores (`get`)
+    /// seeded from the spec's `known_session_accessors`.
+    pub session_accessors: FxHashSet<String>,
+    /// Formal parameter names receiving the implicit receiver (`self`,
+    /// `this`) seeded from the spec's `known_receiver_params`.
+    pub receiver_params: FxHashSet<String>,
     /// Dynamic IDOR-class query keys learned from a bundle or specification.
     pub idor_keys: FxHashSet<String>,
     /// Dynamic IDOR-class finder sinks learned from a bundle or specification.
@@ -340,6 +356,15 @@ impl FactTable {
         if !other.stack_allocators.is_empty() {
             self.stack_allocators = other.stack_allocators.clone();
         }
+        self.collection_constructors
+            .extend(other.collection_constructors.iter().cloned());
+        self.schema_describe_methods
+            .extend(other.schema_describe_methods.iter().cloned());
+        self.null_tokens.extend(other.null_tokens.iter().cloned());
+        self.session_accessors
+            .extend(other.session_accessors.iter().cloned());
+        self.receiver_params
+            .extend(other.receiver_params.iter().cloned());
         self.idor_keys.extend(other.idor_keys.iter().cloned());
         self.idor_finder_sinks
             .extend(other.idor_finder_sinks.iter().cloned());
@@ -414,6 +439,34 @@ impl FactTable {
         let s = name.rsplit('.').next().unwrap_or(name);
         let s = s.rsplit("::").next().unwrap_or(s);
         self.stack_allocators.iter().any(|a| a == s)
+    }
+
+    /// Is `name` a declared collection constructor (`Set`, `Map`)?
+    pub fn is_collection_ctor(&self, name: &str) -> bool {
+        self.collection_constructors.contains(name)
+    }
+
+    /// Is `name` a schema-describing method (`describe`, `description`)?
+    pub fn is_schema_describe_method(&self, name: &str) -> bool {
+        self.schema_describe_methods.contains(name)
+    }
+
+    /// Does the string literal `s` compare as the language's null pointer?
+    pub fn is_null_token(&self, s: &str) -> bool {
+        self.null_tokens.contains(s)
+    }
+
+    /// Is `last` a read accessor of a trusted session store
+    /// (`authenticatedUsers.get(...)`)? Receiver-aware callers combine
+    /// this with [`Self::session_roots`] via [`Self::is_session_path`].
+    pub fn is_session_accessor(&self, last: &str) -> bool {
+        self.session_accessors.contains(last)
+    }
+
+    /// Is `name` a formal parameter that receives the implicit receiver
+    /// (`self`, `this`)?
+    pub fn is_receiver_param(&self, name: &str) -> bool {
+        self.receiver_params.contains(name)
     }
 
     /// Look up input argument slots that propagate taint through `call`.

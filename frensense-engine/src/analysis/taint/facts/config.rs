@@ -152,6 +152,34 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
         .iter()
         .map(|s| (*s).to_string())
         .collect();
+    // Vocabularies the checks read directly: collection constructors
+    // (allowlist definitions), schema describe methods, null-compare
+    // tokens, session read accessors, receiver parameter names.
+    t.collection_constructors = spec
+        .known_collection_constructors()
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+    t.schema_describe_methods = spec
+        .known_schema_describe_methods()
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+    t.null_tokens = spec
+        .known_null_tokens()
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+    t.session_accessors = spec
+        .known_session_accessors()
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
+    t.receiver_params = spec
+        .known_receiver_params()
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect();
     // Guard/allowlist, credential, schema and URL-hint policy vocabulary:
     // spec-owned, read directly by the checks through these fields.
     t.containment_callees = spec

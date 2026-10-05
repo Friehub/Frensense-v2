@@ -172,7 +172,7 @@ impl<'a> ProgramSvfg<'a> {
         prog.discover_bindings(&callgraph);
         prog.compute_topological_order();
         prog.compute_summaries(config, facts);
-        prog.install_cross_edges();
+        prog.install_cross_edges(facts);
         prog.install_heap_cross_edges();
         prog.install_closure_edges();
         prog

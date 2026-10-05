@@ -667,6 +667,33 @@ pub trait LanguageSpec: Send + Sync + 'static {
         crate::memory::BOOTSTRAP_STACK_ALLOCATORS
     }
 
+    /// Collection constructors (`Set`, `Map`) whose literal elements the
+    /// allowlist-definition check reads through
+    /// `FactTable::collection_constructors`.
+    fn known_collection_constructors(&self) -> &'static [&'static str] {
+        &["Set", "Map"]
+    }
+
+    /// Methods that describe a schema's keys/shape (`describe`,
+    /// `description`) through `FactTable::schema_describe_methods`.
+    fn known_schema_describe_methods(&self) -> &'static [&'static str] {
+        &["describe", "description"]
+    }
+
+    /// String literals that compare as the language's null pointer
+    /// (the C lowering renders the `NULL` macro as the literal `"NULL"`)
+    /// through `FactTable::null_tokens`.
+    fn known_null_tokens(&self) -> &'static [&'static str] {
+        &["NULL"]
+    }
+
+    /// Route-registration call suffixes (`.post`, `.get`, ...) whose
+    /// function arguments the harness extracts as handlers. The entries
+    /// are matched as suffixes of the callee text.
+    fn known_route_verbs(&self) -> &'static [&'static str] {
+        &[".post", ".get", ".put", ".delete", ".use", ".all"]
+    }
+
     /// Containment-test callees (guard/allowlist checks) through
     /// `FactTable::containment_callees`. Defaults to
     /// [`crate::policy::bootstrap_containment_callees`].
@@ -825,6 +852,20 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// attacker-controlled. Empty by default.
     fn known_session_roots(&self) -> &'static [&'static str] {
         &[]
+    }
+
+    /// Read-accessor method names of trusted session stores
+    /// (`authenticatedUsers.get(token)`) through
+    /// `FactTable::session_accessors`.
+    fn known_session_accessors(&self) -> &'static [&'static str] {
+        &["get"]
+    }
+
+    /// Formal parameter names that receive the implicit receiver
+    /// (`self` in Python/Rust, `this` in JavaScript) through
+    /// `FactTable::receiver_params`.
+    fn known_receiver_params(&self) -> &'static [&'static str] {
+        &["self", "this"]
     }
 
     /// Rule ids this language declares with full advisory metadata

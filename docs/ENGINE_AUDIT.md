@@ -192,12 +192,12 @@ Also dead: `signatures.rs:11-20` `is_session_accessor` (zero callers, and its
 
 ## Cleanup checklist
 
-- [ ] Commit the bootstrap-purge work (working tree) with ratchet baseline
-- [ ] C1: predicates prose -> `SinkAlert` (Phase 3.2e)
-- [ ] C2: debug_flags env -> consumer bins
-- [ ] C3: `NodeRole` -> `Cow<'static, str>` (kinds.rs leak)
-- [ ] C4: memory fallbacks -> spec seeding + `FactTable.stack_allocators`
-- [ ] C5: hardcoded vocabulary -> spec/FactTable (table above)
+- [x] Commit the bootstrap-purge work (`02ef4a1`, `b1e0b9d`, `76deff0`)
+- [x] C1: predicates prose -> `SinkAlert` (Phase 3.2e) (`858210d`)
+- [x] C2: debug_flags env -> consumer bins (`0f1c186`)
+- [x] C3: `NodeRole` -> `Cow<'static, str>` (kinds.rs leak) (`9e18fb9`)
+- [x] C4: memory fallbacks -> spec seeding + `FactTable.stack_allocators` (`9757ef7`)
+- [x] C5: hardcoded vocabulary -> spec/FactTable (table above)
 - [ ] C6: per-entry provenance in `FactTable`
 - [ ] C7: dead-code sweep
 - [ ] C8: stale comments + duplication

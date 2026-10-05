@@ -9,7 +9,7 @@ impl<'a> ProgramSvfg<'a> {
     // Step 4: explicit interprocedural edges
     // -----------------------------------------------------------------------
 
-    pub(super) fn install_cross_edges(&mut self) {
+    pub(super) fn install_cross_edges(&mut self, facts: &FactTable) {
         for fi in 0..self.functions.len() {
             let bindings = self.functions[fi].bindings.clone();
             for b in &bindings {
@@ -21,7 +21,7 @@ impl<'a> ProgramSvfg<'a> {
                             .var_metadata
                             .get(&p)
                             .and_then(|m| m.source_name.as_deref())
-                            .is_some_and(|name| name == "self" || name == "this")
+                            .is_some_and(|name| facts.is_receiver_param(name))
                     });
 
                     // Receiver passing: only if callee has a formal receiver parameter.

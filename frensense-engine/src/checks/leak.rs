@@ -506,7 +506,7 @@ pub fn check(
     for _ in 0..max_iters {
         let mut next: FxHashMap<BlockId, PointsTo> = FxHashMap::default();
         for (bid, block) in &ir.blocks {
-            let mut state = join_edges(ir, &defs, &parents, &storage, &out_state, *bid);
+            let mut state = join_edges(ir, &defs, &parents, &storage, &out_state, *bid, facts);
             transfer(summaries, &allocs, &parents, &params, block, &mut state);
             next.insert(*bid, state);
         }
@@ -520,7 +520,7 @@ pub fn check(
     // at a `return` after the return operand's own escape.
     let mut leaked: FxHashSet<VarId> = FxHashSet::default();
     for (bid, block) in &ir.blocks {
-        let mut state = join_edges(ir, &defs, &parents, &storage, &out_state, *bid);
+        let mut state = join_edges(ir, &defs, &parents, &storage, &out_state, *bid, facts);
         transfer(summaries, &allocs, &parents, &params, block, &mut state);
         // Explicit returns and fall-off-the-end blocks (`Terminator::None`,
         // void functions with no trailing `return`) are function exits.
@@ -719,6 +719,7 @@ fn join_edges(
     storage: &FxHashMap<VarId, VarId>,
     out_state: &FxHashMap<BlockId, PointsTo>,
     bid: BlockId,
+    facts: &crate::analysis::taint::facts::FactTable,
 ) -> PointsTo {
     let mut live: PointsTo = PointsTo::default();
     if bid == ir.entry_block {
@@ -737,7 +738,7 @@ fn join_edges(
         let Some(mut p) = out_state.get(pred).cloned() else {
             continue;
         };
-        edge_guard_kill(ir, defs, parents, storage, *pred, bid, &mut p);
+        edge_guard_kill(ir, defs, parents, storage, *pred, bid, &mut p, facts);
         // Phi nodes merge per-edge: this predecessor contributes its own
         // value for the phi argument.
         for phi in &block.phis {
@@ -764,6 +765,7 @@ fn join_edges(
 /// so an allocation bound to one but absent from the other cannot be
 /// live here (`buf` itself, a stack buffer or another pointer, never
 /// holds it).
+#[allow(clippy::too_many_arguments)] // guard plumbing, no meaningful grouping
 fn edge_guard_kill(
     ir: &FunctionIR,
     defs: &FxHashMap<VarId, &Instruction>,
@@ -772,6 +774,7 @@ fn edge_guard_kill(
     pred: BlockId,
     succ: BlockId,
     state: &mut PointsTo,
+    facts: &crate::analysis::taint::facts::FactTable,
 ) {
     let Some(block) = ir.blocks.get(&pred) else {
         return;
@@ -790,10 +793,11 @@ fn edge_guard_kill(
         return;
     };
     // The C lowering renders the NULL macro as either a Null operand or
-    // the string literal "NULL" - both compare as the null pointer.
+    // a string literal; which literals compare as the null pointer is
+    // spec-owned vocabulary (`FactTable::null_tokens`).
     let is_nullish = |o: &Operand| match o {
         Operand::Null | Operand::IntLiteral(0) => true,
-        Operand::StringLiteral(s) => s == "NULL",
+        Operand::StringLiteral(s) => facts.is_null_token(s),
         _ => false,
     };
     let compared = match defs.get(c) {

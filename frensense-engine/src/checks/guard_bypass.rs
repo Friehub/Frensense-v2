@@ -379,7 +379,7 @@ pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Ve
                     _ => continue,
                 };
                 let seg = last_segment(callee);
-                if !matches!(seg, "Set" | "Map") {
+                if !facts.is_collection_ctor(seg) {
                     continue;
                 }
                 // Entries may arrive as direct literal args (legacy union
