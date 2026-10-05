@@ -16,7 +16,7 @@ fn print_help() {
     println!();
     println!("Usage: frensense [path] [options]");
     println!(
-        "       frensense bundle <corpus_dir> [output.frc]  Compile corpus pairs into a .frc bundle"
+        "       frensense bundle [<corpus_dir>] [output.frc] [-c/-o]  Compile corpus pairs into a .frc bundle"
     );
     println!(
         "       frensense watch [path] [options]            Re-scan on file changes, print new findings"
@@ -47,7 +47,7 @@ fn print_help() {
 fn print_bundle_help() {
     println!("Frensense Bundle Compiler: compile corpus pairs into a .frc facts bundle.");
     println!();
-    println!("Usage: frensense bundle <corpus_dir> [output.frc]");
+    println!("Usage: frensense bundle [<corpus_dir>] [output.frc] [-c <dir>] [-o <file>]");
     println!();
     println!("Arguments:");
     println!(
@@ -59,6 +59,11 @@ fn print_bundle_help() {
     println!(
         "  [output.frc]  Destination file for compiled facts bundle (default: frensense-corpus.frc)."
     );
+    println!();
+    println!("Options:");
+    println!("  -c, --corpus <dir>   Set the corpus directory (alternative to <corpus_dir>)");
+    println!("  -o, --output <file>  Set the output path (alternative to [output.frc])");
+    println!("  -h, --help           Print this help");
     println!();
     println!("Workflow:");
     println!("  1. Author a vulnerability concept as a pair of source files in <corpus_dir>:");
@@ -81,25 +86,83 @@ fn print_bundle_help() {
     );
 }
 
+/// Parse arguments following the `bundle` subcommand: positionals fill the
+/// corpus/output slots left-to-right, `-c`/`-o` set them explicitly, and any
+/// other `-` argument is an error. `Ok(None)` means print help and exit 0
+/// (no arguments after `bundle`, or `-h`/`--help`).
+fn parse_bundle_args(
+    args: &[String],
+) -> std::result::Result<Option<(std::path::PathBuf, std::path::PathBuf)>, String> {
+    if args.len() <= 2 {
+        return Ok(None);
+    }
+    let mut corpus: Option<std::path::PathBuf> = None;
+    let mut output: Option<std::path::PathBuf> = None;
+    let mut it = args.iter().skip(2);
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "-h" | "--help" => return Ok(None),
+            "-c" | "--corpus" => {
+                if corpus.is_some() {
+                    return Err(format!("corpus specified twice ({arg})"));
+                }
+                let value = it
+                    .next()
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                corpus = Some(std::path::PathBuf::from(value));
+            }
+            "-o" | "--output" => {
+                if output.is_some() {
+                    return Err(format!("output specified twice ({arg})"));
+                }
+                let value = it
+                    .next()
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                output = Some(std::path::PathBuf::from(value));
+            }
+            other if other.starts_with('-') => {
+                return Err(format!("unknown flag: {other}"));
+            }
+            other => {
+                if corpus.is_none() {
+                    corpus = Some(std::path::PathBuf::from(other));
+                } else if output.is_none() {
+                    output = Some(std::path::PathBuf::from(other));
+                } else {
+                    return Err(format!("unexpected extra argument: {other}"));
+                }
+            }
+        }
+    }
+    let corpus = corpus.ok_or("missing corpus directory")?;
+    Ok(Some((
+        corpus,
+        output.unwrap_or_else(|| std::path::PathBuf::from("frensense-corpus.frc")),
+    )))
+}
+
 fn handle_bundle_command(args: &[String]) -> Result<bool> {
     if args.get(1).map(|s| s.as_str()) != Some("bundle") {
         return Ok(false);
     }
-    if args.len() < 3 || args.iter().any(|a| a == "--help" || a == "-h") {
-        print_bundle_help();
-        std::process::exit(0);
+    match parse_bundle_args(args) {
+        Ok(None) => {
+            print_bundle_help();
+            std::process::exit(0);
+        }
+        Ok(Some((corpus_dir, output_path))) => {
+            if let Err(e) = frensense_bundler::run_facts_pipeline(&corpus_dir, &output_path) {
+                eprintln!("Bundle compilation error: {e}");
+                std::process::exit(1);
+            }
+            Ok(true)
+        }
+        Err(e) => {
+            eprintln!("Error: {e}");
+            eprintln!("Usage: frensense bundle [<corpus_dir>] [output.frc] [-c <dir>] [-o <file>]");
+            std::process::exit(2);
+        }
     }
-    let corpus_dir = std::path::PathBuf::from(&args[2]);
-    let output_path = args
-        .get(3)
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("frensense-corpus.frc"));
-
-    if let Err(e) = frensense_bundler::run_facts_pipeline(&corpus_dir, &output_path) {
-        eprintln!("Bundle compilation error: {e}");
-        std::process::exit(1);
-    }
-    Ok(true)
 }
 
 fn handle_early_args(args: &[String]) -> bool {
@@ -355,4 +418,110 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_bundle_args;
+
+    fn args(rest: &[&str]) -> Vec<String> {
+        std::iter::once("frensense".to_string())
+            .chain(std::iter::once("bundle".to_string()))
+            .chain(rest.iter().map(|s| s.to_string()))
+            .collect()
+    }
+
+    fn paths(
+        result: Result<Option<(std::path::PathBuf, std::path::PathBuf)>, String>,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        result.expect("parse").expect("expected paths, got help")
+    }
+
+    #[test]
+    fn bare_bundle_and_help_print_help() {
+        assert!(parse_bundle_args(&args(&[])).expect("parse").is_none());
+        assert!(
+            parse_bundle_args(&args(&["--help"]))
+                .expect("parse")
+                .is_none()
+        );
+        assert!(
+            parse_bundle_args(&args(&["-c", "dir", "-h"]))
+                .expect("parse")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn positional_pair_parses() {
+        let (corpus, output) = paths(parse_bundle_args(&args(&["mycorpus", "my.frc"])));
+        assert_eq!(corpus, std::path::PathBuf::from("mycorpus"));
+        assert_eq!(output, std::path::PathBuf::from("my.frc"));
+    }
+
+    #[test]
+    fn flag_form_parses() {
+        let (corpus, output) = paths(parse_bundle_args(&args(&[
+            "-c",
+            "corpus/targets",
+            "-o",
+            "frensense-corpus.frc",
+        ])));
+        assert_eq!(corpus, std::path::PathBuf::from("corpus/targets"));
+        assert_eq!(output, std::path::PathBuf::from("frensense-corpus.frc"));
+    }
+
+    #[test]
+    fn long_flag_form_parses() {
+        let (corpus, output) = paths(parse_bundle_args(&args(&[
+            "--corpus", "dir", "--output", "file.frc",
+        ])));
+        assert_eq!(corpus, std::path::PathBuf::from("dir"));
+        assert_eq!(output, std::path::PathBuf::from("file.frc"));
+    }
+
+    #[test]
+    fn flag_corpus_with_positional_output() {
+        let (corpus, output) = paths(parse_bundle_args(&args(&["-c", "dir", "file.frc"])));
+        assert_eq!(corpus, std::path::PathBuf::from("dir"));
+        assert_eq!(output, std::path::PathBuf::from("file.frc"));
+    }
+
+    #[test]
+    fn default_output_applies() {
+        let (corpus, output) = paths(parse_bundle_args(&args(&["mycorpus"])));
+        assert_eq!(corpus, std::path::PathBuf::from("mycorpus"));
+        assert_eq!(output, std::path::PathBuf::from("frensense-corpus.frc"));
+    }
+
+    #[test]
+    fn missing_corpus_is_rejected() {
+        let err = parse_bundle_args(&args(&["-o", "file.frc"])).expect_err("reject");
+        assert!(err.contains("missing corpus directory"), "{err}");
+    }
+
+    #[test]
+    fn unknown_flag_is_rejected() {
+        let err =
+            parse_bundle_args(&args(&["mycorpus", "--policy", "p.toml"])).expect_err("reject");
+        assert!(err.contains("unknown flag: --policy"), "{err}");
+    }
+
+    #[test]
+    fn missing_flag_value_is_rejected() {
+        let err = parse_bundle_args(&args(&["-c"])).expect_err("reject");
+        assert!(err.contains("missing value for -c"), "{err}");
+    }
+
+    #[test]
+    fn duplicate_flag_is_rejected() {
+        let err = parse_bundle_args(&args(&["-c", "a", "-c", "b"])).expect_err("reject");
+        assert!(err.contains("corpus specified twice"), "{err}");
+    }
+
+    #[test]
+    fn extra_positional_is_rejected() {
+        let err = parse_bundle_args(&args(&["a", "b", "c"])).expect_err("reject");
+        assert!(err.contains("unexpected extra argument: c"), "{err}");
+    }
 }

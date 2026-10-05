@@ -15,7 +15,7 @@ use super::frc::{read_bundle_parts, BundleHeader};
 
 /// Per-family advisory metadata.
 ///
-/// The facts pipeline (`--facts`) writes one pattern per corpus family
+/// The facts pipeline writes one pattern per corpus family
 /// carrying the human-facing advisory fields (CWE, CVSS, OWASP, severity).
 /// Flow knowledge is NOT here, it is in `learned_facts`, which the engine
 /// consumes.
@@ -105,8 +105,8 @@ pub struct BundlePayloadV5 {
     /// positive/negative pairs, replay-verified at bundle build time.
     #[serde(default)]
     pub learned_facts: Vec<LearnedFactEntry>,
-    /// Hand-authored `policy.toml` rules (D2); empty until a bundle is
-    /// built with `--policy`.
+    /// Reserved direct-assertion section (D2 cancelled: corpus-only
+    /// authoring); ships empty.
     #[serde(default)]
     pub policy_pack: Vec<AuthoredPolicyEntry>,
 }
