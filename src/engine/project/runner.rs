@@ -492,4 +492,24 @@ mod checker_observation_tests {
              or SHA-256+)"
         );
     }
+
+    #[test]
+    fn credential_kdf_renders_lang_observation() {
+        let advisories = scan_temp(
+            "kdf",
+            "app.ts",
+            "export function storePassword (clearTextPassword: string) {\n  \
+             return security.hash(clearTextPassword)\n}\n",
+        );
+        let finding = advisories
+            .iter()
+            .find(|a| a.tags.iter().any(|t| t == "credential_kdf_policy"))
+            .expect("credential_kdf_policy finding");
+        assert_eq!(
+            finding.observation,
+            "Credential `hash` call receives a plaintext password, password storage \
+             must use a memory-hard KDF (bcrypt/argon2/scrypt), not a fast digest \
+             wrapper."
+        );
+    }
 }

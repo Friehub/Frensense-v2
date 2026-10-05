@@ -117,13 +117,8 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                     },
                     function: ir.name.clone(),
                     rule: frensense_lang::rules::SUBSTRING_ALLOWLIST_GUARD.to_string(),
-                    message: format!(
-                        "Allowlist validation uses substring containment `{seg}`, \
-                         bypassable by embedding an allowed URL inside an attacker \
-                         host (`https://evil.com?https://allowed`). Use exact-match \
-                         or parse-and-compare-origin instead."
-                    ),
-                    params: Vec::new(),
+                    message: String::new(),
+                    params: vec![("seg", seg.to_string())],
                     span,
                     severity: String::new(),
                 });
@@ -304,12 +299,8 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                     },
                     function: ir.name.clone(),
                     rule: frensense_lang::rules::CREDENTIAL_KDF_POLICY.to_string(),
-                    message: format!(
-                        "Credential `{seg}` call receives a plaintext password, \
-                         password storage must use a memory-hard KDF \
-                         (bcrypt/argon2/scrypt), not a fast digest wrapper."
-                    ),
-                    params: Vec::new(),
+                    message: String::new(),
+                    params: vec![("seg", seg.to_string())],
                     span,
                     severity: String::new(),
                 });
@@ -461,10 +452,7 @@ pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Ve
                     provenance: guard_provenance,
                     function: ir.name.clone(),
                     rule: frensense_lang::rules::ALLOWLIST_DEFINITION_BYPASSABLE.to_string(),
-                    message: format!(
-                        "Allowlist `{}` is enforced by substring containment elsewhere in                          the program, any URL embedding one of these entries passes the                          guard (`https://evil.com?https://allowed`). Enforce                          origin-exact matching at the guard.",
-                        ir.name
-                    ),
+                    message: String::new(),
                     params: Vec::new(),
                     span,
                     severity: String::new(),

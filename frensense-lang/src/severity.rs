@@ -287,6 +287,23 @@ fn builtin_observation(rule: &str, params: &[(&'static str, String)]) -> Option<
         "insecure_jwt_algorithm" => {
             "Insecure configuration: `{callee}` called with insecure selector '{sel}'"
         }
+        crate::rules::SUBSTRING_ALLOWLIST_GUARD => {
+            "Allowlist validation uses substring containment `{seg}`, bypassable by \
+             embedding an allowed URL inside an attacker host \
+             (`https://evil.com?https://allowed`). Use exact-match or \
+             parse-and-compare-origin instead."
+        }
+        crate::rules::CREDENTIAL_KDF_POLICY => {
+            "Credential `{seg}` call receives a plaintext password, password storage \
+             must use a memory-hard KDF (bcrypt/argon2/scrypt), not a fast digest \
+             wrapper."
+        }
+        crate::rules::ALLOWLIST_DEFINITION_BYPASSABLE => {
+            "Allowlist `{function}` is enforced by substring containment elsewhere in \
+             the program, any URL embedding one of these entries passes the guard \
+             (`https://evil.com?https://allowed`). Enforce origin-exact matching at \
+             the guard."
+        }
         _ => return None,
     })
 }
@@ -451,6 +468,34 @@ mod checker_observation_tests {
             obs,
             "learned_md5_policy violated in `handler` at a.ts:7 \
              (callee=createHash, sel=md5)."
+        );
+    }
+
+    #[test]
+    fn guard_rules_render_verbatim_prose() {
+        let seg = &[("seg", "includes".into())];
+        assert_eq!(
+            observation(crate::rules::SUBSTRING_ALLOWLIST_GUARD, seg),
+            "Allowlist validation uses substring containment `includes`, bypassable by \
+             embedding an allowed URL inside an attacker host \
+             (`https://evil.com?https://allowed`). Use exact-match or \
+             parse-and-compare-origin instead."
+        );
+        assert_eq!(
+            observation(
+                crate::rules::CREDENTIAL_KDF_POLICY,
+                &[("seg", "hash".into())]
+            ),
+            "Credential `hash` call receives a plaintext password, password storage \
+             must use a memory-hard KDF (bcrypt/argon2/scrypt), not a fast digest \
+             wrapper."
+        );
+        assert_eq!(
+            observation(crate::rules::ALLOWLIST_DEFINITION_BYPASSABLE, &[]),
+            "Allowlist `handler` is enforced by substring containment elsewhere in \
+             the program, any URL embedding one of these entries passes the guard \
+             (`https://evil.com?https://allowed`). Enforce origin-exact matching at \
+             the guard."
         );
     }
 
