@@ -156,16 +156,8 @@ pub fn check(
     let val_info = value::analyze(ir);
     let mut out = Vec::new();
     let mut seen: FxHashSet<(String, u128)> = FxHashSet::default();
-    for (rule, provenance) in frensense_lang::policy::bootstrap_integer_overflow_rules()
-        .iter()
-        .map(|r| (r, Provenance::Spec))
-        .chain(
-            facts
-                .integer_overflow_rules
-                .iter()
-                .map(|r| (r, Provenance::Learned)),
-        )
-    {
+    for rule in &facts.integer_overflow_rules {
+        let provenance = Provenance::Spec;
         if !seen.insert((rule.rule_id.clone(), rule.wrap_threshold)) {
             continue;
         }

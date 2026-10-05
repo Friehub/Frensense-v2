@@ -22,9 +22,10 @@ use crate::checks::CheckerFinding;
 use crate::checks::Provenance;
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
-// Weak-hash, key-size and insecure-selector policy tables live in
-// `frensense_lang::policy` (spec-extendable via `FactTable::weak_hash_rules`,
-// `key_size_rules`, `insecure_config_selectors`, `suspicious_hash_wrappers`).
+// Weak-hash, key-size and insecure-selector policy tables are FACT DATA:
+// the engine reads only `FactTable` fields, seeded by the language spec
+// (`fact_table_from_spec`) and extended by `.frc` bundles. No bootstrap
+// vocabulary is referenced from this module.
 
 fn strip_quotes(lit: &str) -> &str {
     let lit = lit.trim();
@@ -56,11 +57,7 @@ fn receiver_path(
     // needs cross-function info; the corpus replay gate (task 9) is the
     // mechanism that learns wrapper→primitive mappings from pairs.
     let n = ir.name.to_ascii_lowercase();
-    if frensense_lang::policy::bootstrap_security_context_hints()
-        .iter()
-        .any(|h| n.contains(h))
-        || facts.security_context_hints.iter().any(|h| n.contains(h))
-    {
+    if facts.security_context_hints.iter().any(|h| n.contains(h)) {
         return Some(ir.name.clone());
     }
     None
@@ -179,16 +176,8 @@ fn check_call(
     let callee_seg = last_segment(callee);
     let callee_lower = callee_seg.to_ascii_lowercase();
 
-    for (rule, provenance) in frensense_lang::policy::bootstrap_weak_hash_rules()
-        .iter()
-        .map(|r| (r, Provenance::Spec))
-        .chain(
-            facts
-                .weak_hash_rules
-                .iter()
-                .map(|r| (r, Provenance::Learned)),
-        )
-    {
+    for rule in &facts.weak_hash_rules {
+        let provenance = Provenance::Spec;
         // Selector shape: `createHash('md5')`. Rules with
         // `requires_credential_context` fire only inside credential-named
         // functions or with credential-named parameters (a general-purpose
@@ -279,20 +268,12 @@ fn check_call(
     // receiver is a security-ish namespace. Matched by last segment of the
     // receiver chain when available; bare `hash(x)` is too generic to flag
     // on its own, so require a known crypto-receiver qualification.
-    let spec_wrapper = frensense_lang::policy::bootstrap_suspicious_hash_wrappers()
-        .contains(&callee_lower.as_str());
-    let learned_wrapper = facts
+    let spec_wrapper = facts
         .suspicious_hash_wrappers
         .contains(callee_lower.as_str());
-    if (spec_wrapper || learned_wrapper)
-        && let Some(path) = receiver_path(ir, args, callee, facts)
-    {
+    if spec_wrapper && let Some(path) = receiver_path(ir, args, callee, facts) {
         out.push(CheckerFinding {
-            provenance: if learned_wrapper && !spec_wrapper {
-                Provenance::Learned
-            } else {
-                Provenance::Spec
-            },
+            provenance: Provenance::Spec,
             function: ir.name.clone(),
             rule: frensense_lang::rules::WEAK_HASH_WRAPPER.to_string(),
             message: String::new(),
@@ -306,16 +287,8 @@ fn check_call(
     // argument is a PROVABLE CONSTANT below the security floor. The value
     // lattice resolves `const bits = 512; generateKey(bits)` the same as a
     // direct literal, so wrapper indirection doesn't hide the weakness.
-    for (rule, provenance) in frensense_lang::policy::bootstrap_key_size_rules()
-        .iter()
-        .map(|r| (r, Provenance::Spec))
-        .chain(
-            facts
-                .key_size_rules
-                .iter()
-                .map(|r| (r, Provenance::Learned)),
-        )
-    {
+    for rule in &facts.key_size_rules {
+        let provenance = Provenance::Spec;
         if last_segment(rule.call).to_ascii_lowercase() != callee_lower {
             continue;
         }
@@ -344,16 +317,10 @@ fn check_call(
 
     // Insecure literal selectors (`{ algorithm: 'none' }` shapes land here
     // once object literals are flattened; for now the string form).
-    for ((prefix, selectors, rule_id), provenance) in
-        frensense_lang::policy::bootstrap_insecure_config_selectors()
-            .iter()
-            .map(|t| (t, Provenance::Spec))
-            .chain(
-                facts
-                    .insecure_config_selectors
-                    .iter()
-                    .map(|t| (t, Provenance::Learned)),
-            )
+    for (prefix, selectors, rule_id, provenance) in facts
+        .insecure_config_selectors
+        .iter()
+        .map(|(prefix, selectors, rule_id)| (*prefix, *selectors, *rule_id, Provenance::Spec))
     {
         // Match the full dotted call path (`jwt.verify`) or the callee
         // (`jwtChallenge`); only a *verifier* accepting an insecure
@@ -391,12 +358,7 @@ fn check_call(
 /// (`known_jwt_algorithm_hints`, bootstrap fallback) - harness wrappers
 /// that merely embed the literal stay silent.
 fn jwt_algorithm_context(path: &str, callee: &str, facts: &FactTable) -> bool {
-    let matches = |s: &str| {
-        frensense_lang::policy::bootstrap_jwt_algorithm_hints()
-            .iter()
-            .any(|h| s.contains(h))
-            || facts.jwt_algorithm_hints.iter().any(|h| s.contains(h))
-    };
+    let matches = |s: &str| facts.jwt_algorithm_hints.iter().any(|h| s.contains(h));
     matches(path) || matches(callee)
 }
 
@@ -410,10 +372,7 @@ fn jwt_algorithm_context(path: &str, callee: &str, facts: &FactTable) -> bool {
 fn in_credential_context(ir: &FunctionIR, facts: &FactTable) -> bool {
     let hint_match = |s: &str| {
         let l = s.to_ascii_lowercase();
-        frensense_lang::policy::bootstrap_credential_context_hints()
-            .iter()
-            .any(|h| l.contains(h))
-            || facts.credential_context_hints.iter().any(|h| l.contains(h))
+        facts.credential_context_hints.iter().any(|h| l.contains(h))
     };
     if hint_match(&ir.name) {
         return true;

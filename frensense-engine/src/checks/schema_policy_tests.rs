@@ -14,6 +14,13 @@ pub mod schema_policy_tests {
     use crate::checks::check_all;
     use crate::harness::lower_source;
 
+    /// Spec-seeded table: the checks read `FactTable` only, so test
+    /// fixtures must seed the vocabulary exactly like a production scan.
+    fn ts_facts() -> FactTable {
+        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
+        crate::analysis::taint::facts::fact_table_from_spec(spec)
+    }
+
     /// The chatbot tool-schema shape: a z.number() whose describe text
     /// declares a maximum in prose, with no .max() enforcement anywhere.
     const UNBOUNDED: &str = r#"
@@ -34,7 +41,7 @@ export const tools = {
 
     fn run(src: &str) -> Vec<crate::checks::CheckerFinding> {
         let irs = lower_source("test.ts", src, "ts").expect("lower");
-        check_all(irs.values(), &FactTable::default())
+        check_all(irs.values(), &ts_facts())
     }
 
     #[test]
@@ -139,7 +146,7 @@ export const isRedirectAllowed = (url: string) => redirectAllowlist.has(url)
     /// Learned schema builder positive & negative test.
     #[test]
     fn learned_schema_builder_positive_and_negative() {
-        let mut facts = FactTable::default();
+        let mut facts = ts_facts();
         facts.schema_builders.insert("customQuantity".into());
 
         // Positive sample: custom builder with prose bound without enforcement
@@ -175,7 +182,7 @@ export const schema = {
     /// Learned schema enforcer positive & negative test.
     #[test]
     fn learned_schema_enforcer_positive_and_negative() {
-        let mut facts = FactTable::default();
+        let mut facts = ts_facts();
         facts.schema_enforcers.insert("customClamp".into());
 
         // Positive sample: standard number builder with prose bound, but lacking customClamp
@@ -214,7 +221,7 @@ export const schema = {
     /// Learned bound keyword positive & negative test.
     #[test]
     fn learned_bound_keyword_positive_and_negative() {
-        let mut facts = FactTable::default();
+        let mut facts = ts_facts();
         facts.schema_keywords.insert("ceiling".into());
 
         // Positive sample: description uses 'ceiling 100' without enforcer

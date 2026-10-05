@@ -11,6 +11,13 @@ pub mod value_spec {
     use crate::analysis::value::{Value, analyze};
     use crate::harness::lower_source;
 
+    /// Spec-seeded table: the checks read `FactTable` only, so test
+    /// fixtures must seed the vocabulary exactly like a production scan.
+    fn ts_facts() -> crate::analysis::taint::facts::FactTable {
+        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
+        crate::analysis::taint::facts::fact_table_from_spec(spec)
+    }
+
     fn var_of<'a>(
         info: &'a crate::analysis::value::ValueInfo,
         ir: &'a crate::ir::function::FunctionIR,
@@ -193,7 +200,7 @@ export function makeKey () {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = crate::analysis::taint::facts::FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| weak_hash::check(ir, &facts))
@@ -212,7 +219,7 @@ export function makeKey () {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = crate::analysis::taint::facts::FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| weak_hash::check(ir, &facts))
@@ -229,7 +236,7 @@ export function makeKey (bits: number) {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = crate::analysis::taint::facts::FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| weak_hash::check(ir, &facts))
@@ -256,7 +263,7 @@ export function signToken (payload: string, secret: string) {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = crate::analysis::taint::facts::FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| weak_hash::check(ir, &facts))

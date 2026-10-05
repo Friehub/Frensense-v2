@@ -11,6 +11,13 @@ pub mod int_overflow_spec {
     use crate::checks::memory_summary::MemorySummaryRegistry;
     use crate::harness::lower_source;
 
+    /// Spec-seeded table: the checks read `FactTable` only, so test
+    /// fixtures must seed the vocabulary exactly like a production scan.
+    fn ts_facts() -> FactTable {
+        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
+        crate::analysis::taint::facts::fact_table_from_spec(spec)
+    }
+
     fn hits(src: &str, facts: &FactTable) -> Vec<String> {
         let fns = lower_source("t.c", src, "c").unwrap();
         let summaries = MemorySummaryRegistry::default();
@@ -36,7 +43,7 @@ void handler(unsigned long count) {
   (void)p;
 }
 "#;
-        let rules = hits(src, &FactTable::default());
+        let rules = hits(src, &ts_facts());
         assert!(
             rules.contains(&"integer_overflow_alloc".to_string()),
             "expected integer_overflow_alloc to fire: {:?}",
@@ -56,7 +63,7 @@ void handler(unsigned long count) {
   (void)p;
 }
 "#;
-        let rules = hits(src, &FactTable::default());
+        let rules = hits(src, &ts_facts());
         assert!(
             rules.is_empty(),
             "guarded site must stay silent: {:?}",
@@ -74,7 +81,7 @@ void handler(unsigned long count) {
   (void)p;
 }
 "#;
-        let rules = hits(src, &FactTable::default());
+        let rules = hits(src, &ts_facts());
         assert!(rules.is_empty(), "unprovable range must skip: {:?}", rules);
     }
 
@@ -89,7 +96,7 @@ void handler(unsigned long count) {
   (void)bytes;
 }
 "#;
-        let rules = hits(src, &FactTable::default());
+        let rules = hits(src, &ts_facts());
         assert!(
             rules.is_empty(),
             "no alloc provenance must skip: {:?}",
@@ -109,7 +116,7 @@ void handler(unsigned long count) {
   (void)p;
 }
 "#;
-        let rules = hits(src, &FactTable::default());
+        let rules = hits(src, &ts_facts());
         assert!(rules.is_empty(), "calloc must stay silent: {:?}", rules);
     }
 
@@ -123,7 +130,7 @@ void handler() {
   (void)p;
 }
 "#;
-        let rules = hits(src, &FactTable::default());
+        let rules = hits(src, &ts_facts());
         assert!(
             rules.is_empty(),
             "constant size must stay silent: {:?}",
@@ -145,7 +152,7 @@ void handler(unsigned long count) {
   (void)p;
 }
 "#;
-        let mut facts = FactTable::default();
+        let mut facts = ts_facts();
         facts
             .integer_overflow_rules
             .push(frensense_lang::policy::IntegerOverflowRule {

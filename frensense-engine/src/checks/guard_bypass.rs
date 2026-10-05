@@ -37,10 +37,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
         .collect();
     let has_url_param = param_names.iter().any(|n| {
         let l = n.to_ascii_lowercase();
-        frensense_lang::policy::bootstrap_url_param_hints()
-            .iter()
-            .any(|h| l.contains(h))
-            || facts.url_param_hints.iter().any(|h| l.contains(h))
+        facts.url_param_hints.iter().any(|h| l.contains(h))
     });
 
     for block in ir.blocks.values() {
@@ -59,11 +56,11 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                 _ => continue,
             };
             let seg = last_segment(callee);
-            let is_builtin = frensense_lang::policy::bootstrap_containment_callees().contains(&seg);
-            let is_learned = facts
+            let is_builtin = facts
                 .containment_callees
                 .iter()
                 .any(|c| c.eq_ignore_ascii_case(seg));
+            let is_learned = is_builtin;
             if !is_builtin && !is_learned {
                 continue;
             }
@@ -77,10 +74,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                 })
                 .map(|n| {
                     let l = n.to_ascii_lowercase();
-                    frensense_lang::policy::bootstrap_url_param_hints()
-                        .iter()
-                        .any(|h| l.contains(h))
-                        || facts.url_param_hints.iter().any(|h| l.contains(h))
+                    facts.url_param_hints.iter().any(|h| l.contains(h))
                 })
                 .unwrap_or(false);
             let arg_is_urlish = args.iter().any(|a| match a {
@@ -90,10 +84,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                     .and_then(|m| m.source_name.clone())
                     .map(|n| {
                         let l = n.to_ascii_lowercase();
-                        frensense_lang::policy::bootstrap_url_arg_hints()
-                            .iter()
-                            .any(|h| l.contains(h))
-                            || facts.url_arg_hints.iter().any(|h| l.contains(h))
+                        facts.url_arg_hints.iter().any(|h| l.contains(h))
                     })
                     .unwrap_or(false),
                 _ => false,
@@ -246,12 +237,11 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                 _ => continue,
             };
             let seg = last_segment(callee);
-            let is_builtin_sink =
-                frensense_lang::policy::bootstrap_credential_sinks().contains(&seg);
-            let is_learned_sink = facts
+            let is_builtin_sink = facts
                 .credential_sinks
                 .iter()
                 .any(|s| s.eq_ignore_ascii_case(seg));
+            let is_learned_sink = is_builtin_sink;
             if !is_builtin_sink && !is_learned_sink {
                 continue;
             }
@@ -263,9 +253,6 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                     .and_then(|m| m.source_name.clone())
                     .map(|n| {
                         let l = n.to_ascii_lowercase();
-                        let builtin = frensense_lang::policy::bootstrap_credential_params()
-                            .iter()
-                            .any(|c| l == c.to_ascii_lowercase());
                         let learned = facts
                             .credential_params
                             .iter()
@@ -273,7 +260,7 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                         if learned {
                             matched_learned = true;
                         }
-                        builtin || learned
+                        learned
                     })
                     .unwrap_or(false),
                 _ => false,
@@ -421,11 +408,7 @@ pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Ve
                 for a in args.iter().chain(stored.iter().copied()) {
                     if let Operand::StringLiteral(s) = a {
                         let l = s.to_ascii_lowercase();
-                        if frensense_lang::policy::bootstrap_url_literal_hints()
-                            .iter()
-                            .any(|h| l.contains(h))
-                            || facts.url_literal_hints.iter().any(|h| l.contains(h))
-                        {
+                        if facts.url_literal_hints.iter().any(|h| l.contains(h)) {
                             urlish = true;
                             // The entry literal's own span: the concrete
                             // allowlist item an attacker embeds. Prefer it

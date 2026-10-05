@@ -213,7 +213,10 @@ pub fn check_with_summaries(
     summaries: &MemorySummaryRegistry,
     facts: &FactTable,
 ) -> Vec<CheckerFinding> {
-    // Buffer vocabulary: spec-seeded, bootstrap fallback when empty.
+    // Buffer vocabulary: spec-seeded via `fact_table_from_spec`. An empty
+    // field means the caller built a bare table (tests, tools); the lang
+    // bootstrap table then provides the C baseline so the check stays
+    // usable without a spec. Production scans always seed the field.
     let buffer_builtins: &[frensense_lang::memory::BufferBuiltinSpec] =
         if facts.buffer_builtins.is_empty() {
             frensense_lang::memory::bootstrap_buffer_builtins()

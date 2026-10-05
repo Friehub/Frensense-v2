@@ -12,6 +12,13 @@ pub mod guard_bypass_tests {
     use crate::checks::guard_bypass;
     use crate::harness::lower_source;
 
+    /// Spec-seeded table: the checks read `FactTable` only, so test
+    /// fixtures must seed the vocabulary exactly like a production scan.
+    fn ts_facts() -> FactTable {
+        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
+        crate::analysis::taint::facts::fact_table_from_spec(spec)
+    }
+
     /// The redirectChallenge shape: allowlist validation by substring
     /// containment over attacker-controlled URL input.
     #[test]
@@ -26,7 +33,7 @@ export const isRedirectAllowed = (url: string) => {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| guard_bypass::check(ir, &facts))
@@ -45,7 +52,7 @@ export function hasItem (items: string[], needle: string) {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| guard_bypass::check(ir, &facts))
@@ -66,7 +73,7 @@ export const auditUrl = (url: string) => {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| guard_bypass::check(ir, &facts))
@@ -90,7 +97,7 @@ export const isRedirectAllowed = (url: string) => {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| guard_bypass::check(ir, &facts))
@@ -112,7 +119,7 @@ export function storePassword (clearTextPassword: string) {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| guard_bypass::check_credentials(ir, &facts))
@@ -135,7 +142,7 @@ export function verifyLogin (password: string, stored: string) {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| guard_bypass::check_credentials(ir, &facts))
@@ -155,7 +162,7 @@ export function cacheKey (userId: string) {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| guard_bypass::check_credentials(ir, &facts))
@@ -166,7 +173,7 @@ export function cacheKey (userId: string) {
     /// Learned containment callee positive & negative test.
     #[test]
     fn learned_containment_callee_positive_and_negative() {
-        let mut facts = FactTable::default();
+        let mut facts = ts_facts();
         facts.containment_callees.insert("customSubstrMatch".into());
 
         // Positive sample: uses customSubstrMatch for allowlist validation on URL
@@ -210,7 +217,7 @@ export const isRedirectAllowed = (url: string) => {
     /// Learned credential sink & param positive & negative test.
     #[test]
     fn learned_credential_sink_and_param_positive_and_negative() {
-        let mut facts = FactTable::default();
+        let mut facts = ts_facts();
         facts.credential_sinks.insert("customFastDigest".into());
         facts.credential_params.insert("clientSecretToken".into());
 

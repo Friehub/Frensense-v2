@@ -34,13 +34,22 @@ use frensense_engine::checks::Provenance;
 use frensense_engine::scan::scan;
 
 fn make_bundle(facts: Vec<LearnedFactEntry>) -> FactTable {
+    // Production scans merge bundle facts OVER spec-seeded tables
+    // (`tables_from_exts` in the runner); mirror that here so the fixtures
+    // exercise the real seeding order. The engine reads `FactTable` only,
+    // so a bare bundle table would hide the spec vocabulary from checks.
+    let mut table = {
+        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
+        frensense_engine::analysis::taint::facts::fact_table_from_spec(spec)
+    };
     let payload = BundlePayload {
         patterns: vec![],
         learned_facts: facts,
     };
     let bytes = write_bundle(&payload, 0).expect("write bundle");
     let loaded = load_bundle(&bytes).expect("load bundle");
-    fact_table_from_entries(&loaded.learned_facts)
+    table.merge(&fact_table_from_entries(&loaded.learned_facts));
+    table
 }
 
 // ── Dimension 1: Dangerous Sinks ──────────────────────────────────────────

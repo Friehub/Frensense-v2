@@ -10,9 +10,17 @@ pub mod checker_tests {
     use crate::checks::check_all;
     use crate::harness::lower_source;
 
+    /// Spec-seeded table: the checks read `FactTable` only, so test
+    /// fixtures must seed the vocabulary exactly like a production scan
+    /// (`tables_from_exts`) does.
+    fn ts_facts() -> FactTable {
+        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
+        crate::analysis::taint::facts::fact_table_from_spec(spec)
+    }
+
     fn check(src: &str) -> Vec<(String, String)> {
         let fns = lower_source("test.ts", src, "ts").expect("lowering failed");
-        check_all(fns.values(), &FactTable::default())
+        check_all(fns.values(), &ts_facts())
             .into_iter()
             .map(|f| (f.function, f.rule))
             .collect()

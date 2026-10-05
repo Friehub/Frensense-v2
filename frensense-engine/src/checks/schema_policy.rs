@@ -58,16 +58,17 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                             });
                         described.push((text, span));
                     }
-                } else if frensense_lang::policy::bootstrap_schema_enforcers().contains(&seg)
-                    || facts
-                        .schema_enforcers
-                        .iter()
-                        .any(|e| e.eq_ignore_ascii_case(seg))
+                } else if facts
+                    .schema_enforcers
+                    .iter()
+                    .any(|e| e.eq_ignore_ascii_case(seg))
                 {
                     enforcers.push(seg);
                 } else {
-                    let is_builtin_builder =
-                        frensense_lang::policy::bootstrap_schema_builders().contains(&seg);
+                    let is_builtin_builder = facts
+                        .schema_builders
+                        .iter()
+                        .any(|b| b.eq_ignore_ascii_case(seg));
                     let is_learned_builder = facts
                         .schema_builders
                         .iter()
@@ -87,13 +88,11 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
         for (_builder, builder_learned, span) in &builders {
             for (text, _dspan) in &described {
                 let lower = text.to_ascii_lowercase();
-                let is_builtin_keyword = frensense_lang::policy::bootstrap_schema_keywords()
-                    .iter()
-                    .any(|k| lower.contains(k));
-                let is_learned_keyword = facts
+                let is_builtin_keyword = facts
                     .schema_keywords
                     .iter()
                     .any(|k| lower.contains(&k.to_ascii_lowercase()));
+                let is_learned_keyword = is_builtin_keyword;
                 if (is_builtin_keyword || is_learned_keyword)
                     && lower.chars().any(|c| c.is_ascii_digit())
                 {

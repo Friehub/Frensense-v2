@@ -534,13 +534,10 @@ fn def_of(ir: &FunctionIR, v: VarId) -> Option<&Instruction> {
 }
 
 /// True when `path` names an auth call per the spec/bundle vocabulary
-/// (`facts.auth_guard_hints`, bootstrap fallback).
+/// (`facts.auth_guard_hints`, seeded by `fact_table_from_spec`).
 fn auth_path_matches(path: &str, facts: &FactTable) -> bool {
     let lower = path.to_ascii_lowercase();
-    frensense_lang::policy::bootstrap_auth_guard_hints()
-        .iter()
-        .any(|h| lower.contains(h))
-        || facts.auth_guard_hints.iter().any(|h| lower.contains(h))
+    facts.auth_guard_hints.iter().any(|h| lower.contains(h))
 }
 
 /// Does the branch condition derive (through unary/binary/assign/await/
