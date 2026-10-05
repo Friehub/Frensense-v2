@@ -227,8 +227,11 @@ All resolved (C8 unless noted):
 - [x] C2: debug_flags env -> consumer bins (`0f1c186`)
 - [x] C3: `NodeRole` -> `Cow<'static, str>` (kinds.rs leak) (`9e18fb9`)
 - [x] C4: memory fallbacks -> spec seeding + `FactTable.stack_allocators` (`9757ef7`)
-- [x] C5: hardcoded vocabulary -> spec/FactTable (table above)
-- [x] C6: per-entry provenance in `FactTable`
-- [x] C7: dead-code sweep
-- [x] C8: stale comments + duplication
-- [ ] Final gate (fmt, clippy, tests, ratchet, A/B)
+- [x] C5: hardcoded vocabulary -> spec/FactTable (table above) (`43f7396`)
+- [x] C6: per-entry provenance in `FactTable` (`73bbc0f`)
+- [x] C7: dead-code sweep (`c551412`)
+- [x] C8: stale comments + duplication (`047fb94`)
+- [x] Final gate (fmt, clippy, tests, ratchet, A/B): all green on
+      `047fb94` (410 tests / 15 suites, clippy 0 warnings, ratchet
+      0/33/0/6, A/B 6 samples x 6 modes byte-identical). `e2e_batch` vs
+      `baseline_scorecard.json` still required where the corpus exists.
