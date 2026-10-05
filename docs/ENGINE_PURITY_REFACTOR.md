@@ -201,7 +201,7 @@ precision/recall vs `baseline_scorecard.json` + bundler round-trip
 (`pipeline.rs:97`). No PR may move these numbers unless the PR's intent says
 so.
 
-Status below reflects the tree at `9b5ea23`. The debt-cleanup series C1-C8
+Status below reflects the tree at `6f1d3cc`. The debt-cleanup series C1-C8
 (formerly tracked in `ENGINE_AUDIT.md`, kept in git history) landed as
 `76deff0` .. `047fb94` on top of Phases 0-3.
 
@@ -261,11 +261,15 @@ e2e_batch identical after each sub-PR.
 
 ### Phase 4 - Schema completion: every check fact-driven
 
-**Status: partially done.** 4.1 complete (`9757ef7`, `43f7396`); 4.2/4.3
-partly addressed there (oob/leak read the registry and `FactTable`; null
-tokens, receiver params and route verbs seeded from the spec). Remaining:
-thread `FactTable` through `uaf/`, unify the three dedup keys, wire or
-drop `route_registration_patterns()`.
+**Status: done** (`9757ef7`, `43f7396`, `6f1d3cc`). 4.1-4.3 complete:
+spec-seeded FactTable fields, registry/facts consumption, null tokens,
+receiver params, and `route_registration_patterns()` wired into the
+harness seam. 4.4: leak and oob take `&FactTable`; uaf receives its
+vocabulary through `MemorySummaryRegistry::from_facts(facts)` (a direct
+facts parameter would be dead code); the three dedup sites collapsed into
+`checks::finding_key` at the one dedup point (`check_all`); teachability
+tests prove a hand-built bundle can create a UAF finding and create or
+suppress a leak finding (the phase's Accept).
 
 | PR | Change | Gaps |
 |----|--------|------|
