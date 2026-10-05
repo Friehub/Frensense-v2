@@ -7,6 +7,7 @@
 #[cfg(test)]
 pub mod int_overflow_spec {
     use crate::analysis::taint::facts::FactTable;
+    use crate::checks::Provenance;
     use crate::checks::int_overflow;
     use crate::checks::memory_summary::MemorySummaryRegistry;
     use crate::harness::lower_source;
@@ -156,14 +157,15 @@ void handler(unsigned long count) {
 }
 "#;
         let mut facts = ts_facts();
-        facts
-            .integer_overflow_rules
-            .push(frensense_lang::policy::IntegerOverflowRule {
+        facts.integer_overflow_rules.push((
+            frensense_lang::policy::IntegerOverflowRule {
                 rule_id: "integer_overflow_alloc_32bit".to_string(),
                 wrap_threshold: 4_294_967_295,
                 severity: "critical".to_string(),
                 message: "Corpus-taught 32-bit wrap rule".to_string(),
-            });
+            },
+            Provenance::Learned,
+        ));
         let rules = hits(src, &facts);
         assert!(
             rules.contains(&"integer_overflow_alloc_32bit".to_string()),

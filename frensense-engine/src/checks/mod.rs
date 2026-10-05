@@ -53,16 +53,7 @@ use crate::analysis::taint::facts::FactTable;
 use crate::ir::function::FunctionIR;
 use rustc_hash::FxHashSet;
 
-/// Where the knowledge behind a finding came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Provenance {
-    /// Built-in seed knowledge shipped with the specs.
-    Spec,
-    /// Structured co-occurrence policy (the authored-policy shape).
-    Authored,
-    /// Corpus-learned fact supplied by a bundle.
-    Learned,
-}
+pub use crate::analysis::taint::facts::Provenance;
 
 /// One non-dataflow policy finding.
 #[derive(Debug, Clone, PartialEq, Eq)]

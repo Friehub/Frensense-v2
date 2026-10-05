@@ -56,14 +56,9 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                 _ => continue,
             };
             let seg = last_segment(callee);
-            let is_builtin = facts
-                .containment_callees
-                .iter()
-                .any(|c| c.eq_ignore_ascii_case(seg));
-            let is_learned = is_builtin;
-            if !is_builtin && !is_learned {
+            let Some(guard_prov) = facts.containment_callee(seg) else {
                 continue;
-            }
+            };
             // URL-ish receiver (`url.includes(x)`) or URL-ish argument in a
             // function that also takes a URL parameter, the allowlist-guard
             // shape. Receiver name comes from var metadata when present.
@@ -101,11 +96,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                 }
                 let span = ir.var_metadata.get(d).and_then(|m| m.byte_range);
                 findings.push(CheckerFinding {
-                    provenance: if is_learned {
-                        Provenance::Learned
-                    } else {
-                        Provenance::Spec
-                    },
+                    provenance: guard_prov,
                     function: ir.name.clone(),
                     rule: frensense_lang::rules::SUBSTRING_ALLOWLIST_GUARD.to_string(),
                     message: String::new(),
@@ -237,15 +228,9 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                 _ => continue,
             };
             let seg = last_segment(callee);
-            let is_builtin_sink = facts
-                .credential_sinks
-                .iter()
-                .any(|s| s.eq_ignore_ascii_case(seg));
-            let is_learned_sink = is_builtin_sink;
-            if !is_builtin_sink && !is_learned_sink {
+            let Some(mut cred_prov) = facts.credential_sink(seg) else {
                 continue;
-            }
-            let mut matched_learned = is_learned_sink;
+            };
             let cred_arg = args.iter().any(|a| match a {
                 Operand::Var(v) => ir
                     .var_metadata
@@ -253,14 +238,11 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                     .and_then(|m| m.source_name.clone())
                     .map(|n| {
                         let l = n.to_ascii_lowercase();
-                        let learned = facts
-                            .credential_params
-                            .iter()
-                            .any(|c| l == c.to_ascii_lowercase());
-                        if learned {
-                            matched_learned = true;
+                        let matched = facts.credential_param(&l);
+                        if matched == Some(Provenance::Learned) {
+                            cred_prov = Provenance::Learned;
                         }
-                        learned
+                        matched.is_some()
                     })
                     .unwrap_or(false),
                 _ => false,
@@ -279,11 +261,7 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                     .and_then(|d| ir.var_metadata.get(d))
                     .and_then(|m| m.byte_range);
                 findings.push(CheckerFinding {
-                    provenance: if matched_learned {
-                        Provenance::Learned
-                    } else {
-                        Provenance::Spec
-                    },
+                    provenance: cred_prov,
                     function: ir.name.clone(),
                     rule: frensense_lang::rules::CREDENTIAL_KDF_POLICY.to_string(),
                     message: String::new(),

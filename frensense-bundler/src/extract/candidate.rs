@@ -6,7 +6,8 @@ use std::collections::BTreeSet;
 
 use frensense_engine::analysis::taint::facts::{
     FactTable, GuardBypassFact, LearnedCheckFact, LearnedFactEntry, MemoryContractFact, PolicyFact,
-    PolicyRequirement, PolicyScope, SanitizerFact, SchemaPolicyFact, SinkSignature, WeakCryptoFact,
+    PolicyRequirement, PolicyScope, Provenance, SanitizerFact, SchemaPolicyFact, SinkSignature,
+    WeakCryptoFact,
 };
 use frensense_engine::checks::memory_summary::CapacitySpec;
 
@@ -234,24 +235,30 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
         }
         Candidate::GuardBypass { fact } => {
             for c in &fact.containment_callees {
-                table.containment_callees.insert(c.clone());
+                table
+                    .containment_callees
+                    .insert(c.clone(), Provenance::Learned);
             }
             for s in &fact.credential_sinks {
-                table.credential_sinks.insert(s.clone());
+                table
+                    .credential_sinks
+                    .insert(s.clone(), Provenance::Learned);
             }
             for p in &fact.credential_params {
-                table.credential_params.insert(p.clone());
+                table
+                    .credential_params
+                    .insert(p.clone(), Provenance::Learned);
             }
         }
         Candidate::SchemaPolicy { fact } => {
             for b in &fact.builders {
-                table.schema_builders.insert(b.clone());
+                table.schema_builders.insert(b.clone(), Provenance::Learned);
             }
             for e in &fact.enforcers {
                 table.schema_enforcers.insert(e.clone());
             }
             for k in &fact.bound_keywords {
-                table.schema_keywords.insert(k.clone());
+                table.schema_keywords.insert(k.clone(), Provenance::Learned);
             }
         }
         Candidate::IntegerOverflowRule {
@@ -269,11 +276,13 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
             if let Some(existing) = table
                 .integer_overflow_rules
                 .iter_mut()
-                .find(|r| r.rule_id == fact.rule_id && r.wrap_threshold == fact.wrap_threshold)
+                .find(|(r, _)| r.rule_id == fact.rule_id && r.wrap_threshold == fact.wrap_threshold)
             {
-                *existing = fact;
+                *existing = (fact, Provenance::Learned);
             } else {
-                table.integer_overflow_rules.push(fact);
+                table
+                    .integer_overflow_rules
+                    .push((fact, Provenance::Learned));
             }
         }
     }

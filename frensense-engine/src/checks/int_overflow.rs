@@ -156,12 +156,11 @@ pub fn check(
     let val_info = value::analyze(ir);
     let mut out = Vec::new();
     let mut seen: FxHashSet<(String, u128)> = FxHashSet::default();
-    for rule in &facts.integer_overflow_rules {
-        let provenance = Provenance::Spec;
+    for (rule, provenance) in &facts.integer_overflow_rules {
         if !seen.insert((rule.rule_id.clone(), rule.wrap_threshold)) {
             continue;
         }
-        check_rule(ir, &val_info, summaries, rule, provenance, &mut out);
+        check_rule(ir, &val_info, summaries, rule, *provenance, &mut out);
     }
     out
 }

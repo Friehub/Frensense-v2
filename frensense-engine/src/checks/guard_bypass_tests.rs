@@ -174,7 +174,9 @@ export function cacheKey (userId: string) {
     #[test]
     fn learned_containment_callee_positive_and_negative() {
         let mut facts = ts_facts();
-        facts.containment_callees.insert("customSubstrMatch".into());
+        facts
+            .containment_callees
+            .insert("customSubstrMatch".into(), Provenance::Learned);
 
         // Positive sample: uses customSubstrMatch for allowlist validation on URL
         let pos_src = r#"
@@ -218,8 +220,12 @@ export const isRedirectAllowed = (url: string) => {
     #[test]
     fn learned_credential_sink_and_param_positive_and_negative() {
         let mut facts = ts_facts();
-        facts.credential_sinks.insert("customFastDigest".into());
-        facts.credential_params.insert("clientSecretToken".into());
+        facts
+            .credential_sinks
+            .insert("customFastDigest".into(), Provenance::Learned);
+        facts
+            .credential_params
+            .insert("clientSecretToken".into(), Provenance::Learned);
 
         // Positive sample 1: learned sink with standard password param
         let pos_src1 = r#"

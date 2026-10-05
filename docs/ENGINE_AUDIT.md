@@ -198,7 +198,7 @@ Also dead: `signatures.rs:11-20` `is_session_accessor` (zero callers, and its
 - [x] C3: `NodeRole` -> `Cow<'static, str>` (kinds.rs leak) (`9e18fb9`)
 - [x] C4: memory fallbacks -> spec seeding + `FactTable.stack_allocators` (`9757ef7`)
 - [x] C5: hardcoded vocabulary -> spec/FactTable (table above)
-- [ ] C6: per-entry provenance in `FactTable`
+- [x] C6: per-entry provenance in `FactTable`
 - [ ] C7: dead-code sweep
 - [ ] C8: stale comments + duplication
 - [ ] Final gate (fmt, clippy, tests, ratchet, A/B)

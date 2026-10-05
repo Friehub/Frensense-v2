@@ -32,25 +32,27 @@ pub struct FactTable {
     pub memory_contracts: Vec<MemoryContractFact>,
     /// Corpus-verified weak cryptography rules.
     pub weak_crypto_rules: Vec<WeakCryptoFact>,
-    /// Corpus-verified containment callees (for allowlist bypass checks),
-    /// spec-seeded via `LanguageSpec::known_containment_callees`; the check
-    /// also unions the lang bootstrap defaults.
-    pub containment_callees: FxHashSet<String>,
-    /// Corpus-verified credential setter/hasher sinks (spec-seeded via
-    /// `LanguageSpec::known_credential_sinks`).
-    pub credential_sinks: FxHashSet<String>,
-    /// Corpus-verified parameter names identifying credentials (spec-seeded
-    /// via `LanguageSpec::known_credential_params`).
-    pub credential_params: FxHashSet<String>,
-    /// Corpus-verified schema builder methods (spec-seeded via
-    /// `LanguageSpec::known_schema_builders`).
-    pub schema_builders: FxHashSet<String>,
+    /// Containment callees (for allowlist bypass checks) with per-entry
+    /// provenance: spec-seeded via `LanguageSpec::known_containment_callees`
+    /// (Spec), bundle-applied (Learned).
+    pub containment_callees: FxHashMap<String, Provenance>,
+    /// Credential setter/hasher sinks with per-entry provenance
+    /// (spec-seeded via `LanguageSpec::known_credential_sinks` -> Spec,
+    /// bundle -> Learned).
+    pub credential_sinks: FxHashMap<String, Provenance>,
+    /// Parameter names identifying credentials with per-entry provenance
+    /// (spec-seeded via `LanguageSpec::known_credential_params` -> Spec,
+    /// bundle -> Learned).
+    pub credential_params: FxHashMap<String, Provenance>,
+    /// Schema builder methods with per-entry provenance (spec-seeded via
+    /// `LanguageSpec::known_schema_builders` -> Spec, bundle -> Learned).
+    pub schema_builders: FxHashMap<String, Provenance>,
     /// Corpus-verified schema enforcer methods (spec-seeded via
     /// `LanguageSpec::known_schema_enforcers`).
     pub schema_enforcers: FxHashSet<String>,
-    /// Corpus-verified bound keywords (spec-seeded via
-    /// `LanguageSpec::known_schema_keywords`).
-    pub schema_keywords: FxHashSet<String>,
+    /// Bound keywords with per-entry provenance (spec-seeded via
+    /// `LanguageSpec::known_schema_keywords` -> Spec, bundle -> Learned).
+    pub schema_keywords: FxHashMap<String, Provenance>,
     /// URL/redirect parameter-name hints (spec-seeded via
     /// `LanguageSpec::known_url_param_hints`).
     pub url_param_hints: FxHashSet<String>,
@@ -80,7 +82,7 @@ pub struct FactTable {
     /// spec-seeded via `LanguageSpec::known_integer_overflow_rules`, bundle
     /// extension via `LearnedFactEntry::IntegerOverflowRule` from a family's
     /// `[frensense] check-rule:` declaration).
-    pub integer_overflow_rules: Vec<frensense_lang::policy::IntegerOverflowRule>,
+    pub integer_overflow_rules: Vec<(frensense_lang::policy::IntegerOverflowRule, Provenance)>,
     /// Insecure config selectors (spec-seeded via
     /// `LanguageSpec::known_insecure_config_selectors`).
     pub insecure_config_selectors: Vec<(&'static str, &'static [&'static str], &'static str)>,
@@ -270,18 +272,25 @@ impl FactTable {
                 self.weak_crypto_rules.push(wc.clone());
             }
         }
-        self.containment_callees
-            .extend(other.containment_callees.iter().cloned());
-        self.credential_sinks
-            .extend(other.credential_sinks.iter().cloned());
-        self.credential_params
-            .extend(other.credential_params.iter().cloned());
-        self.schema_builders
-            .extend(other.schema_builders.iter().cloned());
+        // Merged entries keep their own provenance (other wins on
+        // collision: a bundle overrides a spec entry and carries Learned).
+        for (k, v) in &other.containment_callees {
+            self.containment_callees.insert(k.clone(), *v);
+        }
+        for (k, v) in &other.credential_sinks {
+            self.credential_sinks.insert(k.clone(), *v);
+        }
+        for (k, v) in &other.credential_params {
+            self.credential_params.insert(k.clone(), *v);
+        }
+        for (k, v) in &other.schema_builders {
+            self.schema_builders.insert(k.clone(), *v);
+        }
         self.schema_enforcers
             .extend(other.schema_enforcers.iter().cloned());
-        self.schema_keywords
-            .extend(other.schema_keywords.iter().cloned());
+        for (k, v) in &other.schema_keywords {
+            self.schema_keywords.insert(k.clone(), *v);
+        }
         self.url_param_hints
             .extend(other.url_param_hints.iter().cloned());
         self.url_arg_hints
@@ -301,9 +310,13 @@ impl FactTable {
                 self.weak_hash_rules.push(*r);
             }
         }
-        for r in &other.integer_overflow_rules {
-            if !self.integer_overflow_rules.contains(r) {
-                self.integer_overflow_rules.push(r.clone());
+        for (r, p) in &other.integer_overflow_rules {
+            if !self
+                .integer_overflow_rules
+                .iter()
+                .any(|(e, _)| e.rule_id == r.rule_id && e.wrap_threshold == r.wrap_threshold)
+            {
+                self.integer_overflow_rules.push((r.clone(), *p));
             }
         }
         for s in &other.insecure_config_selectors {
@@ -467,6 +480,51 @@ impl FactTable {
     /// (`self`, `this`)?
     pub fn is_receiver_param(&self, name: &str) -> bool {
         self.receiver_params.contains(name)
+    }
+
+    /// Provenance of the containment callee matching `seg`
+    /// (case-insensitive), or None when not declared.
+    pub fn containment_callee(&self, seg: &str) -> Option<Provenance> {
+        self.containment_callees
+            .iter()
+            .find(|(c, _)| c.eq_ignore_ascii_case(seg))
+            .map(|(_, p)| *p)
+    }
+
+    /// Provenance of the credential sink matching `seg`
+    /// (case-insensitive), or None when not declared.
+    pub fn credential_sink(&self, seg: &str) -> Option<Provenance> {
+        self.credential_sinks
+            .iter()
+            .find(|(s, _)| s.eq_ignore_ascii_case(seg))
+            .map(|(_, p)| *p)
+    }
+
+    /// Provenance of the credential parameter whose lowercased name equals
+    /// `lowered`, or None when not declared.
+    pub fn credential_param(&self, lowered: &str) -> Option<Provenance> {
+        self.credential_params
+            .iter()
+            .find(|(c, _)| lowered == c.to_ascii_lowercase())
+            .map(|(_, p)| *p)
+    }
+
+    /// Provenance of the schema builder matching `seg`
+    /// (case-insensitive), or None when not declared.
+    pub fn schema_builder(&self, seg: &str) -> Option<Provenance> {
+        self.schema_builders
+            .iter()
+            .find(|(b, _)| b.eq_ignore_ascii_case(seg))
+            .map(|(_, p)| *p)
+    }
+
+    /// Provenance of a bound keyword contained in the lowercased schema
+    /// description `lower`, or None when none matches.
+    pub fn schema_keyword(&self, lower: &str) -> Option<Provenance> {
+        self.schema_keywords
+            .iter()
+            .find(|(k, _)| lower.contains(&k.to_ascii_lowercase()))
+            .map(|(_, p)| *p)
     }
 
     /// Look up input argument slots that propagate taint through `call`.
@@ -739,24 +797,32 @@ impl LearnedFactEntry {
                 }
             }
             LearnedFactEntry::GuardBypass(fact) => {
-                table
-                    .containment_callees
-                    .extend(fact.containment_callees.iter().cloned());
-                table
-                    .credential_sinks
-                    .extend(fact.credential_sinks.iter().cloned());
-                table
-                    .credential_params
-                    .extend(fact.credential_params.iter().cloned());
+                for c in &fact.containment_callees {
+                    table
+                        .containment_callees
+                        .insert(c.clone(), Provenance::Learned);
+                }
+                for s in &fact.credential_sinks {
+                    table
+                        .credential_sinks
+                        .insert(s.clone(), Provenance::Learned);
+                }
+                for p in &fact.credential_params {
+                    table
+                        .credential_params
+                        .insert(p.clone(), Provenance::Learned);
+                }
             }
             LearnedFactEntry::SchemaPolicy(fact) => {
-                table.schema_builders.extend(fact.builders.iter().cloned());
+                for b in &fact.builders {
+                    table.schema_builders.insert(b.clone(), Provenance::Learned);
+                }
                 table
                     .schema_enforcers
                     .extend(fact.enforcers.iter().cloned());
-                table
-                    .schema_keywords
-                    .extend(fact.bound_keywords.iter().cloned());
+                for k in &fact.bound_keywords {
+                    table.schema_keywords.insert(k.clone(), Provenance::Learned);
+                }
             }
             LearnedFactEntry::GrammarRole {
                 language,
@@ -843,14 +909,14 @@ impl LearnedFactEntry {
                     severity: severity.clone(),
                     message: message.clone(),
                 };
-                if let Some(existing) = table
-                    .integer_overflow_rules
-                    .iter_mut()
-                    .find(|r| r.rule_id == fact.rule_id && r.wrap_threshold == fact.wrap_threshold)
-                {
-                    *existing = fact;
+                if let Some(existing) = table.integer_overflow_rules.iter_mut().find(|(r, _)| {
+                    r.rule_id == fact.rule_id && r.wrap_threshold == fact.wrap_threshold
+                }) {
+                    *existing = (fact, Provenance::Learned);
                 } else {
-                    table.integer_overflow_rules.push(fact);
+                    table
+                        .integer_overflow_rules
+                        .push((fact, Provenance::Learned));
                 }
             }
         }

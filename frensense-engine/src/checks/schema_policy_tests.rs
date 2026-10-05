@@ -147,7 +147,9 @@ export const isRedirectAllowed = (url: string) => redirectAllowlist.has(url)
     #[test]
     fn learned_schema_builder_positive_and_negative() {
         let mut facts = ts_facts();
-        facts.schema_builders.insert("customQuantity".into());
+        facts
+            .schema_builders
+            .insert("customQuantity".into(), Provenance::Learned);
 
         // Positive sample: custom builder with prose bound without enforcement
         let pos_src = r#"
@@ -222,7 +224,9 @@ export const schema = {
     #[test]
     fn learned_bound_keyword_positive_and_negative() {
         let mut facts = ts_facts();
-        facts.schema_keywords.insert("ceiling".into());
+        facts
+            .schema_keywords
+            .insert("ceiling".into(), Provenance::Learned);
 
         // Positive sample: description uses 'ceiling 100' without enforcer
         let pos_src = r#"

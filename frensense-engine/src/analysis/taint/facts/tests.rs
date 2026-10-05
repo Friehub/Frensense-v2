@@ -312,25 +312,25 @@ fn spec_drives_policy_vocabulary() {
 
     for callee in ["includes", "indexOf", "contains"] {
         assert!(
-            t.containment_callees.contains(callee),
+            t.containment_callees.contains_key(callee),
             "{callee} must be a containment callee"
         );
     }
     for sink in ["hash", "hashPassword", "setPassword"] {
         assert!(
-            t.credential_sinks.contains(sink),
+            t.credential_sinks.contains_key(sink),
             "{sink} must be a credential sink"
         );
     }
-    assert!(t.credential_params.contains("password"));
+    assert!(t.credential_params.contains_key("password"));
     for builder in ["number", "int", "float", "bigint"] {
         assert!(
-            t.schema_builders.contains(builder),
+            t.schema_builders.contains_key(builder),
             "{builder} must be a schema builder"
         );
     }
     assert!(t.schema_enforcers.contains("max"));
-    assert!(t.schema_keywords.contains("maximum"));
+    assert!(t.schema_keywords.contains_key("maximum"));
     assert!(t.url_param_hints.contains("url"));
     assert!(t.url_arg_hints.contains("allowed"));
     assert!(t.url_literal_hints.contains("http"));

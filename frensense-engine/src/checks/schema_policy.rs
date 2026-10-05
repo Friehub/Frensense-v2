@@ -19,7 +19,7 @@ use crate::checks::CheckerFinding;
 use crate::checks::Provenance;
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
-type BuilderEntry = (String, bool, Option<(usize, usize)>);
+type BuilderEntry = (String, Provenance, Option<(usize, usize)>);
 
 pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     let mut findings = Vec::new();
@@ -64,40 +64,26 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                     .any(|e| e.eq_ignore_ascii_case(seg))
                 {
                     enforcers.push(seg);
-                } else {
-                    let is_builtin_builder = facts
-                        .schema_builders
-                        .iter()
-                        .any(|b| b.eq_ignore_ascii_case(seg));
-                    let is_learned_builder = facts
-                        .schema_builders
-                        .iter()
-                        .any(|b| b.eq_ignore_ascii_case(seg));
-                    if is_builtin_builder || is_learned_builder {
-                        let span = dest
-                            .as_ref()
-                            .and_then(|d| ir.var_metadata.get(d))
-                            .and_then(|m| m.byte_range);
-                        builders.push((seg.to_string(), is_learned_builder, span));
-                    }
+                } else if let Some(builder_prov) = facts.schema_builder(seg) {
+                    let span = dest
+                        .as_ref()
+                        .and_then(|d| ir.var_metadata.get(d))
+                        .and_then(|m| m.byte_range);
+                    builders.push((seg.to_string(), builder_prov, span));
                 }
             }
         }
     }
     if enforcers.is_empty() && !described.is_empty() && !builders.is_empty() {
-        for (_builder, builder_learned, span) in &builders {
+        for (_builder, builder_prov, span) in &builders {
             for (text, _dspan) in &described {
                 let lower = text.to_ascii_lowercase();
-                let is_builtin_keyword = facts
-                    .schema_keywords
-                    .iter()
-                    .any(|k| lower.contains(&k.to_ascii_lowercase()));
-                let is_learned_keyword = is_builtin_keyword;
-                if (is_builtin_keyword || is_learned_keyword)
-                    && lower.chars().any(|c| c.is_ascii_digit())
-                {
+                let keyword_prov = facts.schema_keyword(&lower);
+                if keyword_prov.is_some() && lower.chars().any(|c| c.is_ascii_digit()) {
                     findings.push(CheckerFinding {
-                        provenance: if *builder_learned || is_learned_keyword {
+                        provenance: if *builder_prov == Provenance::Learned
+                            || keyword_prov == Some(Provenance::Learned)
+                        {
                             Provenance::Learned
                         } else {
                             Provenance::Spec

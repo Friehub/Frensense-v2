@@ -17,6 +17,19 @@
 //! with bundler-extracted learned facts via a [`FactTable`]). The engine only
 //! consumes them; updating a framework never touches engine code.
 
+/// Where the knowledge behind a fact or finding came from. Stored
+/// per-entry in the [`FactTable`] so checks report the real origin of the
+/// knowledge that fired (spec seed vs bundle) instead of guessing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provenance {
+    /// Built-in seed knowledge shipped with the specs.
+    Spec,
+    /// Structured co-occurrence policy (the authored-policy shape).
+    Authored,
+    /// Corpus-learned fact supplied by a bundle.
+    Learned,
+}
+
 pub mod config;
 pub mod kinds;
 pub mod signatures;

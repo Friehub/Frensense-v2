@@ -3,7 +3,7 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use super::*;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::analysis::taint::config::TaintConfig;
 
@@ -181,37 +181,23 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
         .map(|s| (*s).to_string())
         .collect();
     // Guard/allowlist, credential, schema and URL-hint policy vocabulary:
-    // spec-owned, read directly by the checks through these fields.
-    t.containment_callees = spec
-        .known_containment_callees()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t.credential_sinks = spec
-        .known_credential_sinks()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t.credential_params = spec
-        .known_credential_params()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t.schema_builders = spec
-        .known_schema_builders()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
+    // spec-owned, read directly by the checks. The provenance-carrying
+    // fields seed every entry as Spec; bundle application marks Learned.
+    let spec_set = |vals: &'static [&'static str]| -> FxHashMap<String, Provenance> {
+        vals.iter()
+            .map(|s| ((*s).to_string(), Provenance::Spec))
+            .collect()
+    };
+    t.containment_callees = spec_set(spec.known_containment_callees());
+    t.credential_sinks = spec_set(spec.known_credential_sinks());
+    t.credential_params = spec_set(spec.known_credential_params());
+    t.schema_builders = spec_set(spec.known_schema_builders());
     t.schema_enforcers = spec
         .known_schema_enforcers()
         .iter()
         .map(|s| (*s).to_string())
         .collect();
-    t.schema_keywords = spec
-        .known_schema_keywords()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
+    t.schema_keywords = spec_set(spec.known_schema_keywords());
     t.url_param_hints = spec
         .known_url_param_hints()
         .iter()
@@ -255,7 +241,11 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
     // Allocation-size overflow rules: spec-owned seed; the bundle extends
     // via `LearnedFactEntry::IntegerOverflowRule`; `int_overflow::check`
     // unions the bootstrap defaults with these.
-    t.integer_overflow_rules = spec.known_integer_overflow_rules().to_vec();
+    t.integer_overflow_rules = spec
+        .known_integer_overflow_rules()
+        .iter()
+        .map(|r| (r.clone(), Provenance::Spec))
+        .collect();
     t.insecure_config_selectors = spec.known_insecure_config_selectors().to_vec();
     t.key_size_rules = spec.known_key_size_rules().to_vec();
     t.suspicious_hash_wrappers = spec
