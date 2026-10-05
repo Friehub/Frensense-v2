@@ -134,10 +134,10 @@ only in the engine but interpreted at least 4 times downstream.
   `BUNDLE_VERSION 5` bump with version-branched payload load
   (`frc.rs:66-78`).
 
-#### I. Bundler gate mechanics (for the authored path)
+#### I. Bundler gate mechanics (knowledge intake)
 
 - Existential-vote rule rejects any candidate with no separating voter
-  (`extract/mod.rs:305-313`) - the only hard blocker for authored facts;
+  (`extract/mod.rs:305-313`) - the only hard blocker in the gate;
   cross-family regression (`:291-303`) and
   `apply_candidate -> scan_prepared -> separates` work vote-free.
 - Gate can only observe behavior through the alert predicate:
@@ -152,7 +152,7 @@ only in the engine but interpreted at least 4 times downstream.
 | # | Decision | Resolution |
 |---|----------|------------|
 | D1 | Default pack home | **Embedded `include_bytes!` default `.frc` inside `frensense-bundler`**, exposed as `default_bundle_bytes()`. Rationale: bundler owns the `.frc` format end-to-end (`format/mod.rs:5-9`) *and* is a dependency of the CLI - one embed gives both consumers identical baselines (replay-gate parity) and keeps engine/lang shipping zero policy. Consumer replaces it via `--bundle`; empty pack = spec-seed only. |
-| D2 | Authored input format | **TOML (`policy.toml`)**, human-authored, comments supported, `schema = 1` version field; JSON accepted as secondary (serde nearly free). Keep the in-corpus `[frensense]` metadata block (`family.rs:96-113`) as the per-family shortcut (already authors `IntegerOverflowRule`s). `toml` dep added to bundler (removed from engine in Phase 0). |
+| D2 | Authored input format | **Cancelled - corpus-only (2026-10).** All client-facing authored policy flows through corpus pairs + the in-corpus `[frensense]` metadata block (`family.rs:96-113`, already authors `IntegerOverflowRule`s); no rule file, no TOML/JSON authoring surface ("corpus-based, not rule-based" - `FRENSENSE_CORPUS_GUIDE.md`). `policy_pack` stays in the v5 schema as a reserved, always-empty section; the `Authored` provenance tier stays structural with no producer until a decision reopens it; dead `toml` dep removed from the bundler. |
 | D3 | Per-language tables out of lang (Phase 6.2) | **Deferred until Phases 0-5 land, then executed**, riding the D1 vehicle: each provider's knowledge bodies become **per-language sections of the default pack** (keyed `language` field + `"*"` wildcard, mirroring `grammar_roles` at `table.rs:356-378`). Not skipped - "lang not cluttered" is untrue without it. |
 | D4 | Tier ladder home | **Now: `frensense-lang/src/severity.rs`** - enum, ordering, default role->tier map; both bundler and CLI already depend on lang; CLI already re-exports `Severity` (`src/lib.rs:29`). **Later (post-D1-schema):** role->tier map becomes bundle-overridable. Engine keeps only the `SinkRole` enum, zero tier strings. |
 
@@ -174,9 +174,9 @@ frensense-engine provers: parse->lower->SSA->SVFG->points-to->dominators->
                    zero severity tiers, zero fs/env, zero bootstrap_ imports,
                    no Io error variant
 
-frensense-bundler owns .frc format + DEFAULT PACK bytes (D1) + authored
-                 policy.toml ingestion (D2) + replay gate with local alert
-                 predicate
+frensense-bundler owns .frc format + DEFAULT PACK bytes (D1) + reserved
+                 policy_pack section (D2 cancelled: corpus-only) + replay
+                 gate with local alert predicate
                  x never renders user findings
 
 frensense (CLI)  owns alert policy, tier mapping, dedup, rendering
@@ -189,8 +189,8 @@ frensense (CLI)  owns alert policy, tier mapping, dedup, rendering
 ```
 BundlePayloadV5 { patterns, learned_facts, policy_pack }
   learned_facts  -> provenance = Learned   (corpus pairs, replay-gated)
-  policy_pack    -> provenance = Authored  (policy.toml, structurally
-                                            validated + gated)
+  policy_pack    -> provenance = Authored  (reserved: always empty; D2
+                                            corpus-only, no rule file)
   default pack   -> provenance = Spec      (embedded in bundler, merged first)
 ```
 
@@ -292,17 +292,17 @@ suppress a leak finding (the phase's Accept).
 **Accept:** teachability test - a hand-built bundle can suppress/alter a leak
 and a UAF finding (fails today).
 
-### Phase 5 - The authored path + default pack (heart of the principle)
+### Phase 5 - Ingestion surface + default pack (heart of the principle)
 
 **Status: partially done.** Check-time `bootstrap_*` unions are gone
 (engine refs = 0: `76deff0`, `9757ef7`, `43f7396`); provenance is
-per-entry in `FactTable` (`73bbc0f`). Remaining: default pack, authored
-ingestion (5.1), provenance-ordered merge flip (5.3) - Phase 2 gate open
-(`fb42237`).
+per-entry in `FactTable` (`73bbc0f`). Remaining: CLI arg fix (5.1, D2
+cancelled - corpus-only), default pack (5.2), provenance-ordered merge
+flip (5.3). Phase 2 gate closed (`fb42237`).
 
 | PR | Change | Key sites |
 |----|--------|-----------|
-| 5.1 | **Authored ingestion (D2)**: `policy.toml` (schema-versioned) -> `frensense bundle --policy policy.toml`; fix bundler arg parsing (`main.rs` advertises flags it does not parse; CI passes `-c`/`-o` it ignores); structural validation (schema, known rule ids) + replay where observable; **`authored` branch at the existential-vote rule** (skip vote requirement, keep cross-family regression); status `"authored"` ships into `policy_pack`. | `mod.rs:305-313`, `:291-303`; `main.rs:13-32` |
+| 5.1 | **CLI arg parsing (D2 corpus-only)**: `frensense-bundler` and `frensense bundle` parse `-c/--corpus` + `-o/--output` (release CI passes `-c corpus/targets -o frensense-corpus.frc`; today they are misread as the corpus/output paths), positional args keep working, strict unknown-flag errors, drop stale `--facts`, remove dead `toml` dep. | `main.rs:13-32`; `src/bin/frensense.rs:84-103` |
 | 5.2 | **Default pack (D1)**: generate `frensense-default.frc` from lang's `bootstrap_*` tables; `include_bytes!` in bundler as `default_bundle_bytes()`; seeding order = spec seed -> default pack -> consumer bundle (last-wins). **Remove check-time `bootstrap_*` unions** so checks read `facts.*` only. | `weak_hash.rs:181`, `int_overflow.rs:158`, `guard_bypass.rs:61`, `predicates.rs:540`; `facts/config.rs:16` |
 | 5.3 | **Explicit precedence + provenance** in `FactTable::merge` (today `learned_checks`/`policy_facts` are first-wins, `table.rs:206-229` - flip to provenance-ordered: Spec < Authored < Learned-or-consumer). | `table.rs:189-345` |
 
