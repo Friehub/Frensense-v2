@@ -183,17 +183,27 @@ fn advisory_from_checker(
     file_id: crate::FileId,
 ) -> Advisory {
     let path = Path::new(file);
-    // Severity and message templates are declared per-language in
+    // Severity, title, and message templates are declared per-language in
     // frensense-lang (`LanguageSpec::known_rule_registry`); rules no
-    // language declares fall back to the generic policy shape.
-    let (severity, title, impact, improvement, tag) = frensense_lang::severity::checker_advisory(
-        frensense_lang::spec_for_path(path),
-        &c.rule,
-        &c.function,
-        file,
-        line,
-    );
-    let mut advisory = Advisory::bare(title, severity, file_id, path, c.message.clone())
+    // language declares fall back to the generic policy shape. Spec checks
+    // emit an empty `message` plus structured `params` - the observation
+    // body then renders from the lang template; bundle/policy findings
+    // carry their own prose in `message` and win over the template.
+    let (severity, title, impact, improvement, tag, observation) =
+        frensense_lang::severity::checker_advisory(
+            frensense_lang::spec_for_path(path),
+            &c.rule,
+            &c.function,
+            file,
+            line,
+            &c.params,
+        );
+    let observation = if c.message.is_empty() {
+        observation
+    } else {
+        c.message.clone()
+    };
+    let mut advisory = Advisory::bare(title, severity, file_id, path, observation)
         .with_confidence(1.0)
         .with_line(line)
         .with_column(column)
@@ -430,5 +440,56 @@ mod shape_dedup_tests {
         let b = located("t.ts", 3, 5, 5, "a");
         let kept = dedup_keep_richest(&[&a, &b]);
         assert_eq!(kept.len(), 2, "longer walk = different flow = both report");
+    }
+}
+
+#[cfg(test)]
+mod checker_observation_tests {
+    use crate::engine::Engine;
+
+    fn scan_temp(name: &str, file: &str, source: &str) -> Vec<crate::Advisory> {
+        let dir = std::env::temp_dir().join(format!("frensense-obs-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::fs::write(dir.join(file), source).expect("write");
+        Engine::new().run(&dir.join(file)).expect("scan")
+    }
+
+    #[test]
+    fn bare_weak_hash_renders_lang_observation() {
+        let advisories = scan_temp(
+            "bare",
+            "app.py",
+            "import hashlib\n\ndef digest(data):\n    return hashlib.md5(data).hexdigest()\n",
+        );
+        assert_eq!(advisories.len(), 1, "{advisories:?}");
+        assert_eq!(
+            advisories[0].observation,
+            "Weak hash function `md5`, not acceptable for passwords or security-sensitive \
+             digests (use bcrypt/argon2/scrypt or SHA-256+)"
+        );
+        assert_eq!(advisories[0].title, "Policy violation: weak_hash (digest)");
+        assert_eq!(advisories[0].tags, ["checker", "weak_hash", "policy"]);
+    }
+
+    #[test]
+    fn selector_weak_hash_renders_selected_primitive() {
+        let advisories = scan_temp(
+            "selector",
+            "app.ts",
+            "import { createHash } from \"crypto\";\n\n\
+             export function hashPassword(pw: string) {\n  \
+             return createHash(\"md5\").update(pw).digest(\"hex\");\n}\n",
+        );
+        let finding = advisories
+            .iter()
+            .find(|a| a.tags.iter().any(|t| t == "weak_hash"))
+            .expect("weak_hash finding");
+        assert_eq!(
+            finding.observation,
+            "Weak hash primitive 'md5' selected by `createHash`, not acceptable \
+             for passwords or security-sensitive digests (use bcrypt/argon2/scrypt \
+             or SHA-256+)"
+        );
     }
 }

@@ -558,6 +558,7 @@ pub fn check(ir: &FunctionIR, summaries: &MemorySummaryRegistry) -> Vec<CheckerF
                  or stored before the function returns",
                 alloc.name, ir.name
             ),
+            params: Vec::new(),
             span,
             severity: String::new(),
         });

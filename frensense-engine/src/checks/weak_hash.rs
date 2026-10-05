@@ -209,12 +209,8 @@ fn check_call(
                 provenance,
                 function: ir.name.clone(),
                 rule: rule.rule_id.to_string(),
-                message: format!(
-                    "Weak hash primitive '{}' selected by `{}`, not acceptable \
-                     for passwords or security-sensitive digests (use \
-                     bcrypt/argon2/scrypt or SHA-256+)",
-                    sel, callee_seg
-                ),
+                message: String::new(),
+                params: vec![("callee", callee_seg.to_string()), ("sel", sel.to_string())],
                 span,
                 severity: String::new(),
             });
@@ -230,12 +226,8 @@ fn check_call(
                 provenance,
                 function: ir.name.clone(),
                 rule: rule.rule_id.to_string(),
-                message: format!(
-                    "Weak hash function `{}`, not acceptable for passwords or \
-                     security-sensitive digests (use bcrypt/argon2/scrypt or \
-                     SHA-256+)",
-                    callee_seg
-                ),
+                message: String::new(),
+                params: vec![("callee", callee_seg.to_string())],
                 span,
                 severity: String::new(),
             });
@@ -261,10 +253,8 @@ fn check_call(
                         provenance: Provenance::Learned,
                         function: ir.name.clone(),
                         rule: fact.rule_id.clone(),
-                        message: format!(
-                            "Weak cryptographic primitive '{}' selected by `{}`, not acceptable for security-sensitive operations",
-                            sel, callee_seg
-                        ),
+                        message: String::new(),
+                        params: vec![("callee", callee_seg.to_string()), ("sel", sel.to_string())],
                         span,
                         severity: String::new(),
                     });
@@ -275,10 +265,8 @@ fn check_call(
                     provenance: Provenance::Learned,
                     function: ir.name.clone(),
                     rule: fact.rule_id.clone(),
-                    message: format!(
-                        "Weak cryptographic call `{}`, not acceptable for security-sensitive operations",
-                        callee_seg
-                    ),
+                    message: String::new(),
+                    params: vec![("callee", callee_seg.to_string())],
                     span,
                     severity: String::new(),
                 });
@@ -307,10 +295,8 @@ fn check_call(
             },
             function: ir.name.clone(),
             rule: frensense_lang::rules::WEAK_HASH_WRAPPER.to_string(),
-            message: format!(
-                "Password hashing routed through opaque wrapper `{path}`, \
-                 verify it uses bcrypt/argon2/scrypt, not MD5/SHA-1",
-            ),
+            message: String::new(),
+            params: vec![("path", path.clone())],
             span,
             severity: String::new(),
         });
@@ -342,13 +328,12 @@ fn check_call(
                     provenance,
                     function: ir.name.clone(),
                     rule: rule.rule_id.to_string(),
-                    message: format!(
-                        "Weak key size passed to `{}`: provably below {} bits (use >= {} bits for {})",
-                        callee_seg,
-                        rule.min_bits,
-                        rule.min_bits,
-                        rule.kind
-                    ),
+                    message: String::new(),
+                    params: vec![
+                        ("callee", callee_seg.to_string()),
+                        ("min_bits", rule.min_bits.to_string()),
+                        ("kind", rule.kind.to_string()),
+                    ],
                     span,
                     severity: String::new(),
                 });
@@ -389,11 +374,8 @@ fn check_call(
                     provenance,
                     function: ir.name.clone(),
                     rule: rule_id.to_string(),
-                    message: format!(
-                        "Insecure configuration: `{}` called with insecure \
-                         selector '{lit}'",
-                        callee_seg
-                    ),
+                    message: String::new(),
+                    params: vec![("callee", callee_seg.to_string()), ("sel", lit.to_string())],
                     span,
                     severity: String::new(),
                 });

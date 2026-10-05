@@ -121,6 +121,7 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
                         function: ir.name.clone(),
                         rule: policy.rule.clone(),
                         message: policy.message.clone(),
+                        params: Vec::new(),
                         span,
                         severity: policy.severity.clone(),
                         provenance: Provenance::Learned,

@@ -233,6 +233,7 @@ fn check_rule(
                     rule.wrap_threshold,
                     allocator,
                 ),
+                params: Vec::new(),
                 span: var_span(ir, *dest).or_else(|| match lhs {
                     Operand::Var(v) => var_span(ir, *v),
                     _ => None,

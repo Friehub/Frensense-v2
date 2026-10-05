@@ -193,6 +193,7 @@ fn finding(
         function: ir.name.clone(),
         rule: rule.to_string(),
         message,
+        params: Vec::new(),
         span,
         severity: String::new(),
         provenance: Provenance::Spec,

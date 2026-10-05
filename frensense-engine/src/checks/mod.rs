@@ -73,8 +73,15 @@ pub struct CheckerFinding {
     /// Built-in rules use `&'static str` ids; learned rules carry their
     /// bundle-supplied id, interned here.
     pub rule: String,
-    /// Short human description of the violation.
+    /// Short human description of the violation. Carried verbatim when the
+    /// driving knowledge (bundle fact, authored policy) supplied prose.
+    /// Spec checks leave it empty and emit `params` instead; the consumer
+    /// then renders the observation from a `frensense-lang` template
+    /// keyed by `rule`.
     pub message: String,
+    /// Structured observation parameters `(template key, value)` for
+    /// findings whose `message` is empty. Empty when `message` is set.
+    pub params: Vec<(&'static str, String)>,
     /// Byte range of the violating call in the source file, when known.
     pub span: Option<(usize, usize)>,
     /// Advisory severity declared by the driving fact (learned check,
@@ -309,6 +316,7 @@ pub(crate) mod learned {
                         function: ir.name.clone(),
                         rule: fact.rule.clone(),
                         message: fact.message.clone(),
+                        params: Vec::new(),
                         span: instr_span(ir, instr),
                         severity: fact.severity.clone(),
                         provenance: Provenance::Learned,

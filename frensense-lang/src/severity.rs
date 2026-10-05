@@ -240,22 +240,104 @@ pub fn generic_rule_advisory(
     )
 }
 
+/// Substitute the standard placeholders plus every `{key}` param placeholder
+/// in an observation template.
+fn render_observation(
+    template: &str,
+    rule: &str,
+    function: &str,
+    file: &str,
+    line: u32,
+    params: &[(&'static str, String)],
+) -> String {
+    let mut out = template
+        .replace("{rule}", rule)
+        .replace("{function}", function)
+        .replace("{file}", file)
+        .replace("{line}", &line.to_string());
+    for (key, value) in params {
+        out = out.replace(&format!("{{{key}}}"), value);
+    }
+    out
+}
+
+/// Observation templates for the cross-cutting crypto-policy rules no
+/// language registry owns. Returns `None` for rule ids these templates do
+/// not cover (learned bundle rule ids fall through to the generic shape).
+fn builtin_observation(rule: &str, params: &[(&'static str, String)]) -> Option<&'static str> {
+    let has = |key: &str| params.iter().any(|(k, _)| *k == key);
+    Some(match rule {
+        "weak_hash" if has("sel") => {
+            "Weak hash primitive '{sel}' selected by `{callee}`, not acceptable \
+             for passwords or security-sensitive digests (use bcrypt/argon2/scrypt \
+             or SHA-256+)"
+        }
+        "weak_hash" => {
+            "Weak hash function `{callee}`, not acceptable for passwords or \
+             security-sensitive digests (use bcrypt/argon2/scrypt or SHA-256+)"
+        }
+        crate::rules::WEAK_HASH_WRAPPER => {
+            "Password hashing routed through opaque wrapper `{path}`, verify it \
+             uses bcrypt/argon2/scrypt, not MD5/SHA-1"
+        }
+        "weak_rsa_key_size" => {
+            "Weak key size passed to `{callee}`: provably below {min_bits} bits \
+             (use >= {min_bits} bits for {kind})"
+        }
+        "insecure_jwt_algorithm" => {
+            "Insecure configuration: `{callee}` called with insecure selector '{sel}'"
+        }
+        _ => return None,
+    })
+}
+
+/// Fallback observation for a checker rule no template covers: the rule id,
+/// the location, and the finding's structured params, so learned bundle
+/// rule ids still render an informative body.
+pub fn generic_rule_observation(
+    rule: &str,
+    function: &str,
+    file: &str,
+    line: u32,
+    params: &[(&'static str, String)],
+) -> String {
+    let mut out = format!("{rule} violated in `{function}` at {file}:{line}");
+    if !params.is_empty() {
+        let kv: Vec<String> = params.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        out.push_str(&format!(" ({})", kv.join(", ")));
+    }
+    out.push('.');
+    out
+}
+
 /// Resolve advisory metadata for a checker finding: the language registry
 /// first ([`crate::spec::LanguageSpec::known_rule_registry`]), the generic
-/// policy fallback otherwise.
+/// policy fallback otherwise. The observation body renders from the
+/// cross-cutting builtin templates (`builtin_observation`) keyed by rule
+/// id and the finding's structured `params`, falling back to
+/// [`generic_rule_observation`].
 pub fn checker_advisory(
     spec: Option<&dyn crate::spec::LanguageSpec>,
     rule: &str,
     function: &str,
     file: &str,
     line: u32,
-) -> (Severity, String, String, String, &'static str) {
-    if let Some(spec) = spec {
+    params: &[(&'static str, String)],
+) -> (Severity, String, String, String, &'static str, String) {
+    let (level, title, impact, improvement, tag) = if let Some(spec) = spec {
         if let Some(entry) = spec.known_rule_registry().iter().find(|e| e.rule == rule) {
-            return entry.advisory.render(rule, function, file, line);
+            entry.advisory.render(rule, function, file, line)
+        } else {
+            generic_rule_advisory(rule, function, file, line)
         }
-    }
-    generic_rule_advisory(rule, function, file, line)
+    } else {
+        generic_rule_advisory(rule, function, file, line)
+    };
+    let observation = match builtin_observation(rule, params) {
+        Some(template) => render_observation(template, rule, function, file, line, params),
+        None => generic_rule_observation(rule, function, file, line, params),
+    };
+    (level, title, impact, improvement, tag, observation)
 }
 
 /// Cross-cutting ranking for dataflow findings: what the sink does with the
@@ -289,5 +371,97 @@ pub fn taint_advisory(
             level,
             format!("Unsanitized data from `{src}` reaches sink `{sink}`"),
         ),
+    }
+}
+
+#[cfg(test)]
+mod checker_observation_tests {
+    use super::checker_advisory;
+
+    fn observation(rule: &str, params: &[(&'static str, String)]) -> String {
+        checker_advisory(None, rule, "handler", "a.ts", 7, params).5
+    }
+
+    #[test]
+    fn weak_hash_selector_shape_renders_selected_primitive() {
+        let obs = observation(
+            "weak_hash",
+            &[("callee", "createHash".into()), ("sel", "md5".into())],
+        );
+        assert_eq!(
+            obs,
+            "Weak hash primitive 'md5' selected by `createHash`, not acceptable \
+             for passwords or security-sensitive digests (use bcrypt/argon2/scrypt \
+             or SHA-256+)"
+        );
+    }
+
+    #[test]
+    fn weak_hash_bare_shape_renders_bare_call() {
+        let obs = observation("weak_hash", &[("callee", "md5".into())]);
+        assert_eq!(
+            obs,
+            "Weak hash function `md5`, not acceptable for passwords or \
+             security-sensitive digests (use bcrypt/argon2/scrypt or SHA-256+)"
+        );
+    }
+
+    #[test]
+    fn weak_hash_wrapper_and_key_size_render_params() {
+        let wrapper = observation("weak_hash_wrapper", &[("path", "vault.hash".into())]);
+        assert_eq!(
+            wrapper,
+            "Password hashing routed through opaque wrapper `vault.hash`, verify it \
+             uses bcrypt/argon2/scrypt, not MD5/SHA-1"
+        );
+        let key = observation(
+            "weak_rsa_key_size",
+            &[
+                ("callee", "generateKey".into()),
+                ("min_bits", "128".into()),
+                ("kind", "symmetric keys".into()),
+            ],
+        );
+        assert_eq!(
+            key,
+            "Weak key size passed to `generateKey`: provably below 128 bits \
+             (use >= 128 bits for symmetric keys)"
+        );
+    }
+
+    #[test]
+    fn insecure_config_selector_renders_literal() {
+        let obs = observation(
+            "insecure_jwt_algorithm",
+            &[("callee", "jwt".into()), ("sel", "none".into())],
+        );
+        assert_eq!(
+            obs,
+            "Insecure configuration: `jwt` called with insecure selector 'none'"
+        );
+    }
+
+    #[test]
+    fn unknown_rule_ids_fall_back_to_generic_observation_with_params() {
+        let obs = observation(
+            "learned_md5_policy",
+            &[("callee", "createHash".into()), ("sel", "md5".into())],
+        );
+        assert_eq!(
+            obs,
+            "learned_md5_policy violated in `handler` at a.ts:7 \
+             (callee=createHash, sel=md5)."
+        );
+    }
+
+    #[test]
+    fn registry_rules_keep_their_advisory_and_use_generic_observation() {
+        let path = std::path::Path::new("a.c");
+        let spec = crate::spec_for_path(path);
+        let (level, title, _, _, _, obs) =
+            checker_advisory(spec, crate::rules::BUFFER_OVERFLOW, "f", "a.c", 3, &[]);
+        assert_eq!(level, super::Severity::Critical);
+        assert_eq!(title, "Memory safety violation: buffer_overflow (f)");
+        assert_eq!(obs, "buffer_overflow violated in `f` at a.c:3.");
     }
 }

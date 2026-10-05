@@ -123,6 +123,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                          host (`https://evil.com?https://allowed`). Use exact-match \
                          or parse-and-compare-origin instead."
                     ),
+                    params: Vec::new(),
                     span,
                     severity: String::new(),
                 });
@@ -308,6 +309,7 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                          password storage must use a memory-hard KDF \
                          (bcrypt/argon2/scrypt), not a fast digest wrapper."
                     ),
+                    params: Vec::new(),
                     span,
                     severity: String::new(),
                 });
@@ -463,6 +465,7 @@ pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Ve
                         "Allowlist `{}` is enforced by substring containment elsewhere in                          the program, any URL embedding one of these entries passes the                          guard (`https://evil.com?https://allowed`). Enforce                          origin-exact matching at the guard.",
                         ir.name
                     ),
+                    params: Vec::new(),
                     span,
                     severity: String::new(),
                 });

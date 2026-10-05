@@ -111,6 +111,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                              declared bound is decorative. Add the constraint to the schema \
                              and validate in the handler."
                         ),
+                        params: Vec::new(),
                         span: *span,
                         severity: String::new(),
                     });
