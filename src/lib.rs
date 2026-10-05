@@ -13,6 +13,7 @@ pub mod lsp;
 pub mod mcp;
 pub mod parser;
 pub mod reporter;
+pub mod reporting;
 
 pub use engine::Engine;
 

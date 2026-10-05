@@ -2,11 +2,15 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-//! Severity declarations and advisory registries.
+//! Severity declarations, the tier ladder, and advisory registries.
 //!
 //! Everything report-shaped lives here, not in the engine or the app:
 //!
 //! - [`Severity`] - the ranking type used by every reporter surface.
+//! - [`SinkRole`] - what a sink does with the data it receives, plus the
+//!   default role->tier map ([`SinkRole::default_level`]) and the stable
+//!   reporting tag ([`SinkRole::tag`]). The engine re-exports the type and
+//!   emits it on findings; it holds zero tier strings (D4).
 //! - [`RuleAdvisory`] / [`RuleEntry`] - per-language rule registries
 //!   (`LanguageSpec::known_rule_registry`): each language declares the
 //!   severity and message templates for the rules it owns.
@@ -16,6 +20,8 @@
 //!   findings.
 
 use serde::{Deserialize, Serialize};
+
+use crate::spec::SinkLabel;
 
 /// Advisory severity ranking.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
@@ -42,6 +48,117 @@ impl Severity {
             "critical" => Severity::Critical,
             "warning" => Severity::Warning,
             _ => Severity::Info,
+        }
+    }
+}
+
+/// What the sink does with the value flowing into it.
+///
+/// Two sinks that both "receive tainted data" are not equally dangerous:
+/// `eval(userInput)` executes it, `db.query({ where: { id } })` controls
+/// row selection, and `res.json(userInput)` merely reflects it back, the
+/// last is normally not a bug at all unless the client renders it
+/// unescaped. Classifying by role lets consumers rank findings by what
+/// the sink does instead of treating every flow as Critical.
+///
+/// Roles are derived from this crate's per-sink [`SinkLabel`]s (single
+/// source of truth, no parallel table) and ride on the engine's sink
+/// signatures so both taint engines see them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SinkRole {
+    /// Data is interpreted as code: eval, exec, deserialize, template
+    /// engines, SQL/NoSQL/LDAP strings. Highest severity.
+    Execution,
+    /// Data selects or reads a resource (IDOR-class query payloads, path
+    /// traversal). Access-control concern, ranked below execution.
+    Resource,
+    /// Data is written to persistent storage (KV put, file write).
+    Storage,
+    /// Data goes into a cryptographic operation (sign, cipher, hash).
+    Crypto,
+    /// Data is reflected into an HTTP response. Usually not a bug by
+    /// itself, review-level, the client-side rendering decides.
+    Response,
+    /// Cross-site scripting (DOM, Reflected, Stored). Client-side code
+    /// execution in the browser context.
+    Xss,
+    /// Data enters a validation/verification routine (jwt.verify,
+    /// `.test()`, comparators). Consuming tainted data is these APIs'
+    /// *job*; a finding here is almost always noise.
+    Validation,
+    /// Unknown or unlabeled sink, keep the conservative default.
+    #[default]
+    Other,
+}
+
+impl SinkRole {
+    /// Map a language-spec label to a role. Labels not listed here keep
+    /// `Other` (conservative: treated as execution by the consumer).
+    #[must_use]
+    pub fn from_label(label: SinkLabel) -> Self {
+        use SinkLabel as L;
+        match label {
+            L::SqlInjection
+            | L::NoSqlInjection
+            | L::CommandInjection
+            | L::CodeExecution
+            | L::TemplateSsti
+            | L::UnsafeDeserialize
+            | L::LdapInjection
+            | L::XpathInjection
+            | L::GraphqlInjection
+            | L::Xxe
+            | L::PrototypePollution
+            | L::FormatString => SinkRole::Execution,
+
+            L::Ssrf | L::OpenRedirect | L::PathTraversal | L::Toctou => SinkRole::Resource,
+
+            L::StorageWrite => SinkRole::Storage,
+
+            L::Jwt => SinkRole::Crypto,
+
+            L::Xss | L::XssDom | L::XssReflected => SinkRole::Xss,
+
+            L::ResponseLeak | L::HeaderInjection | L::CookiePoisoning | L::ContentTypeInjection => {
+                SinkRole::Response
+            }
+
+            L::JwtUnsafeDecode => SinkRole::Validation,
+
+            L::LogLeak | L::CredentialLeak => SinkRole::Response,
+
+            L::JwtWeakAlgorithm | L::UnsafeMemory | L::BufferOverflow | L::Unknown => {
+                SinkRole::Other
+            }
+        }
+    }
+
+    /// The default tier for this role: the ladder lives here (D4), not in
+    /// the engine. Consumers map it onto their own reporting policy.
+    #[must_use]
+    pub fn default_level(&self) -> Severity {
+        match self {
+            SinkRole::Execution | SinkRole::Other => Severity::Critical,
+            SinkRole::Resource | SinkRole::Storage | SinkRole::Crypto | SinkRole::Xss => {
+                Severity::Warning
+            }
+            SinkRole::Response | SinkRole::Validation => Severity::Info,
+        }
+    }
+
+    /// Stable tag for reporting (SARIF properties, CLI JSON).
+    #[must_use]
+    pub fn tag(&self) -> &'static str {
+        match self {
+            SinkRole::Execution => "execution",
+            SinkRole::Resource => "resource",
+            SinkRole::Storage => "storage",
+            SinkRole::Crypto => "crypto",
+            SinkRole::Response => "response",
+            SinkRole::Validation => "validation",
+            SinkRole::Xss => "xss",
+            SinkRole::Other => "other",
         }
     }
 }

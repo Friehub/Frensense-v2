@@ -16,7 +16,7 @@ use super::call_analysis::{
 };
 use super::candidate::Candidate;
 use super::family::Family;
-use super::gate::scan_variant;
+use super::gate::{alerts, scan_variant};
 use super::noise::looks_taint_relevant;
 
 /// Propose candidate facts for one family from the pos/neg delta.
@@ -106,8 +106,8 @@ pub fn propose_with_trace(
 
     let pos = scan_variant(&family.positives, config, builtin);
     let neg = scan_variant(&family.negatives, config, builtin);
-    let pos_alerts = pos.has_alert();
-    let neg_alerts = neg.has_alert();
+    let pos_alerts = alerts(&pos);
+    let neg_alerts = alerts(&neg);
 
     if pos_alerts && !neg_alerts {
         // Taint flow already separates. Return any memory contracts discovered.

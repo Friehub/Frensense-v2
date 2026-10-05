@@ -164,7 +164,14 @@ export function process (data: string) {
         let facts = fact_table_from_spec(spec);
         let files = vec![("test.ts".to_string(), src.to_string(), "ts".to_string())];
         let result = scan(&files, &config, &facts);
-        result.vulnerable().count()
+        result
+            .findings
+            .iter()
+            .filter(|f| {
+                f.verdict == crate::analysis::taint::engine::BackwardVerdict::Vulnerable
+                    && f.alert.is_some()
+            })
+            .count()
     }
 
     /// `{ ...req.body, sql: "SELECT 1" }` as a call argument: the spread's

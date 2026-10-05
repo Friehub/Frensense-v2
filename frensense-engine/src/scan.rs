@@ -13,7 +13,7 @@ use rustc_hash::FxHashMap;
 
 use crate::analysis::forward::ProgramSvfg;
 use crate::analysis::taint::config::TaintConfig;
-use crate::analysis::taint::engine::{BackwardTaintEngine, BackwardVerdict, SinkFinding};
+use crate::analysis::taint::engine::{BackwardTaintEngine, SinkFinding};
 use crate::analysis::taint::facts::FactTable;
 use crate::checks::{self, CheckerFinding};
 use crate::harness::lower_source_with_facts;
@@ -266,35 +266,6 @@ pub struct LocatedFinding {
     pub line: u32,
     /// 1-based column of the sink call (0 when no span recorded).
     pub column: u32,
-}
-
-impl ScanResult {
-    /// Findings with verdict [`BackwardVerdict::Vulnerable`], the alerts.
-    pub fn vulnerable(&self) -> impl Iterator<Item = &SinkFinding> {
-        self.findings
-            .iter()
-            .filter(|f| f.verdict == BackwardVerdict::Vulnerable && f.alert.is_some())
-    }
-
-    /// True if any sink argument was reached by a source in a dangerous
-    /// slot (sink-signature aware).
-    ///
-    /// Info-tier findings (lang-declared Response/Validation roles:
-    /// reflect-into-response and decode APIs) are *observations*, not
-    /// alerts: the engine analyses and records them - role never gates
-    /// exploration - but learn/gate consumers count only warning+ findings.
-    /// Otherwise every benign `res.json(...)` echo on a negative would pin
-    /// `negative_alerts` to true and no sanitizer/check candidate could
-    /// ever separate a family.
-    pub fn has_alert(&self) -> bool {
-        self.vulnerable()
-            .any(|f| f.role.default_level() != "info")
-            // Learned/built-in policy checks are alerts too: a corpus family
-            // whose positive violates a learned check must separate exactly
-            // like a taint family. Without this, Check facts could never be
-            // validated by the replay gate.
-            || !self.checker.is_empty()
-    }
 }
 
 #[cfg(test)]

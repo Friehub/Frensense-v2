@@ -6,6 +6,7 @@ use std::fs;
 use tempfile::TempDir;
 
 use frensense_engine::analysis::taint::config::TaintConfig;
+use frensense_engine::analysis::taint::engine::BackwardVerdict;
 use frensense_engine::analysis::taint::facts::{
     config_from_spec, fact_table_from_spec, FactTable, LearnedFactEntry, PolicyFact,
     PolicyRequirement, PolicyScope,
@@ -671,13 +672,16 @@ export function badSearch (req: any) {
 
         let res = scan::scan(&[ts_file("jwt.ts", JWT_VERIFY)], &config, &table);
         assert!(
-            !res.has_alert(),
+            !alerts(&res),
             "jwt.verify(token, secret) must not alert; got {:?}",
-            res.vulnerable().collect::<Vec<_>>()
+            res.findings
+                .iter()
+                .filter(|f| { f.verdict == BackwardVerdict::Vulnerable && f.alert.is_some() })
+                .collect::<Vec<_>>()
         );
 
         let ctrl = scan::scan(&[ts_file("ctrl.ts", CONTROL_SINK)], &config, &table);
-        assert!(ctrl.has_alert(), "control injection flow must still alert");
+        assert!(alerts(&ctrl), "control injection flow must still alert");
     }
 
     #[test]
@@ -693,9 +697,9 @@ export function badSearch (req: any) {
             &config,
             &table,
         );
-        assert!(pos.has_alert(), "taint in the SQL slot must alert");
+        assert!(alerts(&pos), "taint in the SQL slot must alert");
         assert!(
-            !neg.has_alert(),
+            !alerts(&neg),
             "taint in the params binding channel must not alert"
         );
     }
@@ -741,9 +745,9 @@ export function badSearch (req: any) {
             &config,
             &merged,
         );
-        assert!(pos.has_alert(), "SQL-slot danger must survive fact merge");
+        assert!(alerts(&pos), "SQL-slot danger must survive fact merge");
         assert!(
-            !neg.has_alert(),
+            !alerts(&neg),
             "binding-channel safety must survive fact merge"
         );
     }

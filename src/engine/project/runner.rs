@@ -10,11 +10,10 @@
 
 use super::Engine;
 use crate::engine::files::collect_files;
-use crate::{Advisory, Result, Severity};
+use crate::{Advisory, Result};
 use std::path::Path;
 
 use frensense_engine::analysis::taint::config::TaintConfig;
-use frensense_engine::analysis::taint::engine::BackwardVerdict;
 use frensense_engine::analysis::taint::facts::{
     FactTable, fact_table_from_entries, tables_from_exts,
 };
@@ -109,15 +108,7 @@ impl Engine {
         let mut candidates: Vec<&_> = Vec::new();
         for loc in &result.located {
             let f = &loc.finding;
-            if f.verdict != BackwardVerdict::Vulnerable {
-                continue;
-            }
-            // Sink-signature gate: the engine already evaluated per-slot
-            // danger (jwt.verify(token, secret) slot 1 = secret,
-            // query(sql, params) slot 1+ = binding channel). A `Vulnerable`
-            // verdict on a non-dangerous slot must not become an advisory,
-            // `alert` is None exactly when the slot is a safe channel.
-            if f.alert.is_none() {
+            if !crate::reporting::reports_finding(f) {
                 continue;
             }
             let key = (
@@ -147,11 +138,11 @@ impl Engine {
             ));
         }
 
-        advisories.retain(|a| a.confidence >= self.min_confidence);
-        if let Some(sev) = self.severity_filter {
-            advisories.retain(|a| a.severity.meets_threshold(sev));
-        }
-        Ok(advisories)
+        Ok(crate::reporting::apply(
+            advisories,
+            self.min_confidence,
+            self.severity_filter,
+        ))
     }
 
     fn load_bundle_bytes(&self, root: &Path) -> Result<Option<&'static [u8]>> {
@@ -240,7 +231,7 @@ fn advisory_from_finding(
     };
     let (severity, title) = frensense_lang::severity::taint_advisory(
         class,
-        Severity::parse(f.role.default_level()),
+        f.role.default_level(),
         class_tag,
         &f.sink,
         src,
@@ -253,7 +244,6 @@ fn advisory_from_finding(
         f.function,
         flow.trim_end()
     );
-    let _ = class_tag;
     let mut advisory = Advisory::bare(title, severity, file_id, path, observation)
         .with_confidence(1.0)
         .with_line(line)

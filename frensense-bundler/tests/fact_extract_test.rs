@@ -3,6 +3,7 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use frensense_bundler::builder::build_facts_bundle;
+use frensense_bundler::extract::alerts;
 use frensense_bundler::fact_extract::{
     extract_facts_with_tables, group_families, Family, FamilyMetadata,
 };
@@ -80,10 +81,10 @@ export default router;
 
     // Baseline: positive alerts, but negative ALSO alerts (unknown sanitizer).
     let base = frensense_engine::scan::scan(&fams[0].positives, &cfg, &builtin);
-    assert!(base.has_alert(), "positive must alert at baseline");
+    assert!(alerts(&base), "positive must alert at baseline");
     let base_neg = frensense_engine::scan::scan(&fams[0].negatives, &cfg, &builtin);
     assert!(
-        base_neg.has_alert(),
+        alerts(&base_neg),
         "negative alerts at baseline (test unknown), this is the FP the fact should fix"
     );
 
@@ -100,7 +101,7 @@ export default router;
     // The learned table must now separate the family.
     let after = frensense_engine::scan::scan(&fams[0].negatives, &cfg, &learned);
     assert!(
-        !after.has_alert(),
+        !alerts(&after),
         "negative must be clean with the learned fact; findings: {:?}",
         after.findings
     );
@@ -209,7 +210,7 @@ void test_app() {
     // Positive consumer sample ALERTS on use_after_free.
     let scan_pos = frensense_engine::scan::scan(&consumer_pos, &cfg, &learned);
     assert!(
-        scan_pos.has_alert(),
+        alerts(&scan_pos),
         "consumer positive sample MUST alert on use_after_free with learned contract; findings: {:?}",
         scan_pos.checker
     );
@@ -217,7 +218,7 @@ void test_app() {
     // Negative consumer sample remains completely SILENT.
     let scan_neg = frensense_engine::scan::scan(&consumer_neg, &cfg, &learned);
     assert!(
-        !scan_neg.has_alert(),
+        !alerts(&scan_neg),
         "consumer negative sample MUST stay silent with learned contract; findings: {:?}",
         scan_neg.checker
     );
@@ -288,13 +289,13 @@ export function connect() {
 
     // At baseline: does not alert
     let baseline_res = frensense_engine::scan::scan(&consumer_pos, &cfg, &builtin);
-    assert!(!baseline_res.has_alert());
+    assert!(!alerts(&baseline_res));
 
     // With learned bundle facts:
     // Positive sample must alert
     let scan_pos = frensense_engine::scan::scan(&consumer_pos, &cfg, &learned);
     assert!(
-        scan_pos.has_alert(),
+        alerts(&scan_pos),
         "consumer positive MUST alert with learned policy: {:?}",
         scan_pos.checker
     );
@@ -302,7 +303,7 @@ export function connect() {
     // Negative sample must stay completely silent
     let scan_neg = frensense_engine::scan::scan(&consumer_neg, &cfg, &learned);
     assert!(
-        !scan_neg.has_alert(),
+        !alerts(&scan_neg),
         "consumer negative MUST stay silent: {:?}",
         scan_neg.checker
     );
@@ -407,7 +408,7 @@ fn test_security_policy_frc_roundtrip() {
     // Without bundle: engine is blind to this custom API -- 0 findings expected
     let baseline = frensense_engine::scan::scan(&positive_file, &cfg, &builtin);
     assert!(
-        !baseline.has_alert(),
+        !alerts(&baseline),
         "no findings expected without bundle (engine has no prior knowledge): {:?}",
         baseline.checker
     );
@@ -415,7 +416,7 @@ fn test_security_policy_frc_roundtrip() {
     // With bundle: positive must alert
     let with_bundle_pos = frensense_engine::scan::scan(&positive_file, &cfg, &learned_facts);
     assert!(
-        with_bundle_pos.has_alert(),
+        alerts(&with_bundle_pos),
         "unguarded positive MUST alert after engine is taught the rule; checker: {:?}",
         with_bundle_pos.checker
     );
@@ -423,7 +424,7 @@ fn test_security_policy_frc_roundtrip() {
     // With bundle: negative must stay silent
     let with_bundle_neg = frensense_engine::scan::scan(&negative_file, &cfg, &learned_facts);
     assert!(
-        !with_bundle_neg.has_alert(),
+        !alerts(&with_bundle_neg),
         "guarded negative MUST stay silent after engine is taught the rule; checker: {:?}",
         with_bundle_neg.checker
     );
@@ -495,14 +496,14 @@ export function validateRedirect(url: string) {
     // With learned bundle facts:
     let scan_pos = frensense_engine::scan::scan(&consumer_pos, &cfg, &learned);
     assert!(
-        scan_pos.has_alert(),
+        alerts(&scan_pos),
         "consumer positive with fuzzyMatch MUST alert on guard bypass: {:?}",
         scan_pos.checker
     );
 
     let scan_neg = frensense_engine::scan::scan(&consumer_neg, &cfg, &learned);
     assert!(
-        !scan_neg.has_alert(),
+        !alerts(&scan_neg),
         "consumer negative MUST stay silent: {:?}",
         scan_neg.checker
     );

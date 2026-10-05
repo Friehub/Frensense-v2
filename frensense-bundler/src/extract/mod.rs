@@ -39,7 +39,7 @@ pub use call_analysis::{
 };
 pub use candidate::{apply_candidate, fact_key, Candidate};
 pub use family::{group_families, Family, FamilyMetadata, LearnedFact};
-pub use gate::{scan_variant, separates, PreparedFamily};
+pub use gate::{alerts, scan_variant, separates, PreparedFamily};
 pub use noise::{guard_priority, is_exception_name, looks_taint_relevant};
 pub use propose::{propose, propose_with_trace};
 
