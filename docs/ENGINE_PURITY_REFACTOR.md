@@ -151,7 +151,7 @@ only in the engine but interpreted at least 4 times downstream.
 
 | # | Decision | Resolution |
 |---|----------|------------|
-| D1 | Default pack home | **Embedded `include_bytes!` default `.frc` inside `frensense-bundler`**, exposed as `default_bundle_bytes()`. Rationale: bundler owns the `.frc` format end-to-end (`format/mod.rs:5-9`) *and* is a dependency of the CLI - one embed gives both consumers identical baselines (replay-gate parity) and keeps engine/lang shipping zero policy. Consumer replaces it via `--bundle`; empty pack = spec-seed only. |
+| D1 | Default pack home | **Embedded `include_bytes!` default `.frc` inside `frensense-bundler`**, exposed as `default_bundle_bytes()`. Rationale: bundler owns the `.frc` format end-to-end (`format/mod.rs:5-9`) *and* is a dependency of the CLI - one embed gives both consumers identical baselines (replay-gate parity) and keeps engine/lang shipping zero policy. Consumer replaces it via `--bundle`; empty pack = spec-seed only. **5.2 coverage decision:** pack carries the expressible subset (guard/schema vocabularies, integer-overflow rules, memory contracts); hint vocabularies and weak-hash/key-size/insecure-config rules have no entry representation yet and ride 6.2's format extension. |
 | D2 | Authored input format | **Cancelled - corpus-only (2026-10).** All client-facing authored policy flows through corpus pairs + the in-corpus `[frensense]` metadata block (`family.rs:96-113`, already authors `IntegerOverflowRule`s); no rule file, no TOML/JSON authoring surface ("corpus-based, not rule-based" - `FRENSENSE_CORPUS_GUIDE.md`). `policy_pack` stays in the v5 schema as a reserved, always-empty section; the `Authored` provenance tier stays structural with no producer until a decision reopens it; dead `toml` dep removed from the bundler. |
 | D3 | Per-language tables out of lang (Phase 6.2) | **Deferred until Phases 0-5 land, then executed**, riding the D1 vehicle: each provider's knowledge bodies become **per-language sections of the default pack** (keyed `language` field + `"*"` wildcard, mirroring `grammar_roles` at `table.rs:356-378`). Not skipped - "lang not cluttered" is untrue without it. |
 | D4 | Tier ladder home | **Now: `frensense-lang/src/severity.rs`** - enum, ordering, default role->tier map; both bundler and CLI already depend on lang; CLI already re-exports `Severity` (`src/lib.rs:29`). **Later (post-D1-schema):** role->tier map becomes bundle-overridable. Engine keeps only the `SinkRole` enum, zero tier strings. |
@@ -201,7 +201,7 @@ precision/recall vs `baseline_scorecard.json` + bundler round-trip
 (`pipeline.rs:97`). No PR may move these numbers unless the PR's intent says
 so.
 
-Status below reflects the tree at `76a5226`. The debt-cleanup series C1-C8
+Status below reflects the tree at `f64dea6`. The debt-cleanup series C1-C8
 (formerly tracked in `ENGINE_AUDIT.md`, kept in git history) landed as
 `76deff0` .. `047fb94` on top of Phases 0-3.
 
@@ -297,7 +297,8 @@ and a UAF finding (fails today).
 **Status: partially done.** Check-time `bootstrap_*` unions are gone
 (engine refs = 0: `76deff0`, `9757ef7`, `43f7396`); provenance is
 per-entry in `FactTable` (`73bbc0f`). 5.1 CLI arg fix done (`76a5226`,
-D2 cancelled - corpus-only). Remaining: default pack (5.2),
+D2 cancelled - corpus-only); 5.2 default pack embedded (`f64dea6`,
+expressible subset - format extension rides 6.2). Remaining:
 provenance-ordered merge flip (5.3). Phase 2 gate closed (`fb42237`).
 
 | PR | Change | Key sites |
