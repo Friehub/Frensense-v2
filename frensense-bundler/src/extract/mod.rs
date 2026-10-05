@@ -67,14 +67,23 @@ pub fn extract_facts_with_tables(
 }
 
 /// The tables the consumer CLI will scan a family's files under: the
-/// language specs of the family's own extensions, nothing else.
+/// language specs of the family's own extensions, plus the embedded
+/// default pack (Spec provenance - the CLI runner merges the same pack, so
+/// gate and scan replay under identical baselines).
 fn family_tables(f: &Family) -> (TaintConfig, FactTable) {
-    frensense_engine::analysis::taint::facts::tables_from_exts(
+    let (config, mut facts) = frensense_engine::analysis::taint::facts::tables_from_exts(
         f.positives
             .iter()
             .chain(f.negatives.iter())
             .map(|(_, _, ext)| ext.as_str()),
-    )
+    );
+    facts.merge(
+        &frensense_engine::analysis::taint::facts::fact_table_from_entries_with(
+            crate::format::default_pack().learned_facts.as_slice(),
+            frensense_engine::analysis::taint::facts::Provenance::Spec,
+        ),
+    );
+    (config, facts)
 }
 
 fn extract_facts_with(

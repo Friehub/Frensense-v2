@@ -167,3 +167,6 @@ docs-site/.vitepress/cache/
 /bundles/
 *.frc
 frensense-bench/cve_corpus/
+
+# Embedded default pack asset (Phase 5.2 / D1): committed despite *.frc
+!frensense-bundler/assets/*.frc

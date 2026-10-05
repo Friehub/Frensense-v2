@@ -692,8 +692,17 @@ impl LearnedFactEntry {
         }
     }
 
-    /// Insert this fact into a [`FactTable`].
+    /// Insert this fact into a [`FactTable`] as [`Provenance::Learned`]
+    /// (the bundle path: a corpus taught it).
     pub fn apply(&self, table: &mut FactTable) {
+        self.apply_with(table, Provenance::Learned);
+    }
+
+    /// Insert this fact into a [`FactTable`] under an explicit
+    /// [`Provenance`]. The embedded default pack (Phase 5.2) re-ships
+    /// spec knowledge through the same entry type, so its provenance must
+    /// stay [`Provenance::Spec`] instead of flipping to Learned.
+    pub fn apply_with(&self, table: &mut FactTable, provenance: Provenance) {
         match self {
             LearnedFactEntry::Source { pattern } => {
                 table.learned_sources.insert(pattern.clone());
@@ -818,30 +827,24 @@ impl LearnedFactEntry {
             }
             LearnedFactEntry::GuardBypass(fact) => {
                 for c in &fact.containment_callees {
-                    table
-                        .containment_callees
-                        .insert(c.clone(), Provenance::Learned);
+                    table.containment_callees.insert(c.clone(), provenance);
                 }
                 for s in &fact.credential_sinks {
-                    table
-                        .credential_sinks
-                        .insert(s.clone(), Provenance::Learned);
+                    table.credential_sinks.insert(s.clone(), provenance);
                 }
                 for p in &fact.credential_params {
-                    table
-                        .credential_params
-                        .insert(p.clone(), Provenance::Learned);
+                    table.credential_params.insert(p.clone(), provenance);
                 }
             }
             LearnedFactEntry::SchemaPolicy(fact) => {
                 for b in &fact.builders {
-                    table.schema_builders.insert(b.clone(), Provenance::Learned);
+                    table.schema_builders.insert(b.clone(), provenance);
                 }
                 table
                     .schema_enforcers
                     .extend(fact.enforcers.iter().cloned());
                 for k in &fact.bound_keywords {
-                    table.schema_keywords.insert(k.clone(), Provenance::Learned);
+                    table.schema_keywords.insert(k.clone(), provenance);
                 }
             }
             LearnedFactEntry::GrammarRole {
@@ -932,11 +935,9 @@ impl LearnedFactEntry {
                 if let Some(existing) = table.integer_overflow_rules.iter_mut().find(|(r, _)| {
                     r.rule_id == fact.rule_id && r.wrap_threshold == fact.wrap_threshold
                 }) {
-                    *existing = (fact, Provenance::Learned);
+                    *existing = (fact, provenance);
                 } else {
-                    table
-                        .integer_overflow_rules
-                        .push((fact, Provenance::Learned));
+                    table.integer_overflow_rules.push((fact, provenance));
                 }
             }
         }
@@ -945,17 +946,28 @@ impl LearnedFactEntry {
 
 /// Build a [`FactTable`] from a list of learned bundle facts.
 pub fn fact_table_from_entries(entries: &[LearnedFactEntry]) -> FactTable {
+    fact_table_from_entries_with(entries, Provenance::Learned)
+}
+
+/// Build a [`FactTable`] from bundle entries under an explicit
+/// [`Provenance`]: the embedded default pack seeds its entries as
+/// [`Provenance::Spec`] (Phase 5.2), corpus bundle facts as Learned.
+pub fn fact_table_from_entries_with(
+    entries: &[LearnedFactEntry],
+    provenance: Provenance,
+) -> FactTable {
     let mut t = FactTable::default();
     for e in entries {
-        e.apply(&mut t);
+        e.apply_with(&mut t, provenance);
     }
     t
 }
 
 /// One hand-authored rule as persisted in a bundle's `policy_pack` section
-/// (`.frc` v5). `policy.toml` (D2) parses into these; presence in the
-/// section is what marks an entry's provenance [`Provenance::Authored`],
-/// mirroring `learned_facts` -> [`Provenance::Learned`].
+/// (`.frc` v5). The section is reserved (D2 cancelled: corpus-only
+/// authoring); presence in the section is what marks an entry's
+/// provenance [`Provenance::Authored`], mirroring `learned_facts` ->
+/// [`Provenance::Learned`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub enum AuthoredPolicyEntry {
@@ -964,7 +976,7 @@ pub enum AuthoredPolicyEntry {
     Policy(PolicyFact),
     /// An allocation-size integer-overflow rule: same fields as
     /// [`LearnedFactEntry::IntegerOverflowRule`] (the hand-authored
-    /// precedent: `[frensense] wrap-max:` metadata, now also `policy.toml`).
+    /// precedent: `[frensense] wrap-max:` corpus metadata).
     IntegerOverflowRule {
         rule: String,
         wrap_threshold: u128,

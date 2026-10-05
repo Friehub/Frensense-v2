@@ -17,7 +17,7 @@ use std::path::Path;
 
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::facts::{
-    FactTable, fact_table_from_entries, tables_from_exts,
+    FactTable, Provenance, fact_table_from_entries, fact_table_from_entries_with, tables_from_exts,
 };
 use frensense_engine::scan;
 use frensense_engine::scan::LocatedFinding;
@@ -52,6 +52,17 @@ impl Engine {
 
         // Built-in config + fact table from the language specs present.
         let (mut config, mut facts) = build_spec_tables(&files);
+
+        // Default pack (D1/5.2): spec knowledge re-shipped as an embedded
+        // .frc, merged with Spec provenance between the spec seed and the
+        // consumer bundle so bundle facts still win (spec -> pack ->
+        // consumer, last-wins).
+        facts.merge(&fact_table_from_entries_with(
+            frensense_bundler::format::default_pack()
+                .learned_facts
+                .as_slice(),
+            Provenance::Spec,
+        ));
 
         // Merge learned facts from the .frc bundle, if any, and index the
         // bundle's per-family advisory patterns by the finding identities
