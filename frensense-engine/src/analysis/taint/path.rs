@@ -201,28 +201,6 @@ impl TaintPath {
         }
         out
     }
-
-    /// SARIF `codeFlow.threadFlowLocation` array (consumer maps in file URIs).
-    pub fn sarif_locations(&self) -> Vec<serde_json::Value> {
-        self.spans
-            .iter()
-            .zip(&self.steps)
-            .map(|(span, step)| {
-                let loc = span.as_ref().map(|(file, (start, _))| {
-                    serde_json::json!({
-                        "physicalLocation": {
-                            "artifactLocation": { "uri": file },
-                            "region": { "byteOffset": start }
-                        }
-                    })
-                });
-                serde_json::json!({
-                    "location": loc,
-                    "message": { "text": step.describe() }
-                })
-            })
-            .collect()
-    }
 }
 
 /// Dedup helper: keep one representative per shape, preferring the finding

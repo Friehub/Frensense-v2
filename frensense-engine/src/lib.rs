@@ -49,20 +49,12 @@ pub enum FrensenseError {
     ParseFailure(String),
     #[error("Config error: {0}")]
     Config(String),
-    #[error("IO error: {0}")]
-    Io(String),
     #[error("Parser error: {0}")]
     ParserError(String),
     #[error("Pattern error: {0}")]
     Pattern(String),
     #[error("Engine error: {0}")]
     Engine(String),
-}
-
-impl From<std::io::Error> for FrensenseError {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e.to_string())
-    }
 }
 
 impl From<tree_sitter::LanguageError> for FrensenseError {

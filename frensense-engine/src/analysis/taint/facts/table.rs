@@ -462,9 +462,9 @@ pub enum LearnedFactEntry {
         rule: String,
         when_call: String,
         /// Requirements that must hold for the trigger to be compliant.
-        #[serde(default)]
+        #[cfg_attr(feature = "serialize", serde(default))]
         require: Vec<PolicyRequirement>,
-        #[serde(default)]
+        #[cfg_attr(feature = "serialize", serde(default))]
         scope: PolicyScope,
         message: String,
         severity: String,
@@ -477,12 +477,12 @@ pub enum LearnedFactEntry {
         severity: String,
         /// Fire only when this guard call is absent from the function
         /// ("trigger without enforcement"). `None` = presence-only.
-        #[serde(default)]
+        #[cfg_attr(feature = "serialize", serde(default))]
         unless_guard: Option<String>,
         /// Fire only when the trigger's argument is NOT compared against a
         /// literal bound with one of these operators (inline enforcement).
         /// `None` = no range qualification.
-        #[serde(default)]
+        #[cfg_attr(feature = "serialize", serde(default))]
         unless_range_check: Option<Vec<String>>,
     },
     /// Install a corpus-verified memory allocation or deallocation contract.

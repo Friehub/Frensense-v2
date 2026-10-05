@@ -106,7 +106,7 @@ pub struct LearnedCheckFact {
     /// same function. This expresses "trigger without enforcement", e.g.
     /// a privileged tool action executed without its policy-check helper.
     /// `None` = plain presence trigger.
-    #[serde(default)]
+    #[cfg_attr(feature = "serialize", serde(default))]
     pub unless_guard: Option<String>,
     /// Optional range-check qualification (bundle-authored): the rule only
     /// fires when the trigger's guarded argument is NOT compared against a
@@ -116,7 +116,7 @@ pub struct LearnedCheckFact {
     /// none. This expresses enforcement without requiring a named helper.
     /// The value is the operator set accepted as a bound check
     /// (e.g. `["<", ">", "<=", ">="]`); `None` = no range qualification.
-    #[serde(default)]
+    #[cfg_attr(feature = "serialize", serde(default))]
     pub unless_range_check: Option<Vec<String>>,
 }
 
@@ -182,7 +182,7 @@ impl PolicyRequirement {
 /// Where a policy's trigger and requirements are evaluated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
-#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "serialize", serde(rename_all = "snake_case"))]
 pub enum PolicyScope {
     /// Trigger and requirements live in the same function (the default;
     /// matches the legacy `LearnedCheckFact` semantics exactly).
@@ -214,10 +214,10 @@ pub struct PolicyFact {
     pub when_call: String,
     /// Requirements that must hold in the scope for the trigger to be
     /// compliant. Empty = presence-only policy (any trigger fires).
-    #[serde(default)]
+    #[cfg_attr(feature = "serialize", serde(default))]
     pub require: Vec<PolicyRequirement>,
     /// Where trigger and requirements are evaluated.
-    #[serde(default)]
+    #[cfg_attr(feature = "serialize", serde(default))]
     pub scope: PolicyScope,
     /// Advisory text shown to the user (bundle-authored).
     pub message: String,
@@ -276,11 +276,11 @@ pub struct WeakCryptoFact {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct GuardBypassFact {
-    #[serde(default)]
+    #[cfg_attr(feature = "serialize", serde(default))]
     pub containment_callees: Vec<String>,
-    #[serde(default)]
+    #[cfg_attr(feature = "serialize", serde(default))]
     pub credential_sinks: Vec<String>,
-    #[serde(default)]
+    #[cfg_attr(feature = "serialize", serde(default))]
     pub credential_params: Vec<String>,
 }
 
@@ -288,11 +288,11 @@ pub struct GuardBypassFact {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct SchemaPolicyFact {
-    #[serde(default)]
+    #[cfg_attr(feature = "serialize", serde(default))]
     pub builders: Vec<String>,
-    #[serde(default)]
+    #[cfg_attr(feature = "serialize", serde(default))]
     pub enforcers: Vec<String>,
-    #[serde(default)]
+    #[cfg_attr(feature = "serialize", serde(default))]
     pub bound_keywords: Vec<String>,
 }
 
