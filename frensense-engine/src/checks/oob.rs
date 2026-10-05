@@ -21,6 +21,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::analysis::taint::facts::FactTable;
 use crate::analysis::value::{self, ValueInfo};
 use crate::checks::CheckerFinding;
+use crate::checks::Provenance;
 use crate::checks::memory_summary::{CapacitySpec, MemorySummaryRegistry};
 use crate::graph::steensgaard::{ClassId, Steensgaard};
 use crate::ir::function::{BasicBlock, BlockId, FunctionIR, Instruction, Operand, VarId};
@@ -194,7 +195,7 @@ fn finding(
         message,
         span,
         severity: String::new(),
-        learned: false,
+        provenance: Provenance::Spec,
     }
 }
 

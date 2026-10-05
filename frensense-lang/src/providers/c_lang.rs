@@ -450,6 +450,16 @@ impl LanguageSpec for CSpec {
                 },
             },
             RuleEntry {
+                rule: rules::UNINITIALIZED_FREE,
+                advisory: RuleAdvisory {
+                    level: Severity::Critical,
+                    title: "Memory safety violation: {rule} ({function})",
+                    impact: "{rule} at {file}:{line}, dangerous temporal memory safety defect leading to memory corruption or arbitrary code execution.",
+                    improvement: "Initialize pointer variables before freeing them in `{function}`. Assign a valid allocation (or null) before every free.",
+                    tag: "memory-safety",
+                },
+            },
+            RuleEntry {
                 rule: rules::BUFFER_OVERFLOW,
                 advisory: RuleAdvisory {
                     level: Severity::Critical,

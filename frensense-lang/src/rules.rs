@@ -11,8 +11,10 @@
 
 /// Temporal memory-safety violation (use after free).
 pub const USE_AFTER_FREE: &str = "use_after_free";
-/// Temporal memory-safety violation (double free / uninitialized free).
+/// Temporal memory-safety violation (double free).
 pub const DOUBLE_FREE: &str = "double_free";
+/// Temporal memory-safety violation (uninitialized pointer free).
+pub const UNINITIALIZED_FREE: &str = "uninitialized_free";
 /// Spatial memory-safety violation (buffer overflow write).
 pub const BUFFER_OVERFLOW: &str = "buffer_overflow";
 /// Spatial memory-safety violation (out-of-bounds read).

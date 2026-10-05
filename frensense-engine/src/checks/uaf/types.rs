@@ -3,6 +3,7 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use crate::checks::CheckerFinding;
+use crate::checks::Provenance;
 use crate::ir::function::{BlockId, FunctionIR, VarId};
 
 /// A violation of the object lifecycle.
@@ -98,7 +99,7 @@ pub fn finding(
             ),
         ),
         Violation::UninitializedFree => (
-            frensense_lang::rules::DOUBLE_FREE,
+            frensense_lang::rules::UNINITIALIZED_FREE,
             format!(
                 "`{name}` is freed without guaranteed initialization \
                  (uninitialized pointer free). Initialize before use."
@@ -111,6 +112,6 @@ pub fn finding(
         message,
         span,
         severity: String::new(),
-        learned: false,
+        provenance: Provenance::Spec,
     }
 }

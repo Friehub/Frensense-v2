@@ -53,6 +53,17 @@ use crate::analysis::taint::facts::FactTable;
 use crate::ir::function::FunctionIR;
 use rustc_hash::FxHashSet;
 
+/// Where the knowledge behind a finding came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provenance {
+    /// Built-in seed knowledge shipped with the specs.
+    Spec,
+    /// Structured co-occurrence policy (the authored-policy shape).
+    Authored,
+    /// Corpus-learned fact supplied by a bundle.
+    Learned,
+}
+
 /// One non-dataflow policy finding.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckerFinding {
@@ -71,9 +82,8 @@ pub struct CheckerFinding {
     /// driving rule declares none; consumers then resolve severity from
     /// their own rule registry.
     pub severity: String,
-    /// `true` when this finding comes from a corpus-learned rule in the
-    /// fact table rather than a built-in seed check.
-    pub learned: bool,
+    /// Knowledge source: spec seed, authored policy, or bundle-learned fact.
+    pub provenance: Provenance,
 }
 
 /// Run every registered check over every function, deduped and ordered by
@@ -167,6 +177,7 @@ pub fn check_all_with_graph<'a>(
 /// IR); the conclusions are the bundle's.
 pub(crate) mod learned {
     use super::CheckerFinding;
+    use super::Provenance;
     use crate::analysis::taint::facts::FactTable;
     use crate::ir::function::{FunctionIR, Instruction, Operand};
 
@@ -300,7 +311,7 @@ pub(crate) mod learned {
                         message: fact.message.clone(),
                         span: instr_span(ir, instr),
                         severity: fact.severity.clone(),
-                        learned: true,
+                        provenance: Provenance::Learned,
                     });
                 }
             }

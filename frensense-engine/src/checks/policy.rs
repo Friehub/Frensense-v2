@@ -18,6 +18,7 @@
 use rustc_hash::FxHashMap;
 
 use super::CheckerFinding;
+use super::Provenance;
 use super::learned::{call_segments, is_range_guarded};
 use crate::analysis::taint::facts::{FactTable, PolicyFact, PolicyRequirement, PolicyScope};
 use crate::ir::control::{self, DomSets};
@@ -122,7 +123,7 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
                         message: policy.message.clone(),
                         span,
                         severity: policy.severity.clone(),
-                        learned: true,
+                        provenance: Provenance::Learned,
                     });
                 }
             }

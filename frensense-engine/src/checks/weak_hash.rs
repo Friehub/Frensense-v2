@@ -19,6 +19,7 @@
 
 use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
+use crate::checks::Provenance;
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
 // Weak-hash, key-size and insecure-selector policy tables live in
@@ -178,9 +179,15 @@ fn check_call(
     let callee_seg = last_segment(callee);
     let callee_lower = callee_seg.to_ascii_lowercase();
 
-    for rule in frensense_lang::policy::bootstrap_weak_hash_rules()
+    for (rule, provenance) in frensense_lang::policy::bootstrap_weak_hash_rules()
         .iter()
-        .chain(facts.weak_hash_rules.iter())
+        .map(|r| (r, Provenance::Spec))
+        .chain(
+            facts
+                .weak_hash_rules
+                .iter()
+                .map(|r| (r, Provenance::Learned)),
+        )
     {
         // Selector shape: `createHash('md5')`. Rules with
         // `requires_credential_context` fire only inside credential-named
@@ -199,7 +206,7 @@ fn check_call(
             && rule.weak_selectors.contains(&sel.as_str())
         {
             out.push(CheckerFinding {
-                learned: false,
+                provenance,
                 function: ir.name.clone(),
                 rule: rule.rule_id.to_string(),
                 message: format!(
@@ -220,7 +227,7 @@ fn check_call(
             .any(|c| last_segment(c).to_ascii_lowercase() == callee_lower)
         {
             out.push(CheckerFinding {
-                learned: false,
+                provenance,
                 function: ir.name.clone(),
                 rule: rule.rule_id.to_string(),
                 message: format!(
@@ -251,7 +258,7 @@ fn check_call(
                         .any(|ws| ws.to_ascii_lowercase() == sel)
                 {
                     out.push(CheckerFinding {
-                        learned: true,
+                        provenance: Provenance::Learned,
                         function: ir.name.clone(),
                         rule: fact.rule_id.clone(),
                         message: format!(
@@ -265,7 +272,7 @@ fn check_call(
                 }
             } else {
                 out.push(CheckerFinding {
-                    learned: true,
+                    provenance: Provenance::Learned,
                     function: ir.name.clone(),
                     rule: fact.rule_id.clone(),
                     message: format!(
@@ -284,14 +291,20 @@ fn check_call(
     // receiver is a security-ish namespace. Matched by last segment of the
     // receiver chain when available; bare `hash(x)` is too generic to flag
     // on its own, so require a known crypto-receiver qualification.
-    let is_suspicious_wrapper = frensense_lang::policy::bootstrap_suspicious_hash_wrappers()
-        .contains(&callee_lower.as_str())
-        || facts
-            .suspicious_hash_wrappers
-            .contains(callee_lower.as_str());
-    if is_suspicious_wrapper && let Some(path) = receiver_path(ir, args, callee, facts) {
+    let spec_wrapper = frensense_lang::policy::bootstrap_suspicious_hash_wrappers()
+        .contains(&callee_lower.as_str());
+    let learned_wrapper = facts
+        .suspicious_hash_wrappers
+        .contains(callee_lower.as_str());
+    if (spec_wrapper || learned_wrapper)
+        && let Some(path) = receiver_path(ir, args, callee, facts)
+    {
         out.push(CheckerFinding {
-            learned: false,
+            provenance: if learned_wrapper && !spec_wrapper {
+                Provenance::Learned
+            } else {
+                Provenance::Spec
+            },
             function: ir.name.clone(),
             rule: frensense_lang::rules::WEAK_HASH_WRAPPER.to_string(),
             message: format!(
@@ -307,9 +320,15 @@ fn check_call(
     // argument is a PROVABLE CONSTANT below the security floor. The value
     // lattice resolves `const bits = 512; generateKey(bits)` the same as a
     // direct literal, so wrapper indirection doesn't hide the weakness.
-    for rule in frensense_lang::policy::bootstrap_key_size_rules()
+    for (rule, provenance) in frensense_lang::policy::bootstrap_key_size_rules()
         .iter()
-        .chain(facts.key_size_rules.iter())
+        .map(|r| (r, Provenance::Spec))
+        .chain(
+            facts
+                .key_size_rules
+                .iter()
+                .map(|r| (r, Provenance::Learned)),
+        )
     {
         if last_segment(rule.call).to_ascii_lowercase() != callee_lower {
             continue;
@@ -320,7 +339,7 @@ fn check_call(
                 .unwrap_or(false);
             if weak {
                 out.push(CheckerFinding {
-                    learned: false,
+                    provenance,
                     function: ir.name.clone(),
                     rule: rule.rule_id.to_string(),
                     message: format!(
@@ -340,10 +359,16 @@ fn check_call(
 
     // Insecure literal selectors (`{ algorithm: 'none' }` shapes land here
     // once object literals are flattened; for now the string form).
-    for (prefix, selectors, rule_id) in
+    for ((prefix, selectors, rule_id), provenance) in
         frensense_lang::policy::bootstrap_insecure_config_selectors()
             .iter()
-            .chain(facts.insecure_config_selectors.iter())
+            .map(|t| (t, Provenance::Spec))
+            .chain(
+                facts
+                    .insecure_config_selectors
+                    .iter()
+                    .map(|t| (t, Provenance::Learned)),
+            )
     {
         // Match the full dotted call path (`jwt.verify`) or the callee
         // (`jwtChallenge`); only a *verifier* accepting an insecure
@@ -361,7 +386,7 @@ fn check_call(
                 && selectors.contains(&lit.to_ascii_lowercase().as_str())
             {
                 out.push(CheckerFinding {
-                    learned: false,
+                    provenance,
                     function: ir.name.clone(),
                     rule: rule_id.to_string(),
                     message: format!(

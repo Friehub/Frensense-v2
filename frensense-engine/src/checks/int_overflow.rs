@@ -33,6 +33,7 @@ use rustc_hash::FxHashSet;
 use crate::analysis::taint::facts::FactTable;
 use crate::analysis::value::{self, ValueInfo};
 use crate::checks::CheckerFinding;
+use crate::checks::Provenance;
 use crate::checks::memory_summary::{CapacitySpec, MemorySummaryRegistry};
 use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand, VarId};
 
@@ -155,14 +156,20 @@ pub fn check(
     let val_info = value::analyze(ir);
     let mut out = Vec::new();
     let mut seen: FxHashSet<(String, u128)> = FxHashSet::default();
-    for rule in frensense_lang::policy::bootstrap_integer_overflow_rules()
+    for (rule, provenance) in frensense_lang::policy::bootstrap_integer_overflow_rules()
         .iter()
-        .chain(facts.integer_overflow_rules.iter())
+        .map(|r| (r, Provenance::Spec))
+        .chain(
+            facts
+                .integer_overflow_rules
+                .iter()
+                .map(|r| (r, Provenance::Learned)),
+        )
     {
         if !seen.insert((rule.rule_id.clone(), rule.wrap_threshold)) {
             continue;
         }
-        check_rule(ir, &val_info, summaries, rule, &mut out);
+        check_rule(ir, &val_info, summaries, rule, provenance, &mut out);
     }
     out
 }
@@ -174,6 +181,7 @@ fn check_rule(
     val_info: &ValueInfo,
     summaries: &MemorySummaryRegistry,
     rule: &frensense_lang::policy::IntegerOverflowRule,
+    provenance: Provenance,
     out: &mut Vec<CheckerFinding>,
 ) {
     let threshold = i128::try_from(rule.wrap_threshold).unwrap_or(i128::MAX);
@@ -208,7 +216,7 @@ fn check_rule(
                 continue;
             };
             out.push(CheckerFinding {
-                learned: false,
+                provenance,
                 function: ir.name.clone(),
                 rule: rule.rule_id.clone(),
                 severity: rule.severity.clone(),

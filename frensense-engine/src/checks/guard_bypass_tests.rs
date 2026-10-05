@@ -8,6 +8,7 @@
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod guard_bypass_tests {
     use crate::analysis::taint::facts::FactTable;
+    use crate::checks::Provenance;
     use crate::checks::guard_bypass;
     use crate::harness::lower_source;
 
@@ -185,7 +186,7 @@ export const isRedirectAllowed = (url: string) => {
         );
         assert_eq!(pos_hits[0].rule, "substring_allowlist_guard");
         assert!(
-            pos_hits.iter().any(|h| h.learned),
+            pos_hits.iter().any(|h| h.provenance == Provenance::Learned),
             "finding must be marked learned"
         );
 
@@ -225,7 +226,7 @@ export function savePwd (password: string) {
             .flat_map(|ir| guard_bypass::check_credentials(ir, &facts))
             .collect();
         assert_eq!(hits1.len(), 1, "learned sink must fire on password param");
-        assert!(hits1[0].learned);
+        assert_eq!(hits1[0].provenance, Provenance::Learned);
 
         // Positive sample 2: standard sink with learned credential param
         let pos_src2 = r#"
@@ -239,7 +240,7 @@ export function saveToken (clientSecretToken: string) {
             .flat_map(|ir| guard_bypass::check_credentials(ir, &facts))
             .collect();
         assert_eq!(hits2.len(), 1, "learned param must fire on credential sink");
-        assert!(hits2[0].learned);
+        assert_eq!(hits2[0].provenance, Provenance::Learned);
 
         // Negative sample: secure memory-hard KDF or non-credential hash
         let neg_src = r#"

@@ -16,6 +16,7 @@
 
 use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
+use crate::checks::Provenance;
 use crate::ir::function::{FunctionIR, Instruction, Operand, Terminator, VarId};
 use rustc_hash::FxHashSet;
 
@@ -109,7 +110,11 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                 }
                 let span = ir.var_metadata.get(d).and_then(|m| m.byte_range);
                 findings.push(CheckerFinding {
-                    learned: is_learned,
+                    provenance: if is_learned {
+                        Provenance::Learned
+                    } else {
+                        Provenance::Spec
+                    },
                     function: ir.name.clone(),
                     rule: frensense_lang::rules::SUBSTRING_ALLOWLIST_GUARD.to_string(),
                     message: format!(
@@ -291,7 +296,11 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
                     .and_then(|d| ir.var_metadata.get(d))
                     .and_then(|m| m.byte_range);
                 findings.push(CheckerFinding {
-                    learned: matched_learned,
+                    provenance: if matched_learned {
+                        Provenance::Learned
+                    } else {
+                        Provenance::Spec
+                    },
                     function: ir.name.clone(),
                     rule: frensense_lang::rules::CREDENTIAL_KDF_POLICY.to_string(),
                     message: format!(
@@ -358,10 +367,27 @@ fn allocation_of(ir: &FunctionIR, mut var: VarId) -> Option<VarId> {
 }
 
 pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFinding> {
-    let guard_exists = irs.iter().any(|ir| !check(ir, facts).is_empty());
-    if !guard_exists {
+    // The definition finding inherits the guards' knowledge source: a
+    // program whose substring guards all come from bundle-learned
+    // containment callees (none built in) is a learned finding.
+    let mut guard_spec = false;
+    let mut guard_learned = false;
+    for ir in irs {
+        for guard in check(ir, facts) {
+            match guard.provenance {
+                Provenance::Spec | Provenance::Authored => guard_spec = true,
+                Provenance::Learned => guard_learned = true,
+            }
+        }
+    }
+    if !guard_spec && !guard_learned {
         return Vec::new();
     }
+    let guard_provenance = if guard_spec {
+        Provenance::Spec
+    } else {
+        Provenance::Learned
+    };
     let mut findings = Vec::new();
     for ir in irs {
         for block in ir.blocks.values() {
@@ -430,7 +456,7 @@ pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Ve
                     .and_then(|d| ir.var_metadata.get(d))
                     .and_then(|m| m.byte_range);
                 findings.push(CheckerFinding {
-                    learned: false,
+                    provenance: guard_provenance,
                     function: ir.name.clone(),
                     rule: frensense_lang::rules::ALLOWLIST_DEFINITION_BYPASSABLE.to_string(),
                     message: format!(

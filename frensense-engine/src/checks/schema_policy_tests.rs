@@ -10,6 +10,7 @@
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod schema_policy_tests {
     use crate::analysis::taint::facts::FactTable;
+    use crate::checks::Provenance;
     use crate::checks::check_all;
     use crate::harness::lower_source;
 
@@ -147,7 +148,7 @@ export const schema = {
             .iter()
             .find(|f| f.rule == "unbounded_number_schema")
             .expect("learned builder must fire on positive sample");
-        assert!(f.learned);
+        assert_eq!(f.provenance, Provenance::Learned);
 
         // Negative sample: custom builder with enforcement
         let neg_src = r#"
@@ -223,7 +224,7 @@ export const schema = {
             .iter()
             .find(|f| f.rule == "unbounded_number_schema")
             .expect("learned keyword must trigger on positive sample");
-        assert!(f.learned);
+        assert_eq!(f.provenance, Provenance::Learned);
 
         // Negative sample: description uses 'ceiling 100' with .max(100) enforcer
         let neg_src = r#"

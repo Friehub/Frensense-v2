@@ -58,6 +58,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checks::CheckerFinding;
+use crate::checks::Provenance;
 use crate::checks::memory_summary::MemorySummaryRegistry;
 use crate::ir::control::{DomSets, dominators};
 use crate::ir::function::{
@@ -549,7 +550,7 @@ pub fn check(ir: &FunctionIR, summaries: &MemorySummaryRegistry) -> Vec<CheckerF
         }
         let span = var_span(ir, id);
         out.push(CheckerFinding {
-            learned: false,
+            provenance: Provenance::Spec,
             function: ir.name.clone(),
             rule: frensense_lang::rules::MEMORY_LEAK.to_string(),
             message: format!(

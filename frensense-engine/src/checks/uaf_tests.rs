@@ -356,7 +356,7 @@ void parse_def(int skip) {
 "#;
         let rules = hits(src);
         assert!(
-            rules.iter().any(|r| r == "double_free"),
+            rules.iter().any(|r| r == "uninitialized_free"),
             "uninitialized pointer free on error path must fire: {:?}",
             rules
         );
@@ -408,7 +408,7 @@ void handler(void) {
 "#;
         let rules = hits(src);
         assert!(
-            rules.iter().any(|r| r == "double_free"),
+            rules.iter().any(|r| r == "uninitialized_free"),
             "free of a never-initialized local must fire: {:?}",
             rules
         );
@@ -445,7 +445,7 @@ int apply_entry(void) {
             .map(|f| f.rule)
             .collect();
         assert!(
-            rules.iter().any(|r| r == "double_free"),
+            rules.iter().any(|r| r == "uninitialized_free"),
             "never-initialized local freed through an in-program wrapper must fire: {:?}",
             rules
         );
@@ -471,7 +471,7 @@ void handler(void) {
 "#;
         let rules = hits(src);
         assert!(
-            rules.iter().any(|r| r == "double_free"),
+            rules.iter().any(|r| r == "uninitialized_free"),
             "free reachable only from paths with no reaching def must fire: {:?}",
             rules
         );

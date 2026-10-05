@@ -29,6 +29,7 @@ use frensense_engine::analysis::taint::facts::{
     PolicyRequirement, PolicyScope, SchemaPolicyFact, TeachableNodeRole, WeakCryptoFact,
 };
 use frensense_engine::checks::memory_summary::CapacitySpec;
+use frensense_engine::checks::Provenance;
 use frensense_engine::scan::scan;
 
 fn make_bundle(facts: Vec<LearnedFactEntry>) -> FactTable {
@@ -376,7 +377,7 @@ fn test_dim_08_cryptographic_rules_weak_cipher() {
         "banned cryptographic primitive must alert"
     );
     assert_eq!(pos_res.checker[0].rule, "weak_crypto_custom");
-    assert!(pos_res.checker[0].learned);
+    assert_eq!(pos_res.checker[0].provenance, Provenance::Learned);
 
     // Negative: uses secure 'aes256' -> SILENT
     let neg_file = vec![(

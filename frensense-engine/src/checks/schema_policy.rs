@@ -16,6 +16,7 @@
 
 use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
+use crate::checks::Provenance;
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
 type BuilderEntry = (String, bool, Option<(usize, usize)>);
@@ -97,7 +98,11 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                     && lower.chars().any(|c| c.is_ascii_digit())
                 {
                     findings.push(CheckerFinding {
-                        learned: *builder_learned || is_learned_keyword,
+                        provenance: if *builder_learned || is_learned_keyword {
+                            Provenance::Learned
+                        } else {
+                            Provenance::Spec
+                        },
                         function: ir.name.clone(),
                         rule: frensense_lang::rules::UNBOUNDED_NUMBER_SCHEMA.to_string(),
                         message: format!(
