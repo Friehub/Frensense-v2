@@ -673,6 +673,25 @@ pub enum LearnedFactEntry {
 }
 
 impl LearnedFactEntry {
+    /// Finding identities this fact's scanner output is keyed by: checker
+    /// rule ids and learned sink call names. The bundle-advisory join
+    /// (`BundlePattern::rules`) goes through this, so a family's
+    /// `[frensense]` metadata can attach to the findings its facts cause.
+    /// Entries whose findings use engine-internal rule ids (memory
+    /// contracts, guard vocabularies, grammar) contribute none.
+    pub fn finding_identities(&self) -> Vec<String> {
+        match self {
+            LearnedFactEntry::Sink { call, .. } | LearnedFactEntry::IdorFinderSink { call, .. } => {
+                vec![call.clone()]
+            }
+            LearnedFactEntry::Policy { rule, .. }
+            | LearnedFactEntry::Check { rule, .. }
+            | LearnedFactEntry::IntegerOverflowRule { rule, .. } => vec![rule.clone()],
+            LearnedFactEntry::WeakCrypto(fact) => vec![fact.rule_id.clone()],
+            _ => Vec::new(),
+        }
+    }
+
     /// Insert this fact into a [`FactTable`].
     pub fn apply(&self, table: &mut FactTable) {
         match self {

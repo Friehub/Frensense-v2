@@ -4,9 +4,11 @@
 
 //! The scan runner: collect files → `data_flow::scan` → advisories.
 //!
-//! This is the whole consumer pipeline. Advisory text is generated from the
-//! flow itself (source access path, sink name, exact sink line/column),
-//! never from corpus pattern text or templates.
+//! This is the whole consumer pipeline. Advisory text renders from the
+//! lang rule registry or, for flows, from the flow itself (source access
+//! path, sink name, exact sink line/column); fact-authored prose wins over
+//! both, and a bundle pattern whose `rules` match the finding overlays
+//! severity, impact, and tags (plus observation on the checker path).
 
 use super::Engine;
 use crate::engine::files::collect_files;
@@ -51,11 +53,24 @@ impl Engine {
         // Built-in config + fact table from the language specs present.
         let (mut config, mut facts) = build_spec_tables(&files);
 
-        // Merge learned facts from the .frc bundle, if any.
+        // Merge learned facts from the .frc bundle, if any, and index the
+        // bundle's per-family advisory patterns by the finding identities
+        // they apply to (`BundlePattern::rules`) for the advisory path.
+        let mut bundle_advisories: rustc_hash::FxHashMap<
+            String,
+            frensense_bundler::format::BundlePattern,
+        > = rustc_hash::FxHashMap::default();
         if let Some(bundle_bytes) = self.load_bundle_bytes(root)? {
             match frensense_bundler::format::load_bundle(bundle_bytes) {
                 Ok(loaded) => {
                     facts.merge(&fact_table_from_entries(&loaded.learned_facts));
+                    for pattern in &loaded.patterns {
+                        for rule in &pattern.rules {
+                            bundle_advisories
+                                .entry(rule.clone())
+                                .or_insert_with(|| pattern.clone());
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::warn!("failed to load corpus bundle: {e}");
@@ -90,6 +105,7 @@ impl Engine {
                     line,
                     col,
                     crate::engine::project::Engine::next_file_id(seq),
+                    &bundle_advisories,
                 )
                 .with_end_line(lc.end_line),
             );
@@ -135,6 +151,7 @@ impl Engine {
                 loc.line,
                 loc.column,
                 crate::engine::project::Engine::next_file_id(seq),
+                &bundle_advisories,
             ));
         }
 
@@ -174,6 +191,49 @@ fn build_spec_tables(files: &[(String, String, String)]) -> (TaintConfig, FactTa
     tables_from_exts(files.iter().map(|(_, _, ext)| ext.as_str()))
 }
 
+/// Corpus `[frensense] severity:` labels -> CLI tier. CVSS-style labels;
+/// tier mapping is consumer policy (D4). Unknown labels return `None` so
+/// the finding keeps the registry's severity.
+fn corpus_severity(raw: &str) -> Option<crate::Severity> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "critical" | "high" => Some(crate::Severity::Critical),
+        "medium" => Some(crate::Severity::Warning),
+        "low" => Some(crate::Severity::Info),
+        _ => None,
+    }
+}
+
+/// Overlay a matched bundle pattern's advisory on a finding's advisory:
+/// declared severity, impact, improvement, and cwe/cvss/owasp tags
+/// override the registry. Observation is handled by the caller - only the
+/// checker path lets pattern prose replace the template; a flow's
+/// observation is the finding's own description and stays.
+fn apply_bundle_pattern(
+    advisory: &mut Advisory,
+    pattern: &frensense_bundler::format::BundlePattern,
+) {
+    if let Some(raw) = pattern.severity.as_deref()
+        && let Some(tier) = corpus_severity(raw)
+    {
+        advisory.severity = tier;
+    }
+    if let Some(impact) = &pattern.impact {
+        advisory.impact = impact.clone();
+    }
+    if let Some(improvement) = &pattern.improvement {
+        advisory.improvement = improvement.clone();
+    }
+    if let Some(cwe) = &pattern.cwe {
+        advisory.tags.push(cwe.clone());
+    }
+    if let Some(cvss) = pattern.cvss {
+        advisory.tags.push(format!("CVSS:{cvss}"));
+    }
+    if let Some(owasp) = &pattern.owasp {
+        advisory.tags.push(owasp.clone());
+    }
+}
+
 /// Build the compiler-style advisory for one non-dataflow policy finding.
 fn advisory_from_checker(
     c: &frensense_engine::checks::CheckerFinding,
@@ -181,6 +241,7 @@ fn advisory_from_checker(
     line: u32,
     column: u32,
     file_id: crate::FileId,
+    bundle_advisories: &rustc_hash::FxHashMap<String, frensense_bundler::format::BundlePattern>,
 ) -> Advisory {
     let path = Path::new(file);
     // Severity, title, and message templates are declared per-language in
@@ -188,7 +249,10 @@ fn advisory_from_checker(
     // language declares fall back to the generic policy shape. Spec checks
     // emit an empty `message` plus structured `params` - the observation
     // body then renders from the lang template; bundle/policy findings
-    // carry their own prose in `message` and win over the template.
+    // carry their own prose in `message` and win over the template, and a
+    // bundle pattern whose `rules` contain this finding's rule overlays
+    // registry severity/impact/tags (and the observation when no fact
+    // prose exists).
     let (severity, title, impact, improvement, tag, observation) =
         frensense_lang::severity::checker_advisory(
             frensense_lang::spec_for_path(path),
@@ -198,10 +262,17 @@ fn advisory_from_checker(
             line,
             &c.params,
         );
-    let observation = if c.message.is_empty() {
-        observation
-    } else {
+    let pattern = bundle_advisories.get(&c.rule);
+    // Prose precedence: fact-authored `message` > matched bundle pattern's
+    // observation > lang template.
+    let observation = if !c.message.is_empty() {
         c.message.clone()
+    } else if let Some(p) = pattern
+        && let Some(o) = &p.observation
+    {
+        o.clone()
+    } else {
+        observation
     };
     let mut advisory = Advisory::bare(title, severity, file_id, path, observation)
         .with_confidence(1.0)
@@ -212,6 +283,9 @@ fn advisory_from_checker(
         .with_impact(impact)
         .with_improvement(improvement)
         .with_tags(["checker", &c.rule, tag]);
+    if let Some(p) = pattern {
+        apply_bundle_pattern(&mut advisory, p);
+    }
     advisory.requires_human = false;
     advisory.fingerprint = stable_fingerprint(&[file, &c.rule, &c.function]);
     advisory
@@ -224,6 +298,7 @@ fn advisory_from_finding(
     line: u32,
     column: u32,
     file_id: crate::FileId,
+    bundle_advisories: &rustc_hash::FxHashMap<String, frensense_bundler::format::BundlePattern>,
 ) -> Advisory {
     let src = f.source_desc.as_deref().unwrap_or("user input");
     let path = Path::new(file);
@@ -269,6 +344,11 @@ fn advisory_from_finding(
             f.sink, f.function
         ))
         .with_tags(["taint", class_tag]);
+    // A learned sink's family pattern joins on the sink name; the flow
+    // observation stays (it is the finding's own description).
+    if let Some(pattern) = bundle_advisories.get(&f.sink) {
+        apply_bundle_pattern(&mut advisory, pattern);
+    }
     advisory.requires_human = false;
     // Taint path steps (source→sink) for SARIF codeFlows / rich clients.
     advisory.taint_steps = f
@@ -516,6 +596,181 @@ mod checker_observation_tests {
             "Credential `hash` call receives a plaintext password, password storage \
              must use a memory-hard KDF (bcrypt/argon2/scrypt), not a fast digest \
              wrapper."
+        );
+    }
+}
+
+#[cfg(test)]
+mod bundle_pattern_tests {
+    //! Phase 2.3: bundle patterns join to findings through
+    //! `BundlePattern::rules` and overlay the consumer advisory path.
+
+    use super::{advisory_from_checker, apply_bundle_pattern, corpus_severity};
+    use crate::Severity;
+    use crate::engine::Engine;
+    use frensense_bundler::format::{BundlePattern, BundlePayloadV5, write_bundle};
+    use frensense_engine::analysis::taint::facts::Provenance;
+    use frensense_engine::checks::CheckerFinding;
+
+    fn checker(rule: &str, message: &str) -> CheckerFinding {
+        CheckerFinding {
+            function: "handler".to_string(),
+            rule: rule.to_string(),
+            message: message.to_string(),
+            params: vec![],
+            span: None,
+            severity: String::new(),
+            provenance: Provenance::Spec,
+        }
+    }
+
+    fn pattern(rules: &[&str]) -> BundlePattern {
+        BundlePattern {
+            id: "family-a".to_string(),
+            observation: Some("family observation".to_string()),
+            impact: Some("family impact".to_string()),
+            improvement: Some("family fix".to_string()),
+            cwe: Some("CWE-79".to_string()),
+            cvss: Some(7.5),
+            owasp: Some("A03:2021".to_string()),
+            severity: Some("High".to_string()),
+            rules: rules.iter().map(|r| r.to_string()).collect(),
+        }
+    }
+
+    fn pattern_map(rules: &[&str]) -> rustc_hash::FxHashMap<String, BundlePattern> {
+        let mut map = rustc_hash::FxHashMap::default();
+        for r in rules {
+            map.insert(r.to_string(), pattern(rules));
+        }
+        map
+    }
+
+    #[test]
+    fn corpus_severity_maps_cvss_labels_to_tiers() {
+        assert_eq!(corpus_severity("critical"), Some(Severity::Critical));
+        assert_eq!(corpus_severity("High"), Some(Severity::Critical));
+        assert_eq!(corpus_severity("medium"), Some(Severity::Warning));
+        assert_eq!(corpus_severity("Low"), Some(Severity::Info));
+        assert_eq!(corpus_severity("Bogus"), None);
+        assert_eq!(corpus_severity(""), None);
+    }
+
+    #[test]
+    fn pattern_overlays_registry_when_rules_match() {
+        let advisories = super::advisory_from_checker(
+            &checker("policy_custom_rule", ""),
+            "src/app.ts",
+            3,
+            1,
+            Engine::next_file_id(0),
+            &pattern_map(&["policy_custom_rule"]),
+        );
+        assert_eq!(advisories.severity, Severity::Critical);
+        assert_eq!(advisories.observation, "family observation");
+        assert_eq!(advisories.impact, "family impact");
+        assert_eq!(advisories.improvement, "family fix");
+        assert_eq!(
+            advisories.tags,
+            [
+                "checker",
+                "policy_custom_rule",
+                "policy",
+                "CWE-79",
+                "CVSS:7.5",
+                "A03:2021"
+            ]
+        );
+    }
+
+    #[test]
+    fn fact_prose_wins_over_pattern_observation() {
+        let advisories = advisory_from_checker(
+            &checker("policy_custom_rule", "fact-authored prose"),
+            "src/app.ts",
+            3,
+            1,
+            Engine::next_file_id(0),
+            &pattern_map(&["policy_custom_rule"]),
+        );
+        assert_eq!(advisories.observation, "fact-authored prose");
+        assert_eq!(
+            advisories.severity,
+            Severity::Critical,
+            "severity overlay is independent of prose precedence"
+        );
+    }
+
+    #[test]
+    fn unknown_pattern_severity_keeps_registry_tier() {
+        let mut p = pattern(&["policy_custom_rule"]);
+        p.severity = Some("Bogus".to_string());
+        let mut advisories = advisory_from_checker(
+            &checker("policy_custom_rule", ""),
+            "src/app.ts",
+            3,
+            1,
+            Engine::next_file_id(0),
+            &rustc_hash::FxHashMap::default(),
+        );
+        let registry_tier = advisories.severity;
+        apply_bundle_pattern(&mut advisories, &p);
+        assert_eq!(advisories.severity, registry_tier);
+    }
+
+    #[test]
+    fn unmatched_rule_keeps_registry_behavior() {
+        let advisories = advisory_from_checker(
+            &checker("policy_custom_rule", ""),
+            "src/app.ts",
+            3,
+            1,
+            Engine::next_file_id(0),
+            &pattern_map(&["some_other_rule"]),
+        );
+        assert_eq!(advisories.severity, Severity::Warning);
+        assert!(
+            !advisories.tags.iter().any(|t| t.starts_with("CWE-")),
+            "no pattern overlay without a rules match: {:?}",
+            advisories.tags
+        );
+    }
+
+    /// End-to-end: a loaded bundle's pattern reaches a real scan through
+    /// the load -> index -> advisory path.
+    #[test]
+    fn bundle_loaded_pattern_reaches_scan_advisories() {
+        let payload = BundlePayloadV5 {
+            patterns: vec![pattern(&["weak_hash"])],
+            learned_facts: vec![],
+            policy_pack: vec![],
+        };
+        let bytes: &'static [u8] = Box::leak(
+            write_bundle(&payload, 1)
+                .expect("bundle writes")
+                .into_boxed_slice(),
+        );
+
+        let dir =
+            std::env::temp_dir().join(format!("frensense-bundle-pattern-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let source =
+            "import hashlib\n\ndef digest(data):\n    return hashlib.md5(data).hexdigest()\n";
+        std::fs::write(dir.join("app.py"), source).expect("write");
+        let mut engine = Engine::new();
+        engine.set_corpus_bundle(bytes);
+        let advisories = engine.run(&dir.join("app.py")).expect("scan");
+        let finding = advisories
+            .iter()
+            .find(|a| a.tags.iter().any(|t| t == "weak_hash"))
+            .expect("weak_hash finding");
+        assert_eq!(finding.severity, Severity::Critical, "{finding:?}");
+        assert_eq!(finding.observation, "family observation", "{finding:?}");
+        assert!(
+            finding.tags.iter().any(|t| t == "CWE-79"),
+            "{:?}",
+            finding.tags
         );
     }
 }

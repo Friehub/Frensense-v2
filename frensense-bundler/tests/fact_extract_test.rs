@@ -395,6 +395,18 @@ fn test_security_policy_frc_roundtrip() {
     let loaded = load_bundle(&bundle_bytes).expect("bundle must deserialize");
     let learned_facts = fact_table_from_entries(&loaded.learned_facts);
 
+    // Phase 2.3: the family's advisory pattern carries the join keys of the
+    // facts it published (checker rule ids / sink names).
+    assert!(
+        loaded.patterns.iter().any(|p| {
+            p.id == "delete_account"
+                && !p.rules.is_empty()
+                && p.rules.iter().any(|r| r.contains("delete_user_account"))
+        }),
+        "pattern must join to the published check/policy rule, patterns: {:#?}",
+        loaded.patterns
+    );
+
     // Scanner test fixtures
     let positive_file = vec![(
         "app_positive.py".to_string(),

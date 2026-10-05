@@ -19,6 +19,12 @@ use super::frc::{read_bundle_parts, BundleHeader};
 /// carrying the human-facing advisory fields (CWE, CVSS, OWASP, severity).
 /// Flow knowledge is NOT here, it is in `learned_facts`, which the engine
 /// consumes.
+///
+/// `rules` is the join back to scanner output: the finding identities
+/// (checker rule ids, learned sink names) published from the family, so
+/// the consumer's advisory path can attach this metadata to the findings
+/// the family's facts cause. v4 bundles predate the join and load with
+/// an empty list.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct BundlePattern {
     pub id: String,
@@ -36,6 +42,10 @@ pub struct BundlePattern {
     pub owasp: Option<String>,
     #[serde(default)]
     pub severity: Option<String>,
+    /// Finding identities this family's advisory applies to (see the type
+    /// docs); filled by the builder from the family's published facts.
+    #[serde(default)]
+    pub rules: Vec<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -49,9 +59,40 @@ pub struct Bundle {
 /// version-branched load in [`load_bundle`].
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 struct V4Payload {
-    pub patterns: Vec<BundlePattern>,
+    pub patterns: Vec<V4Pattern>,
     #[serde(default)]
     pub learned_facts: Vec<LearnedFactEntry>,
+}
+
+/// The v4 per-family advisory shape, frozen: bincode is positional, so
+/// widening [`BundlePattern`] (the `rules` join) must not touch bytes
+/// v4 bundles already shipped with.
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct V4Pattern {
+    id: String,
+    observation: Option<String>,
+    impact: Option<String>,
+    improvement: Option<String>,
+    cwe: Option<String>,
+    cvss: Option<f32>,
+    owasp: Option<String>,
+    severity: Option<String>,
+}
+
+impl From<V4Pattern> for BundlePattern {
+    fn from(p: V4Pattern) -> Self {
+        BundlePattern {
+            id: p.id,
+            observation: p.observation,
+            impact: p.impact,
+            improvement: p.improvement,
+            cwe: p.cwe,
+            cvss: p.cvss,
+            owasp: p.owasp,
+            severity: p.severity,
+            rules: Vec::new(),
+        }
+    }
 }
 
 /// The v5 payload: learned facts plus the authored-policy section. Each
@@ -93,7 +134,15 @@ pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
         (payload.patterns, payload.learned_facts, payload.policy_pack)
     } else {
         match bincode::deserialize::<V4Payload>(payload_bytes) {
-            Ok(payload) => (payload.patterns, payload.learned_facts, Vec::new()),
+            Ok(payload) => (
+                payload
+                    .patterns
+                    .into_iter()
+                    .map(BundlePattern::from)
+                    .collect(),
+                payload.learned_facts,
+                Vec::new(),
+            ),
             Err(e) => match bincode::deserialize::<Vec<LegacyPattern>>(payload_bytes) {
                 Ok(_) => {
                     tracing::warn!(
@@ -157,11 +206,12 @@ mod tests {
         assert!(load_bundle(&bytes).is_err());
     }
 
-    /// Phase 2 accept: v4 bundles keep loading, with no policy_pack.
+    /// Phase 2 accept: v4 bundles keep loading, with no policy_pack and
+    /// no `rules` join (the field postdates the v4 shape).
     #[test]
     fn v4_bundle_loads_with_empty_policy_pack() {
         let payload = bincode::serialize(&V4Payload {
-            patterns: vec![BundlePattern {
+            patterns: vec![V4Pattern {
                 id: "family-a".to_string(),
                 observation: None,
                 impact: None,
@@ -178,6 +228,10 @@ mod tests {
         let loaded = load_bundle(&bytes).expect("v4 bundle loads");
         assert_eq!(loaded.patterns.len(), 1);
         assert_eq!(loaded.patterns[0].id, "family-a");
+        assert!(
+            loaded.patterns[0].rules.is_empty(),
+            "v4 bundles predate the rules join"
+        );
         assert!(loaded.learned_facts.is_empty());
         assert!(loaded.policy_pack.is_empty());
     }

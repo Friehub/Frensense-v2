@@ -29,6 +29,9 @@ pub fn build_facts_bundle(
     // One advisory pattern per family, sorted by id for a deterministic
     // payload. Metadata comes from the family's `[frensense]` comment block
     // (parsed during grouping); families without a block ship all-None.
+    // `rules` joins the pattern to the findings the family's published
+    // facts cause (checker rule ids + learned sink names), so the consumer
+    // can attach this metadata when one of those findings fires.
     let mut family_ids: Vec<String> = families.iter().map(|f| f.id.clone()).collect();
     family_ids.sort();
     let mut patterns: Vec<BundlePattern> = Vec::with_capacity(family_ids.len());
@@ -36,6 +39,13 @@ pub fn build_facts_bundle(
     for id in &family_ids {
         let family = families.iter().find(|f| f.id == *id);
         let meta = family.map(|f| &f.metadata).unwrap_or(&empty);
+        let mut rules: Vec<String> = published
+            .iter()
+            .filter(|f| f.families.iter().any(|fam| fam == id))
+            .flat_map(|f| f.entry.finding_identities())
+            .collect();
+        rules.sort();
+        rules.dedup();
         patterns.push(BundlePattern {
             id: id.clone(),
             observation: meta.observation.clone(),
@@ -45,6 +55,7 @@ pub fn build_facts_bundle(
             cvss: meta.cvss,
             owasp: meta.owasp.clone(),
             severity: meta.severity.clone(),
+            rules,
         });
     }
 

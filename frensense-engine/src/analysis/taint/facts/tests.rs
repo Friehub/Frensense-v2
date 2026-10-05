@@ -355,3 +355,38 @@ fn spec_drives_policy_vocabulary() {
     assert!(frensense_lang::policy::bootstrap_containment_callees().contains(&"includes"));
     assert!(frensense_lang::policy::bootstrap_weak_hash_rules().len() >= 2);
 }
+
+/// Phase 2.3: finding identities the bundle advisory join
+/// (`BundlePattern::rules`) relies on.
+#[test]
+fn finding_identities_cover_joinable_entries() {
+    assert_eq!(
+        LearnedFactEntry::Sink {
+            call: "query".to_string(),
+            dangerous_args: Default::default(),
+            binding_args_safe: false,
+        }
+        .finding_identities(),
+        vec!["query"]
+    );
+    assert_eq!(
+        LearnedFactEntry::Policy {
+            rule: "policy_checkout".to_string(),
+            when_call: "checkout".to_string(),
+            require: vec![],
+            scope: PolicyScope::Function,
+            message: String::new(),
+            severity: String::new(),
+        }
+        .finding_identities(),
+        vec!["policy_checkout"]
+    );
+    // Entries whose findings use engine-internal rule ids contribute none.
+    assert!(
+        LearnedFactEntry::Allocator {
+            name: "my_alloc".to_string()
+        }
+        .finding_identities()
+        .is_empty()
+    );
+}
