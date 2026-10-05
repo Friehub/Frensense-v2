@@ -24,13 +24,14 @@ pub struct FactTable {
     pub sink_signatures: FxHashMap<String, SinkSignature>,
     pub sanitizer_facts: FxHashMap<String, SanitizerFact>,
     /// Corpus-verified non-dataflow checks (order-preserving; dedup on
-    /// `(rule, call)` at merge time).
-    pub learned_checks: Vec<LearnedCheckFact>,
+    /// `(rule, call)` at merge time, provenance-ordered per entry).
+    pub learned_checks: Vec<(LearnedCheckFact, Provenance)>,
     /// Corpus-verified co-occurrence policies (the generalized check fact).
     /// Evaluated by `checks::policy`; legacy `learned_checks` entries ALSO
     /// evaluate there after `PolicyFact::from_legacy` conversion, so bundles
-    /// never need to migrate to keep firing.
-    pub policy_facts: Vec<PolicyFact>,
+    /// never need to migrate to keep firing. Dedup on
+    /// `(rule, when_call)` at merge time, provenance-ordered per entry.
+    pub policy_facts: Vec<(PolicyFact, Provenance)>,
     /// Corpus-verified interprocedural memory contracts (allocators / deallocators).
     pub memory_contracts: Vec<MemoryContractFact>,
     /// Corpus-verified weak cryptography rules.
@@ -232,28 +233,35 @@ impl FactTable {
         for (k, v) in &other.sanitizer_facts {
             self.sanitizer_facts.insert(k.clone(), v.clone());
         }
-        // Learned checks accumulate: a bundle may install many rules, and
-        // merging a second bundle must not drop the first's. Dedup on
-        // (rule, call): the same fact arriving twice (shared dependencies,
-        // re-merge) must not duplicate findings.
-        for c in &other.learned_checks {
-            if !self
+        // Provenance-ordered (Phase 5.3): learned checks accumulate with
+        // dedup on (rule, call), but the higher-ranked provenance wins the
+        // collision (Spec < Authored < Learned) and ties keep the existing
+        // entry, so merge is order-independent across provenance tiers.
+        for (c, prov) in &other.learned_checks {
+            if let Some(existing) = self
                 .learned_checks
-                .iter()
-                .any(|e| e.rule == c.rule && e.call == c.call)
+                .iter_mut()
+                .find(|(e, _)| e.rule == c.rule && e.call == c.call)
             {
-                self.learned_checks.push(c.clone());
+                if *prov > existing.1 {
+                    *existing = (c.clone(), *prov);
+                }
+            } else {
+                self.learned_checks.push((c.clone(), *prov));
             }
         }
-        // Policy facts accumulate the same way, dedup on (rule, when_call):
-        // the same policy arriving twice must not duplicate findings.
-        for p in &other.policy_facts {
-            if !self
+        // Policy facts order the same way, dedup on (rule, when_call).
+        for (p, prov) in &other.policy_facts {
+            if let Some(existing) = self
                 .policy_facts
-                .iter()
-                .any(|e| e.rule == p.rule && e.when_call == p.when_call)
+                .iter_mut()
+                .find(|(e, _)| e.rule == p.rule && e.when_call == p.when_call)
             {
-                self.policy_facts.push(p.clone());
+                if *prov > existing.1 {
+                    *existing = (p.clone(), *prov);
+                }
+            } else {
+                self.policy_facts.push((p.clone(), *prov));
             }
         }
         // Memory contracts accumulate, with newer/learned contracts replacing older ones on collision.
@@ -275,24 +283,35 @@ impl FactTable {
                 self.weak_crypto_rules.push(wc.clone());
             }
         }
-        // Merged entries keep their own provenance (other wins on
-        // collision: a bundle overrides a spec entry and carries Learned).
+        // Merged entries keep their own provenance; on collision the
+        // higher-ranked provenance wins (Spec < Authored < Learned), ties
+        // keep the existing entry - order-independent across tiers.
         for (k, v) in &other.containment_callees {
-            self.containment_callees.insert(k.clone(), *v);
+            if self.containment_callees.get(k).is_none_or(|cur| *v > *cur) {
+                self.containment_callees.insert(k.clone(), *v);
+            }
         }
         for (k, v) in &other.credential_sinks {
-            self.credential_sinks.insert(k.clone(), *v);
+            if self.credential_sinks.get(k).is_none_or(|cur| *v > *cur) {
+                self.credential_sinks.insert(k.clone(), *v);
+            }
         }
         for (k, v) in &other.credential_params {
-            self.credential_params.insert(k.clone(), *v);
+            if self.credential_params.get(k).is_none_or(|cur| *v > *cur) {
+                self.credential_params.insert(k.clone(), *v);
+            }
         }
         for (k, v) in &other.schema_builders {
-            self.schema_builders.insert(k.clone(), *v);
+            if self.schema_builders.get(k).is_none_or(|cur| *v > *cur) {
+                self.schema_builders.insert(k.clone(), *v);
+            }
         }
         self.schema_enforcers
             .extend(other.schema_enforcers.iter().cloned());
         for (k, v) in &other.schema_keywords {
-            self.schema_keywords.insert(k.clone(), *v);
+            if self.schema_keywords.get(k).is_none_or(|cur| *v > *cur) {
+                self.schema_keywords.insert(k.clone(), *v);
+            }
         }
         self.url_param_hints
             .extend(other.url_param_hints.iter().cloned());
@@ -313,12 +332,19 @@ impl FactTable {
                 self.weak_hash_rules.push(*r);
             }
         }
+        // Provenance-ordered like the policy tables: a consumer bundle
+        // redefining a spec-seeded rule now overrides it (Learned >
+        // Spec), ties keep the existing entry.
         for (r, p) in &other.integer_overflow_rules {
-            if !self
+            if let Some(existing) = self
                 .integer_overflow_rules
-                .iter()
-                .any(|(e, _)| e.rule_id == r.rule_id && e.wrap_threshold == r.wrap_threshold)
+                .iter_mut()
+                .find(|(e, _)| e.rule_id == r.rule_id && e.wrap_threshold == r.wrap_threshold)
             {
+                if *p > existing.1 {
+                    *existing = (r.clone(), *p);
+                }
+            } else {
                 self.integer_overflow_rules.push((r.clone(), *p));
             }
         }
@@ -760,12 +786,16 @@ impl LearnedFactEntry {
                     message: message.clone(),
                     severity: severity.clone(),
                 };
-                if !table
+                if let Some(existing) = table
                     .policy_facts
-                    .iter()
-                    .any(|e| e.rule == fact.rule && e.when_call == fact.when_call)
+                    .iter_mut()
+                    .find(|(e, _)| e.rule == fact.rule && e.when_call == fact.when_call)
                 {
-                    table.policy_facts.push(fact);
+                    if provenance > existing.1 {
+                        *existing = (fact, provenance);
+                    }
+                } else {
+                    table.policy_facts.push((fact, provenance));
                 }
             }
             LearnedFactEntry::Check {
@@ -784,12 +814,16 @@ impl LearnedFactEntry {
                     unless_guard: unless_guard.clone(),
                     unless_range_check: unless_range_check.clone(),
                 };
-                if !table
+                if let Some(existing) = table
                     .learned_checks
-                    .iter()
-                    .any(|e| e.rule == fact.rule && e.call == fact.call)
+                    .iter_mut()
+                    .find(|(e, _)| e.rule == fact.rule && e.call == fact.call)
                 {
-                    table.learned_checks.push(fact);
+                    if provenance > existing.1 {
+                        *existing = (fact, provenance);
+                    }
+                } else {
+                    table.learned_checks.push((fact, provenance));
                 }
             }
             LearnedFactEntry::MemoryContract {
@@ -935,7 +969,9 @@ impl LearnedFactEntry {
                 if let Some(existing) = table.integer_overflow_rules.iter_mut().find(|(r, _)| {
                     r.rule_id == fact.rule_id && r.wrap_threshold == fact.wrap_threshold
                 }) {
-                    *existing = (fact, provenance);
+                    if provenance > existing.1 {
+                        *existing = (fact, provenance);
+                    }
                 } else {
                     table.integer_overflow_rules.push((fact, provenance));
                 }

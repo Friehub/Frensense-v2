@@ -175,14 +175,17 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
             unless_guard,
             unless_range_check,
         } => {
-            table.learned_checks.push(LearnedCheckFact {
-                rule: rule.clone(),
-                call: call.clone(),
-                message: message.clone(),
-                severity: "warning".into(),
-                unless_guard: unless_guard.clone(),
-                unless_range_check: unless_range_check.clone(),
-            });
+            table.learned_checks.push((
+                LearnedCheckFact {
+                    rule: rule.clone(),
+                    call: call.clone(),
+                    message: message.clone(),
+                    severity: "warning".into(),
+                    unless_guard: unless_guard.clone(),
+                    unless_range_check: unless_range_check.clone(),
+                },
+                Provenance::Learned,
+            ));
         }
         Candidate::Policy {
             rule,
@@ -191,14 +194,17 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
             require,
             scope,
         } => {
-            table.policy_facts.push(PolicyFact {
-                rule: rule.clone(),
-                when_call: call.clone(),
-                require: require.clone(),
-                scope: *scope,
-                message: message.clone(),
-                severity: "warning".into(),
-            });
+            table.policy_facts.push((
+                PolicyFact {
+                    rule: rule.clone(),
+                    when_call: call.clone(),
+                    require: require.clone(),
+                    scope: *scope,
+                    message: message.clone(),
+                    severity: "warning".into(),
+                },
+                Provenance::Learned,
+            ));
         }
         Candidate::MemoryContract {
             name,

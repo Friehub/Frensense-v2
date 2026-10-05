@@ -183,7 +183,6 @@ pub fn check_all_with_graph<'a>(
 /// IR); the conclusions are the bundle's.
 pub(crate) mod learned {
     use super::CheckerFinding;
-    use super::Provenance;
     use crate::analysis::taint::facts::FactTable;
     use crate::ir::function::{FunctionIR, Instruction, Operand};
 
@@ -288,7 +287,7 @@ pub(crate) mod learned {
                     } => (func, args),
                     _ => continue,
                 };
-                for fact in facts.learned_checks_for(callee) {
+                for (fact, provenance) in facts.learned_checks_for(callee) {
                     // Guard qualification: a rule with `unless_guard` is
                     // silent when the guard call is present in the same
                     // function, the corpus says "trigger without
@@ -318,7 +317,7 @@ pub(crate) mod learned {
                         params: Vec::new(),
                         span: instr_span(ir, instr),
                         severity: fact.severity.clone(),
-                        provenance: Provenance::Learned,
+                        provenance,
                     });
                 }
             }

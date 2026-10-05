@@ -9,6 +9,7 @@
 pub mod policy_spec {
     use crate::analysis::taint::facts::{
         FactTable, LearnedCheckFact, LearnedFactEntry, PolicyFact, PolicyRequirement, PolicyScope,
+        Provenance,
     };
     use crate::checks::policy;
     use crate::harness::lower_source;
@@ -53,7 +54,7 @@ export function handler (cmd: string) {
         let mut facts = FactTable::default();
         facts
             .learned_checks
-            .push(legacy(Some("checkPermission"), None));
+            .push((legacy(Some("checkPermission"), None), Provenance::Learned));
         let irs = lower(POSITIVE);
         let hits = policy::check_program(&irs, &facts);
         assert_eq!(hits.len(), 1, "positive must fire: {:?}", hits);
@@ -65,7 +66,7 @@ export function handler (cmd: string) {
         let mut facts = FactTable::default();
         facts
             .learned_checks
-            .push(legacy(Some("checkPermission"), None));
+            .push((legacy(Some("checkPermission"), None), Provenance::Learned));
         let irs = lower(NEGATIVE);
         let hits = policy::check_program(&irs, &facts);
         assert!(
@@ -80,16 +81,19 @@ export function handler (cmd: string) {
     #[test]
     fn native_policy_matches_legacy_semantics() {
         let mut facts = FactTable::default();
-        facts.policy_facts.push(PolicyFact {
-            rule: "policy_run_tool".into(),
-            when_call: "runTool".into(),
-            require: vec![PolicyRequirement::GuardCall {
-                call: "checkPermission".into(),
-            }],
-            scope: PolicyScope::Function,
-            message: "tool executed without policy check".into(),
-            severity: "warning".into(),
-        });
+        facts.policy_facts.push((
+            PolicyFact {
+                rule: "policy_run_tool".into(),
+                when_call: "runTool".into(),
+                require: vec![PolicyRequirement::GuardCall {
+                    call: "checkPermission".into(),
+                }],
+                scope: PolicyScope::Function,
+                message: "tool executed without policy check".into(),
+                severity: "warning".into(),
+            },
+            Provenance::Learned,
+        ));
         let pos = policy::check_program(&lower(POSITIVE), &facts);
         let neg = policy::check_program(&lower(NEGATIVE), &facts);
         assert_eq!(pos.len(), 1, "native positive must fire: {:?}", pos);
@@ -104,19 +108,22 @@ export function handler (cmd: string) {
     #[test]
     fn legacy_suppressed_when_native_policy_exists() {
         let mut facts = FactTable::default();
-        facts.policy_facts.push(PolicyFact {
-            rule: "policy_run_tool".into(),
-            when_call: "runTool".into(),
-            require: vec![PolicyRequirement::GuardCall {
-                call: "checkPermission".into(),
-            }],
-            scope: PolicyScope::Function,
-            message: "tool executed without policy check".into(),
-            severity: "warning".into(),
-        });
+        facts.policy_facts.push((
+            PolicyFact {
+                rule: "policy_run_tool".into(),
+                when_call: "runTool".into(),
+                require: vec![PolicyRequirement::GuardCall {
+                    call: "checkPermission".into(),
+                }],
+                scope: PolicyScope::Function,
+                message: "tool executed without policy check".into(),
+                severity: "warning".into(),
+            },
+            Provenance::Learned,
+        ));
         facts
             .learned_checks
-            .push(legacy(Some("checkPermission"), None));
+            .push((legacy(Some("checkPermission"), None), Provenance::Learned));
         let hits = policy::check_program(&lower(POSITIVE), &facts);
         assert_eq!(
             hits.len(),
@@ -140,16 +147,19 @@ export function handler (cmd: string, doAudit: boolean) {
 }
 "#;
         let mut facts = FactTable::default();
-        facts.policy_facts.push(PolicyFact {
-            rule: "policy_run_tool".into(),
-            when_call: "runTool".into(),
-            require: vec![PolicyRequirement::GuardCall {
-                call: "checkPermission".into(),
-            }],
-            scope: PolicyScope::Function,
-            message: "tool executed without policy check".into(),
-            severity: "warning".into(),
-        });
+        facts.policy_facts.push((
+            PolicyFact {
+                rule: "policy_run_tool".into(),
+                when_call: "runTool".into(),
+                require: vec![PolicyRequirement::GuardCall {
+                    call: "checkPermission".into(),
+                }],
+                scope: PolicyScope::Function,
+                message: "tool executed without policy check".into(),
+                severity: "warning".into(),
+            },
+            Provenance::Learned,
+        ));
         let hits = policy::check_program(&lower(src), &facts);
         assert_eq!(
             hits.len(),
@@ -170,16 +180,19 @@ export function handler (cmd: string) {
 }
 "#;
         let mut facts = FactTable::default();
-        facts.policy_facts.push(PolicyFact {
-            rule: "policy_run_tool".into(),
-            when_call: "runTool".into(),
-            require: vec![PolicyRequirement::GuardCall {
-                call: "checkPermission".into(),
-            }],
-            scope: PolicyScope::Function,
-            message: "tool executed without policy check".into(),
-            severity: "warning".into(),
-        });
+        facts.policy_facts.push((
+            PolicyFact {
+                rule: "policy_run_tool".into(),
+                when_call: "runTool".into(),
+                require: vec![PolicyRequirement::GuardCall {
+                    call: "checkPermission".into(),
+                }],
+                scope: PolicyScope::Function,
+                message: "tool executed without policy check".into(),
+                severity: "warning".into(),
+            },
+            Provenance::Learned,
+        ));
         let hits = policy::check_program(&lower(src), &facts);
         assert_eq!(
             hits.len(),
@@ -202,16 +215,19 @@ export function handler (cmd: string) {
 }
 "#;
         let mut facts = FactTable::default();
-        facts.policy_facts.push(PolicyFact {
-            rule: "policy_run_tool".into(),
-            when_call: "runTool".into(),
-            require: vec![PolicyRequirement::GuardCall {
-                call: "checkPermission".into(),
-            }],
-            scope: PolicyScope::Function,
-            message: "tool executed without policy check".into(),
-            severity: "warning".into(),
-        });
+        facts.policy_facts.push((
+            PolicyFact {
+                rule: "policy_run_tool".into(),
+                when_call: "runTool".into(),
+                require: vec![PolicyRequirement::GuardCall {
+                    call: "checkPermission".into(),
+                }],
+                scope: PolicyScope::Function,
+                message: "tool executed without policy check".into(),
+                severity: "warning".into(),
+            },
+            Provenance::Learned,
+        ));
         let hits = policy::check_program(&lower(src), &facts);
         assert_eq!(
             hits.len(),
@@ -237,16 +253,19 @@ export function handler (cmd: string) {
 }
 "#;
         let mut facts = FactTable::default();
-        facts.policy_facts.push(PolicyFact {
-            rule: "policy_run_tool_audited".into(),
-            when_call: "runTool".into(),
-            require: vec![PolicyRequirement::RequireCall {
-                any_of: vec!["audit.log".into(), "auditLog".into()],
-            }],
-            scope: PolicyScope::Function,
-            message: "privileged tool call without audit log".into(),
-            severity: "warning".into(),
-        });
+        facts.policy_facts.push((
+            PolicyFact {
+                rule: "policy_run_tool_audited".into(),
+                when_call: "runTool".into(),
+                require: vec![PolicyRequirement::RequireCall {
+                    any_of: vec!["audit.log".into(), "auditLog".into()],
+                }],
+                scope: PolicyScope::Function,
+                message: "privileged tool call without audit log".into(),
+                severity: "warning".into(),
+            },
+            Provenance::Learned,
+        ));
         let hits_no = policy::check_program(&lower(without_log), &facts);
         assert_eq!(hits_no.len(), 1, "unaudited call must fire: {:?}", hits_no);
         let hits_with = policy::check_program(&lower(with_log), &facts);
@@ -272,16 +291,19 @@ export function handler (t: string) {
 }
 "#;
         let mut facts = FactTable::default();
-        facts.policy_facts.push(PolicyFact {
-            rule: "policy_no_token_echo".into(),
-            when_call: "renderToken".into(),
-            require: vec![PolicyRequirement::NotCall {
-                call: "console.log".into(),
-            }],
-            scope: PolicyScope::Function,
-            message: "token echoed to console".into(),
-            severity: "critical".into(),
-        });
+        facts.policy_facts.push((
+            PolicyFact {
+                rule: "policy_no_token_echo".into(),
+                when_call: "renderToken".into(),
+                require: vec![PolicyRequirement::NotCall {
+                    call: "console.log".into(),
+                }],
+                scope: PolicyScope::Function,
+                message: "token echoed to console".into(),
+                severity: "critical".into(),
+            },
+            Provenance::Learned,
+        ));
         let hits_clean = policy::check_program(&lower(clean), &facts);
         assert!(hits_clean.is_empty());
         let hits_dirty = policy::check_program(&lower(dirty), &facts);
@@ -306,16 +328,19 @@ export function checkPermission (cmd: string) {
 }
 "#;
         let mut facts_fn = FactTable::default();
-        facts_fn.policy_facts.push(PolicyFact {
-            rule: "policy_run_tool".into(),
-            when_call: "runTool".into(),
-            require: vec![PolicyRequirement::GuardCall {
-                call: "checkPermission".into(),
-            }],
-            scope: PolicyScope::Function,
-            message: "tool executed without policy check".into(),
-            severity: "warning".into(),
-        });
+        facts_fn.policy_facts.push((
+            PolicyFact {
+                rule: "policy_run_tool".into(),
+                when_call: "runTool".into(),
+                require: vec![PolicyRequirement::GuardCall {
+                    call: "checkPermission".into(),
+                }],
+                scope: PolicyScope::Function,
+                message: "tool executed without policy check".into(),
+                severity: "warning".into(),
+            },
+            Provenance::Learned,
+        ));
         let irs = lower(split_pos);
         let hits_fn = policy::check_program(&irs, &facts_fn);
         assert_eq!(
@@ -326,16 +351,19 @@ export function checkPermission (cmd: string) {
         );
 
         let mut facts_mod = FactTable::default();
-        facts_mod.policy_facts.push(PolicyFact {
-            rule: "policy_run_tool".into(),
-            when_call: "runTool".into(),
-            require: vec![PolicyRequirement::GuardCall {
-                call: "checkPermission".into(),
-            }],
-            scope: PolicyScope::Module,
-            message: "tool executed without policy check".into(),
-            severity: "warning".into(),
-        });
+        facts_mod.policy_facts.push((
+            PolicyFact {
+                rule: "policy_run_tool".into(),
+                when_call: "runTool".into(),
+                require: vec![PolicyRequirement::GuardCall {
+                    call: "checkPermission".into(),
+                }],
+                scope: PolicyScope::Module,
+                message: "tool executed without policy check".into(),
+                severity: "warning".into(),
+            },
+            Provenance::Learned,
+        ));
         let hits_mod = policy::check_program(&irs, &facts_mod);
         assert!(
             hits_mod.is_empty(),
@@ -377,17 +405,20 @@ export function checkPermission (cmd: string) {
     #[test]
     fn policy_banned_arg_literal_positive_and_negative() {
         let mut facts = FactTable::default();
-        facts.policy_facts.push(PolicyFact {
-            rule: "policy_banned_insecure_transport".into(),
-            when_call: "initConnection".into(),
-            require: vec![PolicyRequirement::BannedArgLiteral {
-                slot: 1,
-                values: vec!["false".into(), "insecure".into()],
-            }],
-            scope: PolicyScope::Function,
-            message: "Insecure transport option used".into(),
-            severity: "critical".into(),
-        });
+        facts.policy_facts.push((
+            PolicyFact {
+                rule: "policy_banned_insecure_transport".into(),
+                when_call: "initConnection".into(),
+                require: vec![PolicyRequirement::BannedArgLiteral {
+                    slot: 1,
+                    values: vec!["false".into(), "insecure".into()],
+                }],
+                scope: PolicyScope::Function,
+                message: "Insecure transport option used".into(),
+                severity: "critical".into(),
+            },
+            Provenance::Learned,
+        ));
 
         // Positive sample: slot 1 is banned literal "false"
         let pos_src = r#"
@@ -420,17 +451,20 @@ export function connectClient (host: string) {
     #[test]
     fn policy_required_arg_literal_positive_and_negative() {
         let mut facts = FactTable::default();
-        facts.policy_facts.push(PolicyFact {
-            rule: "policy_require_secure_algorithm".into(),
-            when_call: "signToken".into(),
-            require: vec![PolicyRequirement::RequiredArgLiteral {
-                slot: 2,
-                values: vec!["RS256".into(), "ES256".into()],
-            }],
-            scope: PolicyScope::Function,
-            message: "Must use approved asymmetric signature algorithm".into(),
-            severity: "critical".into(),
-        });
+        facts.policy_facts.push((
+            PolicyFact {
+                rule: "policy_require_secure_algorithm".into(),
+                when_call: "signToken".into(),
+                require: vec![PolicyRequirement::RequiredArgLiteral {
+                    slot: 2,
+                    values: vec!["RS256".into(), "ES256".into()],
+                }],
+                scope: PolicyScope::Function,
+                message: "Must use approved asymmetric signature algorithm".into(),
+                severity: "critical".into(),
+            },
+            Provenance::Learned,
+        ));
 
         // Positive sample: slot 2 uses unapproved algorithm "HS256"
         let pos_src = r#"

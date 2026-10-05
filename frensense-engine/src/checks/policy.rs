@@ -54,23 +54,28 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
 
     // Learned checks evaluate alongside native policies (deduped by rule id:
     // a bundle shipping both shapes of the same rule must not fire twice).
-    let mut native_rules: Vec<&str> = facts.policy_facts.iter().map(|p| p.rule.as_str()).collect();
+    // Each entry keeps its own provenance so findings report the origin.
+    let mut native_rules: Vec<&str> = facts
+        .policy_facts
+        .iter()
+        .map(|(p, _)| p.rule.as_str())
+        .collect();
     native_rules.sort();
     native_rules.dedup();
-    let mut all_policies: Vec<PolicyFact> = Vec::new();
+    let mut all_policies: Vec<(PolicyFact, Provenance)> = Vec::new();
     all_policies.extend(facts.policy_facts.iter().cloned());
-    for check in &facts.learned_checks {
+    for (check, prov) in &facts.learned_checks {
         if native_rules.contains(&check.rule.as_str()) {
             continue;
         }
-        all_policies.push(PolicyFact::from_legacy(check));
+        all_policies.push((PolicyFact::from_legacy(check), *prov));
     }
 
     let mut findings = Vec::new();
     // Dominance for function-scoped guard/require presence: cached per
     // function across policies (computed at most once per scanned IR).
     let mut dom_cache: FxHashMap<&str, DomSets> = FxHashMap::default();
-    for policy in &all_policies {
+    for (policy, policy_provenance) in &all_policies {
         let trigger_seg = policy
             .when_call
             .rsplit('.')
@@ -124,7 +129,7 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
                         params: Vec::new(),
                         span,
                         severity: policy.severity.clone(),
-                        provenance: Provenance::Learned,
+                        provenance: *policy_provenance,
                     });
                 }
             }

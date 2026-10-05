@@ -390,3 +390,156 @@ fn finding_identities_cover_joinable_entries() {
         .is_empty()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5.3: provenance-ordered merge (Spec < Authored < Learned)
+// ---------------------------------------------------------------------------
+
+fn check(rule: &str, call: &str, msg: &str) -> LearnedCheckFact {
+    LearnedCheckFact {
+        rule: rule.into(),
+        call: call.into(),
+        message: msg.into(),
+        severity: "warning".into(),
+        unless_guard: None,
+        unless_range_check: None,
+    }
+}
+
+fn policy(rule: &str, when: &str, msg: &str) -> PolicyFact {
+    PolicyFact {
+        rule: rule.into(),
+        when_call: when.into(),
+        require: vec![],
+        scope: PolicyScope::Function,
+        message: msg.into(),
+        severity: "warning".into(),
+    }
+}
+
+fn iorule(rule: &str, msg: &str) -> frensense_lang::policy::IntegerOverflowRule {
+    frensense_lang::policy::IntegerOverflowRule {
+        rule_id: rule.into(),
+        wrap_threshold: u64::MAX as u128,
+        severity: "warning".into(),
+        message: msg.into(),
+    }
+}
+
+/// Acceptance (Phase 5.3): merging in either direction yields the same
+/// higher-ranked (Learned) entry for every provenance-tracked table - the
+/// result no longer depends on which table was seeded first.
+#[test]
+fn provenance_ordered_merge_is_order_independent() {
+    let mut spec_side = FactTable::default();
+    spec_side
+        .learned_checks
+        .push((check("r1", "f", "spec"), Provenance::Spec));
+    spec_side
+        .policy_facts
+        .push((policy("p1", "g", "spec"), Provenance::Spec));
+    spec_side
+        .integer_overflow_rules
+        .push((iorule("io1", "spec"), Provenance::Spec));
+    spec_side
+        .containment_callees
+        .insert("f".into(), Provenance::Spec);
+
+    let mut learned_side = FactTable::default();
+    learned_side
+        .learned_checks
+        .push((check("r1", "f", "learned"), Provenance::Learned));
+    learned_side
+        .policy_facts
+        .push((policy("p1", "g", "learned"), Provenance::Learned));
+    learned_side
+        .integer_overflow_rules
+        .push((iorule("io1", "learned"), Provenance::Learned));
+    learned_side
+        .containment_callees
+        .insert("f".into(), Provenance::Learned);
+
+    let mut a = spec_side.clone();
+    a.merge(&learned_side);
+    let mut b = learned_side.clone();
+    b.merge(&spec_side);
+
+    for t in [&a, &b] {
+        assert_eq!(t.learned_checks.len(), 1);
+        assert_eq!(t.learned_checks[0].0.message, "learned");
+        assert_eq!(t.learned_checks[0].1, Provenance::Learned);
+        assert_eq!(t.policy_facts.len(), 1);
+        assert_eq!(t.policy_facts[0].0.message, "learned");
+        assert_eq!(t.policy_facts[0].1, Provenance::Learned);
+        assert_eq!(t.integer_overflow_rules.len(), 1);
+        assert_eq!(t.integer_overflow_rules[0].0.message, "learned");
+        assert_eq!(t.integer_overflow_rules[0].1, Provenance::Learned);
+        assert_eq!(t.containment_callees.get("f"), Some(&Provenance::Learned));
+    }
+}
+
+/// Acceptance (Phase 5.3): a lower-ranked incoming entry never overrides a
+/// higher-ranked existing one (today's first-wins never overrode either -
+/// the rank rule generalizes it to be tier-aware).
+#[test]
+fn lower_ranked_incoming_never_overrides() {
+    let mut learned = FactTable::default();
+    learned
+        .learned_checks
+        .push((check("r1", "f", "learned"), Provenance::Learned));
+    learned
+        .policy_facts
+        .push((policy("p1", "g", "learned"), Provenance::Learned));
+    learned
+        .integer_overflow_rules
+        .push((iorule("io1", "learned"), Provenance::Learned));
+    learned
+        .containment_callees
+        .insert("f".into(), Provenance::Learned);
+
+    let mut spec = FactTable::default();
+    spec.learned_checks
+        .push((check("r1", "f", "spec"), Provenance::Spec));
+    spec.policy_facts
+        .push((policy("p1", "g", "spec"), Provenance::Spec));
+    spec.integer_overflow_rules
+        .push((iorule("io1", "spec"), Provenance::Spec));
+    spec.containment_callees
+        .insert("f".into(), Provenance::Spec);
+
+    learned.merge(&spec);
+    assert_eq!(learned.learned_checks[0].0.message, "learned");
+    assert_eq!(learned.policy_facts[0].0.message, "learned");
+    assert_eq!(learned.integer_overflow_rules[0].0.message, "learned");
+    assert_eq!(
+        learned.containment_callees.get("f"),
+        Some(&Provenance::Learned)
+    );
+}
+
+/// Acceptance (Phase 5.3): equal-rank collisions keep the existing entry,
+/// so re-merging the same bundle (or two bundles at one tier) is a no-op.
+#[test]
+fn equal_provenance_tie_keeps_existing_entry() {
+    let mut first = FactTable::default();
+    first
+        .learned_checks
+        .push((check("r1", "f", "first"), Provenance::Learned));
+    first
+        .policy_facts
+        .push((policy("p1", "g", "first"), Provenance::Learned));
+
+    let mut second = FactTable::default();
+    second
+        .learned_checks
+        .push((check("r1", "f", "second"), Provenance::Learned));
+    second
+        .policy_facts
+        .push((policy("p1", "g", "second"), Provenance::Learned));
+
+    first.merge(&second);
+    assert_eq!(first.learned_checks.len(), 1);
+    assert_eq!(first.learned_checks[0].0.message, "first");
+    assert_eq!(first.policy_facts.len(), 1);
+    assert_eq!(first.policy_facts[0].0.message, "first");
+}

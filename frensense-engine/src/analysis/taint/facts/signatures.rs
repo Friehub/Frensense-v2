@@ -126,12 +126,14 @@ impl FactTable {
     /// Learned checks whose trigger call's last segment matches `call`.
     /// The engine matches calls by last segment, so a bundle rule written
     /// for `security.hash` also fires on bare `hash`, same over-approximate
-    /// semantics as built-in seed checks.
-    pub fn learned_checks_for(&self, call: &str) -> Vec<&LearnedCheckFact> {
+    /// semantics as built-in seed checks. Each match carries the entry's
+    /// provenance so findings report where the rule came from.
+    pub fn learned_checks_for(&self, call: &str) -> Vec<(&LearnedCheckFact, Provenance)> {
         let seg = call.rsplit('.').next().unwrap_or(call);
         self.learned_checks
             .iter()
-            .filter(|c| c.call.rsplit('.').next() == Some(seg))
+            .filter(|(c, _)| c.call.rsplit('.').next() == Some(seg))
+            .map(|(c, p)| (c, *p))
             .collect()
     }
 }

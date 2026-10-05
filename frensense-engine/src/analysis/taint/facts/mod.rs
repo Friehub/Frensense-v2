@@ -20,7 +20,12 @@
 /// Where the knowledge behind a fact or finding came from. Stored
 /// per-entry in the [`FactTable`] so checks report the real origin of the
 /// knowledge that fired (spec seed vs bundle) instead of guessing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Derives `Ord` in declaration order, which doubles as the merge
+/// precedence ladder (Phase 5.3): [`Provenance::Spec`] <
+/// [`Provenance::Authored`] < [`Provenance::Learned`] - a merge keeps the
+/// higher-ranked entry on collision and the existing one on a tie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Provenance {
     /// Built-in seed knowledge shipped with the specs.
     Spec,

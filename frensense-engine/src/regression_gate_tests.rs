@@ -22,7 +22,7 @@ pub mod nested_flow_gate {
     use crate::analysis::taint::config::TaintConfig;
     use crate::analysis::taint::engine::BackwardVerdict;
     use crate::analysis::taint::facts::{
-        FactTable, PolicyFact, PolicyRequirement, PolicyScope, config_from_spec,
+        FactTable, PolicyFact, PolicyRequirement, PolicyScope, Provenance, config_from_spec,
         fact_table_from_spec,
     };
     use crate::checks::policy;
@@ -258,16 +258,19 @@ export function outer (cmd: string) {
             .map(|ir| Box::leak(Box::new(ir)) as &'static FunctionIR)
             .collect();
         let mut facts = FactTable::default();
-        facts.policy_facts.push(PolicyFact {
-            rule: "policy_run_tool".into(),
-            when_call: "runTool".into(),
-            require: vec![PolicyRequirement::GuardCall {
-                call: "checkPermission".into(),
-            }],
-            scope: PolicyScope::Function,
-            message: "tool executed without policy check".into(),
-            severity: "warning".into(),
-        });
+        facts.policy_facts.push((
+            PolicyFact {
+                rule: "policy_run_tool".into(),
+                when_call: "runTool".into(),
+                require: vec![PolicyRequirement::GuardCall {
+                    call: "checkPermission".into(),
+                }],
+                scope: PolicyScope::Function,
+                message: "tool executed without policy check".into(),
+                severity: "warning".into(),
+            },
+            Provenance::Learned,
+        ));
         let hits = policy::check_program(&irs, &facts);
         assert_eq!(
             hits.len(),
@@ -368,9 +371,8 @@ export function outer(c: any, db: any) {
                 .collect()
         }
         let mut pfacts = FactTable::default();
-        pfacts
-            .policy_facts
-            .push(crate::analysis::taint::facts::PolicyFact {
+        pfacts.policy_facts.push((
+            crate::analysis::taint::facts::PolicyFact {
                 rule: "policy_run_tool".into(),
                 when_call: "runTool".into(),
                 require: vec![
@@ -381,7 +383,9 @@ export function outer(c: any, db: any) {
                 scope: crate::analysis::taint::facts::PolicyScope::Function,
                 message: "tool executed without policy check".into(),
                 severity: "warning".into(),
-            });
+            },
+            crate::analysis::taint::facts::Provenance::Learned,
+        ));
 
         // ── Probe 3: policy nested named (was: 2 hits outer+inner) ─────
         let hits = policy::check_program(

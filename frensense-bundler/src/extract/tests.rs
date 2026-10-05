@@ -386,7 +386,7 @@ mod policy_proposal_tests {
                 LearnedFactEntry::Policy { .. } => match learned
                     .policy_facts
                     .iter()
-                    .find(|p| p.rule == rule_of(&f.entry))
+                    .find(|(p, _)| p.rule == rule_of(&f.entry))
                 {
                     _ => None,
                 },

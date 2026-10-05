@@ -219,7 +219,7 @@ pub fn propose_with_trace(
     //     carries `unless_guard` so the engine fires only when the guard
     //     is missing. This is the chatbot/privileged-tool shape.
     for call in pos_calls.keys() {
-        if builtin.learned_checks.iter().any(|c| c.call == *call) {
+        if builtin.learned_checks.iter().any(|(c, _)| c.call == *call) {
             continue; // already learned
         }
         // Family-declared trigger restricts Check proposals to the declared
@@ -318,7 +318,10 @@ pub fn propose_with_trace(
     if let Some(trigger) = family.declared_check_call.clone() {
         if pos_calls.contains_key(&trigger)
             && neg_calls.contains_key(&trigger)
-            && builtin.learned_checks.iter().all(|c| c.call != trigger)
+            && builtin
+                .learned_checks
+                .iter()
+                .all(|(c, _)| c.call != trigger)
         {
             let pos_has = |g: &str| pos_calls.contains_key(g);
             let all_negs_have = |g: &str| {
