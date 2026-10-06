@@ -322,8 +322,15 @@ replaces/extends; empty pack = zero policies.
 |----|--------|
 | 6.1 | Move fact types (`WeakPrimitiveRule`, `IntegerOverflowRule`, `KeySizeRule`, `MemoryFuncSpec`, `BufferBuiltinSpec`) -> `engine::facts::kinds`; **delete `frensense-lang/src/policy.rs`**; delete the 18 never-overridden `known_*` trait methods (`spec.rs:660-778`); bundler import site updates (`candidate.rs:263`). |
 | 6.2 | **(D3)** Provider knowledge bodies (~2,570 lines across go/python/rust/c/js) -> per-language sections of the default pack (keyed `language` + `"*"`); lang keeps only trait/grammar/queries/classify/registry. |
+| 6.2a | Delete five dead context-hint knowledge methods. |
+| 6.2b | Add language-keyed `LearnedFactEntry` variants + `apply_language_entries` installer. |
+| 6.2c | Emit pack language sections and wire both consumers (double-install over spec seed; parity tests keep A/B neutral). |
+| 6.2d | **Spec seeds stop carrying provider knowledge**: delete `config_from_spec`; strip the provider halves (sink names/signatures, IDOR, session roots, sanitizers, propagators) out of `fact_table_from_spec` (structural vocabularies stay); rework the parity test into a sole-source contract (`language_pack_entries_are_the_sole_source_of_provider_knowledge`); test helpers `tables_from_exts_with_pack` / `seeded_tables` mirror production seeding so tests cannot drift. Pack asset byte-identical; A/B 36/36 IDENTICAL. |
 
-**Accept:** lang ~= mechanism only; `grep bootstrap_ workspace` -> 0.
+**Accept:** lang ~= mechanism only; `grep bootstrap_ workspace` -> 0. 6.2d
+strips the *consumers*, not lang: the provider trait bodies still exist
+(they feed pack generation at asset-build time), so Phase 6 remains
+pending until they move into the generator and lang loses them.
 
 ### Phase 7 - Enforcement + hardening
 
