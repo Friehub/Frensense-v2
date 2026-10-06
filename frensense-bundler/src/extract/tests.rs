@@ -360,11 +360,20 @@ mod policy_proposal_tests {
             config.sanitizers.extend(c.sanitizers);
             table.merge(&fact_table_from_spec(spec));
         }
-        // Production `family_tables` seeds spec -> default pack; mirror it.
+        // Production `family_tables` seeds spec -> default pack -> pack
+        // language sections; mirror it.
+        let pack_entries = crate::format::default_pack().learned_facts.as_slice();
         table.merge(&fact_table_from_entries_with(
-            crate::format::default_pack().learned_facts.as_slice(),
+            pack_entries,
             Provenance::Spec,
         ));
+        let all_languages: Vec<&str> = frensense_lang::all_specs().map(|s| s.name()).collect();
+        frensense_engine::analysis::taint::facts::apply_language_entries(
+            &mut config,
+            &mut table,
+            pack_entries,
+            &all_languages,
+        );
         (config, table)
     }
 
@@ -602,11 +611,20 @@ mod slot_regression_tests {
             config.sanitizers.extend(c.sanitizers);
             table.merge(&fact_table_from_spec(spec));
         }
-        // Production `family_tables` seeds spec -> default pack; mirror it.
+        // Production `family_tables` seeds spec -> default pack -> pack
+        // language sections; mirror it.
+        let pack_entries = crate::format::default_pack().learned_facts.as_slice();
         table.merge(&fact_table_from_entries_with(
-            crate::format::default_pack().learned_facts.as_slice(),
+            pack_entries,
             Provenance::Spec,
         ));
+        let all_languages: Vec<&str> = frensense_lang::all_specs().map(|s| s.name()).collect();
+        frensense_engine::analysis::taint::facts::apply_language_entries(
+            &mut config,
+            &mut table,
+            pack_entries,
+            &all_languages,
+        );
         (config, table)
     }
 

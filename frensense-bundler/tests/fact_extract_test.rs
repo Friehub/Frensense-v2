@@ -140,22 +140,30 @@ void caller() {
     let fams = group_families(dir.path()).unwrap();
     assert_eq!(fams.len(), 1);
 
-    let cfg = config();
+    let mut cfg = config();
     // Production extraction runs under the family's language spec tables
     // (`extract_facts`); mirror that here so the registry carries the C
     // memory vocabulary the fixpoint needs to recognise `free` as consuming.
     let builtin = {
         let spec = frensense_lang::spec_for_ext("c").expect("c spec");
         let mut t = frensense_engine::analysis::taint::facts::fact_table_from_spec(spec);
-        // Production `family_tables` seeds spec -> default pack; mirror it
-        // so the registry carries the pack's C memory vocabulary.
+        // Production `family_tables` seeds spec -> default pack -> pack
+        // language sections; mirror it so the registry carries the pack's
+        // C memory vocabulary.
+        let pack_entries = frensense_bundler::format::default_pack()
+            .learned_facts
+            .as_slice();
         t.merge(
             &frensense_engine::analysis::taint::facts::fact_table_from_entries_with(
-                frensense_bundler::format::default_pack()
-                    .learned_facts
-                    .as_slice(),
+                pack_entries,
                 frensense_engine::analysis::taint::facts::Provenance::Spec,
             ),
+        );
+        frensense_engine::analysis::taint::facts::apply_language_entries(
+            &mut cfg,
+            &mut t,
+            pack_entries,
+            &["c"],
         );
         t
     };
@@ -229,14 +237,22 @@ void test_app() {
     let scan_facts = {
         let spec = frensense_lang::spec_for_ext("c").expect("c spec");
         let mut t = fact_table_from_spec(spec);
-        // The CLI runner seeds spec -> default pack -> consumer bundle.
+        // The CLI runner seeds spec -> default pack -> pack language
+        // sections -> consumer bundle.
+        let pack_entries = frensense_bundler::format::default_pack()
+            .learned_facts
+            .as_slice();
         t.merge(
             &frensense_engine::analysis::taint::facts::fact_table_from_entries_with(
-                frensense_bundler::format::default_pack()
-                    .learned_facts
-                    .as_slice(),
+                pack_entries,
                 frensense_engine::analysis::taint::facts::Provenance::Spec,
             ),
+        );
+        frensense_engine::analysis::taint::facts::apply_language_entries(
+            &mut cfg,
+            &mut t,
+            pack_entries,
+            &["c"],
         );
         t.merge(&learned);
         t

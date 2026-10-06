@@ -293,6 +293,23 @@ pub fn tables_from_exts<'a>(exts: impl IntoIterator<Item = &'a str>) -> (TaintCo
     (config, facts)
 }
 
+/// The distinct language names for a set of file extensions, in first
+/// appearance order - the exact per-spec merge order [`tables_from_exts`]
+/// uses. Feed the result to [`apply_language_entries`] so its group merges
+/// land in the same order the spec-seeded tables were merged.
+pub fn languages_for_exts<'a>(exts: impl IntoIterator<Item = &'a str>) -> Vec<&'static str> {
+    let mut seen: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for ext in exts {
+        if let Some(spec) = frensense_lang::spec_for_ext(ext)
+            && seen.insert(spec.name())
+        {
+            out.push(spec.name());
+        }
+    }
+    out
+}
+
 // ── Phase 6.2: language-keyed default-pack knowledge ───────────────────────
 
 /// The language key of a language-keyed pack entry, if this variant has

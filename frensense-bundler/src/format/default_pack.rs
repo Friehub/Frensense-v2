@@ -226,6 +226,17 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
             consumes_params: f.consumes_params.to_vec(),
         });
     }
+    // Phase 6.2: one language-keyed section per registered language spec,
+    // installed by `apply_language_entries` filtered to the scan's
+    // languages (the language-agnostic variants above stay shared). Sorted
+    // by language name: the registry's by_name map iterates in hash order,
+    // and the asset must be byte-deterministic.
+    let mut specs: Vec<&dyn frensense_lang::spec::LanguageSpec> =
+        frensense_lang::all_specs().collect();
+    specs.sort_unstable_by_key(|spec| spec.name());
+    for spec in specs {
+        entries.extend(language_entries_for_spec(spec));
+    }
     entries
 }
 

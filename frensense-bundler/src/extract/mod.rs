@@ -71,17 +71,29 @@ pub fn extract_facts_with_tables(
 /// default pack (Spec provenance - the CLI runner merges the same pack, so
 /// gate and scan replay under identical baselines).
 fn family_tables(f: &Family) -> (TaintConfig, FactTable) {
-    let (config, mut facts) = frensense_engine::analysis::taint::facts::tables_from_exts(
-        f.positives
-            .iter()
-            .chain(f.negatives.iter())
-            .map(|(_, _, ext)| ext.as_str()),
-    );
+    let exts: Vec<&str> = f
+        .positives
+        .iter()
+        .chain(f.negatives.iter())
+        .map(|(_, _, ext)| ext.as_str())
+        .collect();
+    let (mut config, mut facts) =
+        frensense_engine::analysis::taint::facts::tables_from_exts(exts.iter().copied());
+    let pack_entries = crate::format::default_pack().learned_facts.as_slice();
     facts.merge(
         &frensense_engine::analysis::taint::facts::fact_table_from_entries_with(
-            crate::format::default_pack().learned_facts.as_slice(),
+            pack_entries,
             frensense_engine::analysis::taint::facts::Provenance::Spec,
         ),
+    );
+    // Phase 6.2: pack language-keyed sections, same layer and order as the
+    // CLI runner's pack merge (double-install over the spec seed until
+    // 6.2d strips it; identical values keep gate and scan in lockstep).
+    frensense_engine::analysis::taint::facts::apply_language_entries(
+        &mut config,
+        &mut facts,
+        pack_entries,
+        &frensense_engine::analysis::taint::facts::languages_for_exts(exts),
     );
     (config, facts)
 }

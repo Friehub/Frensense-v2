@@ -41,15 +41,24 @@ fn make_bundle(facts: Vec<LearnedFactEntry>) -> FactTable {
     // so a bare bundle table would hide the spec vocabulary from checks.
     let mut table = {
         let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
+        let mut config = frensense_engine::analysis::taint::config::TaintConfig::default();
         let mut t = frensense_engine::analysis::taint::facts::fact_table_from_spec(spec);
         // Seeding order is spec -> default pack -> consumer bundle
         // (Phase 6.1: the vacated spec tables are pack-owned now).
+        let pack_entries = frensense_bundler::format::default_pack()
+            .learned_facts
+            .as_slice();
         t.merge(&fact_table_from_entries_with(
-            frensense_bundler::format::default_pack()
-                .learned_facts
-                .as_slice(),
+            pack_entries,
             Provenance::Spec,
         ));
+        // Phase 6.2: pack language-keyed sections, as the runner installs them.
+        frensense_engine::analysis::taint::facts::apply_language_entries(
+            &mut config,
+            &mut t,
+            pack_entries,
+            &["typescript"],
+        );
         t
     };
     let payload = BundlePayloadV5 {

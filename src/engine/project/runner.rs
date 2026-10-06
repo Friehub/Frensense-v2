@@ -17,7 +17,8 @@ use std::path::Path;
 
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::facts::{
-    FactTable, Provenance, fact_table_from_entries, fact_table_from_entries_with, tables_from_exts,
+    FactTable, Provenance, apply_language_entries, fact_table_from_entries,
+    fact_table_from_entries_with, languages_for_exts, tables_from_exts,
 };
 use frensense_engine::scan;
 use frensense_engine::scan::LocatedFinding;
@@ -57,12 +58,25 @@ impl Engine {
         // .frc, merged with Spec provenance between the spec seed and the
         // consumer bundle so bundle facts still win (spec -> pack ->
         // consumer, last-wins).
+        let pack_entries = frensense_bundler::format::default_pack()
+            .learned_facts
+            .as_slice();
         facts.merge(&fact_table_from_entries_with(
-            frensense_bundler::format::default_pack()
-                .learned_facts
-                .as_slice(),
+            pack_entries,
             Provenance::Spec,
         ));
+        // Phase 6.2: the pack's language-keyed sections install into config
+        // and facts together, filtered to the scanned languages, at the
+        // same pack layer (still a double-install over the spec seed for
+        // now; identical values keep the A/B neutral until 6.2d strips the
+        // spec seeds). Must run before the consumer bundle merge so
+        // Learned facts still win.
+        apply_language_entries(
+            &mut config,
+            &mut facts,
+            pack_entries,
+            &languages_for_exts(files.iter().map(|(_, _, ext)| ext.as_str())),
+        );
 
         // Merge learned facts from the .frc bundle, if any, and index the
         // bundle's per-family advisory patterns by the finding identities
