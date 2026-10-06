@@ -8,12 +8,10 @@ use crate::checks::memory_summary::MemorySummaryRegistry;
 
 #[test]
 fn test_teachable_allocator_and_deallocator() {
-    // Memory vocabulary is pack/bundle-owned (Phase 6.1): the default
-    // pack seeds the fact table after the structural spec seed; there is
-    // no implicit bootstrap fallback.
-    let spec = frensense_lang::spec_for_ext("c").expect("c spec");
-    let mut seeded = crate::analysis::taint::facts::fact_table_from_spec(spec);
-    seeded.merge(&crate::analysis::taint::facts::default_pack_table());
+    // Memory vocabulary is pack/bundle-owned (Phase 6.1): the production
+    // seeding order (spec seed -> default pack -> pack language sections)
+    // seeds the fact table; there is no implicit bootstrap fallback.
+    let seeded = crate::analysis::taint::facts::seeded_tables(["c"]).1;
     let seeded_reg = MemorySummaryRegistry::from_facts(&seeded);
     assert!(seeded_reg.returns_fresh("malloc"));
     assert!(seeded_reg.returns_fresh("calloc"));
@@ -21,17 +19,14 @@ fn test_teachable_allocator_and_deallocator() {
     assert!(!seeded_reg.returns_fresh("custom_arena_alloc"));
 
     // A bare table carries no vocabulary at all - seeding is the caller's
-    // job (`fact_table_from_spec`, exactly like a production scan).
+    // job (`seeded_tables`, exactly like a production scan).
     let bare_reg = MemorySummaryRegistry::from_facts(&FactTable::default());
     assert!(!bare_reg.returns_fresh("malloc"));
     assert!(bare_reg.consumes_params("free").is_empty());
 
-    // Learn custom primitives from a bundle over the spec-seeded table
-    // (production merge order: spec first, bundle facts on top).
-    let mut table = crate::analysis::taint::facts::fact_table_from_spec(
-        frensense_lang::spec_for_ext("c").expect("c spec"),
-    );
-    table.merge(&crate::analysis::taint::facts::default_pack_table());
+    // Learn custom primitives from a bundle over the production-seeded
+    // table (production merge order: pack seed first, bundle facts on top).
+    let mut table = crate::analysis::taint::facts::seeded_tables(["c"]).1;
     let alloc_fact = LearnedFactEntry::Allocator {
         name: "custom_arena_alloc".into(),
     };
@@ -61,8 +56,7 @@ fn test_teachable_idor_finder_sinks_and_keys() {
     assert!(!table.is_idor_key("id"));
     assert!(!table.is_idor_key("where"));
 
-    let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-    let t = crate::analysis::taint::facts::fact_table_from_spec(spec);
+    let t = crate::analysis::taint::facts::seeded_tables(["ts"]).1;
     assert!(t.is_idor_finder_sink("find"));
     assert!(t.is_idor_finder_sink("findOne"));
     assert!(t.is_idor_key("id"));
@@ -111,8 +105,7 @@ fn test_teachable_guard_denylist_patterns() {
     let mut table = FactTable::default();
     assert!(!table.is_guard_denylist("../etc/shadow"));
 
-    let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-    let seeded = crate::analysis::taint::facts::fact_table_from_spec(spec);
+    let seeded = crate::analysis::taint::facts::seeded_tables(["ts"]).1;
     assert!(seeded.is_guard_denylist("../etc/shadow"));
     assert!(!seeded.is_guard_denylist("/private/vault"));
 

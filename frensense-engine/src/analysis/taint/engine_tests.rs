@@ -1342,15 +1342,7 @@ pub mod demand_tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_regex_test_guard_sanitizes_flow() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = crate::analysis::taint::facts::config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
-        }
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
 
         let files = vec![(
             "search.ts".to_string(),
@@ -1388,15 +1380,7 @@ export function handleSearch(c: any) {
     // -----------------------------------------------------------------------
     #[test]
     fn test_db_prepare_receiver_suppression() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = crate::analysis::taint::facts::config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
-        }
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
 
         let files = vec![(
             "query.ts".to_string(),
@@ -1428,15 +1412,7 @@ export function handleDb(c: any) {
     // -----------------------------------------------------------------------
     #[test]
     fn test_context_set_not_flagged_as_sink() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = crate::analysis::taint::facts::config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
-        }
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
 
         let files = vec![(
             "middleware.ts".to_string(),
@@ -1468,15 +1444,7 @@ export function middleware(c: any) {
     // -----------------------------------------------------------------------
     #[test]
     fn test_plain_file_param_is_not_a_source() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = crate::analysis::taint::facts::config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
-        }
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
 
         let files = vec![(
             "validate.ts".to_string(),
@@ -1504,15 +1472,7 @@ export function run (file: string) {
 
     #[test]
     fn test_request_param_is_still_a_source() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = crate::analysis::taint::facts::config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
-        }
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
 
         let files = vec![(
             "handler.ts".to_string(),
@@ -1541,15 +1501,7 @@ export function run (req: any) {
     // -----------------------------------------------------------------------
     #[test]
     fn test_render_locals_argument_not_dangerous() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = crate::analysis::taint::facts::config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
-        }
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
 
         let files = vec![(
             "render.ts".to_string(),
@@ -1577,15 +1529,7 @@ export function render (req: any, res: any) {
 
     #[test]
     fn test_render_view_name_argument_dangerous() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = crate::analysis::taint::facts::config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
-        }
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
 
         let files = vec![(
             "render.ts".to_string(),
@@ -1616,15 +1560,7 @@ export function render (req: any, res: any) {
     // -----------------------------------------------------------------------
     #[test]
     fn test_write_file_content_argument_not_dangerous() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = crate::analysis::taint::facts::config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
-        }
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
 
         let files = vec![(
             "upload.ts".to_string(),
@@ -1652,15 +1588,7 @@ export function save (req: any) {
 
     #[test]
     fn test_write_file_path_argument_dangerous() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = crate::analysis::taint::facts::config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
-        }
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
 
         let files = vec![(
             "upload.ts".to_string(),
@@ -1692,15 +1620,7 @@ export function save (req: any) {
     // -----------------------------------------------------------------------
     #[test]
     fn test_destructured_query_root_still_a_source() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = crate::analysis::taint::facts::config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
-        }
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
 
         let files = vec![(
             "redirect.ts".to_string(),

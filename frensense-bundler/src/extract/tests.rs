@@ -8,8 +8,8 @@ use tempfile::TempDir;
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::engine::BackwardVerdict;
 use frensense_engine::analysis::taint::facts::{
-    config_from_spec, fact_table_from_entries_with, fact_table_from_spec, FactTable,
-    LearnedFactEntry, PolicyFact, PolicyRequirement, PolicyScope, Provenance,
+    tables_from_exts_with_pack, FactTable, LearnedFactEntry, PolicyFact, PolicyRequirement,
+    PolicyScope,
 };
 use frensense_engine::scan;
 
@@ -351,30 +351,15 @@ mod policy_proposal_tests {
     }
 
     fn builtin() -> (TaintConfig, FactTable) {
-        let mut config = TaintConfig::default();
-        let mut table = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            table.merge(&fact_table_from_spec(spec));
-        }
         // Production `family_tables` seeds spec -> default pack -> pack
-        // language sections; mirror it.
-        let pack_entries = crate::format::default_pack().learned_facts.as_slice();
-        table.merge(&fact_table_from_entries_with(
-            pack_entries,
-            Provenance::Spec,
-        ));
-        let all_languages: Vec<&str> = frensense_lang::all_specs().map(|s| s.name()).collect();
-        frensense_engine::analysis::taint::facts::apply_language_entries(
-            &mut config,
-            &mut table,
-            pack_entries,
-            &all_languages,
-        );
-        (config, table)
+        // language sections; mirror it with the production-shaped helper.
+        let all_extensions: Vec<&str> = frensense_lang::all_specs()
+            .flat_map(|s| s.extensions().iter().copied())
+            .collect();
+        tables_from_exts_with_pack(
+            all_extensions,
+            crate::format::default_pack().learned_facts.as_slice(),
+        )
     }
 
     #[test]
@@ -602,30 +587,15 @@ mod slot_regression_tests {
     use super::*;
 
     fn builtin() -> (TaintConfig, FactTable) {
-        let mut config = TaintConfig::default();
-        let mut table = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            table.merge(&fact_table_from_spec(spec));
-        }
         // Production `family_tables` seeds spec -> default pack -> pack
-        // language sections; mirror it.
-        let pack_entries = crate::format::default_pack().learned_facts.as_slice();
-        table.merge(&fact_table_from_entries_with(
-            pack_entries,
-            Provenance::Spec,
-        ));
-        let all_languages: Vec<&str> = frensense_lang::all_specs().map(|s| s.name()).collect();
-        frensense_engine::analysis::taint::facts::apply_language_entries(
-            &mut config,
-            &mut table,
-            pack_entries,
-            &all_languages,
-        );
-        (config, table)
+        // language sections; mirror it with the production-shaped helper.
+        let all_extensions: Vec<&str> = frensense_lang::all_specs()
+            .flat_map(|s| s.extensions().iter().copied())
+            .collect();
+        tables_from_exts_with_pack(
+            all_extensions,
+            crate::format::default_pack().learned_facts.as_slice(),
+        )
     }
 
     fn ts_file(name: &str, source: &str) -> (String, String, String) {

@@ -7,10 +7,7 @@
 
 #[cfg(test)]
 fn c_facts() -> crate::analysis::taint::facts::FactTable {
-    let spec = frensense_lang::spec_for_ext("c").expect("c spec");
-    let mut t = crate::analysis::taint::facts::fact_table_from_spec(spec);
-    t.merge(&crate::analysis::taint::facts::default_pack_table());
-    t
+    crate::analysis::taint::facts::seeded_tables(["c"]).1
 }
 
 #[cfg(test)]
@@ -19,9 +16,7 @@ pub mod uaf_spec {
     use crate::harness::lower_source;
 
     fn hits(src: &str) -> Vec<String> {
-        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
-        let mut facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
-        facts.merge(&crate::analysis::taint::facts::default_pack_table());
+        let facts = crate::analysis::taint::facts::seeded_tables(["c"]).1;
         let summaries = crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&facts);
         let fns = lower_source("t.c", src, "c").unwrap();
         let mut rules: Vec<String> = fns
@@ -48,9 +43,7 @@ void handler () {
   p[0] = 1;
 }
 "#;
-        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
-        let mut facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
-        facts.merge(&crate::analysis::taint::facts::default_pack_table());
+        let mut facts = crate::analysis::taint::facts::seeded_tables(["c"]).1;
         let fns = lower_source("t.c", src, "c").unwrap();
         let uaf_fires = |facts: &crate::analysis::taint::facts::FactTable| -> bool {
             let summaries = crate::checks::memory_summary::MemorySummaryRegistry::from_facts(facts);

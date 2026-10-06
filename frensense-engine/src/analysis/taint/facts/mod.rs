@@ -60,8 +60,38 @@ pub use table::*;
 /// bundler would resolve to a duplicate `frensense-engine` crate unit.
 #[cfg(test)]
 pub fn default_pack_table() -> FactTable {
+    fact_table_from_entries_with(&default_pack_entries(), Provenance::Spec)
+}
+
+/// The default pack's entries as the engine decodes them (bytes cross the
+/// bundler dev-dependency cycle; see [`default_pack_table`]).
+#[cfg(test)]
+pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
     let bytes = frensense_bundler::format::default_pack_entry_bytes();
-    let entries: Vec<LearnedFactEntry> =
-        bincode::deserialize(&bytes).expect("default pack entries decode");
-    fact_table_from_entries_with(&entries, Provenance::Spec)
+    bincode::deserialize(&bytes).expect("default pack entries decode")
+}
+
+/// Production tables for a set of extensions (spec seed -> default pack ->
+/// pack language sections), exactly as `build_spec_tables` assembles them.
+#[cfg(test)]
+pub fn seeded_tables<'a>(
+    exts: impl IntoIterator<Item = &'a str>,
+) -> (crate::analysis::taint::config::TaintConfig, FactTable) {
+    config::tables_from_exts_with_pack(exts, &default_pack_entries())
+}
+
+/// Production tables for every registered language: extensions collected
+/// from `all_specs()` in registry order, which is the same order the
+/// per-spec merge uses (extensions are disjoint across specs).
+#[cfg(test)]
+pub fn seeded_tables_all() -> (crate::analysis::taint::config::TaintConfig, FactTable) {
+    let exts: Vec<&str> = frensense_lang::all_specs()
+        .flat_map(|s| s.extensions().iter().copied())
+        .collect();
+    debug_assert_eq!(
+        config::languages_for_exts(exts.iter().copied()).len(),
+        frensense_lang::all_specs().count(),
+        "extensions must cover every registered language exactly once"
+    );
+    seeded_tables(exts)
 }

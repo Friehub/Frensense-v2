@@ -159,9 +159,7 @@ mod idor_classification_tests {
         config.sources.insert("req.body".into());
         config.sources.insert("req".into());
         let prog = ProgramSvfg::new(&statics, &config);
-        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-        let mut facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
-        facts.merge(&crate::analysis::taint::facts::default_pack_table());
+        let facts = crate::analysis::taint::facts::seeded_tables(["ts"]).1;
         let mut engine = BackwardTaintEngine::new(&prog, &config).with_fact_table(&facts);
         engine.run();
         engine.findings
@@ -316,9 +314,7 @@ export function getAccount(req: any, repo: any): void {
 
         // 2. With learned IDOR finder sink and custom key
         let files = vec![("test.ts".to_string(), src.to_string(), "ts".to_string())];
-        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-        let mut facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
-        facts.merge(&crate::analysis::taint::facts::default_pack_table());
+        let mut facts = crate::analysis::taint::facts::seeded_tables(["ts"]).1;
         let fact = crate::analysis::taint::facts::LearnedFactEntry::IdorFinderSink {
             call: "fetchRecord".to_string(),
             keys: vec!["org_identifier".to_string()],

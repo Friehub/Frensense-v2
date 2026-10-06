@@ -10,14 +10,12 @@ pub mod checker_tests {
     use crate::checks::check_all;
     use crate::harness::lower_source;
 
-    /// Spec-seeded table: the checks read `FactTable` only, so test
-    /// fixtures must seed the vocabulary exactly like a production scan
-    /// (`tables_from_exts`) does.
+    /// Production-seeded table (spec seed -> default pack -> pack language
+    /// sections): the checks read `FactTable` only, so test fixtures must
+    /// seed the vocabulary exactly like a production scan
+    /// (`seeded_tables`) does.
     fn ts_facts() -> FactTable {
-        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-        let mut t = crate::analysis::taint::facts::fact_table_from_spec(spec);
-        t.merge(&crate::analysis::taint::facts::default_pack_table());
-        t
+        crate::analysis::taint::facts::seeded_tables(["ts"]).1
     }
 
     fn check(src: &str) -> Vec<(String, String)> {
@@ -165,14 +163,11 @@ export function process (data: string) {
 
     // ── Composite-literal / spread value-flow regressions ────────────────
 
-    use crate::analysis::taint::facts::{config_from_spec, fact_table_from_spec};
+    use crate::analysis::taint::facts::seeded_tables;
     use crate::scan::scan;
 
     fn scan_count(src: &str) -> usize {
-        let spec = frensense_lang::spec_for_ext("ts").unwrap();
-        let config = config_from_spec(spec);
-        let mut facts = fact_table_from_spec(spec);
-        facts.merge(&crate::analysis::taint::facts::default_pack_table());
+        let (config, facts) = seeded_tables(["ts"]);
         let files = vec![("test.ts".to_string(), src.to_string(), "ts".to_string())];
         let result = scan(&files, &config, &facts);
         result
@@ -397,8 +392,7 @@ export function caller (x: any) {
     /// End-to-end: scan applies learned checks alongside taint.
     #[test]
     fn learned_check_via_scan() {
-        let spec = frensense_lang::spec_for_ext("ts").unwrap();
-        let config = crate::analysis::taint::facts::config_from_spec(spec);
+        let config = crate::analysis::taint::facts::seeded_tables(["ts"]).0;
         let facts = learned_table("insecureRedirect", "policy_open_redirect");
         let files = vec![(
             "t.ts".to_string(),

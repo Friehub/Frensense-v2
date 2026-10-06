@@ -293,6 +293,32 @@ pub fn tables_from_exts<'a>(exts: impl IntoIterator<Item = &'a str>) -> (TaintCo
     (config, facts)
 }
 
+/// Production table assembly for a set of extensions: the spec seed
+/// ([`tables_from_exts`]) + the default pack's language-agnostic entries
+/// merged at [`Provenance::Spec`], then its language-keyed sections
+/// installed for those extensions' languages. This is byte-for-byte the
+/// order `build_spec_tables` (scan runner) and `family_tables` (fact
+/// bundler) use, exposed so tests can assemble tables that cannot drift
+/// from production.
+pub fn tables_from_exts_with_pack<'a>(
+    exts: impl IntoIterator<Item = &'a str>,
+    pack_entries: &[LearnedFactEntry],
+) -> (TaintConfig, FactTable) {
+    let exts: Vec<&'a str> = exts.into_iter().collect();
+    let (mut config, mut facts) = tables_from_exts(exts.iter().copied());
+    facts.merge(&fact_table_from_entries_with(
+        pack_entries,
+        Provenance::Spec,
+    ));
+    apply_language_entries(
+        &mut config,
+        &mut facts,
+        pack_entries,
+        &languages_for_exts(exts.iter().copied()),
+    );
+    (config, facts)
+}
+
 /// The distinct language names for a set of file extensions, in first
 /// appearance order - the exact per-spec merge order [`tables_from_exts`]
 /// uses. Feed the result to [`apply_language_entries`] so its group merges

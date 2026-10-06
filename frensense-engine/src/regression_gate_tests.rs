@@ -19,11 +19,9 @@
 
 #[cfg(test)]
 pub mod nested_flow_gate {
-    use crate::analysis::taint::config::TaintConfig;
     use crate::analysis::taint::engine::BackwardVerdict;
     use crate::analysis::taint::facts::{
-        FactTable, PolicyFact, PolicyRequirement, PolicyScope, Provenance, config_from_spec,
-        fact_table_from_spec,
+        FactTable, PolicyFact, PolicyRequirement, PolicyScope, Provenance, seeded_tables_all,
     };
     use crate::checks::policy;
     use crate::harness::lower_source;
@@ -31,15 +29,7 @@ pub mod nested_flow_gate {
     use crate::scan::{ScanResult, scan};
 
     fn scan_ts(src: &str) -> ScanResult {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&fact_table_from_spec(spec));
-        }
+        let (config, facts) = seeded_tables_all();
         let files = vec![("app.ts".to_string(), src.to_string(), "ts".to_string())];
         scan(&files, &config, &facts)
     }
@@ -288,23 +278,14 @@ export function outer (cmd: string) {
 
 #[cfg(test)]
 pub mod duplicate_result_gate {
-    use crate::analysis::taint::config::TaintConfig;
     use crate::analysis::taint::engine::BackwardVerdict;
-    use crate::analysis::taint::facts::{FactTable, config_from_spec, fact_table_from_spec};
+    use crate::analysis::taint::facts::{FactTable, seeded_tables_all};
     use crate::checks::policy;
     use crate::scan::scan;
 
     #[test]
     fn no_duplicate_findings_across_shapes() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&fact_table_from_spec(spec));
-        }
+        let (config, facts) = seeded_tables_all();
         let scan_ts = |src: &str| {
             scan(
                 &[("app.ts".to_string(), src.to_string(), "ts".to_string())],
@@ -478,21 +459,12 @@ export function orderHistory () {
 
 #[cfg(test)]
 pub mod c_taint_gate {
-    use crate::analysis::taint::config::TaintConfig;
     use crate::analysis::taint::engine::BackwardVerdict;
-    use crate::analysis::taint::facts::{FactTable, config_from_spec, fact_table_from_spec};
+    use crate::analysis::taint::facts::seeded_tables_all;
     use crate::scan::{ScanResult, scan};
 
     fn scan_c(src: &str) -> ScanResult {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&fact_table_from_spec(spec));
-        }
+        let (config, facts) = seeded_tables_all();
         let files = vec![("t.c".to_string(), src.to_string(), "c".to_string())];
         scan(&files, &config, &facts)
     }
@@ -580,23 +552,14 @@ void f(void) {
 
 #[cfg(test)]
 pub mod spec_acceptance_gate {
-    use crate::analysis::taint::config::TaintConfig;
     use crate::analysis::taint::engine::BackwardVerdict;
-    use crate::analysis::taint::facts::{FactTable, config_from_spec, fact_table_from_spec};
+    use crate::analysis::taint::facts::seeded_tables_all;
     use crate::scan::{ScanResult, scan};
 
-    /// Full production pipeline: config + facts merged from every language
-    /// spec, exactly as the CLI scanner assembles them.
+    /// Full production pipeline: config + tables assembled for every
+    /// registered language, exactly as the CLI scanner assembles them.
     fn scan_ts(src: &str) -> ScanResult {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&fact_table_from_spec(spec));
-        }
+        let (config, facts) = seeded_tables_all();
         scan(
             &[("app.ts".to_string(), src.to_string(), "ts".to_string())],
             &config,

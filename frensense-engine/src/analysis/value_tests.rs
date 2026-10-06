@@ -11,13 +11,11 @@ pub mod value_spec {
     use crate::analysis::value::{Value, analyze};
     use crate::harness::lower_source;
 
-    /// Spec-seeded table: the checks read `FactTable` only, so test
-    /// fixtures must seed the vocabulary exactly like a production scan.
+    /// Production-seeded table (spec seed -> default pack -> pack language
+    /// sections): the checks read `FactTable` only, so test fixtures must
+    /// seed the vocabulary exactly like a production scan.
     fn ts_facts() -> crate::analysis::taint::facts::FactTable {
-        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-        let mut t = crate::analysis::taint::facts::fact_table_from_spec(spec);
-        t.merge(&crate::analysis::taint::facts::default_pack_table());
-        t
+        crate::analysis::taint::facts::seeded_tables(["ts"]).1
     }
 
     fn var_of<'a>(
@@ -285,10 +283,7 @@ export function signToken (payload: string, secret: string) {
     /// at a constant root, no source reachable).
     #[test]
     fn constant_sink_argument_is_not_vulnerable() {
-        use crate::analysis::taint::{
-            engine::BackwardVerdict,
-            facts::{config_from_spec, fact_table_from_spec},
-        };
+        use crate::analysis::taint::engine::BackwardVerdict;
         use crate::scan::{prepare, scan_prepared};
 
         let src = r#"
@@ -299,10 +294,7 @@ export function runQuery () {
 }
 "#;
         let files = vec![("t.ts".to_string(), src.to_string(), "ts".to_string())];
-        let spec = frensense_lang::spec_for_ext("ts").unwrap();
-        let config = config_from_spec(spec);
-        let mut facts = fact_table_from_spec(spec);
-        facts.merge(&crate::analysis::taint::facts::default_pack_table());
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables(["ts"]);
         let prepared = prepare(&files).unwrap();
         let result = scan_prepared(&prepared, &config, &facts);
         assert!(

@@ -11,10 +11,7 @@ pub mod memory_summary_spec {
     use crate::harness::lower_source;
 
     fn c_facts() -> FactTable {
-        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
-        let mut t = crate::analysis::taint::facts::fact_table_from_spec(spec);
-        t.merge(&crate::analysis::taint::facts::default_pack_table());
-        t
+        crate::analysis::taint::facts::seeded_tables(["c"]).1
     }
 
     fn hits(src: &str) -> Vec<String> {

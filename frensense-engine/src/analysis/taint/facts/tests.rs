@@ -67,8 +67,7 @@ fn test_sanitizer_fact_lookup() {
 fn test_verb_sink_receiver_aware() {
     // The JS spec carries dotted client sinks (got.get, axios.post, ...);
     // their bare verb segments must be receiver-aware, not blanket sinks.
-    let spec = frensense_lang::spec_for_ext("ts").unwrap();
-    let t = fact_table_from_spec(spec);
+    let t = seeded_tables(["ts"]).1;
 
     assert!(
         t.verb_sinks.contains("get"),
@@ -86,8 +85,7 @@ fn test_verb_sink_receiver_aware() {
 
 #[test]
 fn test_verb_sink_merge_accumulates() {
-    let spec = frensense_lang::spec_for_ext("ts").unwrap();
-    let base = fact_table_from_spec(spec);
+    let base = seeded_tables(["ts"]).1;
     let mut merged = FactTable::default();
     merged.merge(&base);
     assert!(merged.verb_sinks.contains("post"));
@@ -99,8 +97,7 @@ fn test_last_segment_role_collision_bare_wins() {
     // `decode` (JwtUnsafeDecode) and `msgpack.decode` (UnsafeDeserialize)
     // share a last segment with different roles. The bare entry must keep
     // Validation; a dotted sibling must never silently re-role it.
-    let spec = frensense_lang::spec_for_ext("ts").unwrap();
-    let t = fact_table_from_spec(spec);
+    let t = seeded_tables(["ts"]).1;
     let sig = t.sink_signature("decode").expect("decode registered");
     assert_eq!(sig.role, crate::analysis::taint::role::SinkRole::Validation);
     // The dotted entry keeps its own role under its full-path key.
@@ -117,8 +114,7 @@ fn test_last_segment_role_collision_bare_wins() {
 fn test_per_slot_signature_inherits_label_role() {
     // Per-slot entries (JS_SINK_SIGNATURES) carry no label of their own;
     // they must inherit the role of the same call's all-args entry.
-    let spec = frensense_lang::spec_for_ext("ts").unwrap();
-    let t = fact_table_from_spec(spec);
+    let t = seeded_tables(["ts"]).1;
     let query = t.sink_signature("query").expect("query registered");
     assert_eq!(
         query.role,
@@ -136,8 +132,7 @@ fn test_per_slot_signature_inherits_label_role() {
 fn test_rust_fetch_single_label() {
     // The Rust spec once declared `fetch` twice (SqlInjection + Ssrf);
     // insertion-order races decided its role. Exactly one label wins now.
-    let spec = frensense_lang::spec_for_ext("rs").unwrap();
-    let t = fact_table_from_spec(spec);
+    let t = seeded_tables(["rs"]).1;
     let fetch = t.sink_signature("fetch").expect("fetch registered");
     assert_eq!(
         fetch.role,
@@ -152,8 +147,7 @@ fn test_receiver_role_disambiguates_dotted_vs_bare() {
     // `res.send` (XssReflected) colliding with `Queue.send` (Ssrf).
     // A receiver root matching the dotted entry's declared root must
     // flip the role; an unmatched receiver keeps the bare entry's.
-    let spec = frensense_lang::spec_for_ext("ts").unwrap();
-    let t = fact_table_from_spec(spec);
+    let t = seeded_tables(["ts"]).1;
 
     // res.send: receiver `res` matches the dotted root -> XssReflected -> Xss.
     let res_send = t.role_for_call("send", Some("res"));
@@ -177,8 +171,7 @@ fn test_receiver_role_disambiguates_dotted_vs_bare() {
 
 #[test]
 fn test_receiver_roles_survive_merge() {
-    let spec = frensense_lang::spec_for_ext("ts").unwrap();
-    let base = fact_table_from_spec(spec);
+    let base = seeded_tables(["ts"]).1;
     let mut merged = FactTable::default();
     merged.merge(&base);
     let role = merged.role_for_call("put", Some("KVNamespace"));
@@ -196,8 +189,7 @@ fn signature_only_sinks_carry_spec_labels() {
     // entry, which did not exist for them): `destroy` reported as "other"
     // instead of its query class, pg-promise verbs as "other" instead of
     // SQL. Every sink must resolve a real label.
-    let spec = frensense_lang::spec_for_ext("ts").unwrap();
-    let t = fact_table_from_spec(spec);
+    let t = seeded_tables(["ts"]).1;
     for call in ["destroy", "findByIdAndUpdate", "findByIdAndDelete"] {
         let sig = t
             .sink_signature(call)
@@ -229,8 +221,7 @@ fn generic_promise_verbs_are_not_sinks() {
     // sinks (juice-shop: restoreOverwrittenFilesWithOriginals.ts:26).
     // Until the spec grows an ambiguous-verb + receiver-root vocabulary,
     // these names must not be sinks at all.
-    let spec = frensense_lang::spec_for_ext("ts").unwrap();
-    let t = fact_table_from_spec(spec);
+    let t = seeded_tables(["ts"]).1;
     assert!(
         !t.is_sink_call("all", Some("Promise")),
         "Promise.all must not be a sink"
@@ -253,8 +244,7 @@ fn spec_drives_idor_vocabulary() {
     // wrappers (`where`) are NOT identity keys - a where-wrapped leaf value
     // is a parameterized filter, structurally unprovable as an
     // access-control violation (zero-FP).
-    let spec = frensense_lang::spec_for_ext("ts").unwrap();
-    let t = fact_table_from_spec(spec);
+    let t = seeded_tables(["ts"]).1;
     for call in [
         "findOne",
         "find",
@@ -304,12 +294,9 @@ fn spec_drives_idor_vocabulary() {
 #[test]
 fn spec_drives_policy_vocabulary() {
     // Guard/credential/schema/URL/weak-crypto policy vocabulary ships in
-    // the default pack (Phase 6.1: the lang `known_*` seeds are gone):
-    // `fact_table_from_spec` seeds only the structural spec tables, then
-    // consumers merge the pack between the spec seed and the bundle.
-    let spec = frensense_lang::spec_for_ext("ts").unwrap();
-    let mut t = fact_table_from_spec(spec);
-    t.merge(&default_pack_table());
+    // the default pack (Phase 6.1: the lang `known_*` seeds are gone) and
+    // is installed by the production seeding order (`seeded_tables`).
+    let t = seeded_tables(["ts"]).1;
 
     for callee in ["includes", "indexOf", "contains"] {
         assert!(

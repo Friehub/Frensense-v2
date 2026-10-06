@@ -11,9 +11,7 @@ pub mod leak_spec {
     use crate::harness::lower_source;
 
     fn rules(src: &str) -> Vec<String> {
-        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
-        let mut facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
-        facts.merge(&crate::analysis::taint::facts::default_pack_table());
+        let facts = crate::analysis::taint::facts::seeded_tables(["c"]).1;
         let summaries = MemorySummaryRegistry::from_facts(&facts);
         let fns = lower_source("t.c", src, "c").unwrap();
         let mut out: Vec<String> = fns
@@ -38,9 +36,7 @@ void handler(void)
     (void)p;
 }
 "#;
-        let spec = frensense_lang::spec_for_ext("c").expect("c spec");
-        let mut facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
-        facts.merge(&crate::analysis::taint::facts::default_pack_table());
+        let mut facts = crate::analysis::taint::facts::seeded_tables(["c"]).1;
         let fns = crate::harness::lower_source("t.c", src, "c").unwrap();
         let leak_fires = |facts: &crate::analysis::taint::facts::FactTable| -> bool {
             let summaries = MemorySummaryRegistry::from_facts(facts);

@@ -26,41 +26,30 @@ use frensense_bundler::format::{load_bundle, write_bundle, BundlePayloadV5};
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::engine::FindingClass;
 use frensense_engine::analysis::taint::facts::{
-    fact_table_from_entries, fact_table_from_entries_with, FactTable, GrammarFeature,
-    GuardBypassFact, LearnedFactEntry, PolicyRequirement, PolicyScope, SchemaPolicyFact,
-    TeachableNodeRole, WeakCryptoFact,
+    fact_table_from_entries, FactTable, GrammarFeature, GuardBypassFact, LearnedFactEntry,
+    PolicyRequirement, PolicyScope, SchemaPolicyFact, TeachableNodeRole, WeakCryptoFact,
 };
 use frensense_engine::checks::memory_summary::CapacitySpec;
 use frensense_engine::checks::Provenance;
 use frensense_engine::scan::scan;
 
 fn make_bundle(facts: Vec<LearnedFactEntry>) -> FactTable {
-    // Production scans merge bundle facts OVER spec-seeded tables
-    // (`tables_from_exts` in the runner); mirror that here so the fixtures
-    // exercise the real seeding order. The engine reads `FactTable` only,
-    // so a bare bundle table would hide the spec vocabulary from checks.
-    let mut table = {
-        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-        let mut config = frensense_engine::analysis::taint::config::TaintConfig::default();
-        let mut t = frensense_engine::analysis::taint::facts::fact_table_from_spec(spec);
-        // Seeding order is spec -> default pack -> consumer bundle
-        // (Phase 6.1: the vacated spec tables are pack-owned now).
-        let pack_entries = frensense_bundler::format::default_pack()
+    // Production scans seed spec -> default pack -> pack language sections
+    // via the engine's production-shaped helper, then merge bundle facts
+    // OVER that (`tables_from_exts_with_pack`); mirror that here so the
+    // fixtures exercise the real seeding order. The engine reads
+    // `FactTable` only, so a bare bundle table would hide the vocabulary
+    // from checks.
+    let all_extensions: Vec<&str> = frensense_lang::all_specs()
+        .flat_map(|s| s.extensions().iter().copied())
+        .collect();
+    let mut table = frensense_engine::analysis::taint::facts::tables_from_exts_with_pack(
+        all_extensions,
+        frensense_bundler::format::default_pack()
             .learned_facts
-            .as_slice();
-        t.merge(&fact_table_from_entries_with(
-            pack_entries,
-            Provenance::Spec,
-        ));
-        // Phase 6.2: pack language-keyed sections, as the runner installs them.
-        frensense_engine::analysis::taint::facts::apply_language_entries(
-            &mut config,
-            &mut t,
-            pack_entries,
-            &["typescript"],
-        );
-        t
-    };
+            .as_slice(),
+    )
+    .1;
     let payload = BundlePayloadV5 {
         patterns: vec![],
         learned_facts: facts,

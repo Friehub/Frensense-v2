@@ -11,7 +11,7 @@
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod session_trust_tests {
     use crate::analysis::taint::engine::BackwardVerdict;
-    use crate::analysis::taint::facts::{config_from_spec, fact_table_from_spec};
+    use crate::analysis::taint::facts::seeded_tables;
     use crate::harness::lower_source;
     use crate::scan::{prepare, scan_prepared};
 
@@ -46,11 +46,9 @@ export function handler (req: any) {
 
     fn run(src: &str) -> Vec<crate::analysis::taint::engine::SinkFinding> {
         let files = vec![("test.ts".to_string(), src.to_string(), "ts".to_string())];
-        let spec = frensense_lang::spec_for_ext("ts").unwrap();
-        let config = config_from_spec(spec);
         // Session roots are language vocabulary (`known_session_roots`);
-        // the spec-built table already carries them.
-        let facts = fact_table_from_spec(spec);
+        // the production-seeded table already carries them.
+        let (config, facts) = seeded_tables(["ts"]);
         let prepared = prepare(&files).expect("prepare");
         scan_prepared(&prepared, &config, &facts).findings
     }
@@ -73,8 +71,7 @@ export function handler (req: any) {
         // No sink in MAP_FLOW; the point is the engine's session predicate
         // doesn't fire on arbitrary receivers, assert via the fact table
         // directly for precision.
-        let spec = frensense_lang::spec_for_ext("ts").unwrap();
-        let facts = fact_table_from_spec(spec);
+        let facts = seeded_tables(["ts"]).1;
         assert!(!facts.is_session_path("get", Some("myMap")));
         assert!(facts.is_session_path("get", Some("security.authenticatedUsers")));
         assert!(!facts.is_session_path("put", Some("security.authenticatedUsers")));

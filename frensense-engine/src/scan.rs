@@ -268,16 +268,13 @@ pub struct LocatedFinding {
 #[cfg(test)]
 mod collision_tests {
     use super::scan;
-    use crate::analysis::taint::facts::{config_from_spec, fact_table_from_spec};
+    use crate::analysis::taint::facts::seeded_tables;
 
     fn ts_tables() -> (
         crate::analysis::taint::config::TaintConfig,
         crate::analysis::taint::facts::FactTable,
     ) {
-        let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-        let mut facts = fact_table_from_spec(spec);
-        facts.merge(&crate::analysis::taint::facts::default_pack_table());
-        (config_from_spec(spec), facts)
+        seeded_tables(["ts"])
     }
 
     /// Same prefix in both files => the nameless nested arrows start at the

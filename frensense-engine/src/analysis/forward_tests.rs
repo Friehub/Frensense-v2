@@ -1043,9 +1043,7 @@ pub mod interprocedural_tests {
             (NodeKey::instr(b, 1, obj), NodeKey::instr(b, 1, val))
         };
 
-        let facts = crate::analysis::taint::facts::fact_table_from_spec(
-            frensense_lang::spec_for_ext("ts").unwrap(),
-        );
+        let (_, facts) = crate::analysis::taint::facts::seeded_tables(["ts"]);
         let prog = ProgramSvfg::new_with_facts(
             &[
                 ("MyClass.method".into(), &callee),
