@@ -275,7 +275,9 @@ mod collision_tests {
         crate::analysis::taint::facts::FactTable,
     ) {
         let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-        (config_from_spec(spec), fact_table_from_spec(spec))
+        let mut facts = fact_table_from_spec(spec);
+        facts.merge(&crate::analysis::taint::facts::default_pack_table());
+        (config_from_spec(spec), facts)
     }
 
     /// Same prefix in both files => the nameless nested arrows start at the

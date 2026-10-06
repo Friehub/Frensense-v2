@@ -3,7 +3,7 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use super::*;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashSet;
 
 use crate::analysis::taint::config::TaintConfig;
 
@@ -139,12 +139,12 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
             t.guard_denylist_patterns.push((*pattern).to_string());
         }
     }
-    // Memory-function vocabulary (allocators/deallocators + capacity
-    // contracts): spec-owned, consumed by the memory/UAF/OOB checks.
-    t.memory_functions = spec.known_memory_functions().to_vec();
-    // Buffer builtins (copy/fill/read with dst/src/len slots): spec-owned,
-    // consumed by the spatial (OOB) check.
-    t.buffer_builtins = spec.known_buffer_builtins().to_vec();
+    // Memory contracts, buffer builtins, the guard/credential/schema
+    // vocabularies, hint sets and weak-crypto policy tables no longer
+    // seed from the spec (Phase 6.1): the default pack carries them and
+    // every consumer merges it between this seed and the consumer bundle
+    // (seeding order: spec -> default pack -> consumer). Spec-seeded
+    // only: stack allocators and the small structural vocabularies below.
     // Stack-frame allocators (alloca, ...): spec-owned, consumed by the
     // allocation-lifetime (leak) check.
     t.stack_allocators = spec
@@ -180,79 +180,9 @@ pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> Fa
         .iter()
         .map(|s| (*s).to_string())
         .collect();
-    // Guard/allowlist, credential, schema and URL-hint policy vocabulary:
-    // spec-owned, read directly by the checks. The provenance-carrying
-    // fields seed every entry as Spec; bundle application marks Learned.
-    let spec_set = |vals: &'static [&'static str]| -> FxHashMap<String, Provenance> {
-        vals.iter()
-            .map(|s| ((*s).to_string(), Provenance::Spec))
-            .collect()
-    };
-    t.containment_callees = spec_set(spec.known_containment_callees());
-    t.credential_sinks = spec_set(spec.known_credential_sinks());
-    t.credential_params = spec_set(spec.known_credential_params());
-    t.schema_builders = spec_set(spec.known_schema_builders());
-    t.schema_enforcers = spec
-        .known_schema_enforcers()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t.schema_keywords = spec_set(spec.known_schema_keywords());
-    t.url_param_hints = spec
-        .known_url_param_hints()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t.url_arg_hints = spec
-        .known_url_arg_hints()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t.url_literal_hints = spec
-        .known_url_literal_hints()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t.security_context_hints = spec
-        .known_security_context_hints()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    // Qualification vocabularies: auth-guard call paths (idor suppression),
-    // verifier hints (insecure-jwt), credential-context hints (weak digest).
-    t.auth_guard_hints = spec
-        .known_auth_guard_hints()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t.jwt_algorithm_hints = spec
-        .known_jwt_algorithm_hints()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t.credential_context_hints = spec
-        .known_credential_context_hints()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    // Weak-crypto policy tables: spec-owned; `weak_hash::check` unions the
-    // bootstrap defaults with these.
-    t.weak_hash_rules = spec.known_weak_hash_rules().to_vec();
-    // Allocation-size overflow rules: spec-owned seed; the bundle extends
-    // via `LearnedFactEntry::IntegerOverflowRule`; `int_overflow::check`
-    // unions the bootstrap defaults with these.
-    t.integer_overflow_rules = spec
-        .known_integer_overflow_rules()
-        .iter()
-        .map(|r| (r.clone(), Provenance::Spec))
-        .collect();
-    t.insecure_config_selectors = spec.known_insecure_config_selectors().to_vec();
-    t.key_size_rules = spec.known_key_size_rules().to_vec();
-    t.suspicious_hash_wrappers = spec
-        .known_suspicious_hash_wrappers()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
+    // Guard/allowlist, credential, schema, URL-hint, weak-crypto,
+    // integer-overflow, key-size and insecure-config tables seed from the
+    // default pack (Phase 6.1), not from the spec - see the note above.
     // Spec sanitizers: register each known sanitizer into `t.sanitizer_facts`.
     // Predicate-guard detection (regex `.test()`, `is...()` type-guards, Full
     // classification) is spec-owned: `LanguageSpec::is_predicate_guard`.

@@ -8,9 +8,6 @@ use std::collections::BTreeSet;
 use super::*;
 use crate::analysis::taint::config::TaintConfig;
 use crate::checks::memory_summary::CapacitySpec;
-use frensense_lang::policy::{
-    InsecureConfigRule, IntegerOverflowRule, KeySizeRule, WeakPrimitiveRule,
-};
 
 /// The merged fact table: built-in language tables + bundle-learned facts.
 ///
@@ -37,64 +34,50 @@ pub struct FactTable {
     /// Corpus-verified weak cryptography rules.
     pub weak_crypto_rules: Vec<WeakCryptoFact>,
     /// Containment callees (for allowlist bypass checks) with per-entry
-    /// provenance: spec-seeded via `LanguageSpec::known_containment_callees`
-    /// (Spec), bundle-applied (Learned).
+    /// provenance: default-pack-seeded (Spec), bundle-applied (Learned).
     pub containment_callees: FxHashMap<String, Provenance>,
-    /// Credential setter/hasher sinks with per-entry provenance
-    /// (spec-seeded via `LanguageSpec::known_credential_sinks` -> Spec,
-    /// bundle -> Learned).
+    /// Credential setter/hasher sinks with per-entry provenance (pack ->
+    /// Spec, bundle -> Learned).
     pub credential_sinks: FxHashMap<String, Provenance>,
     /// Parameter names identifying credentials with per-entry provenance
-    /// (spec-seeded via `LanguageSpec::known_credential_params` -> Spec,
-    /// bundle -> Learned).
+    /// (pack -> Spec, bundle -> Learned).
     pub credential_params: FxHashMap<String, Provenance>,
-    /// Schema builder methods with per-entry provenance (spec-seeded via
-    /// `LanguageSpec::known_schema_builders` -> Spec, bundle -> Learned).
+    /// Schema builder methods with per-entry provenance (pack -> Spec,
+    /// bundle -> Learned).
     pub schema_builders: FxHashMap<String, Provenance>,
-    /// Corpus-verified schema enforcer methods (spec-seeded via
-    /// `LanguageSpec::known_schema_enforcers`).
+    /// Corpus-verified schema enforcer methods (default-pack-seeded).
     pub schema_enforcers: FxHashSet<String>,
-    /// Bound keywords with per-entry provenance (spec-seeded via
-    /// `LanguageSpec::known_schema_keywords` -> Spec, bundle -> Learned).
+    /// Bound keywords with per-entry provenance (pack -> Spec, bundle ->
+    /// Learned).
     pub schema_keywords: FxHashMap<String, Provenance>,
-    /// URL/redirect parameter-name hints (spec-seeded via
-    /// `LanguageSpec::known_url_param_hints`).
+    /// URL/redirect parameter-name hints (default-pack-seeded).
     pub url_param_hints: FxHashSet<String>,
-    /// URL-ish guard argument hints (spec-seeded via
-    /// `LanguageSpec::known_url_arg_hints`).
+    /// URL-ish guard argument hints (default-pack-seeded).
     pub url_arg_hints: FxHashSet<String>,
-    /// Absolute-URL literal hints (spec-seeded via
-    /// `LanguageSpec::known_url_literal_hints`).
+    /// Absolute-URL literal hints (default-pack-seeded).
     pub url_literal_hints: FxHashSet<String>,
-    /// Security-context name hints (spec-seeded via
-    /// `LanguageSpec::known_security_context_hints`).
+    /// Security-context name hints (default-pack-seeded).
     pub security_context_hints: FxHashSet<String>,
-    /// Auth-guard call-path hints (spec-seeded via
-    /// `LanguageSpec::known_auth_guard_hints`); the idor emission gate
-    /// suppresses identity findings behind a guard branch over these calls.
+    /// Auth-guard call-path hints (default-pack-seeded); the idor emission
+    /// gate suppresses identity findings behind a guard branch over these
+    /// calls.
     pub auth_guard_hints: FxHashSet<String>,
-    /// JWT algorithm-operation call-path hints (spec-seeded via
-    /// `LanguageSpec::known_jwt_algorithm_hints`).
+    /// JWT algorithm-operation call-path hints (default-pack-seeded).
     pub jwt_algorithm_hints: FxHashSet<String>,
-    /// Credential-context name hints (spec-seeded via
-    /// `LanguageSpec::known_credential_context_hints`).
+    /// Credential-context name hints (default-pack-seeded).
     pub credential_context_hints: FxHashSet<String>,
-    /// Weak-hash policy rules (spec-seeded via
-    /// `LanguageSpec::known_weak_hash_rules`).
+    /// Weak-hash policy rules (default-pack-seeded).
     pub weak_hash_rules: Vec<WeakPrimitiveRule>,
     /// Corpus-extendable allocation-size overflow rules (CWE-190 -> CWE-680;
-    /// spec-seeded via `LanguageSpec::known_integer_overflow_rules`, bundle
-    /// extension via `LearnedFactEntry::IntegerOverflowRule` from a family's
+    /// default-pack-seeded, bundle extension via
+    /// `LearnedFactEntry::IntegerOverflowRule` from a family's
     /// `[frensense] check-rule:` declaration).
     pub integer_overflow_rules: Vec<(IntegerOverflowRule, Provenance)>,
-    /// Insecure config selectors (spec-seeded via
-    /// `LanguageSpec::known_insecure_config_selectors`).
+    /// Insecure config selectors (default-pack-seeded).
     pub insecure_config_selectors: Vec<InsecureConfigRule>,
-    /// Key-size policy rules (spec-seeded via
-    /// `LanguageSpec::known_key_size_rules`).
+    /// Key-size policy rules (default-pack-seeded).
     pub key_size_rules: Vec<KeySizeRule>,
-    /// Suspicious hash-wrapper names (spec-seeded via
-    /// `LanguageSpec::known_suspicious_hash_wrappers`).
+    /// Suspicious hash-wrapper names (default-pack-seeded).
     pub suspicious_hash_wrappers: FxHashSet<String>,
     /// Last segments that come ONLY from dotted client sinks (`got.get`,
     /// `axios.post`, ...). These verbs are ambiguous, `Map.get`, router
@@ -141,15 +124,15 @@ pub struct FactTable {
     /// Dynamic custom memory deallocators learned from a bundle or specification.
     pub custom_deallocators: FxHashSet<String>,
     /// Memory-function vocabulary (allocators/deallocators and their
-    /// capacity contracts) seeded from the spec's
-    /// `known_memory_functions`. Empty means the caller built a bare
-    /// table; the checks then see no memory vocabulary at all.
-    pub memory_functions: Vec<frensense_lang::memory::MemoryFuncSpec>,
+    /// capacity contracts), default-pack-seeded (Phase 6.1). Empty means
+    /// the caller built a bare table; the checks then see no memory
+    /// vocabulary at all.
+    pub memory_functions: Vec<MemoryFuncSpec>,
     /// Buffer-manipulation vocabulary (copy/fill/read builtins with their
-    /// dst/src/len argument slots) seeded from the spec's
-    /// `known_buffer_builtins`. Empty means the caller built a bare
-    /// table; the OOB check then sees no buffer vocabulary.
-    pub buffer_builtins: Vec<frensense_lang::memory::BufferBuiltinSpec>,
+    /// dst/src/len argument slots), default-pack-seeded (Phase 6.1).
+    /// Empty means the caller built a bare table; the OOB check then sees
+    /// no buffer vocabulary.
+    pub buffer_builtins: Vec<BufferBuiltinSpec>,
     /// Stack-frame allocators (`alloca`, ...) seeded from the spec's
     /// `known_stack_allocators`; leak-style checkers exclude them.
     pub stack_allocators: Vec<String>,
@@ -1111,7 +1094,7 @@ impl LearnedFactEntry {
                 src_arg,
                 len_arg,
             } => {
-                let fact = frensense_lang::memory::BufferBuiltinSpec {
+                let fact = BufferBuiltinSpec {
                     name: name.clone(),
                     dst_arg: *dst_arg,
                     src_arg: *src_arg,

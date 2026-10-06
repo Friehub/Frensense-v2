@@ -146,7 +146,18 @@ void caller() {
     // memory vocabulary the fixpoint needs to recognise `free` as consuming.
     let builtin = {
         let spec = frensense_lang::spec_for_ext("c").expect("c spec");
-        frensense_engine::analysis::taint::facts::fact_table_from_spec(spec)
+        let mut t = frensense_engine::analysis::taint::facts::fact_table_from_spec(spec);
+        // Production `family_tables` seeds spec -> default pack; mirror it
+        // so the registry carries the pack's C memory vocabulary.
+        t.merge(
+            &frensense_engine::analysis::taint::facts::fact_table_from_entries_with(
+                frensense_bundler::format::default_pack()
+                    .learned_facts
+                    .as_slice(),
+                frensense_engine::analysis::taint::facts::Provenance::Spec,
+            ),
+        );
+        t
     };
 
     // 2. Fact Extraction:
@@ -218,6 +229,15 @@ void test_app() {
     let scan_facts = {
         let spec = frensense_lang::spec_for_ext("c").expect("c spec");
         let mut t = fact_table_from_spec(spec);
+        // The CLI runner seeds spec -> default pack -> consumer bundle.
+        t.merge(
+            &frensense_engine::analysis::taint::facts::fact_table_from_entries_with(
+                frensense_bundler::format::default_pack()
+                    .learned_facts
+                    .as_slice(),
+                frensense_engine::analysis::taint::facts::Provenance::Spec,
+            ),
+        );
         t.merge(&learned);
         t
     };

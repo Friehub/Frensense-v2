@@ -62,11 +62,11 @@ pub struct MemorySummaryRegistry {
 
 impl MemorySummaryRegistry {
     /// Build a registry from a memory-function vocabulary (seeded into a
-    /// [`crate::analysis::taint::facts::FactTable`] via the spec's
-    /// `known_memory_functions`): one summary per entry, mapping the
-    /// spec's capacity shape onto [`CapacitySpec`].
-    fn from_vocabulary(vocab: &[frensense_lang::memory::MemoryFuncSpec]) -> Self {
-        use frensense_lang::memory::AllocCapacity;
+    /// [`crate::analysis::taint::facts::FactTable`] by the default pack):
+    /// one summary per entry, mapping the vocabulary's capacity shape
+    /// onto [`CapacitySpec`].
+    fn from_vocabulary(vocab: &[crate::analysis::taint::facts::MemoryFuncSpec]) -> Self {
+        use crate::analysis::taint::facts::AllocCapacity;
         let mut summaries = FxHashMap::default();
         for f in vocab {
             summaries.insert(
@@ -152,8 +152,8 @@ impl MemorySummaryRegistry {
     }
 
     /// Returns true if calling `name` returns a freshly allocated object.
-    /// Vocabulary-driven: the registry was seeded from the spec's
-    /// `known_memory_functions` through `FactTable::memory_functions`.
+    /// Vocabulary-driven: the registry was seeded from the default pack
+    /// through `FactTable::memory_functions`.
     pub fn returns_fresh(&self, name: &str) -> bool {
         self.get(name).is_some_and(|s| s.returns_fresh)
     }

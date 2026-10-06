@@ -18,7 +18,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::analysis::taint::facts::FactTable;
+use crate::analysis::taint::facts::{BufferBuiltinSpec, FactTable};
 use crate::analysis::value::{self, ValueInfo};
 use crate::checks::CheckerFinding;
 use crate::checks::Provenance;
@@ -183,7 +183,7 @@ pub fn check_with_summaries(
 ) -> Vec<CheckerFinding> {
     // Buffer vocabulary: spec-seeded via `fact_table_from_spec` into
     // `facts.buffer_builtins` (empty table = no vocabulary = no findings).
-    let buffer_builtins: &[frensense_lang::memory::BufferBuiltinSpec] = &facts.buffer_builtins;
+    let buffer_builtins: &[BufferBuiltinSpec] = &facts.buffer_builtins;
     let pts = Steensgaard::analyze(ir);
     let val_info = value::analyze(ir);
     let mut findings: Vec<CheckerFinding> = Vec::new();
@@ -232,7 +232,7 @@ pub fn check_with_summaries(
         pts: &Steensgaard,
         val_info: &ValueInfo,
         summaries: &MemorySummaryRegistry,
-        buffer_builtins: &[frensense_lang::memory::BufferBuiltinSpec],
+        buffer_builtins: &[BufferBuiltinSpec],
         findings: &mut Vec<CheckerFinding>,
         mut ps: PathState,
         block_id: BlockId,

@@ -273,7 +273,7 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
             severity,
             message,
         } => {
-            let fact = frensense_lang::policy::IntegerOverflowRule {
+            let fact = frensense_engine::analysis::taint::facts::IntegerOverflowRule {
                 rule_id: rule.clone(),
                 wrap_threshold: *wrap_threshold,
                 severity: severity.clone(),

@@ -340,8 +340,8 @@ fn check_call(
 
 /// Algorithm-operation qualification for `insecure_jwt_algorithm`: the
 /// callee path must hint at an operation whose algorithm choice matters
-/// (verify/decode/sign/...), vocabulary from the spec
-/// (`known_jwt_algorithm_hints`) - harness wrappers
+/// (verify/decode/sign/...), vocabulary from the default pack
+/// (`FactTable::jwt_algorithm_hints`) - harness wrappers
 /// that merely embed the literal stay silent.
 fn jwt_algorithm_context(path: &str, callee: &str, facts: &FactTable) -> bool {
     let matches = |s: &str| facts.jwt_algorithm_hints.iter().any(|h| s.contains(h));

@@ -16,15 +16,17 @@ pub mod int_overflow_spec {
     /// fixtures must seed the vocabulary exactly like a production scan.
     fn ts_facts() -> FactTable {
         let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-        crate::analysis::taint::facts::fact_table_from_spec(spec)
+        let mut t = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        t.merge(&crate::analysis::taint::facts::default_pack_table());
+        t
     }
 
     fn hits(src: &str, facts: &FactTable) -> Vec<String> {
         let fns = lower_source("t.c", src, "c").unwrap();
         let c_spec = frensense_lang::spec_for_ext("c").expect("c spec");
-        let summaries = MemorySummaryRegistry::from_facts(
-            &crate::analysis::taint::facts::fact_table_from_spec(c_spec),
-        );
+        let mut c_table = crate::analysis::taint::facts::fact_table_from_spec(c_spec);
+        c_table.merge(&crate::analysis::taint::facts::default_pack_table());
+        let summaries = MemorySummaryRegistry::from_facts(&c_table);
         let mut rules: Vec<String> = fns
             .values()
             .flat_map(|ir| int_overflow::check(ir, &summaries, facts))
@@ -158,7 +160,7 @@ void handler(unsigned long count) {
 "#;
         let mut facts = ts_facts();
         facts.integer_overflow_rules.push((
-            frensense_lang::policy::IntegerOverflowRule {
+            crate::analysis::taint::facts::IntegerOverflowRule {
                 rule_id: "integer_overflow_alloc_32bit".to_string(),
                 wrap_threshold: 4_294_967_295,
                 severity: "critical".to_string(),

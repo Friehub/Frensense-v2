@@ -555,3 +555,137 @@ impl From<&frensense_lang::NodeRole> for TeachableNodeRole {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Fact-rule types moved out of `frensense-lang` (Phase 6.1: lang keeps only
+// mechanism - grammar/classification/queries/registry - while these types
+// and their bootstrap tables live here and in the default pack).
+// ---------------------------------------------------------------------------
+
+/// A weak-primitive policy rule: a call whose string-literal selector (or
+/// bare name) selects a weak digest algorithm. Matches the two shapes
+/// real code uses: `createHash('md5')` (selector in an argument slot) and
+/// bare `md5(data)`.
+///
+/// Owned fields: bundle-loaded rules carry corpus-authored text, so
+/// nothing `FactTable` stores may be `&'static str`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WeakPrimitiveRule {
+    /// Finding rule id.
+    pub rule_id: String,
+    /// Callee last-segment names that take a selector literal argument.
+    pub selector_calls: Vec<String>,
+    /// Bare function names that are weak by themselves.
+    pub bare_calls: Vec<String>,
+    /// Argument slot of the selector literal (ignored for bare calls).
+    pub selector_slot: usize,
+    /// Selector literals that mark the call weak (case-insensitive, quotes
+    /// stripped by the caller).
+    pub weak_selectors: Vec<String>,
+    /// When true, the selector shape fires only inside a credential
+    /// context; bare weak names fire unconditionally.
+    pub requires_credential_context: bool,
+    /// Advisory severity hint: "warning" or "critical".
+    pub severity: String,
+    /// Advisory observation body.
+    pub message: String,
+}
+
+/// An allocation-size integer-overflow prover rule (CWE-190 wrap ->
+/// CWE-680 undersized allocation). The engine owns the prover; this type
+/// owns the conclusion: rule id, wrap threshold, advisory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub struct IntegerOverflowRule {
+    /// Finding rule id.
+    pub rule_id: String,
+    /// Products exceeding this value cannot be represented as an
+    /// allocation size on the target platform.
+    pub wrap_threshold: u128,
+    /// Advisory severity hint: "critical" or "warning".
+    pub severity: String,
+    /// Corpus-authored advisory message (rendered with prover detail).
+    pub message: String,
+}
+
+/// A string-literal insecure-configuration selector: a call whose
+/// argument literal selects an insecure mode regardless of algorithm.
+/// The literal selector and its advisory travel together so the check
+/// stays fact-driven end to end.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InsecureConfigRule {
+    /// Callee-path prefix the selector applies to (`jwt.verify`, ...).
+    pub prefix: String,
+    /// Selector literals that select the insecure mode (lowercase match).
+    pub selectors: Vec<String>,
+    /// Finding rule id.
+    pub rule_id: String,
+    /// Advisory severity hint: "warning" or "critical".
+    pub severity: String,
+    /// Advisory observation body.
+    pub message: String,
+}
+
+/// A key-size rule: a generation call whose constant bit-length argument
+/// falls below the security floor. Value-aware: the argument may be a var
+/// whose lattice value is a provable constant, not just a bare literal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeySizeRule {
+    /// Finding rule id.
+    pub rule_id: String,
+    /// Callee last segment (case-insensitive match).
+    pub call: String,
+    /// Argument slot carrying the bit length.
+    pub slot: usize,
+    /// Minimum acceptable bits.
+    pub min_bits: i64,
+    /// Human label of what the key protects.
+    pub kind: String,
+    /// Advisory severity hint: "warning" or "critical".
+    pub severity: String,
+    /// Advisory observation body.
+    pub message: String,
+}
+
+/// Capacity of a fresh allocation, derived from the call's arguments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AllocCapacity {
+    /// Fresh, but capacity is dynamic or unconstrained (`strdup(s)`).
+    Unknown,
+    /// Capacity is the argument at this index (`malloc(n)`).
+    Param(usize),
+    /// Capacity is the product of two arguments (`calloc(n, size)`).
+    ParamProduct(usize, usize),
+}
+
+/// One memory-function contract: what the call returns and which slots
+/// it consumes. Spec vocabulary only - bundle contracts travel as
+/// `LearnedFactEntry::MemoryContract` (owned strings).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryFuncSpec {
+    /// Callee name (bare or dotted; the engine matches exact-or-last).
+    pub name: &'static str,
+    /// Does the call return freshly allocated memory?
+    pub returns_fresh: bool,
+    /// Capacity of the returned allocation (meaningful when fresh).
+    pub capacity: AllocCapacity,
+    /// Parameter indices the call consumes (deallocates / takes ownership).
+    pub consumes_params: &'static [usize],
+}
+
+/// One buffer-manipulation builtin: which arguments are the destination
+/// buffer, the source data, and the length, so the spatial checker can
+/// verify write/read bounds against the tracked capacity.
+///
+/// Owned name: bundle-loaded builtins carry corpus text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BufferBuiltinSpec {
+    /// Callee last-segment name.
+    pub name: String,
+    /// Argument index of the destination buffer (`None` = none).
+    pub dst_arg: Option<usize>,
+    /// Argument index of the source data (`None` = none).
+    pub src_arg: Option<usize>,
+    /// Argument index of the length.
+    pub len_arg: usize,
+}

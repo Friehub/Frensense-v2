@@ -8,8 +8,8 @@ use tempfile::TempDir;
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::engine::BackwardVerdict;
 use frensense_engine::analysis::taint::facts::{
-    config_from_spec, fact_table_from_spec, FactTable, LearnedFactEntry, PolicyFact,
-    PolicyRequirement, PolicyScope,
+    config_from_spec, fact_table_from_entries_with, fact_table_from_spec, FactTable,
+    LearnedFactEntry, PolicyFact, PolicyRequirement, PolicyScope, Provenance,
 };
 use frensense_engine::scan;
 
@@ -360,6 +360,11 @@ mod policy_proposal_tests {
             config.sanitizers.extend(c.sanitizers);
             table.merge(&fact_table_from_spec(spec));
         }
+        // Production `family_tables` seeds spec -> default pack; mirror it.
+        table.merge(&fact_table_from_entries_with(
+            crate::format::default_pack().learned_facts.as_slice(),
+            Provenance::Spec,
+        ));
         (config, table)
     }
 
@@ -597,6 +602,11 @@ mod slot_regression_tests {
             config.sanitizers.extend(c.sanitizers);
             table.merge(&fact_table_from_spec(spec));
         }
+        // Production `family_tables` seeds spec -> default pack; mirror it.
+        table.merge(&fact_table_from_entries_with(
+            crate::format::default_pack().learned_facts.as_slice(),
+            Provenance::Spec,
+        ));
         (config, table)
     }
 

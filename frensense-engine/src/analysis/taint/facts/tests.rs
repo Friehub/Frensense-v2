@@ -303,12 +303,13 @@ fn spec_drives_idor_vocabulary() {
 
 #[test]
 fn spec_drives_policy_vocabulary() {
-    // Guard/credential/schema/URL/weak-crypto policy vocabulary is
-    // spec-owned (frensense-lang `known_*` methods), not engine built-ins:
-    // `fact_table_from_spec` seeds the FactTable and the checks union the
-    // lang bootstrap defaults at evaluation time.
+    // Guard/credential/schema/URL/weak-crypto policy vocabulary ships in
+    // the default pack (Phase 6.1: the lang `known_*` seeds are gone):
+    // `fact_table_from_spec` seeds only the structural spec tables, then
+    // consumers merge the pack between the spec seed and the bundle.
     let spec = frensense_lang::spec_for_ext("ts").unwrap();
-    let t = fact_table_from_spec(spec);
+    let mut t = fact_table_from_spec(spec);
+    t.merge(&default_pack_table());
 
     for callee in ["includes", "indexOf", "contains"] {
         assert!(
@@ -351,9 +352,11 @@ fn spec_drives_policy_vocabulary() {
     assert!(!t.insecure_config_selectors.is_empty());
     assert!(t.suspicious_hash_wrappers.contains("hashPassword"));
 
-    // The bootstrap defaults back the evaluation-time union.
-    assert!(frensense_lang::policy::bootstrap_containment_callees().contains(&"includes"));
-    assert!(frensense_lang::policy::bootstrap_weak_hash_rules().len() >= 2);
+    // The pack provides the whole vocabulary the checks union at
+    // evaluation time (rank-tied with the spec seed: nothing else seeds
+    // these fields anymore).
+    assert!(t.containment_callees.contains_key("includes"));
+    assert!(t.weak_hash_rules.len() >= 2);
 }
 
 /// Phase 2.3: finding identities the bundle advisory join
@@ -417,8 +420,8 @@ fn policy(rule: &str, when: &str, msg: &str) -> PolicyFact {
     }
 }
 
-fn iorule(rule: &str, msg: &str) -> frensense_lang::policy::IntegerOverflowRule {
-    frensense_lang::policy::IntegerOverflowRule {
+fn iorule(rule: &str, msg: &str) -> IntegerOverflowRule {
+    IntegerOverflowRule {
         rule_id: rule.into(),
         wrap_threshold: u64::MAX as u128,
         severity: "warning".into(),

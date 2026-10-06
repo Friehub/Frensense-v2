@@ -11,11 +11,11 @@
 //! Built-in = how to look; learned = what to conclude: the prover below is
 //! the stable, language-agnostic "how" (provable ranges, wrap threshold,
 //! allocation-capacity provenance). Which rule fires - id, threshold, and
-//! advisory - comes from `FactTable::integer_overflow_rules`: seeded from
-//! the language spec (`known_integer_overflow_rules`) and extended by a
-//! corpus bundle from a family's `[frensense] check-rule:` declaration
+//! advisory - comes from `FactTable::integer_overflow_rules`: seeded by
+//! the default pack and extended by a corpus bundle from a family's
+//! `[frensense] check-rule:` declaration
 //! (`LearnedFactEntry::IntegerOverflowRule`). New rules of this class come
-//! from the spec or a corpus bundle; the engine does not change.
+//! from the pack or a corpus bundle; the engine does not change.
 //!
 //! Zero-FP by construction:
 //! - Both operand intervals must be provable and non-negative at the
@@ -167,7 +167,7 @@ fn check_rule(
     ir: &FunctionIR,
     val_info: &ValueInfo,
     summaries: &MemorySummaryRegistry,
-    rule: &frensense_lang::policy::IntegerOverflowRule,
+    rule: &crate::analysis::taint::facts::IntegerOverflowRule,
     provenance: Provenance,
     out: &mut Vec<CheckerFinding>,
 ) {

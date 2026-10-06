@@ -2,16 +2,20 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-//! Policy vocabulary: guard/allowlist, credential, schema-bound, URL-hint
-//! and weak-crypto tables consumed by the engine's non-taint checks.
+//! Bootstrap policy-cluster and memory-vocabulary data (Phase 6.1).
 //!
-//! Language specs extend these via the corresponding `LanguageSpec` methods
-//! (`known_containment_callees`, `known_weak_hash_rules`, ...); the engine
-//! seeds them into `FactTable` and unions the bootstrap defaults at check
-//! time, so no language-specific names live in `frensense-engine`.
-//!
-//! (Not to be confused with `frensense_engine::checks::policy`, the
-//! co-occurrence policy evaluator over learned `PolicyFact`s.)
+//! The tables `frensense-lang` used to ship as `policy.rs` /
+//! `memory.rs` bootstrap statics, moved here because the default pack is
+//! now their only home: the generator reads them to emit
+//! [`LearnedFactEntry`](frensense_engine::analysis::taint::facts::LearnedFactEntry)s,
+//! the committed `.frc` asset carries them, and the spec-side `known_*`
+//! seeds are gone from lang. Consumed only by [`super::default_pack`];
+//! nothing in lang or the engine references these names anymore.
+
+use frensense_engine::analysis::taint::facts::{
+    AllocCapacity, BufferBuiltinSpec, InsecureConfigRule, IntegerOverflowRule, KeySizeRule,
+    MemoryFuncSpec, WeakPrimitiveRule,
+};
 
 /// Containment-test callees (last segment): `includes` is the canonical JS
 /// shape; `indexOf`/`contains` count when the result feeds a boolean guard.
@@ -119,37 +123,6 @@ pub static BOOTSTRAP_CREDENTIAL_CONTEXT_HINTS: &[&str] = &[
     "apikey",
 ];
 
-/// A known call whose string-literal argument selects a weak primitive.
-///
-/// Matches the two shapes real code uses:
-/// - `createHash('md5')`, the selector literal is argument 0.
-/// - `md5(data)` / `MD5(...)`, bare weak-hash functions; no selector needed.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WeakPrimitiveRule {
-    /// Finding rule id.
-    pub rule_id: String,
-    /// Callee last-segment names that take a selector literal argument.
-    pub selector_calls: Vec<String>,
-    /// Bare function names that are weak by themselves.
-    pub bare_calls: Vec<String>,
-    /// Argument slot of the selector literal (ignored for bare calls).
-    pub selector_slot: usize,
-    /// Selector literals that mark the call weak (case-insensitive, quotes
-    /// stripped by the caller).
-    pub weak_selectors: Vec<String>,
-    /// When true, the selector shape fires only inside a credential context
-    /// (function or parameter names hint password/secret/token/...).
-    /// `crypto.createHash` doubles as a general-purpose checksum API, so
-    /// JS-shaped selector rules stay qualified; explicit weak-algorithm
-    /// selectors like `hashlib.new('md5')` fire unconditionally.
-    pub requires_credential_context: bool,
-    /// Advisory severity hint: "warning" or "critical".
-    pub severity: String,
-    /// Advisory observation body (mirrors the lang observation template for
-    /// this rule id, without interpolation).
-    pub message: String,
-}
-
 /// Shared advisory body for the bootstrap weak-hash rules (the `weak_hash`
 /// observation template's text, static form).
 const WEAK_HASH_MESSAGE: &str = "Weak hash primitive selected, not acceptable \
@@ -192,35 +165,11 @@ pub static BOOTSTRAP_WEAK_HASH_RULES: std::sync::LazyLock<Vec<WeakPrimitiveRule>
         ]
     });
 
-/// A corpus-extendable rule activating the allocation-size integer-overflow
-/// prover (CWE-190 wrap -> CWE-680 undersized allocation -> heap overflow).
-///
-/// The engine owns the prover ("how to look": provable operand ranges whose
-/// product can exceed the wrap threshold, flowing into an allocation's
-/// capacity argument); this table owns the conclusion ("what to conclude":
-/// which rule id fires, at which threshold, with which advisory). Lang
-/// ships the bootstrap seed below; a corpus bundle extends the table via
-/// `LearnedFactEntry::IntegerOverflowRule` from a family's `[frensense]`
-/// `check-rule:` declaration, so new rules of this class never require an
-/// engine or lang edit.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct IntegerOverflowRule {
-    /// Finding rule id.
-    pub rule_id: String,
-    /// Products exceeding this value cannot be represented as an allocation
-    /// size on the target platform (`u64::MAX` == `SIZE_MAX` on LP64/LLP64).
-    pub wrap_threshold: u128,
-    /// Advisory severity hint: "critical" or "warning".
-    pub severity: String,
-    /// Corpus-authored advisory message (rendered with prover detail).
-    pub message: String,
-}
-
 /// The bootstrap allocation-size overflow rules (LP64 `SIZE_MAX` threshold).
 pub static BOOTSTRAP_INTEGER_OVERFLOW_RULES: std::sync::LazyLock<Vec<IntegerOverflowRule>> =
     std::sync::LazyLock::new(|| {
         vec![IntegerOverflowRule {
-            rule_id: crate::rules::INTEGER_OVERFLOW_ALLOC.to_string(),
+            rule_id: frensense_lang::rules::INTEGER_OVERFLOW_ALLOC.to_string(),
             wrap_threshold: 18_446_744_073_709_551_615,
             severity: "critical".to_string(),
             message: "Integer overflow in allocation size (CWE-190/CWE-680): \
@@ -230,25 +179,6 @@ pub static BOOTSTRAP_INTEGER_OVERFLOW_RULES: std::sync::LazyLock<Vec<IntegerOver
                 .to_string(),
         }]
     });
-
-/// Known *string-literal* insecure configuration selectors: calls whose
-/// argument literal itself selects an insecure mode regardless of
-/// algorithm. The literal selector and its advisory travel together so the
-/// check stays fact-driven end to end.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct InsecureConfigRule {
-    /// Callee-path prefix the selector applies to (`jwt.verify`, ...).
-    pub prefix: String,
-    /// Selector literals that select the insecure mode (lowercase match).
-    pub selectors: Vec<String>,
-    /// Finding rule id.
-    pub rule_id: String,
-    /// Advisory severity hint: "warning" or "critical".
-    pub severity: String,
-    /// Advisory observation body (mirrors the lang observation template for
-    /// this rule id, without interpolation).
-    pub message: String,
-}
 
 /// The bootstrap insecure-config table.
 pub static BOOTSTRAP_INSECURE_CONFIG_SELECTORS: std::sync::LazyLock<Vec<InsecureConfigRule>> =
@@ -267,28 +197,6 @@ pub static BOOTSTRAP_INSECURE_CONFIG_SELECTORS: std::sync::LazyLock<Vec<Insecure
             },
         ]
     });
-
-/// A key-size rule: a generation call whose constant bit-length argument
-/// falls below the security floor. Value-aware: the argument may be a var
-/// whose lattice value is a provable constant, not just a bare literal.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KeySizeRule {
-    /// Finding rule id.
-    pub rule_id: String,
-    /// Callee last segment (case-insensitive match).
-    pub call: String,
-    /// Argument slot carrying the bit length.
-    pub slot: usize,
-    /// Minimum acceptable bits.
-    pub min_bits: i64,
-    /// Human label of what the key protects.
-    pub kind: String,
-    /// Advisory severity hint: "warning" or "critical".
-    pub severity: String,
-    /// Advisory observation body (mirrors the lang observation template for
-    /// this rule id, without interpolation).
-    pub message: String,
-}
 
 /// The bootstrap key-size policy table.
 pub static BOOTSTRAP_KEY_SIZE_RULES: std::sync::LazyLock<Vec<KeySizeRule>> =
@@ -328,93 +236,107 @@ pub static BOOTSTRAP_KEY_SIZE_RULES: std::sync::LazyLock<Vec<KeySizeRule>> =
 pub static BOOTSTRAP_SUSPICIOUS_HASH_WRAPPERS: &[&str] =
     &["hash", "hashpw", "hashPassword", "digest"];
 
-/// The default containment-test callees (see [`BOOTSTRAP_CONTAINMENT_CALLEES`]).
-pub fn bootstrap_containment_callees() -> &'static [&'static str] {
-    BOOTSTRAP_CONTAINMENT_CALLEES
+const fn fresh(name: &'static str, capacity: AllocCapacity) -> MemoryFuncSpec {
+    MemoryFuncSpec {
+        name,
+        returns_fresh: true,
+        capacity,
+        consumes_params: &[],
+    }
 }
 
-/// The default credential sinks (see [`BOOTSTRAP_CREDENTIAL_SINKS`]).
-pub fn bootstrap_credential_sinks() -> &'static [&'static str] {
-    BOOTSTRAP_CREDENTIAL_SINKS
+const fn fresh_consuming(
+    name: &'static str,
+    capacity: AllocCapacity,
+    consumes_params: &'static [usize],
+) -> MemoryFuncSpec {
+    MemoryFuncSpec {
+        name,
+        returns_fresh: true,
+        capacity,
+        consumes_params,
+    }
 }
 
-/// The default credential parameter names (see [`BOOTSTRAP_CREDENTIAL_PARAMS`]).
-pub fn bootstrap_credential_params() -> &'static [&'static str] {
-    BOOTSTRAP_CREDENTIAL_PARAMS
+const fn dealloc(name: &'static str) -> MemoryFuncSpec {
+    MemoryFuncSpec {
+        name,
+        returns_fresh: false,
+        capacity: AllocCapacity::Unknown,
+        consumes_params: &[0],
+    }
 }
 
-/// The default schema builders (see [`BOOTSTRAP_SCHEMA_BUILDERS`]).
-pub fn bootstrap_schema_builders() -> &'static [&'static str] {
-    BOOTSTRAP_SCHEMA_BUILDERS
+/// The bootstrap memory vocabulary: the C family plus the common bindings
+/// (GLib, kernel, sqlite, OpenSSL, Apache, libxml, cJSON) that server
+/// code links against. This is the default for every spec - providers
+/// whose language has a different memory model (Go GC, JVM, JS) may
+/// override with a narrower table.
+pub static BOOTSTRAP_MEMORY_FUNCS: &[MemoryFuncSpec] = &[
+    // Deallocators: consume parameter 0, return nothing fresh.
+    dealloc("free"),
+    dealloc("g_free"),
+    dealloc("kfree"),
+    dealloc("cJSON_Delete"),
+    dealloc("apr_palloc"), // pool-allocated, ownership passes to the pool
+    dealloc("CRYPTO_free"),
+    dealloc("xmlFree"),
+    dealloc("sqlite3_free"),
+    // Sized allocators: capacity = argument 0.
+    fresh("malloc", AllocCapacity::Param(0)),
+    fresh("valloc", AllocCapacity::Param(0)),
+    fresh("alloca", AllocCapacity::Param(0)),
+    fresh("g_malloc", AllocCapacity::Param(0)),
+    fresh("g_malloc0", AllocCapacity::Param(0)),
+    fresh("kmalloc", AllocCapacity::Param(0)),
+    fresh("kzalloc", AllocCapacity::Param(0)),
+    fresh("sqlite3_malloc", AllocCapacity::Param(0)),
+    // Count × size allocators.
+    fresh("calloc", AllocCapacity::ParamProduct(0, 1)),
+    fresh("sqlite3_malloc64", AllocCapacity::ParamProduct(0, 1)),
+    fresh("kcalloc", AllocCapacity::ParamProduct(0, 1)),
+    // Realloc-style: capacity = argument 1, consumes the old pointer.
+    fresh_consuming("realloc", AllocCapacity::Param(1), &[0]),
+    fresh_consuming("g_realloc", AllocCapacity::Param(1), &[0]),
+    fresh_consuming("sqlite3_realloc", AllocCapacity::Param(1), &[0]),
+    // Aligned allocator: capacity = argument 1 (size), arg 0 is alignment.
+    fresh("aligned_alloc", AllocCapacity::Param(1)),
+    // String duplicators: fresh, capacity unknown.
+    fresh("strdup", AllocCapacity::Unknown),
+    fresh("strndup", AllocCapacity::Unknown),
+    fresh("g_strdup", AllocCapacity::Unknown),
+];
+
+/// Is `name` one of the pack's built-in memory contracts?
+///
+/// Used by the bundler to avoid re-emitting built-in contracts into a
+/// `.frc` bundle (they already ship with the pack). Exact-name match.
+pub fn is_pack_memory_builtin(name: &str) -> bool {
+    BOOTSTRAP_MEMORY_FUNCS.iter().any(|m| m.name == name)
 }
 
-/// The default schema enforcers (see [`BOOTSTRAP_SCHEMA_ENFORCERS`]).
-pub fn bootstrap_schema_enforcers() -> &'static [&'static str] {
-    BOOTSTRAP_SCHEMA_ENFORCERS
-}
-
-/// The default schema bound keywords (see [`BOOTSTRAP_SCHEMA_KEYWORDS`]).
-pub fn bootstrap_schema_keywords() -> &'static [&'static str] {
-    BOOTSTRAP_SCHEMA_KEYWORDS
-}
-
-/// The default URL parameter hints (see [`BOOTSTRAP_URL_PARAM_HINTS`]).
-pub fn bootstrap_url_param_hints() -> &'static [&'static str] {
-    BOOTSTRAP_URL_PARAM_HINTS
-}
-
-/// The default URL argument hints (see [`BOOTSTRAP_URL_ARG_HINTS`]).
-pub fn bootstrap_url_arg_hints() -> &'static [&'static str] {
-    BOOTSTRAP_URL_ARG_HINTS
-}
-
-/// The default URL literal hints (see [`BOOTSTRAP_URL_LITERAL_HINTS`]).
-pub fn bootstrap_url_literal_hints() -> &'static [&'static str] {
-    BOOTSTRAP_URL_LITERAL_HINTS
-}
-
-/// The default security-context hints (see [`BOOTSTRAP_SECURITY_CONTEXT_HINTS`]).
-pub fn bootstrap_security_context_hints() -> &'static [&'static str] {
-    BOOTSTRAP_SECURITY_CONTEXT_HINTS
-}
-
-/// The default auth-guard hints (see [`BOOTSTRAP_AUTH_GUARD_HINTS`]).
-pub fn bootstrap_auth_guard_hints() -> &'static [&'static str] {
-    BOOTSTRAP_AUTH_GUARD_HINTS
-}
-
-/// The default JWT algorithm-operation hints (see [`BOOTSTRAP_JWT_ALGORITHM_HINTS`]).
-pub fn bootstrap_jwt_algorithm_hints() -> &'static [&'static str] {
-    BOOTSTRAP_JWT_ALGORITHM_HINTS
-}
-
-/// The default credential-context hints (see [`BOOTSTRAP_CREDENTIAL_CONTEXT_HINTS`]).
-pub fn bootstrap_credential_context_hints() -> &'static [&'static str] {
-    BOOTSTRAP_CREDENTIAL_CONTEXT_HINTS
-}
-
-/// The default weak-hash rules (see [`BOOTSTRAP_WEAK_HASH_RULES`]).
-pub fn bootstrap_weak_hash_rules() -> &'static [WeakPrimitiveRule] {
-    &BOOTSTRAP_WEAK_HASH_RULES
-}
-
-/// The default allocation-size overflow rules (see
-/// [`BOOTSTRAP_INTEGER_OVERFLOW_RULES`]).
-pub fn bootstrap_integer_overflow_rules() -> &'static [IntegerOverflowRule] {
-    &BOOTSTRAP_INTEGER_OVERFLOW_RULES
-}
-
-/// The default insecure config selectors (see [`BOOTSTRAP_INSECURE_CONFIG_SELECTORS`]).
-pub fn bootstrap_insecure_config_selectors() -> &'static [InsecureConfigRule] {
-    &BOOTSTRAP_INSECURE_CONFIG_SELECTORS
-}
-
-/// The default key-size rules (see [`BOOTSTRAP_KEY_SIZE_RULES`]).
-pub fn bootstrap_key_size_rules() -> &'static [KeySizeRule] {
-    &BOOTSTRAP_KEY_SIZE_RULES
-}
-
-/// The default suspicious hash wrappers (see [`BOOTSTRAP_SUSPICIOUS_HASH_WRAPPERS`]).
-pub fn bootstrap_suspicious_hash_wrappers() -> &'static [&'static str] {
-    BOOTSTRAP_SUSPICIOUS_HASH_WRAPPERS
-}
+/// The bootstrap buffer vocabulary: C's copy/fill/read primitives.
+///
+/// Owned names (Phase 6): bundle-loaded builtins carry corpus text, so the
+/// shared spec type may not be `&'static str`.
+pub static BOOTSTRAP_BUFFER_BUILTINS: std::sync::LazyLock<Vec<BufferBuiltinSpec>> =
+    std::sync::LazyLock::new(|| {
+        fn bi(name: &str, dst: Option<usize>, src: Option<usize>, len: usize) -> BufferBuiltinSpec {
+            BufferBuiltinSpec {
+                name: name.to_string(),
+                dst_arg: dst,
+                src_arg: src,
+                len_arg: len,
+            }
+        }
+        vec![
+            bi("memset", Some(0), None, 2),
+            bi("bzero", Some(0), None, 1),
+            bi("memcpy", Some(0), Some(1), 2),
+            bi("memmove", Some(0), Some(1), 2),
+            bi("strncpy", Some(0), None, 2),
+            bi("snprintf", Some(0), None, 1),
+            bi("fgets", Some(0), None, 1),
+            bi("read", Some(1), None, 2),
+        ]
+    });

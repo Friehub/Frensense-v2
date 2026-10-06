@@ -26,8 +26,9 @@ use frensense_bundler::format::{load_bundle, write_bundle, BundlePayloadV5};
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::engine::FindingClass;
 use frensense_engine::analysis::taint::facts::{
-    fact_table_from_entries, FactTable, GrammarFeature, GuardBypassFact, LearnedFactEntry,
-    PolicyRequirement, PolicyScope, SchemaPolicyFact, TeachableNodeRole, WeakCryptoFact,
+    fact_table_from_entries, fact_table_from_entries_with, FactTable, GrammarFeature,
+    GuardBypassFact, LearnedFactEntry, PolicyRequirement, PolicyScope, SchemaPolicyFact,
+    TeachableNodeRole, WeakCryptoFact,
 };
 use frensense_engine::checks::memory_summary::CapacitySpec;
 use frensense_engine::checks::Provenance;
@@ -40,7 +41,16 @@ fn make_bundle(facts: Vec<LearnedFactEntry>) -> FactTable {
     // so a bare bundle table would hide the spec vocabulary from checks.
     let mut table = {
         let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-        frensense_engine::analysis::taint::facts::fact_table_from_spec(spec)
+        let mut t = frensense_engine::analysis::taint::facts::fact_table_from_spec(spec);
+        // Seeding order is spec -> default pack -> consumer bundle
+        // (Phase 6.1: the vacated spec tables are pack-owned now).
+        t.merge(&fact_table_from_entries_with(
+            frensense_bundler::format::default_pack()
+                .learned_facts
+                .as_slice(),
+            Provenance::Spec,
+        ));
+        t
     };
     let payload = BundlePayloadV5 {
         patterns: vec![],

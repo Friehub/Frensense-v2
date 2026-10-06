@@ -20,20 +20,11 @@
 //! verdict.
 
 use frensense_engine::analysis::taint::facts::{
-    GuardBypassFact, HintKind, LearnedFactEntry, SchemaPolicyFact,
+    AllocCapacity, GuardBypassFact, HintKind, LearnedFactEntry, SchemaPolicyFact,
 };
 use frensense_engine::checks::memory_summary::CapacitySpec;
-use frensense_lang::memory::{
-    bootstrap_buffer_builtins, bootstrap_memory_functions, AllocCapacity,
-};
-use frensense_lang::policy::{
-    bootstrap_auth_guard_hints, bootstrap_containment_callees, bootstrap_credential_context_hints,
-    bootstrap_credential_params, bootstrap_credential_sinks, bootstrap_insecure_config_selectors,
-    bootstrap_integer_overflow_rules, bootstrap_jwt_algorithm_hints, bootstrap_key_size_rules,
-    bootstrap_schema_builders, bootstrap_schema_enforcers, bootstrap_schema_keywords,
-    bootstrap_security_context_hints, bootstrap_suspicious_hash_wrappers, bootstrap_url_arg_hints,
-    bootstrap_url_literal_hints, bootstrap_url_param_hints, bootstrap_weak_hash_rules,
-};
+
+use super::default_pack_data as data;
 use std::sync::OnceLock;
 
 use super::{load_bundle, write_bundle, BundlePayloadV5, LoadedBundle};
@@ -48,33 +39,33 @@ fn owned(vals: &[&str]) -> Vec<String> {
 pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
     let mut entries = vec![
         LearnedFactEntry::GuardBypass(GuardBypassFact {
-            containment_callees: owned(bootstrap_containment_callees()),
-            credential_sinks: owned(bootstrap_credential_sinks()),
-            credential_params: owned(bootstrap_credential_params()),
+            containment_callees: owned(data::BOOTSTRAP_CONTAINMENT_CALLEES),
+            credential_sinks: owned(data::BOOTSTRAP_CREDENTIAL_SINKS),
+            credential_params: owned(data::BOOTSTRAP_CREDENTIAL_PARAMS),
         }),
         LearnedFactEntry::SchemaPolicy(SchemaPolicyFact {
-            builders: owned(bootstrap_schema_builders()),
-            enforcers: owned(bootstrap_schema_enforcers()),
-            bound_keywords: owned(bootstrap_schema_keywords()),
+            builders: owned(data::BOOTSTRAP_SCHEMA_BUILDERS),
+            enforcers: owned(data::BOOTSTRAP_SCHEMA_ENFORCERS),
+            bound_keywords: owned(data::BOOTSTRAP_SCHEMA_KEYWORDS),
         }),
         LearnedFactEntry::SuspiciousHashWrappers {
-            calls: owned(bootstrap_suspicious_hash_wrappers()),
+            calls: owned(data::BOOTSTRAP_SUSPICIOUS_HASH_WRAPPERS),
         },
     ];
     // Hint vocabularies: one entry per table, kind-keyed.
     for (kind, hints) in [
-        (HintKind::UrlParam, bootstrap_url_param_hints()),
-        (HintKind::UrlArg, bootstrap_url_arg_hints()),
-        (HintKind::UrlLiteral, bootstrap_url_literal_hints()),
+        (HintKind::UrlParam, data::BOOTSTRAP_URL_PARAM_HINTS),
+        (HintKind::UrlArg, data::BOOTSTRAP_URL_ARG_HINTS),
+        (HintKind::UrlLiteral, data::BOOTSTRAP_URL_LITERAL_HINTS),
         (
             HintKind::SecurityContext,
-            bootstrap_security_context_hints(),
+            data::BOOTSTRAP_SECURITY_CONTEXT_HINTS,
         ),
-        (HintKind::AuthGuard, bootstrap_auth_guard_hints()),
-        (HintKind::JwtAlgorithm, bootstrap_jwt_algorithm_hints()),
+        (HintKind::AuthGuard, data::BOOTSTRAP_AUTH_GUARD_HINTS),
+        (HintKind::JwtAlgorithm, data::BOOTSTRAP_JWT_ALGORITHM_HINTS),
         (
             HintKind::CredentialContext,
-            bootstrap_credential_context_hints(),
+            data::BOOTSTRAP_CREDENTIAL_CONTEXT_HINTS,
         ),
     ] {
         entries.push(LearnedFactEntry::Hints {
@@ -83,7 +74,7 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
         });
     }
     // Rule tables: weak hash, insecure config, key size.
-    for rule in bootstrap_weak_hash_rules().iter() {
+    for rule in data::BOOTSTRAP_WEAK_HASH_RULES.iter() {
         entries.push(LearnedFactEntry::WeakPrimitiveRule {
             rule_id: rule.rule_id.clone(),
             selector_calls: rule.selector_calls.clone(),
@@ -95,7 +86,7 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
             message: rule.message.clone(),
         });
     }
-    for rule in bootstrap_insecure_config_selectors().iter() {
+    for rule in data::BOOTSTRAP_INSECURE_CONFIG_SELECTORS.iter() {
         entries.push(LearnedFactEntry::InsecureConfigRule {
             prefix: rule.prefix.clone(),
             selectors: rule.selectors.clone(),
@@ -104,7 +95,7 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
             message: rule.message.clone(),
         });
     }
-    for rule in bootstrap_key_size_rules().iter() {
+    for rule in data::BOOTSTRAP_KEY_SIZE_RULES.iter() {
         entries.push(LearnedFactEntry::KeySizeRule {
             rule_id: rule.rule_id.clone(),
             call: rule.call.clone(),
@@ -115,7 +106,7 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
             message: rule.message.clone(),
         });
     }
-    for rule in bootstrap_integer_overflow_rules().iter() {
+    for rule in data::BOOTSTRAP_INTEGER_OVERFLOW_RULES.iter() {
         entries.push(LearnedFactEntry::IntegerOverflowRule {
             rule: rule.rule_id.clone(),
             wrap_threshold: rule.wrap_threshold,
@@ -124,7 +115,7 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
         });
     }
     // Buffer builtins: the spatial checker's dest/src/len vocabulary.
-    for b in bootstrap_buffer_builtins().iter() {
+    for b in data::BOOTSTRAP_BUFFER_BUILTINS.iter() {
         entries.push(LearnedFactEntry::BufferBuiltin {
             name: b.name.clone(),
             dst_arg: b.dst_arg,
@@ -135,7 +126,7 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
     // Same capacity mapping as `MemorySummaryRegistry::from_vocabulary`, so
     // the contract entries produce identical summaries when layered over
     // the spec-seeded vocabulary.
-    for f in bootstrap_memory_functions().iter() {
+    for f in data::BOOTSTRAP_MEMORY_FUNCS.iter() {
         entries.push(LearnedFactEntry::MemoryContract {
             name: f.name.to_string(),
             returns_fresh: f.returns_fresh,
@@ -160,6 +151,18 @@ pub fn build_default_bundle() -> Vec<u8> {
         policy_pack: Vec::new(),
     };
     write_bundle(&payload, 0).unwrap_or_else(|e| panic!("default pack serialization failed: {e}"))
+}
+
+/// [`default_pack_entries`] encoded alone as raw bytes.
+///
+/// Engine tests use this to merge the real pack across the
+/// engine<->bundler dev-dependency cycle: only `Vec<u8>` crosses the
+/// cycle, never engine-typed values (which would hit duplicate crate
+/// units), and the engine decodes with its own `LearnedFactEntry` serde
+/// impls from the same source (Phase 6.1).
+pub fn default_pack_entry_bytes() -> Vec<u8> {
+    bincode::serialize(&default_pack_entries())
+        .unwrap_or_else(|e| panic!("default pack entries serialization failed: {e}"))
 }
 
 /// Bytes of the committed `assets/frensense-default.frc`.
@@ -278,98 +281,185 @@ mod tests {
             .collect()
     }
 
-    /// Merging the pack over the spec seed must not change any value the
-    /// checks read (today's tables are the same knowledge by construction).
+    /// Phase 6.1: the spec seed for these tables was deleted, so the
+    /// default pack is their sole source. For every extension the bare
+    /// spec seed must contribute nothing, and merging the pack must
+    /// reproduce the pack's own tables exactly (family-independent
+    /// vocabulary).
     #[test]
-    fn default_pack_merge_is_value_neutral_over_spec_seed() {
+    fn default_pack_is_the_sole_source_of_the_vacated_tables() {
+        let pack =
+            fact_table_from_entries_with(default_pack().learned_facts.as_slice(), Provenance::Spec);
         for ext in ["ts", "tsx", "js", "py", "go", "rs"] {
             let (_, spec) = tables_from_exts([ext]);
             let (_, mut with_pack) = tables_from_exts([ext]);
-            with_pack.merge(&fact_table_from_entries_with(
-                default_pack().learned_facts.as_slice(),
-                Provenance::Spec,
-            ));
+            with_pack.merge(&pack);
+
+            assert!(
+                spec.containment_callees.is_empty(),
+                "spec still seeds containment_callees for {ext}"
+            );
+            assert!(
+                spec.credential_sinks.is_empty(),
+                "spec still seeds credential_sinks for {ext}"
+            );
+            assert!(
+                spec.credential_params.is_empty(),
+                "spec still seeds credential_params for {ext}"
+            );
+            assert!(
+                spec.schema_builders.is_empty(),
+                "spec still seeds schema_builders for {ext}"
+            );
+            assert!(
+                spec.schema_keywords.is_empty(),
+                "spec still seeds schema_keywords for {ext}"
+            );
+            assert!(
+                spec.schema_enforcers.is_empty(),
+                "spec still seeds schema_enforcers for {ext}"
+            );
+            assert!(
+                spec.integer_overflow_rules.is_empty(),
+                "spec still seeds IO rules for {ext}"
+            );
+            assert!(
+                spec.url_param_hints.is_empty(),
+                "spec still seeds url_param_hints for {ext}"
+            );
+            assert!(
+                spec.url_arg_hints.is_empty(),
+                "spec still seeds url_arg_hints for {ext}"
+            );
+            assert!(
+                spec.url_literal_hints.is_empty(),
+                "spec still seeds url_literal_hints for {ext}"
+            );
+            assert!(
+                spec.security_context_hints.is_empty(),
+                "spec still seeds security_context_hints for {ext}"
+            );
+            assert!(
+                spec.auth_guard_hints.is_empty(),
+                "spec still seeds auth_guard_hints for {ext}"
+            );
+            assert!(
+                spec.jwt_algorithm_hints.is_empty(),
+                "spec still seeds jwt_algorithm_hints for {ext}"
+            );
+            assert!(
+                spec.credential_context_hints.is_empty(),
+                "spec still seeds credential_context_hints for {ext}"
+            );
+            assert!(
+                spec.weak_hash_rules.is_empty(),
+                "spec still seeds weak_hash_rules for {ext}"
+            );
+            assert!(
+                spec.insecure_config_selectors.is_empty(),
+                "spec still seeds insecure_config_selectors for {ext}"
+            );
+            assert!(
+                spec.key_size_rules.is_empty(),
+                "spec still seeds key_size_rules for {ext}"
+            );
+            assert!(
+                spec.suspicious_hash_wrappers.is_empty(),
+                "spec still seeds suspicious_hash_wrappers for {ext}"
+            );
+            assert!(
+                spec.memory_functions.is_empty(),
+                "spec still seeds memory_functions for {ext}"
+            );
+            assert!(
+                spec.buffer_builtins.is_empty(),
+                "spec still seeds buffer_builtins for {ext}"
+            );
 
             assert_eq!(
-                spec.containment_callees, with_pack.containment_callees,
+                with_pack.containment_callees, pack.containment_callees,
                 "containment_callees drifted for {ext}"
             );
             assert_eq!(
-                spec.credential_sinks, with_pack.credential_sinks,
+                with_pack.credential_sinks, pack.credential_sinks,
                 "credential_sinks drifted for {ext}"
             );
             assert_eq!(
-                spec.credential_params, with_pack.credential_params,
+                with_pack.credential_params, pack.credential_params,
                 "credential_params drifted for {ext}"
             );
             assert_eq!(
-                spec.schema_builders, with_pack.schema_builders,
+                with_pack.schema_builders, pack.schema_builders,
                 "schema_builders drifted for {ext}"
             );
             assert_eq!(
-                spec.schema_keywords, with_pack.schema_keywords,
+                with_pack.schema_keywords, pack.schema_keywords,
                 "schema_keywords drifted for {ext}"
             );
             assert_eq!(
-                spec.schema_enforcers, with_pack.schema_enforcers,
+                with_pack.schema_enforcers, pack.schema_enforcers,
                 "schema_enforcers drifted for {ext}"
             );
             assert_eq!(
-                io_ids(&spec),
                 io_ids(&with_pack),
+                io_ids(&pack),
                 "IO rules drifted for {ext}"
             );
             assert_eq!(
-                spec.url_param_hints, with_pack.url_param_hints,
+                with_pack.url_param_hints, pack.url_param_hints,
                 "url_param_hints drifted for {ext}"
             );
             assert_eq!(
-                spec.url_arg_hints, with_pack.url_arg_hints,
+                with_pack.url_arg_hints, pack.url_arg_hints,
                 "url_arg_hints drifted for {ext}"
             );
             assert_eq!(
-                spec.url_literal_hints, with_pack.url_literal_hints,
+                with_pack.url_literal_hints, pack.url_literal_hints,
                 "url_literal_hints drifted for {ext}"
             );
             assert_eq!(
-                spec.security_context_hints, with_pack.security_context_hints,
+                with_pack.security_context_hints, pack.security_context_hints,
                 "security_context_hints drifted for {ext}"
             );
             assert_eq!(
-                spec.auth_guard_hints, with_pack.auth_guard_hints,
+                with_pack.auth_guard_hints, pack.auth_guard_hints,
                 "auth_guard_hints drifted for {ext}"
             );
             assert_eq!(
-                spec.jwt_algorithm_hints, with_pack.jwt_algorithm_hints,
+                with_pack.jwt_algorithm_hints, pack.jwt_algorithm_hints,
                 "jwt_algorithm_hints drifted for {ext}"
             );
             assert_eq!(
-                spec.credential_context_hints, with_pack.credential_context_hints,
+                with_pack.credential_context_hints, pack.credential_context_hints,
                 "credential_context_hints drifted for {ext}"
             );
             assert_eq!(
-                spec.weak_hash_rules, with_pack.weak_hash_rules,
+                with_pack.weak_hash_rules, pack.weak_hash_rules,
                 "weak_hash_rules drifted for {ext}"
             );
             assert_eq!(
-                spec.insecure_config_selectors, with_pack.insecure_config_selectors,
+                with_pack.insecure_config_selectors, pack.insecure_config_selectors,
                 "insecure_config_selectors drifted for {ext}"
             );
             assert_eq!(
-                spec.key_size_rules, with_pack.key_size_rules,
+                with_pack.key_size_rules, pack.key_size_rules,
                 "key_size_rules drifted for {ext}"
             );
             assert_eq!(
-                spec.suspicious_hash_wrappers, with_pack.suspicious_hash_wrappers,
+                with_pack.suspicious_hash_wrappers, pack.suspicious_hash_wrappers,
                 "suspicious_hash_wrappers drifted for {ext}"
             );
             assert_eq!(
-                spec.buffer_builtins, with_pack.buffer_builtins,
+                with_pack.buffer_builtins, pack.buffer_builtins,
                 "buffer_builtins drifted for {ext}"
             );
             assert_eq!(
-                MemorySummaryRegistry::from_facts(&spec).summaries,
+                with_pack.memory_functions, pack.memory_functions,
+                "memory_functions drifted for {ext}"
+            );
+            assert_eq!(
                 MemorySummaryRegistry::from_facts(&with_pack).summaries,
+                MemorySummaryRegistry::from_facts(&pack).summaries,
                 "memory summaries drifted for {ext}"
             );
         }

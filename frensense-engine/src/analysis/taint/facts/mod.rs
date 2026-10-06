@@ -49,3 +49,19 @@ mod teachable_subsystem_tests;
 pub use config::*;
 pub use kinds::*;
 pub use table::*;
+
+/// The shipped default-pack fact table exactly as every consumer sees it
+/// ([`LearnedFactEntry`]s -> [`FactTable`] under [`Provenance::Spec`]).
+/// Engine tests merge this instead of relying on deleted spec seeds
+/// (Phase 6.1).
+///
+/// The pack crosses the engine<->bundler dev-dependency cycle as raw
+/// bytes: bundler-typed or engine-typed values returned through the
+/// bundler would resolve to a duplicate `frensense-engine` crate unit.
+#[cfg(test)]
+pub fn default_pack_table() -> FactTable {
+    let bytes = frensense_bundler::format::default_pack_entry_bytes();
+    let entries: Vec<LearnedFactEntry> =
+        bincode::deserialize(&bytes).expect("default pack entries decode");
+    fact_table_from_entries_with(&entries, Provenance::Spec)
+}

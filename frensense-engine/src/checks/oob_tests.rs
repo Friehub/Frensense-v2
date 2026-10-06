@@ -11,7 +11,8 @@ pub mod oob_spec {
 
     fn hits(src: &str) -> Vec<String> {
         let spec = frensense_lang::spec_for_ext("c").expect("c spec");
-        let facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        let mut facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        facts.merge(&crate::analysis::taint::facts::default_pack_table());
         let summaries = crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&facts);
         let fns = lower_source("t.c", src, "c").unwrap();
         let mut rules: Vec<String> = fns
@@ -284,7 +285,8 @@ pub mod oob_lowering_regressions {
 
     fn hits(src: &str) -> Vec<String> {
         let spec = frensense_lang::spec_for_ext("c").expect("c spec");
-        let facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        let mut facts = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        facts.merge(&crate::analysis::taint::facts::default_pack_table());
         let summaries = crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&facts);
         let fns = lower_source("t.c", src, "c").unwrap();
         let mut rules: Vec<String> = fns

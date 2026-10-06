@@ -15,7 +15,9 @@ pub mod checker_tests {
     /// (`tables_from_exts`) does.
     fn ts_facts() -> FactTable {
         let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-        crate::analysis::taint::facts::fact_table_from_spec(spec)
+        let mut t = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        t.merge(&crate::analysis::taint::facts::default_pack_table());
+        t
     }
 
     fn check(src: &str) -> Vec<(String, String)> {
@@ -169,7 +171,8 @@ export function process (data: string) {
     fn scan_count(src: &str) -> usize {
         let spec = frensense_lang::spec_for_ext("ts").unwrap();
         let config = config_from_spec(spec);
-        let facts = fact_table_from_spec(spec);
+        let mut facts = fact_table_from_spec(spec);
+        facts.merge(&crate::analysis::taint::facts::default_pack_table());
         let files = vec![("test.ts".to_string(), src.to_string(), "ts".to_string())];
         let result = scan(&files, &config, &facts);
         result

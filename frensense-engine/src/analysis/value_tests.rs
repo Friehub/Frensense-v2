@@ -15,7 +15,9 @@ pub mod value_spec {
     /// fixtures must seed the vocabulary exactly like a production scan.
     fn ts_facts() -> crate::analysis::taint::facts::FactTable {
         let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-        crate::analysis::taint::facts::fact_table_from_spec(spec)
+        let mut t = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        t.merge(&crate::analysis::taint::facts::default_pack_table());
+        t
     }
 
     fn var_of<'a>(
@@ -299,7 +301,8 @@ export function runQuery () {
         let files = vec![("t.ts".to_string(), src.to_string(), "ts".to_string())];
         let spec = frensense_lang::spec_for_ext("ts").unwrap();
         let config = config_from_spec(spec);
-        let facts = fact_table_from_spec(spec);
+        let mut facts = fact_table_from_spec(spec);
+        facts.merge(&crate::analysis::taint::facts::default_pack_table());
         let prepared = prepare(&files).unwrap();
         let result = scan_prepared(&prepared, &config, &facts);
         assert!(

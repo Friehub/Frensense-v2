@@ -16,7 +16,9 @@ pub mod guard_bypass_tests {
     /// fixtures must seed the vocabulary exactly like a production scan.
     fn ts_facts() -> FactTable {
         let spec = frensense_lang::spec_for_ext("ts").expect("ts spec");
-        crate::analysis::taint::facts::fact_table_from_spec(spec)
+        let mut t = crate::analysis::taint::facts::fact_table_from_spec(spec);
+        t.merge(&crate::analysis::taint::facts::default_pack_table());
+        t
     }
 
     /// The redirectChallenge shape: allowlist validation by substring

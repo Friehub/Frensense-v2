@@ -8,10 +8,12 @@ use crate::checks::memory_summary::MemorySummaryRegistry;
 
 #[test]
 fn test_teachable_allocator_and_deallocator() {
-    // Memory vocabulary is spec/bundle-owned: the spec seeds the fact
-    // table; there is no implicit bootstrap fallback.
+    // Memory vocabulary is pack/bundle-owned (Phase 6.1): the default
+    // pack seeds the fact table after the structural spec seed; there is
+    // no implicit bootstrap fallback.
     let spec = frensense_lang::spec_for_ext("c").expect("c spec");
-    let seeded = crate::analysis::taint::facts::fact_table_from_spec(spec);
+    let mut seeded = crate::analysis::taint::facts::fact_table_from_spec(spec);
+    seeded.merge(&crate::analysis::taint::facts::default_pack_table());
     let seeded_reg = MemorySummaryRegistry::from_facts(&seeded);
     assert!(seeded_reg.returns_fresh("malloc"));
     assert!(seeded_reg.returns_fresh("calloc"));
@@ -29,6 +31,7 @@ fn test_teachable_allocator_and_deallocator() {
     let mut table = crate::analysis::taint::facts::fact_table_from_spec(
         frensense_lang::spec_for_ext("c").expect("c spec"),
     );
+    table.merge(&crate::analysis::taint::facts::default_pack_table());
     let alloc_fact = LearnedFactEntry::Allocator {
         name: "custom_arena_alloc".into(),
     };
