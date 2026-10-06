@@ -39,4 +39,4 @@ serialize = ["dep:serde", "dep:serde_json", "dep:bincode", "dep:blake3"]
 full-analysis = []
 
 [dev-dependencies]
-frensense-bundler = { path = "../frensense-bundler" }
+frensense-packgen = { path = "../frensense-packgen" }

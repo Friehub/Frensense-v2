@@ -150,8 +150,8 @@ version = "0.7.0-preview.5"
 dependencies = [
  "bincode",
  "blake3",
- "frensense-bundler",
  "frensense-lang",
+ "frensense-packgen",
  "rustc-hash",
  "serde",
  "serde_json",
@@ -176,6 +176,16 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+]
+
+[[package]]
+name = "frensense-packgen"
+version = "0.7.0-preview.5"
+dependencies = [
+ "bincode",
+ "frensense-bundler",
+ "frensense-engine",
+ "frensense-lang",
 ]
 
 [[package]]

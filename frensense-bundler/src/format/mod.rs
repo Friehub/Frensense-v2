@@ -9,14 +9,10 @@
 //! live in `frensense_engine::analysis::taint::facts`.
 
 mod default_pack;
-pub(crate) mod default_pack_data;
 mod frc;
 mod types;
 
-pub use default_pack::{
-    build_default_bundle, default_bundle_bytes, default_pack, default_pack_entries,
-    default_pack_entry_bytes,
-};
+pub use default_pack::{default_bundle_bytes, default_pack, is_pack_memory_builtin};
 pub use frc::{
     read_bundle, read_bundle_parts, write_bundle, BundleHeader, BUNDLE_MAGIC, BUNDLE_VERSION,
 };

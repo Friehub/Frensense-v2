@@ -60,6 +60,9 @@ jobs:
       - name: Enforce Style (rustfmt)
         run: cargo fmt --all -- --check
 
+      - name: Default pack drift check (packgen --check)
+        run: cargo run -p frensense-packgen -- --check
+
       - name: Lint (Clippy, warnings are errors)
         run: cargo clippy --all-features --all-targets -- -D warnings
 

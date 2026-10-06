@@ -64,10 +64,10 @@ pub fn default_pack_table() -> FactTable {
 }
 
 /// The default pack's entries as the engine decodes them (bytes cross the
-/// bundler dev-dependency cycle; see [`default_pack_table`]).
+/// engine<->packgen dependency edge; see [`default_pack_table`]).
 #[cfg(test)]
 pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
-    let bytes = frensense_bundler::format::default_pack_entry_bytes();
+    let bytes = frensense_packgen::default_pack_entry_bytes();
     bincode::deserialize(&bytes).expect("default pack entries decode")
 }
 

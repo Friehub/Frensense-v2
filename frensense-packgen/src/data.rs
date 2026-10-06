@@ -10,7 +10,7 @@
 //! [`LearnedFactEntry`](frensense_engine::analysis::taint::facts::LearnedFactEntry)s,
 //! the committed `.frc` asset carries them, and the spec-side `known_*`
 //! seeds are gone from lang. Consumed only by [`super::default_pack`];
-//! nothing in lang or the engine references these names anymore.
+//! nothing in lang, the engine or the bundler references these names anymore.
 
 use frensense_engine::analysis::taint::facts::{
     AllocCapacity, BufferBuiltinSpec, InsecureConfigRule, IntegerOverflowRule, KeySizeRule,
@@ -311,10 +311,6 @@ pub static BOOTSTRAP_MEMORY_FUNCS: &[MemoryFuncSpec] = &[
 ///
 /// Used by the bundler to avoid re-emitting built-in contracts into a
 /// `.frc` bundle (they already ship with the pack). Exact-name match.
-pub fn is_pack_memory_builtin(name: &str) -> bool {
-    BOOTSTRAP_MEMORY_FUNCS.iter().any(|m| m.name == name)
-}
-
 /// The bootstrap buffer vocabulary: C's copy/fill/read primitives.
 ///
 /// Owned names (Phase 6): bundle-loaded builtins carry corpus text, so the
