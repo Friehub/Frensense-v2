@@ -313,6 +313,30 @@ pub struct SchemaPolicyFact {
     pub bound_keywords: Vec<String>,
 }
 
+/// Which hint table a `LearnedFactEntry::Hints` entry feeds. The hint
+/// vocabularies are flat string sets keyed by purpose (Phase 6 format
+/// extension): one entry kind, seven tables.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub enum HintKind {
+    /// [`FactTable::url_param_hints`]: a function parameter is URL-like.
+    UrlParam,
+    /// [`FactTable::url_arg_hints`]: a guard argument is URL-ish.
+    UrlArg,
+    /// [`FactTable::url_literal_hints`]: a literal is an absolute URL.
+    UrlLiteral,
+    /// [`FactTable::security_context_hints`]: a name marks security code.
+    SecurityContext,
+    /// [`FactTable::auth_guard_hints`]: a call is an authentication check.
+    AuthGuard,
+    /// [`FactTable::jwt_algorithm_hints`]: an algorithm choice is
+    /// security-sensitive.
+    JwtAlgorithm,
+    /// [`FactTable::credential_context_hints`]: an enclosing name marks
+    /// credential context.
+    CredentialContext,
+}
+
 /// Syntactic grammar features that can be dynamically learned or configured via bundle facts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]

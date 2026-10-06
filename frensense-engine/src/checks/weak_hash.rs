@@ -179,7 +179,7 @@ fn check_call(
                 .get(rule.selector_slot)
                 .and_then(|a| arg_str_literal(a, values))
                 .map(str::to_ascii_lowercase)
-            && rule.weak_selectors.contains(&sel.as_str())
+            && rule.weak_selectors.contains(&sel)
         {
             out.push(CheckerFinding {
                 provenance,
@@ -276,7 +276,7 @@ fn check_call(
     // direct literal, so wrapper indirection doesn't hide the weakness.
     for rule in &facts.key_size_rules {
         let provenance = Provenance::Spec;
-        if last_segment(rule.call).to_ascii_lowercase() != callee_lower {
+        if last_segment(rule.call.as_str()).to_ascii_lowercase() != callee_lower {
             continue;
         }
         if let Some(slot) = args.get(rule.slot) {
@@ -311,7 +311,9 @@ fn check_call(
         // algorithm is the violation - token issuers that merely embed the
         // literal (`jwtChallenge(id, req, 'none', ...)`) are harness code.
         let path_lower = full_path.to_ascii_lowercase();
-        if !(path_lower.starts_with(rule.prefix) || callee_lower.starts_with(rule.prefix)) {
+        if !(path_lower.starts_with(rule.prefix.as_str())
+            || callee_lower.starts_with(rule.prefix.as_str()))
+        {
             continue;
         }
         if !jwt_algorithm_context(&path_lower, &callee_lower, facts) {
@@ -319,7 +321,7 @@ fn check_call(
         }
         for arg in args {
             if let Some(lit) = arg_str_literal(arg, values)
-                && rule.selectors.contains(&lit.to_ascii_lowercase().as_str())
+                && rule.selectors.contains(&lit.to_ascii_lowercase())
             {
                 out.push(CheckerFinding {
                     provenance,

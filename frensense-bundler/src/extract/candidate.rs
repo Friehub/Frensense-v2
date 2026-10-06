@@ -340,5 +340,19 @@ pub fn fact_key(e: &LearnedFactEntry) -> (String, String) {
             ("guard_denylist".into(), pattern.clone())
         }
         LearnedFactEntry::IntegerOverflowRule { rule, .. } => ("io_rule".into(), rule.clone()),
+        LearnedFactEntry::Hints { kind, .. } => ("hints".into(), format!("{kind:?}")),
+        LearnedFactEntry::WeakPrimitiveRule { rule_id, .. } => {
+            ("weak_primitive".into(), rule_id.clone())
+        }
+        LearnedFactEntry::InsecureConfigRule { rule_id, .. } => {
+            ("insecure_config".into(), rule_id.clone())
+        }
+        LearnedFactEntry::KeySizeRule { rule_id, call, .. } => {
+            ("key_size".into(), format!("{rule_id}:{call}"))
+        }
+        LearnedFactEntry::SuspiciousHashWrappers { calls } => {
+            ("hash_wrappers".into(), calls.join(","))
+        }
+        LearnedFactEntry::BufferBuiltin { name, .. } => ("buffer_builtin".into(), name.clone()),
     }
 }

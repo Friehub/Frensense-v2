@@ -339,7 +339,7 @@ fn spec_drives_policy_vocabulary() {
     assert!(
         t.weak_hash_rules
             .iter()
-            .any(|r| r.selector_calls.contains(&"createHash")),
+            .any(|r| r.selector_calls.iter().any(|c| c == "createHash")),
         "weak-hash rules must include the createHash selector rule"
     );
     assert!(

@@ -124,19 +124,19 @@ pub static BOOTSTRAP_CREDENTIAL_CONTEXT_HINTS: &[&str] = &[
 /// Matches the two shapes real code uses:
 /// - `createHash('md5')`, the selector literal is argument 0.
 /// - `md5(data)` / `MD5(...)`, bare weak-hash functions; no selector needed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WeakPrimitiveRule {
     /// Finding rule id.
-    pub rule_id: &'static str,
+    pub rule_id: String,
     /// Callee last-segment names that take a selector literal argument.
-    pub selector_calls: &'static [&'static str],
+    pub selector_calls: Vec<String>,
     /// Bare function names that are weak by themselves.
-    pub bare_calls: &'static [&'static str],
+    pub bare_calls: Vec<String>,
     /// Argument slot of the selector literal (ignored for bare calls).
     pub selector_slot: usize,
     /// Selector literals that mark the call weak (case-insensitive, quotes
     /// stripped by the caller).
-    pub weak_selectors: &'static [&'static str],
+    pub weak_selectors: Vec<String>,
     /// When true, the selector shape fires only inside a credential context
     /// (function or parameter names hint password/secret/token/...).
     /// `crypto.createHash` doubles as a general-purpose checksum API, so
@@ -144,10 +144,10 @@ pub struct WeakPrimitiveRule {
     /// selectors like `hashlib.new('md5')` fire unconditionally.
     pub requires_credential_context: bool,
     /// Advisory severity hint: "warning" or "critical".
-    pub severity: &'static str,
+    pub severity: String,
     /// Advisory observation body (mirrors the lang observation template for
     /// this rule id, without interpolation).
-    pub message: &'static str,
+    pub message: String,
 }
 
 /// Shared advisory body for the bootstrap weak-hash rules (the `weak_hash`
@@ -158,30 +158,39 @@ const WEAK_HASH_MESSAGE: &str = "Weak hash primitive selected, not acceptable \
 
 /// The bootstrap weak-hash policy table: universal crypto policy facts
 /// (Node `createHash`, Python `hashlib.new`, bare `md5`/`sha1`).
-pub static BOOTSTRAP_WEAK_HASH_RULES: &[WeakPrimitiveRule] = &[
-    // Node crypto: createHash('md5'), createHash('sha1')
-    WeakPrimitiveRule {
-        rule_id: "weak_hash",
-        selector_calls: &["createHash"],
-        bare_calls: &["md5", "sha1"],
-        selector_slot: 0,
-        weak_selectors: &["md5", "md4", "sha1", "sha"],
-        requires_credential_context: true,
-        severity: "warning",
-        message: WEAK_HASH_MESSAGE,
-    },
-    // Python hashlib / passlib: hashlib.new('md5', ...)
-    WeakPrimitiveRule {
-        rule_id: "weak_hash",
-        selector_calls: &["new"],
-        bare_calls: &["md5", "sha1"],
-        selector_slot: 0,
-        weak_selectors: &["md5", "md4", "sha1", "sha"],
-        requires_credential_context: false,
-        severity: "warning",
-        message: WEAK_HASH_MESSAGE,
-    },
-];
+pub static BOOTSTRAP_WEAK_HASH_RULES: std::sync::LazyLock<Vec<WeakPrimitiveRule>> =
+    std::sync::LazyLock::new(|| {
+        vec![
+            // Node crypto: createHash('md5'), createHash('sha1')
+            WeakPrimitiveRule {
+                rule_id: "weak_hash".to_string(),
+                selector_calls: ["createHash"].iter().map(|s| s.to_string()).collect(),
+                bare_calls: ["md5", "sha1"].iter().map(|s| s.to_string()).collect(),
+                selector_slot: 0,
+                weak_selectors: ["md5", "md4", "sha1", "sha"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+                requires_credential_context: true,
+                severity: "warning".to_string(),
+                message: WEAK_HASH_MESSAGE.to_string(),
+            },
+            // Python hashlib / passlib: hashlib.new('md5', ...)
+            WeakPrimitiveRule {
+                rule_id: "weak_hash".to_string(),
+                selector_calls: ["new"].iter().map(|s| s.to_string()).collect(),
+                bare_calls: ["md5", "sha1"].iter().map(|s| s.to_string()).collect(),
+                selector_slot: 0,
+                weak_selectors: ["md5", "md4", "sha1", "sha"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+                requires_credential_context: false,
+                severity: "warning".to_string(),
+                message: WEAK_HASH_MESSAGE.to_string(),
+            },
+        ]
+    });
 
 /// A corpus-extendable rule activating the allocation-size integer-overflow
 /// prover (CWE-190 wrap -> CWE-680 undersized allocation -> heap overflow).
@@ -226,80 +235,89 @@ pub static BOOTSTRAP_INTEGER_OVERFLOW_RULES: std::sync::LazyLock<Vec<IntegerOver
 /// argument literal itself selects an insecure mode regardless of
 /// algorithm. The literal selector and its advisory travel together so the
 /// check stays fact-driven end to end.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InsecureConfigRule {
     /// Callee-path prefix the selector applies to (`jwt.verify`, ...).
-    pub prefix: &'static str,
+    pub prefix: String,
     /// Selector literals that select the insecure mode (lowercase match).
-    pub selectors: &'static [&'static str],
+    pub selectors: Vec<String>,
     /// Finding rule id.
-    pub rule_id: &'static str,
+    pub rule_id: String,
     /// Advisory severity hint: "warning" or "critical".
-    pub severity: &'static str,
+    pub severity: String,
     /// Advisory observation body (mirrors the lang observation template for
     /// this rule id, without interpolation).
-    pub message: &'static str,
+    pub message: String,
 }
 
 /// The bootstrap insecure-config table.
-pub static BOOTSTRAP_INSECURE_CONFIG_SELECTORS: &[InsecureConfigRule] = &[
-    // jwt.sign(payload, secret, { algorithm: 'none' }) style appears as a
-    // string selector on some APIs; `none`/`HS1` in the `alg` slot.
-    InsecureConfigRule {
-        prefix: "jwt",
-        selectors: &["none", "hs1"],
-        rule_id: "insecure_jwt_algorithm",
-        severity: "warning",
-        message: "Insecure configuration: an insecure JWT algorithm selector \
-                  ('none'/'hs1') was accepted (use RS256/ES256)",
-    },
-];
+pub static BOOTSTRAP_INSECURE_CONFIG_SELECTORS: std::sync::LazyLock<Vec<InsecureConfigRule>> =
+    std::sync::LazyLock::new(|| {
+        vec![
+            // jwt.sign(payload, secret, { algorithm: 'none' }) style appears as a
+            // string selector on some APIs; `none`/`HS1` in the `alg` slot.
+            InsecureConfigRule {
+                prefix: "jwt".to_string(),
+                selectors: ["none", "hs1"].iter().map(|s| s.to_string()).collect(),
+                rule_id: "insecure_jwt_algorithm".to_string(),
+                severity: "warning".to_string(),
+                message: "Insecure configuration: an insecure JWT algorithm selector \
+                          ('none'/'hs1') was accepted (use RS256/ES256)"
+                    .to_string(),
+            },
+        ]
+    });
 
 /// A key-size rule: a generation call whose constant bit-length argument
 /// falls below the security floor. Value-aware: the argument may be a var
 /// whose lattice value is a provable constant, not just a bare literal.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeySizeRule {
     /// Finding rule id.
-    pub rule_id: &'static str,
+    pub rule_id: String,
     /// Callee last segment (case-insensitive match).
-    pub call: &'static str,
+    pub call: String,
     /// Argument slot carrying the bit length.
     pub slot: usize,
     /// Minimum acceptable bits.
     pub min_bits: i64,
     /// Human label of what the key protects.
-    pub kind: &'static str,
+    pub kind: String,
     /// Advisory severity hint: "warning" or "critical".
-    pub severity: &'static str,
+    pub severity: String,
     /// Advisory observation body (mirrors the lang observation template for
     /// this rule id, without interpolation).
-    pub message: &'static str,
+    pub message: String,
 }
 
 /// The bootstrap key-size policy table.
-pub static BOOTSTRAP_KEY_SIZE_RULES: &[KeySizeRule] = &[
-    KeySizeRule {
-        rule_id: "weak_rsa_key_size",
-        call: "generateKeyPair",
-        slot: 0,
-        min_bits: 2048,
-        kind: "RSA",
-        severity: "warning",
-        message: "Key generation call with RSA key size below 2048 bits \
-                  (use >= 2048 bits for RSA)",
-    },
-    KeySizeRule {
-        rule_id: "weak_rsa_key_size",
-        call: "generateKey",
-        slot: 0,
-        min_bits: 128,
-        kind: "symmetric keys",
-        severity: "warning",
-        message: "Key generation call with symmetric key size below 128 bits \
-                  (use >= 128 bits for symmetric keys)",
-    },
-];
+pub static BOOTSTRAP_KEY_SIZE_RULES: std::sync::LazyLock<Vec<KeySizeRule>> =
+    std::sync::LazyLock::new(|| {
+        vec![
+            KeySizeRule {
+                rule_id: "weak_rsa_key_size".to_string(),
+                call: "generateKeyPair".to_string(),
+                slot: 0,
+                min_bits: 2048,
+                kind: "RSA".to_string(),
+                severity: "warning".to_string(),
+                message: "Key generation call with RSA key size below 2048 bits \
+                          (use >= 2048 bits for RSA)"
+                    .to_string(),
+            },
+            KeySizeRule {
+                rule_id: "weak_rsa_key_size".to_string(),
+                call: "generateKey".to_string(),
+                slot: 0,
+                min_bits: 128,
+                kind: "symmetric keys".to_string(),
+                severity: "warning".to_string(),
+                message: "Key generation call with symmetric key size below 128 bits \
+                          (use >= 128 bits for symmetric keys)"
+                    .to_string(),
+            },
+        ]
+    });
 
 /// Known *wrapper* names whose entire purpose is hashing: a weak selector
 /// inside the wrapper (checked cross-function by the corpus replay gate) or
@@ -377,7 +395,7 @@ pub fn bootstrap_credential_context_hints() -> &'static [&'static str] {
 
 /// The default weak-hash rules (see [`BOOTSTRAP_WEAK_HASH_RULES`]).
 pub fn bootstrap_weak_hash_rules() -> &'static [WeakPrimitiveRule] {
-    BOOTSTRAP_WEAK_HASH_RULES
+    &BOOTSTRAP_WEAK_HASH_RULES
 }
 
 /// The default allocation-size overflow rules (see
@@ -388,12 +406,12 @@ pub fn bootstrap_integer_overflow_rules() -> &'static [IntegerOverflowRule] {
 
 /// The default insecure config selectors (see [`BOOTSTRAP_INSECURE_CONFIG_SELECTORS`]).
 pub fn bootstrap_insecure_config_selectors() -> &'static [InsecureConfigRule] {
-    BOOTSTRAP_INSECURE_CONFIG_SELECTORS
+    &BOOTSTRAP_INSECURE_CONFIG_SELECTORS
 }
 
 /// The default key-size rules (see [`BOOTSTRAP_KEY_SIZE_RULES`]).
 pub fn bootstrap_key_size_rules() -> &'static [KeySizeRule] {
-    BOOTSTRAP_KEY_SIZE_RULES
+    &BOOTSTRAP_KEY_SIZE_RULES
 }
 
 /// The default suspicious hash wrappers (see [`BOOTSTRAP_SUSPICIOUS_HASH_WRAPPERS`]).

@@ -329,7 +329,7 @@ impl FactTable {
             .extend(other.credential_context_hints.iter().cloned());
         for r in &other.weak_hash_rules {
             if !self.weak_hash_rules.contains(r) {
-                self.weak_hash_rules.push(*r);
+                self.weak_hash_rules.push(r.clone());
             }
         }
         // Provenance-ordered like the policy tables: a consumer bundle
@@ -350,12 +350,12 @@ impl FactTable {
         }
         for s in &other.insecure_config_selectors {
             if !self.insecure_config_selectors.contains(s) {
-                self.insecure_config_selectors.push(*s);
+                self.insecure_config_selectors.push(s.clone());
             }
         }
         for r in &other.key_size_rules {
             if !self.key_size_rules.contains(r) {
-                self.key_size_rules.push(*r);
+                self.key_size_rules.push(r.clone());
             }
         }
         self.suspicious_hash_wrappers
@@ -696,6 +696,53 @@ pub enum LearnedFactEntry {
         severity: String,
         message: String,
     },
+    /// Substring-hint vocabulary for one hint table (Phase 6 format
+    /// extension): bundles extend the URL/security/auth/credential hint
+    /// sets the same way the spec seed provides them.
+    Hints { kind: HintKind, values: Vec<String> },
+    /// A weak-primitive policy rule (weak digest selectors), the bundle
+    /// form of the bootstrap weak-hash table.
+    WeakPrimitiveRule {
+        rule_id: String,
+        selector_calls: Vec<String>,
+        bare_calls: Vec<String>,
+        selector_slot: usize,
+        weak_selectors: Vec<String>,
+        requires_credential_context: bool,
+        severity: String,
+        message: String,
+    },
+    /// A string-literal insecure-configuration selector rule (the bundle
+    /// form of the bootstrap insecure-config table).
+    InsecureConfigRule {
+        prefix: String,
+        selectors: Vec<String>,
+        rule_id: String,
+        severity: String,
+        message: String,
+    },
+    /// A minimum-key-size rule for a key-generation call (the bundle form
+    /// of the bootstrap key-size table).
+    KeySizeRule {
+        rule_id: String,
+        call: String,
+        slot: usize,
+        min_bits: i64,
+        kind: String,
+        severity: String,
+        message: String,
+    },
+    /// Known wrapper calls whose entire purpose is hashing: the bundle
+    /// form of the bootstrap suspicious-hash-wrapper vocabulary.
+    SuspiciousHashWrappers { calls: Vec<String> },
+    /// A buffer-manipulation builtin with destination/source/length slots:
+    /// the bundle form of the bootstrap buffer vocabulary.
+    BufferBuiltin {
+        name: String,
+        dst_arg: Option<usize>,
+        src_arg: Option<usize>,
+        len_arg: usize,
+    },
 }
 
 impl LearnedFactEntry {
@@ -713,6 +760,9 @@ impl LearnedFactEntry {
             LearnedFactEntry::Policy { rule, .. }
             | LearnedFactEntry::Check { rule, .. }
             | LearnedFactEntry::IntegerOverflowRule { rule, .. } => vec![rule.clone()],
+            LearnedFactEntry::WeakPrimitiveRule { rule_id, .. }
+            | LearnedFactEntry::InsecureConfigRule { rule_id, .. }
+            | LearnedFactEntry::KeySizeRule { rule_id, .. } => vec![rule_id.clone()],
             LearnedFactEntry::WeakCrypto(fact) => vec![fact.rule_id.clone()],
             _ => Vec::new(),
         }
@@ -974,6 +1024,101 @@ impl LearnedFactEntry {
                     }
                 } else {
                     table.integer_overflow_rules.push((fact, provenance));
+                }
+            }
+            LearnedFactEntry::Hints { kind, values } => {
+                let set = match kind {
+                    HintKind::UrlParam => &mut table.url_param_hints,
+                    HintKind::UrlArg => &mut table.url_arg_hints,
+                    HintKind::UrlLiteral => &mut table.url_literal_hints,
+                    HintKind::SecurityContext => &mut table.security_context_hints,
+                    HintKind::AuthGuard => &mut table.auth_guard_hints,
+                    HintKind::JwtAlgorithm => &mut table.jwt_algorithm_hints,
+                    HintKind::CredentialContext => &mut table.credential_context_hints,
+                };
+                set.extend(values.iter().cloned());
+            }
+            LearnedFactEntry::WeakPrimitiveRule {
+                rule_id,
+                selector_calls,
+                bare_calls,
+                selector_slot,
+                weak_selectors,
+                requires_credential_context,
+                severity,
+                message,
+            } => {
+                let fact = WeakPrimitiveRule {
+                    rule_id: rule_id.clone(),
+                    selector_calls: selector_calls.clone(),
+                    bare_calls: bare_calls.clone(),
+                    selector_slot: *selector_slot,
+                    weak_selectors: weak_selectors.clone(),
+                    requires_credential_context: *requires_credential_context,
+                    severity: severity.clone(),
+                    message: message.clone(),
+                };
+                if !table.weak_hash_rules.contains(&fact) {
+                    table.weak_hash_rules.push(fact);
+                }
+            }
+            LearnedFactEntry::InsecureConfigRule {
+                prefix,
+                selectors,
+                rule_id,
+                severity,
+                message,
+            } => {
+                let fact = InsecureConfigRule {
+                    prefix: prefix.clone(),
+                    selectors: selectors.clone(),
+                    rule_id: rule_id.clone(),
+                    severity: severity.clone(),
+                    message: message.clone(),
+                };
+                if !table.insecure_config_selectors.contains(&fact) {
+                    table.insecure_config_selectors.push(fact);
+                }
+            }
+            LearnedFactEntry::KeySizeRule {
+                rule_id,
+                call,
+                slot,
+                min_bits,
+                kind,
+                severity,
+                message,
+            } => {
+                let fact = KeySizeRule {
+                    rule_id: rule_id.clone(),
+                    call: call.clone(),
+                    slot: *slot,
+                    min_bits: *min_bits,
+                    kind: kind.clone(),
+                    severity: severity.clone(),
+                    message: message.clone(),
+                };
+                if !table.key_size_rules.contains(&fact) {
+                    table.key_size_rules.push(fact);
+                }
+            }
+            LearnedFactEntry::SuspiciousHashWrappers { calls } => {
+                table.suspicious_hash_wrappers.extend(calls.iter().cloned());
+            }
+            LearnedFactEntry::BufferBuiltin {
+                name,
+                dst_arg,
+                src_arg,
+                len_arg,
+            } => {
+                let fact = frensense_lang::memory::BufferBuiltinSpec {
+                    name: name.clone(),
+                    dst_arg: *dst_arg,
+                    src_arg: *src_arg,
+                    len_arg: *len_arg,
+                };
+                if !table.buffer_builtins.iter().any(|b| b.name == fact.name) {
+                    table.buffer_builtins.push(fact);
                 }
             }
         }

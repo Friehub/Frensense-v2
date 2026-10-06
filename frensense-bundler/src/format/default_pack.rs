@@ -2,7 +2,7 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-//! The embedded default pack (Phase 5.2 / decision D1).
+//! The embedded default pack (Phase 5.2 / decision D1, extended in Phase 6).
 //!
 //! `frensense-lang`'s bootstrap policy tables re-shipped as a `.frc`
 //! bundle, embedded in the bundler and merged between the spec seed and
@@ -11,21 +11,28 @@
 //! the CLI scan runner - merge it with [`Provenance::Spec`], so consumer
 //! bundle facts still win and provenance reporting stays truthful.
 //!
-//! Coverage is the expressible subset of the bootstrap tables (decision:
-//! format extension rides Phase 6.2): guard/schema vocabularies,
-//! integer-overflow rules, and memory contracts. The hint vocabularies
-//! and the weak-hash/key-size/insecure-config rule tables have no
-//! `LearnedFactEntry` representation yet and stay spec-seeded.
+//! Coverage: the full bootstrap policy cluster (guard/schema
+//! vocabularies, hint vocabularies, integer-overflow, weak-hash,
+//! insecure-config, key-size and suspicious-wrapper rules), memory
+//! contracts, and the buffer builtin vocabulary - everything the
+//! spec-seeded `known_*` methods provided for these tables, so Phase 6
+//! can delete them from `frensense-lang` without changing a check
+//! verdict.
 
 use frensense_engine::analysis::taint::facts::{
-    GuardBypassFact, LearnedFactEntry, SchemaPolicyFact,
+    GuardBypassFact, HintKind, LearnedFactEntry, SchemaPolicyFact,
 };
 use frensense_engine::checks::memory_summary::CapacitySpec;
-use frensense_lang::memory::{bootstrap_memory_functions, AllocCapacity};
+use frensense_lang::memory::{
+    bootstrap_buffer_builtins, bootstrap_memory_functions, AllocCapacity,
+};
 use frensense_lang::policy::{
-    bootstrap_containment_callees, bootstrap_credential_params, bootstrap_credential_sinks,
-    bootstrap_integer_overflow_rules, bootstrap_schema_builders, bootstrap_schema_enforcers,
-    bootstrap_schema_keywords,
+    bootstrap_auth_guard_hints, bootstrap_containment_callees, bootstrap_credential_context_hints,
+    bootstrap_credential_params, bootstrap_credential_sinks, bootstrap_insecure_config_selectors,
+    bootstrap_integer_overflow_rules, bootstrap_jwt_algorithm_hints, bootstrap_key_size_rules,
+    bootstrap_schema_builders, bootstrap_schema_enforcers, bootstrap_schema_keywords,
+    bootstrap_security_context_hints, bootstrap_suspicious_hash_wrappers, bootstrap_url_arg_hints,
+    bootstrap_url_literal_hints, bootstrap_url_param_hints, bootstrap_weak_hash_rules,
 };
 use std::sync::OnceLock;
 
@@ -50,13 +57,79 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
             enforcers: owned(bootstrap_schema_enforcers()),
             bound_keywords: owned(bootstrap_schema_keywords()),
         }),
+        LearnedFactEntry::SuspiciousHashWrappers {
+            calls: owned(bootstrap_suspicious_hash_wrappers()),
+        },
     ];
+    // Hint vocabularies: one entry per table, kind-keyed.
+    for (kind, hints) in [
+        (HintKind::UrlParam, bootstrap_url_param_hints()),
+        (HintKind::UrlArg, bootstrap_url_arg_hints()),
+        (HintKind::UrlLiteral, bootstrap_url_literal_hints()),
+        (
+            HintKind::SecurityContext,
+            bootstrap_security_context_hints(),
+        ),
+        (HintKind::AuthGuard, bootstrap_auth_guard_hints()),
+        (HintKind::JwtAlgorithm, bootstrap_jwt_algorithm_hints()),
+        (
+            HintKind::CredentialContext,
+            bootstrap_credential_context_hints(),
+        ),
+    ] {
+        entries.push(LearnedFactEntry::Hints {
+            kind,
+            values: owned(hints),
+        });
+    }
+    // Rule tables: weak hash, insecure config, key size.
+    for rule in bootstrap_weak_hash_rules().iter() {
+        entries.push(LearnedFactEntry::WeakPrimitiveRule {
+            rule_id: rule.rule_id.clone(),
+            selector_calls: rule.selector_calls.clone(),
+            bare_calls: rule.bare_calls.clone(),
+            selector_slot: rule.selector_slot,
+            weak_selectors: rule.weak_selectors.clone(),
+            requires_credential_context: rule.requires_credential_context,
+            severity: rule.severity.clone(),
+            message: rule.message.clone(),
+        });
+    }
+    for rule in bootstrap_insecure_config_selectors().iter() {
+        entries.push(LearnedFactEntry::InsecureConfigRule {
+            prefix: rule.prefix.clone(),
+            selectors: rule.selectors.clone(),
+            rule_id: rule.rule_id.clone(),
+            severity: rule.severity.clone(),
+            message: rule.message.clone(),
+        });
+    }
+    for rule in bootstrap_key_size_rules().iter() {
+        entries.push(LearnedFactEntry::KeySizeRule {
+            rule_id: rule.rule_id.clone(),
+            call: rule.call.clone(),
+            slot: rule.slot,
+            min_bits: rule.min_bits,
+            kind: rule.kind.clone(),
+            severity: rule.severity.clone(),
+            message: rule.message.clone(),
+        });
+    }
     for rule in bootstrap_integer_overflow_rules().iter() {
         entries.push(LearnedFactEntry::IntegerOverflowRule {
             rule: rule.rule_id.clone(),
             wrap_threshold: rule.wrap_threshold,
             severity: rule.severity.clone(),
             message: rule.message.clone(),
+        });
+    }
+    // Buffer builtins: the spatial checker's dest/src/len vocabulary.
+    for b in bootstrap_buffer_builtins().iter() {
+        entries.push(LearnedFactEntry::BufferBuiltin {
+            name: b.name.clone(),
+            dst_arg: b.dst_arg,
+            src_arg: b.src_arg,
+            len_arg: b.len_arg,
         });
     }
     // Same capacity mapping as `MemorySummaryRegistry::from_vocabulary`, so
@@ -154,6 +227,21 @@ mod tests {
             e,
             LearnedFactEntry::MemoryContract { .. }
         )));
+        assert!(has(|e| matches!(e, LearnedFactEntry::Hints { .. })));
+        assert!(has(|e| matches!(
+            e,
+            LearnedFactEntry::WeakPrimitiveRule { .. }
+        )));
+        assert!(has(|e| matches!(
+            e,
+            LearnedFactEntry::InsecureConfigRule { .. }
+        )));
+        assert!(has(|e| matches!(e, LearnedFactEntry::KeySizeRule { .. })));
+        assert!(has(|e| matches!(
+            e,
+            LearnedFactEntry::SuspiciousHashWrappers { .. }
+        )));
+        assert!(has(|e| matches!(e, LearnedFactEntry::BufferBuiltin { .. })));
     }
 
     #[test]
@@ -230,6 +318,54 @@ mod tests {
                 io_ids(&spec),
                 io_ids(&with_pack),
                 "IO rules drifted for {ext}"
+            );
+            assert_eq!(
+                spec.url_param_hints, with_pack.url_param_hints,
+                "url_param_hints drifted for {ext}"
+            );
+            assert_eq!(
+                spec.url_arg_hints, with_pack.url_arg_hints,
+                "url_arg_hints drifted for {ext}"
+            );
+            assert_eq!(
+                spec.url_literal_hints, with_pack.url_literal_hints,
+                "url_literal_hints drifted for {ext}"
+            );
+            assert_eq!(
+                spec.security_context_hints, with_pack.security_context_hints,
+                "security_context_hints drifted for {ext}"
+            );
+            assert_eq!(
+                spec.auth_guard_hints, with_pack.auth_guard_hints,
+                "auth_guard_hints drifted for {ext}"
+            );
+            assert_eq!(
+                spec.jwt_algorithm_hints, with_pack.jwt_algorithm_hints,
+                "jwt_algorithm_hints drifted for {ext}"
+            );
+            assert_eq!(
+                spec.credential_context_hints, with_pack.credential_context_hints,
+                "credential_context_hints drifted for {ext}"
+            );
+            assert_eq!(
+                spec.weak_hash_rules, with_pack.weak_hash_rules,
+                "weak_hash_rules drifted for {ext}"
+            );
+            assert_eq!(
+                spec.insecure_config_selectors, with_pack.insecure_config_selectors,
+                "insecure_config_selectors drifted for {ext}"
+            );
+            assert_eq!(
+                spec.key_size_rules, with_pack.key_size_rules,
+                "key_size_rules drifted for {ext}"
+            );
+            assert_eq!(
+                spec.suspicious_hash_wrappers, with_pack.suspicious_hash_wrappers,
+                "suspicious_hash_wrappers drifted for {ext}"
+            );
+            assert_eq!(
+                spec.buffer_builtins, with_pack.buffer_builtins,
+                "buffer_builtins drifted for {ext}"
             );
             assert_eq!(
                 MemorySummaryRegistry::from_facts(&spec).summaries,

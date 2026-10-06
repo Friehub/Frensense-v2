@@ -142,10 +142,10 @@ pub fn is_stack_allocator(name: &str) -> bool {
 /// One buffer-manipulation builtin: which arguments are the destination
 /// buffer, the source data, and the length, so the spatial checker can
 /// verify write/read bounds against the tracked capacity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BufferBuiltinSpec {
     /// Callee last-segment name.
-    pub name: &'static str,
+    pub name: String,
     /// Argument index of the destination buffer (`None` = none).
     pub dst_arg: Option<usize>,
     /// Argument index of the source data (`None` = none).
@@ -155,58 +155,32 @@ pub struct BufferBuiltinSpec {
 }
 
 /// The bootstrap buffer vocabulary: C's copy/fill/read primitives.
-pub static BOOTSTRAP_BUFFER_BUILTINS: &[BufferBuiltinSpec] = &[
-    BufferBuiltinSpec {
-        name: "memset",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 2,
-    },
-    BufferBuiltinSpec {
-        name: "bzero",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 1,
-    },
-    BufferBuiltinSpec {
-        name: "memcpy",
-        dst_arg: Some(0),
-        src_arg: Some(1),
-        len_arg: 2,
-    },
-    BufferBuiltinSpec {
-        name: "memmove",
-        dst_arg: Some(0),
-        src_arg: Some(1),
-        len_arg: 2,
-    },
-    BufferBuiltinSpec {
-        name: "strncpy",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 2,
-    },
-    BufferBuiltinSpec {
-        name: "snprintf",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 1,
-    },
-    BufferBuiltinSpec {
-        name: "fgets",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 1,
-    },
-    BufferBuiltinSpec {
-        name: "read",
-        dst_arg: Some(1),
-        src_arg: None,
-        len_arg: 2,
-    },
-];
+///
+/// Owned names (Phase 6): bundle-loaded builtins carry corpus text, so the
+/// shared spec type may not be `&'static str`.
+pub static BOOTSTRAP_BUFFER_BUILTINS: std::sync::LazyLock<Vec<BufferBuiltinSpec>> =
+    std::sync::LazyLock::new(|| {
+        fn bi(name: &str, dst: Option<usize>, src: Option<usize>, len: usize) -> BufferBuiltinSpec {
+            BufferBuiltinSpec {
+                name: name.to_string(),
+                dst_arg: dst,
+                src_arg: src,
+                len_arg: len,
+            }
+        }
+        vec![
+            bi("memset", Some(0), None, 2),
+            bi("bzero", Some(0), None, 1),
+            bi("memcpy", Some(0), Some(1), 2),
+            bi("memmove", Some(0), Some(1), 2),
+            bi("strncpy", Some(0), None, 2),
+            bi("snprintf", Some(0), None, 1),
+            bi("fgets", Some(0), None, 1),
+            bi("read", Some(1), None, 2),
+        ]
+    });
 
 /// The default buffer vocabulary (see [`BOOTSTRAP_BUFFER_BUILTINS`]).
 pub fn bootstrap_buffer_builtins() -> &'static [BufferBuiltinSpec] {
-    BOOTSTRAP_BUFFER_BUILTINS
+    &BOOTSTRAP_BUFFER_BUILTINS
 }
