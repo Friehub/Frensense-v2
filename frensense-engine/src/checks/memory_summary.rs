@@ -87,7 +87,7 @@ impl MemorySummaryRegistry {
     }
 
     /// Seed a registry from the spec's memory vocabulary in `facts`
-    /// (spec-seeded via `fact_table_from_spec`), then layer
+    /// (seeded via the default pack), then layer
     /// bundle-learned contracts on top. Learned contracts override the
     /// vocabulary on name collision (more specific corpus knowledge wins).
     ///

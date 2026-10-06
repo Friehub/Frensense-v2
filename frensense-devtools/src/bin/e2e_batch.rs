@@ -235,19 +235,8 @@ fn analyze(path: &str, src: &str) -> (usize, bool, usize) {
         let ir = all.remove(n).unwrap();
         statics.insert(n.clone(), Box::leak(Box::new(ir)));
     }
-    let mut config = ts_config();
-    // Spec-driven built-ins: merge the language spec's knowledge (sources,
-    // sinks, sanitizers) over the measurement baseline.
-    if std::env::var("FRENS_SPEC_CONFIG").is_ok() {
-        let sc = frensense_engine::analysis::taint::facts::config_from_spec(spec);
-        config.sources.extend(sc.sources);
-        config.sinks.extend(sc.sinks);
-        config.sanitizers.extend(sc.sanitizers);
-    }
-    let mut facts = ts_fact_table();
-    if std::env::var("FRENS_SPEC_FACTS").is_ok() {
-        facts.merge(&frensense_engine::analysis::taint::facts::fact_table_from_spec(spec));
-    }
+    let config = ts_config();
+    let facts = ts_fact_table();
     let prog = ProgramSvfg::new(&statics, &config);
     let mut engine = BackwardTaintEngine::new(&prog, &config).with_fact_table(&facts);
     engine.run();

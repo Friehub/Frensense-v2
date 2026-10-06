@@ -87,8 +87,9 @@ fn family_tables(f: &Family) -> (TaintConfig, FactTable) {
         ),
     );
     // Phase 6.2: pack language-keyed sections, same layer and order as the
-    // CLI runner's pack merge (double-install over the spec seed until
-    // 6.2d strips it; identical values keep gate and scan in lockstep).
+    // CLI runner's pack merge. Since Phase 6.2d they are the sole source of
+    // the provider knowledge (the spec seed carries none), so gate and scan
+    // stay in lockstep.
     frensense_engine::analysis::taint::facts::apply_language_entries(
         &mut config,
         &mut facts,

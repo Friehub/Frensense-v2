@@ -67,10 +67,9 @@ impl Engine {
         ));
         // Phase 6.2: the pack's language-keyed sections install into config
         // and facts together, filtered to the scanned languages, at the
-        // same pack layer (still a double-install over the spec seed for
-        // now; identical values keep the A/B neutral until 6.2d strips the
-        // spec seeds). Must run before the consumer bundle merge so
-        // Learned facts still win.
+        // same pack layer. Since Phase 6.2d the spec seed carries none of
+        // this provider knowledge, so this install is its sole source. Must
+        // run before the consumer bundle merge so Learned facts still win.
         apply_language_entries(
             &mut config,
             &mut facts,

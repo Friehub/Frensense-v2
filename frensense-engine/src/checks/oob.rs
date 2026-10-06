@@ -104,7 +104,7 @@ fn eval_alloc_capacity(
     summaries: &MemorySummaryRegistry,
 ) -> Option<(i64, i64)> {
     // Capacity contracts come from the memory-function vocabulary in the
-    // registry (`fact_table_from_spec` seeds it per language; `get`
+    // registry (the default pack seeds it per language; `get`
     // resolves full names and last segments alike).
     match summaries.return_capacity(func) {
         Some(CapacitySpec::Exact(k)) => Some((*k, *k)),
@@ -181,7 +181,7 @@ pub fn check_with_summaries(
     summaries: &MemorySummaryRegistry,
     facts: &FactTable,
 ) -> Vec<CheckerFinding> {
-    // Buffer vocabulary: spec-seeded via `fact_table_from_spec` into
+    // Buffer vocabulary: seeded via the default pack into
     // `facts.buffer_builtins` (empty table = no vocabulary = no findings).
     let buffer_builtins: &[BufferBuiltinSpec] = &facts.buffer_builtins;
     let pts = Steensgaard::analyze(ir);

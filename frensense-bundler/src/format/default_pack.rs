@@ -76,7 +76,7 @@ pub fn language_entries_for_spec(
         });
     }
     // Sources: conventional request-parameter names are sources too, and
-    // `config_from_spec` folds both tables into the same set.
+    // the scan's source set folds both vocabularies together.
     for p in spec.known_source_patterns() {
         entries.push(LearnedFactEntry::LanguageSource {
             language: language.clone(),
@@ -285,9 +285,8 @@ mod tests {
     use super::*;
     use frensense_engine::analysis::taint::config::TaintConfig;
     use frensense_engine::analysis::taint::facts::{
-        apply_language_entries, config_from_spec, fact_table_from_entries,
-        fact_table_from_entries_with, fact_table_from_spec, tables_from_exts, FactTable,
-        Provenance,
+        apply_language_entries, fact_table_from_entries, fact_table_from_entries_with,
+        tables_from_exts, FactTable, Provenance,
     };
     use frensense_engine::checks::memory_summary::MemorySummaryRegistry;
 
@@ -566,103 +565,192 @@ mod tests {
         }
     }
 
-    /// Phase 6.2 contract: installing a spec's language-keyed pack entries
-    /// via [`apply_language_entries`] reproduces exactly what the
-    /// provider-knowledge halves of [`config_from_spec`] and
-    /// [`fact_table_from_spec`] seeded before those bodies moved into the
-    /// pack. Covers every registered language; the structural vocabularies
-    /// (stack allocators, guard denylist, ...) are spec-seeded by design
-    /// and out of scope here.
+    /// Phase 6.2d sole-source contract: the spec seed no longer carries
+    /// provider knowledge. For every registered language the bare
+    /// [`tables_from_exts`] seed yields empty source/sink/sanitizer sets
+    /// and empty provider tables, and installing that language's pack
+    /// sections via [`apply_language_entries`] is what populates all of
+    /// them - with exactly the values the spec declares. The structural
+    /// vocabularies (stack allocators, guard denylist, ...) stay
+    /// spec-seeded by design and are out of scope here.
     #[test]
-    fn language_pack_entries_parity_with_spec_seed() {
-        for spec in frensense_lang::all_specs() {
-            let base_config = config_from_spec(spec);
-            let base_facts = fact_table_from_spec(spec);
+    fn language_pack_entries_are_the_sole_source_of_provider_knowledge() {
+        use frensense_engine::analysis::taint::role::SinkRole;
 
+        for spec in frensense_lang::all_specs() {
+            let lang = spec.name();
+
+            // 1. Bare spec seed: nothing provider-shaped.
+            let (bare_config, bare_facts) = tables_from_exts(spec.extensions().iter().copied());
+            assert!(
+                bare_config.sources.is_empty(),
+                "spec seeds sources for {lang}"
+            );
+            assert!(bare_config.sinks.is_empty(), "spec seeds sinks for {lang}");
+            assert!(
+                bare_config.sanitizers.is_empty(),
+                "spec seeds sanitizers for {lang}"
+            );
+            assert!(
+                bare_facts.sink_signatures.is_empty(),
+                "spec seeds sink_signatures for {lang}"
+            );
+            assert!(
+                bare_facts.receiver_roles.is_empty(),
+                "spec seeds receiver_roles for {lang}"
+            );
+            assert!(
+                bare_facts.verb_sinks.is_empty(),
+                "spec seeds verb_sinks for {lang}"
+            );
+            assert!(
+                bare_facts.client_roots.is_empty(),
+                "spec seeds client_roots for {lang}"
+            );
+            assert!(
+                bare_facts.idor_finder_sinks.is_empty(),
+                "spec seeds idor_finder_sinks for {lang}"
+            );
+            assert!(
+                bare_facts.idor_keys.is_empty(),
+                "spec seeds idor_keys for {lang}"
+            );
+            assert!(
+                bare_facts.session_roots.is_empty(),
+                "spec seeds session_roots for {lang}"
+            );
+            assert!(
+                bare_facts.sanitizer_facts.is_empty(),
+                "spec seeds sanitizer_facts for {lang}"
+            );
+            assert!(
+                bare_facts.propagators.is_empty(),
+                "spec seeds propagators for {lang}"
+            );
+            assert!(
+                bare_facts.propagator_blocks_receiver.is_empty(),
+                "spec seeds propagator_blocks_receiver for {lang}"
+            );
+            assert!(
+                bare_facts.route_patterns.is_empty(),
+                "spec seeds route_patterns for {lang}"
+            );
+
+            // 2. Installing this language's pack sections is the only
+            //    source, and it lands exactly the spec's declared values.
             let entries = language_entries_for_spec(spec);
             let mut config = TaintConfig::default();
             let mut facts = FactTable::default();
-            apply_language_entries(&mut config, &mut facts, &entries, &[spec.name()]);
+            apply_language_entries(&mut config, &mut facts, &entries, &[lang]);
 
+            let expected_sources: std::collections::BTreeSet<String> = spec
+                .known_source_patterns()
+                .iter()
+                .chain(spec.request_param_names().iter())
+                .map(|p| (*p).to_string())
+                .collect();
+            let actual_sources: std::collections::BTreeSet<String> =
+                config.sources.iter().cloned().collect();
             assert_eq!(
-                config.sources,
-                base_config.sources,
-                "sources differ for {}",
-                spec.name()
+                actual_sources, expected_sources,
+                "sources differ for {lang}"
             );
+
+            let expected_sinks: std::collections::BTreeSet<String> = spec
+                .known_sink_names()
+                .iter()
+                .map(|(call, _)| call.rsplit('.').next().unwrap_or(call).to_string())
+                .collect();
+            let actual_sinks: std::collections::BTreeSet<String> =
+                config.sinks.iter().cloned().collect();
+            assert_eq!(actual_sinks, expected_sinks, "sinks differ for {lang}");
+
+            let expected_sanitizers: std::collections::BTreeSet<String> = spec
+                .known_sanitizer_names()
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect();
+            let actual_sanitizers: std::collections::BTreeSet<String> =
+                config.sanitizers.iter().cloned().collect();
             assert_eq!(
-                config.sinks,
-                base_config.sinks,
-                "sinks differ for {}",
-                spec.name()
+                actual_sanitizers, expected_sanitizers,
+                "sanitizers differ for {lang}"
             );
-            assert_eq!(
-                config.sanitizers,
-                base_config.sanitizers,
-                "sanitizers differ for {}",
-                spec.name()
+
+            assert!(
+                !facts.sink_signatures.is_empty(),
+                "pack install must populate sink_signatures for {lang}"
             );
-            assert_eq!(
-                facts.sink_signatures,
-                base_facts.sink_signatures,
-                "sink_signatures differ for {}",
-                spec.name()
+            assert!(
+                !facts.sanitizer_facts.is_empty(),
+                "pack install must populate sanitizer_facts for {lang}"
             );
-            assert_eq!(
-                facts.receiver_roles,
-                base_facts.receiver_roles,
-                "receiver_roles differ for {}",
-                spec.name()
-            );
-            assert_eq!(
-                facts.verb_sinks,
-                base_facts.verb_sinks,
-                "verb_sinks differ for {}",
-                spec.name()
-            );
-            assert_eq!(
-                facts.client_roots,
-                base_facts.client_roots,
-                "client_roots differ for {}",
-                spec.name()
-            );
-            assert_eq!(
-                facts.idor_finder_sinks,
-                base_facts.idor_finder_sinks,
-                "idor_finder_sinks differ for {}",
-                spec.name()
-            );
-            assert_eq!(
-                facts.idor_keys,
-                base_facts.idor_keys,
-                "idor_keys differ for {}",
-                spec.name()
-            );
-            assert_eq!(
-                facts.session_roots,
-                base_facts.session_roots,
-                "session_roots differ for {}",
-                spec.name()
-            );
-            assert_eq!(
-                facts.sanitizer_facts,
-                base_facts.sanitizer_facts,
-                "sanitizer_facts differ for {}",
-                spec.name()
-            );
-            assert_eq!(
-                facts.propagators,
-                base_facts.propagators,
-                "propagators differ for {}",
-                spec.name()
-            );
-            assert_eq!(
-                facts.propagator_blocks_receiver,
-                base_facts.propagator_blocks_receiver,
-                "propagator_blocks_receiver differ for {}",
-                spec.name()
-            );
-            // Route patterns have no spec-seed counterpart yet (the harness
+
+            // 3. Spot-check the sink signatures the pack installed: every
+            //    spec sink name resolves under its full path with the
+            //    spec's role, every per-slot rule keeps its slots, and the
+            //    last segment resolves to some signature (bare-wins rule:
+            //    a dotted entry's last segment may carry a different role
+            //    when a bare entry owns the shared name).
+            for (call, label) in spec.known_sink_names() {
+                let last = call.rsplit('.').next().unwrap_or(call);
+                let sig = facts
+                    .sink_signature(call)
+                    .unwrap_or_else(|| panic!("{call} must be a sink for {lang}"));
+                assert_eq!(
+                    sig.role,
+                    SinkRole::from_label(*label),
+                    "role for {call} ({lang})"
+                );
+                assert!(
+                    facts.sink_signature(last).is_some(),
+                    "last-segment alias for {call} ({lang}) must resolve"
+                );
+            }
+            for (call, slots, binding_safe) in spec.known_sink_signatures() {
+                let sig = facts
+                    .sink_signature(call)
+                    .unwrap_or_else(|| panic!("{call} must have a signature for {lang}"));
+                let expected_slots: std::collections::BTreeSet<usize> =
+                    slots.iter().copied().collect();
+                let actual_slots: std::collections::BTreeSet<usize> =
+                    sig.dangerous_args.iter().copied().collect();
+                assert_eq!(
+                    actual_slots, expected_slots,
+                    "dangerous args for {call} ({lang})"
+                );
+                assert_eq!(
+                    sig.binding_args_safe, *binding_safe,
+                    "binding safety for {call} ({lang})"
+                );
+            }
+            for (call, keys) in spec.known_idor_sinks() {
+                assert!(
+                    facts.is_idor_finder_sink(call),
+                    "{call} must be an IDOR finder sink for {lang}"
+                );
+                for key in keys.iter() {
+                    assert!(
+                        facts.is_idor_key(key),
+                        "{key} must be an identity key for {lang}"
+                    );
+                }
+            }
+            for root in spec.known_session_roots() {
+                assert!(
+                    facts.session_roots.contains(*root),
+                    "{root} must be a session root for {lang}"
+                );
+            }
+            for prop in spec.propagator_rules() {
+                assert!(
+                    facts.propagators.contains_key(prop.call),
+                    "{} must be a propagator for {lang}",
+                    prop.call
+                );
+            }
+
+            // Route patterns have no spec-seed counterpart (the harness
             // still reads the spec directly): the pack must carry exactly
             // what the spec declares, keyed by language name.
             let expected: Vec<String> = spec
@@ -670,17 +758,8 @@ mod tests {
                 .iter()
                 .map(|p| (*p).to_string())
                 .collect();
-            let actual = facts
-                .route_patterns
-                .get(spec.name())
-                .cloned()
-                .unwrap_or_default();
-            assert_eq!(
-                actual,
-                expected,
-                "route_patterns differ for {}",
-                spec.name()
-            );
+            let actual = facts.route_patterns.get(lang).cloned().unwrap_or_default();
+            assert_eq!(actual, expected, "route_patterns differ for {lang}");
         }
     }
 

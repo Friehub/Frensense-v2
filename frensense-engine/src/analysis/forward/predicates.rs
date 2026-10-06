@@ -511,7 +511,7 @@ fn def_of(ir: &FunctionIR, v: VarId) -> Option<&Instruction> {
 }
 
 /// True when `path` names an auth call per the spec/bundle vocabulary
-/// (`facts.auth_guard_hints`, seeded by `fact_table_from_spec`).
+/// (`facts.auth_guard_hints`, seeded by the default pack).
 fn auth_path_matches(path: &str, facts: &FactTable) -> bool {
     let lower = path.to_ascii_lowercase();
     facts.auth_guard_hints.iter().any(|h| lower.contains(h))

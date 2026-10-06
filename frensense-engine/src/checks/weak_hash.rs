@@ -25,7 +25,7 @@ use crate::ir::function::{FunctionIR, Instruction, Operand};
 
 // Weak-hash, key-size and insecure-selector policy tables are FACT DATA:
 // the engine reads only `FactTable` fields, seeded by the language spec
-// (`fact_table_from_spec`) and extended by `.frc` bundles. No bootstrap
+// (the default pack) and extended by `.frc` bundles. No bootstrap
 // vocabulary is referenced from this module.
 
 fn strip_quotes(lit: &str) -> &str {

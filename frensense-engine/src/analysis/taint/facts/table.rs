@@ -752,41 +752,48 @@ pub enum LearnedFactEntry {
         call: String,
         role: String,
     },
-    /// Per-slot sink rules for one language (the `known_sink_signatures`
-    /// table): which argument slots are dangerous / binding-safe.
+    /// Per-slot sink rules for one language (generated from
+    /// `LanguageSpec::known_sink_signatures`): which argument slots are
+    /// dangerous / binding-safe.
     LanguageSinkSlots {
         language: String,
         call: String,
         dangerous_args: BTreeSet<usize>,
         binding_args_safe: bool,
     },
-    /// An IDOR-class finder sink for one language (`known_idor_sinks`).
+    /// An IDOR-class finder sink for one language (generated from
+    /// `LanguageSpec::known_idor_sinks`).
     LanguageIdorSink {
         language: String,
         call: String,
         keys: Vec<String>,
     },
-    /// A taint source pattern for one language (`known_source_patterns`
-    /// and the conventional request-parameter names).
+    /// A taint source pattern for one language (generated from
+    /// `LanguageSpec::known_source_patterns` and the conventional
+    /// request-parameter names).
     LanguageSource { language: String, pattern: String },
-    /// A sanitizer call for one language (`known_sanitizer_names`, with the
-    /// predicate-guard classification precomputed by the pack generator).
+    /// A sanitizer call for one language (generated from
+    /// `LanguageSpec::known_sanitizer_names`, with the predicate-guard
+    /// classification precomputed by the pack generator).
     LanguageSanitizer {
         language: String,
         call: String,
         guard_style: bool,
     },
-    /// A taint propagator rule for one language (`propagator_rules`).
+    /// A taint propagator rule for one language (generated from
+    /// `LanguageSpec::propagator_rules`).
     LanguagePropagator {
         language: String,
         call: String,
         tainted_arg: Option<usize>,
         tainted_receiver: bool,
     },
-    /// A session-root accessor for one language (`known_session_roots`).
+    /// A session-root accessor for one language (generated from
+    /// `LanguageSpec::known_session_roots`).
     LanguageSessionRoot { language: String, root: String },
-    /// A route-registration call pattern for one language
-    /// (`route_registration_patterns`), keyed for the lowering harness.
+    /// A route-registration call pattern for one language (generated from
+    /// `LanguageSpec::route_registration_patterns`), keyed for the lowering
+    /// harness.
     LanguageRoutePattern { language: String, pattern: String },
 }
 
