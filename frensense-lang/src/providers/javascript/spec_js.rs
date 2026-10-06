@@ -154,64 +154,6 @@ impl LanguageSpec for JavaScriptSpec {
         JS_SESSION_ROOTS
     }
 
-    fn route_context_hints(&self) -> &'static [&'static str] {
-        &[
-            "(req, res)",
-            "app.get(",
-            "router.get(",
-            "app.post(",
-            "router.post(",
-            "res.send",
-            "res.json",
-            "res.status",
-            "c.req",
-            "c.json",
-            "ctx.body",
-            "ctx.response",
-            "fastify.get(",
-            "fastify.post(",
-            "export async function GET(",
-            "export async function POST(",
-            "export async function PUT(",
-            "export async function DELETE(",
-            "export async function PATCH(",
-            "export default function handler(",
-            "publicProcedure.input(",
-            "protectedProcedure.input(",
-            "t.procedure",
-            "Query: {",
-            "Mutation: {",
-            "Subscription: {",
-            "resolve(",
-            "export async function loader(",
-            "export async function action(",
-            "export async function load(",
-            "export const GET = ",
-            "export const POST = ",
-            "io.on('connection'",
-            "socket.on(",
-            "Bun.serve(",
-            "Deno.serve(",
-            "Deno.serve({ handler",
-        ]
-    }
-
-    fn test_context_hints(&self) -> &'static [&'static str] {
-        TypeScriptSpec.test_context_hints()
-    }
-
-    fn response_method_names(&self) -> &'static [&'static str] {
-        TypeScriptSpec.response_method_names()
-    }
-
-    fn db_api_method_names(&self) -> &'static [&'static str] {
-        TypeScriptSpec.db_api_method_names()
-    }
-
-    fn shell_api_method_names(&self) -> &'static [&'static str] {
-        TypeScriptSpec.shell_api_method_names()
-    }
-
     fn route_registration_patterns(&self) -> &'static [&'static str] {
         TypeScriptSpec.route_registration_patterns()
     }

@@ -730,41 +730,7 @@ pub trait LanguageSpec: Send + Sync + 'static {
         &[]
     }
 
-    // ── Context hints ─────────────────────────────────────────────────────
-
-    /// Text strings whose presence in a source file suggests an HTTP handler
-    /// context.  Used by the text-based context detector as a fast first pass.
-    fn route_context_hints(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    /// Text strings indicating a test / spec file.
-    fn test_context_hints(&self) -> &'static [&'static str] {
-        &[]
-    }
-
     // ── Engine knowledge not yet covered by spec ─────────────────────────────
-
-    /// HTTP response method names for this language.
-    ///
-    /// Returns `&[]` for languages without HTTP framework conventions.
-    fn response_method_names(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    /// Database API method names.
-    ///
-    /// Returns `&[]` for languages without standard DB API conventions.
-    fn db_api_method_names(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    /// Shell execution API names.
-    ///
-    /// Returns `&[]` for languages without standard shell execution APIs.
-    fn shell_api_method_names(&self) -> &'static [&'static str] {
-        &[]
-    }
 
     /// Route registration call patterns (e.g. `"app.get("`, `"router.post("`).
     ///

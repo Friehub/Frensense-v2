@@ -401,22 +401,6 @@ impl LanguageSpec for CSpec {
         &["atoi", "atol", "atof", "strtol", "strtoul"]
     }
 
-    fn test_context_hints(&self) -> &'static [&'static str] {
-        &["CU_ASSERT", "assert(", "TEST(", "EXPECT_", "mu_assert"]
-    }
-
-    fn response_method_names(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    fn db_api_method_names(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    fn shell_api_method_names(&self) -> &'static [&'static str] {
-        &[]
-    }
-
     fn route_registration_patterns(&self) -> &'static [&'static str] {
         &[]
     }

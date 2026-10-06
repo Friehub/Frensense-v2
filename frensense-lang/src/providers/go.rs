@@ -562,7 +562,7 @@ impl LanguageSpec for GoSpec {
 
     fn is_http_route_decorator(&self, _: &str) -> bool {
         // Go has no decorator syntax; route registration is detected via
-        // route_context_hints and the SemanticProvider's call analysis.
+        // route-registration patterns and the call analysis.
         false
     }
 
@@ -773,50 +773,5 @@ impl LanguageSpec for GoSpec {
             "Sanitize",
             "EscapeText",
         ]
-    }
-
-    fn route_context_hints(&self) -> &'static [&'static str] {
-        &[
-            "http.HandleFunc",
-            "http.Handle",
-            "r.GET(",
-            "r.POST(",
-            "r.PUT(",
-            "r.DELETE(", // Gin
-            "e.GET(",
-            "e.POST(", // Echo
-            "app.Get(",
-            "app.Post(", // Fiber
-            "http.ResponseWriter",
-            "*http.Request",
-            "c.JSON(",
-            "c.String(",
-            "c.Status(", // Gin response
-            "c.JSON(",
-            "c.String(", // Echo/Fiber response
-        ]
-    }
-
-    fn test_context_hints(&self) -> &'static [&'static str] {
-        &[
-            "func Test",
-            "testing.T",
-            "t.Error(",
-            "t.Fatal(",
-            "t.Run(",
-            "testify",
-        ]
-    }
-
-    fn response_method_names(&self) -> &'static [&'static str] {
-        &["WriteHeader", "SetCookie", "WriteString", "ServeHTTP"]
-    }
-
-    fn db_api_method_names(&self) -> &'static [&'static str] {
-        &["QueryRow", "Exec", "Begin", "First", "Updates"]
-    }
-
-    fn shell_api_method_names(&self) -> &'static [&'static str] {
-        &["Command", "Output", "CombinedOutput", "Start"]
     }
 }
