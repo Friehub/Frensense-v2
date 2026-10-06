@@ -18,6 +18,7 @@
 //! registered spec, sorted by language name for byte-determinism.
 
 mod data;
+mod vocab;
 
 use frensense_bundler::format::{write_bundle, BundlePayloadV5};
 use frensense_engine::analysis::taint::facts::{
@@ -231,7 +232,14 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
         frensense_lang::all_specs().collect();
     specs.sort_unstable_by_key(|spec| spec.name());
     for spec in specs {
-        entries.extend(language_entries_for_spec(spec));
+        // Phase 6.3b/6.3c: extracted languages emit from the generator's
+        // static vocabulary (parity-proven equal to the spec-derived
+        // path in `vocab`'s test); the rest still read their specs.
+        entries.extend(match spec.name() {
+            "javascript" => vocab::entries_for_static(vocab::javascript()),
+            "typescript" => vocab::entries_for_static(vocab::typescript()),
+            _ => language_entries_for_spec(spec),
+        });
     }
     entries
 }
