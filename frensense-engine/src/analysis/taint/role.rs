@@ -12,3 +12,39 @@
 //! only the type on its findings - zero tier strings.
 
 pub use frensense_lang::severity::SinkRole;
+
+/// Parse the snake_case [`SinkRole`] name the default-pack generator
+/// serializes on [`crate::analysis::taint::facts::LearnedFactEntry::LanguageSink`]
+/// (the serde wire form). Unknown names keep the conservative default.
+#[must_use]
+pub fn sink_role_from_name(name: &str) -> SinkRole {
+    match name {
+        "execution" => SinkRole::Execution,
+        "resource" => SinkRole::Resource,
+        "storage" => SinkRole::Storage,
+        "crypto" => SinkRole::Crypto,
+        "response" => SinkRole::Response,
+        "xss" => SinkRole::Xss,
+        "validation" => SinkRole::Validation,
+        _ => SinkRole::Other,
+    }
+}
+
+/// The snake_case wire name of a [`SinkRole`] - the inverse of
+/// [`sink_role_from_name`]. The default-pack generator serializes this
+/// onto [`crate::analysis::taint::facts::LearnedFactEntry::LanguageSink`],
+/// so the pack stores role names instead of serde enum indices (bundle
+/// stability across enum reorders).
+#[must_use]
+pub fn sink_role_name(role: SinkRole) -> &'static str {
+    match role {
+        SinkRole::Execution => "execution",
+        SinkRole::Resource => "resource",
+        SinkRole::Storage => "storage",
+        SinkRole::Crypto => "crypto",
+        SinkRole::Response => "response",
+        SinkRole::Xss => "xss",
+        SinkRole::Validation => "validation",
+        SinkRole::Other => "other",
+    }
+}

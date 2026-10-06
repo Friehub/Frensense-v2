@@ -136,6 +136,10 @@ pub struct FactTable {
     /// Stack-frame allocators (`alloca`, ...) seeded from the spec's
     /// `known_stack_allocators`; leak-style checkers exclude them.
     pub stack_allocators: Vec<String>,
+    /// Route-registration call patterns per language
+    /// (`(language or "*", patterns)`), default-pack-seeded (Phase 6.2);
+    /// the lowering harness unions these with the spec's route verbs.
+    pub route_patterns: FxHashMap<String, Vec<String>>,
     /// Collection constructors (`Set`, `Map`) seeded from the spec's
     /// `known_collection_constructors`; the allowlist-definition check
     /// reads their literal elements.
@@ -361,6 +365,14 @@ impl FactTable {
             .extend(other.learned_sources.iter().cloned());
         for (k, v) in &other.grammar_roles {
             self.grammar_roles.insert(k.clone(), v.clone());
+        }
+        for (lang, pats) in &other.route_patterns {
+            let slot = self.route_patterns.entry(lang.clone()).or_default();
+            for p in pats {
+                if !slot.contains(p) {
+                    slot.push(p.clone());
+                }
+            }
         }
         for (k, v) in &other.grammar_features {
             self.grammar_features
@@ -726,6 +738,56 @@ pub enum LearnedFactEntry {
         src_arg: Option<usize>,
         len_arg: usize,
     },
+
+    // ── Phase 6.2: language-keyed default-pack knowledge ──────────────────
+    // These variants carry the per-language provider tables that used to
+    // seed through `LanguageSpec::known_*` methods. They are applied by
+    // `apply_language_entries` (config + facts together), filtered by the
+    // scan's languages; `"*"` matches every language. Family bundles keep
+    // using the language-agnostic variants above.
+    /// An all-arguments dangerous sink for one language, with the role the
+    /// spec seed derived from its `SinkLabel` (snake_case [`SinkRole`] name).
+    LanguageSink {
+        language: String,
+        call: String,
+        role: String,
+    },
+    /// Per-slot sink rules for one language (the `known_sink_signatures`
+    /// table): which argument slots are dangerous / binding-safe.
+    LanguageSinkSlots {
+        language: String,
+        call: String,
+        dangerous_args: BTreeSet<usize>,
+        binding_args_safe: bool,
+    },
+    /// An IDOR-class finder sink for one language (`known_idor_sinks`).
+    LanguageIdorSink {
+        language: String,
+        call: String,
+        keys: Vec<String>,
+    },
+    /// A taint source pattern for one language (`known_source_patterns`
+    /// and the conventional request-parameter names).
+    LanguageSource { language: String, pattern: String },
+    /// A sanitizer call for one language (`known_sanitizer_names`, with the
+    /// predicate-guard classification precomputed by the pack generator).
+    LanguageSanitizer {
+        language: String,
+        call: String,
+        guard_style: bool,
+    },
+    /// A taint propagator rule for one language (`propagator_rules`).
+    LanguagePropagator {
+        language: String,
+        call: String,
+        tainted_arg: Option<usize>,
+        tainted_receiver: bool,
+    },
+    /// A session-root accessor for one language (`known_session_roots`).
+    LanguageSessionRoot { language: String, root: String },
+    /// A route-registration call pattern for one language
+    /// (`route_registration_patterns`), keyed for the lowering harness.
+    LanguageRoutePattern { language: String, pattern: String },
 }
 
 impl LearnedFactEntry {
@@ -1104,6 +1166,19 @@ impl LearnedFactEntry {
                     table.buffer_builtins.push(fact);
                 }
             }
+            // Language-keyed pack knowledge is installed by
+            // `apply_language_entries` (config + facts together, filtered
+            // by the scan's languages); the language-agnostic bundle path
+            // ignores it so a family bundle can never pollute another
+            // language's tables.
+            LearnedFactEntry::LanguageSink { .. }
+            | LearnedFactEntry::LanguageSinkSlots { .. }
+            | LearnedFactEntry::LanguageIdorSink { .. }
+            | LearnedFactEntry::LanguageSource { .. }
+            | LearnedFactEntry::LanguageSanitizer { .. }
+            | LearnedFactEntry::LanguagePropagator { .. }
+            | LearnedFactEntry::LanguageSessionRoot { .. }
+            | LearnedFactEntry::LanguageRoutePattern { .. } => {}
         }
     }
 }

@@ -354,5 +354,30 @@ pub fn fact_key(e: &LearnedFactEntry) -> (String, String) {
             ("hash_wrappers".into(), calls.join(","))
         }
         LearnedFactEntry::BufferBuiltin { name, .. } => ("buffer_builtin".into(), name.clone()),
+        LearnedFactEntry::LanguageSink { language, call, .. } => {
+            ("language_sink".into(), format!("{language}:{call}"))
+        }
+        LearnedFactEntry::LanguageSinkSlots { language, call, .. } => {
+            ("language_sink_slots".into(), format!("{language}:{call}"))
+        }
+        LearnedFactEntry::LanguageIdorSink { language, call, .. } => {
+            ("language_idor_sink".into(), format!("{language}:{call}"))
+        }
+        LearnedFactEntry::LanguageSource { language, pattern } => {
+            ("language_source".into(), format!("{language}:{pattern}"))
+        }
+        LearnedFactEntry::LanguageSanitizer { language, call, .. } => {
+            ("language_sanitizer".into(), format!("{language}:{call}"))
+        }
+        LearnedFactEntry::LanguagePropagator { language, call, .. } => {
+            ("language_propagator".into(), format!("{language}:{call}"))
+        }
+        LearnedFactEntry::LanguageSessionRoot { language, root } => {
+            ("language_session_root".into(), format!("{language}:{root}"))
+        }
+        LearnedFactEntry::LanguageRoutePattern { language, pattern } => (
+            "language_route_pattern".into(),
+            format!("{language}:{pattern}"),
+        ),
     }
 }

@@ -33,6 +33,94 @@ fn owned(vals: &[&str]) -> Vec<String> {
     vals.iter().map(|s| (*s).to_string()).collect()
 }
 
+/// Emit the language-keyed provider knowledge for one spec as
+/// [`LearnedFactEntry`]s (Phase 6.2): the per-language sink, source,
+/// sanitizer, propagator, session-root and route-registration tables that
+/// used to seed through `LanguageSpec::known_*` methods.
+///
+/// Emission order is the install order `apply_language_entries` expects:
+/// all sink names first (roles resolved from `SinkLabel` via the engine's
+/// snake_case role names), then per-slot rules (which inherit the role of
+/// the just-installed name entry), idor sinks (which attach keys to those
+/// signatures), sources, sanitizers (guard style precomputed via the
+/// spec-owned predicate-guard classifier), propagators, session roots and
+/// route patterns.
+pub fn language_entries_for_spec(
+    spec: &dyn frensense_lang::spec::LanguageSpec,
+) -> Vec<LearnedFactEntry> {
+    use frensense_engine::analysis::taint::role::sink_role_name;
+    use frensense_lang::severity::SinkRole;
+
+    let language = spec.name().to_string();
+    let mut entries = Vec::new();
+    for (call, label) in spec.known_sink_names() {
+        entries.push(LearnedFactEntry::LanguageSink {
+            language: language.clone(),
+            call: (*call).to_string(),
+            role: sink_role_name(SinkRole::from_label(*label)).to_string(),
+        });
+    }
+    for (call, slots, binding_safe) in spec.known_sink_signatures() {
+        entries.push(LearnedFactEntry::LanguageSinkSlots {
+            language: language.clone(),
+            call: (*call).to_string(),
+            dangerous_args: slots.iter().copied().collect(),
+            binding_args_safe: *binding_safe,
+        });
+    }
+    for (call, keys) in spec.known_idor_sinks() {
+        entries.push(LearnedFactEntry::LanguageIdorSink {
+            language: language.clone(),
+            call: (*call).to_string(),
+            keys: keys.iter().map(|s| (*s).to_string()).collect(),
+        });
+    }
+    // Sources: conventional request-parameter names are sources too, and
+    // `config_from_spec` folds both tables into the same set.
+    for p in spec.known_source_patterns() {
+        entries.push(LearnedFactEntry::LanguageSource {
+            language: language.clone(),
+            pattern: (*p).to_string(),
+        });
+    }
+    for p in spec.request_param_names() {
+        entries.push(LearnedFactEntry::LanguageSource {
+            language: language.clone(),
+            pattern: (*p).to_string(),
+        });
+    }
+    for name in spec.known_sanitizer_names() {
+        let classified = spec.classify_sanitizer(name);
+        let guard_style = spec.is_predicate_guard(name, classified.as_ref());
+        entries.push(LearnedFactEntry::LanguageSanitizer {
+            language: language.clone(),
+            call: (*name).to_string(),
+            guard_style,
+        });
+    }
+    for prop in spec.propagator_rules() {
+        entries.push(LearnedFactEntry::LanguagePropagator {
+            language: language.clone(),
+            call: prop.call.to_string(),
+            tainted_arg: prop.tainted_arg,
+            tainted_receiver: prop.tainted_receiver,
+        });
+    }
+    for root in spec.known_session_roots() {
+        entries.push(LearnedFactEntry::LanguageSessionRoot {
+            language: language.clone(),
+            root: (*root).to_string(),
+        });
+    }
+    for pattern in spec.route_registration_patterns() {
+        entries.push(LearnedFactEntry::LanguageRoutePattern {
+            language: language.clone(),
+            pattern: (*pattern).to_string(),
+        });
+    }
+    entries
+}
+
 /// The default pack's entries, generated from lang's bootstrap tables.
 /// Deterministic (static iteration order) so the committed asset and the
 /// drift test agree byte-for-byte.
@@ -184,8 +272,10 @@ pub fn default_pack() -> &'static LoadedBundle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use frensense_engine::analysis::taint::config::TaintConfig;
     use frensense_engine::analysis::taint::facts::{
-        fact_table_from_entries, fact_table_from_entries_with, tables_from_exts, FactTable,
+        apply_language_entries, config_from_spec, fact_table_from_entries,
+        fact_table_from_entries_with, fact_table_from_spec, tables_from_exts, FactTable,
         Provenance,
     };
     use frensense_engine::checks::memory_summary::MemorySummaryRegistry;
@@ -463,5 +553,152 @@ mod tests {
                 "memory summaries drifted for {ext}"
             );
         }
+    }
+
+    /// Phase 6.2 contract: installing a spec's language-keyed pack entries
+    /// via [`apply_language_entries`] reproduces exactly what the
+    /// provider-knowledge halves of [`config_from_spec`] and
+    /// [`fact_table_from_spec`] seeded before those bodies moved into the
+    /// pack. Covers every registered language; the structural vocabularies
+    /// (stack allocators, guard denylist, ...) are spec-seeded by design
+    /// and out of scope here.
+    #[test]
+    fn language_pack_entries_parity_with_spec_seed() {
+        for spec in frensense_lang::all_specs() {
+            let base_config = config_from_spec(spec);
+            let base_facts = fact_table_from_spec(spec);
+
+            let entries = language_entries_for_spec(spec);
+            let mut config = TaintConfig::default();
+            let mut facts = FactTable::default();
+            apply_language_entries(&mut config, &mut facts, &entries, &[spec.name()]);
+
+            assert_eq!(
+                config.sources,
+                base_config.sources,
+                "sources differ for {}",
+                spec.name()
+            );
+            assert_eq!(
+                config.sinks,
+                base_config.sinks,
+                "sinks differ for {}",
+                spec.name()
+            );
+            assert_eq!(
+                config.sanitizers,
+                base_config.sanitizers,
+                "sanitizers differ for {}",
+                spec.name()
+            );
+            assert_eq!(
+                facts.sink_signatures,
+                base_facts.sink_signatures,
+                "sink_signatures differ for {}",
+                spec.name()
+            );
+            assert_eq!(
+                facts.receiver_roles,
+                base_facts.receiver_roles,
+                "receiver_roles differ for {}",
+                spec.name()
+            );
+            assert_eq!(
+                facts.verb_sinks,
+                base_facts.verb_sinks,
+                "verb_sinks differ for {}",
+                spec.name()
+            );
+            assert_eq!(
+                facts.client_roots,
+                base_facts.client_roots,
+                "client_roots differ for {}",
+                spec.name()
+            );
+            assert_eq!(
+                facts.idor_finder_sinks,
+                base_facts.idor_finder_sinks,
+                "idor_finder_sinks differ for {}",
+                spec.name()
+            );
+            assert_eq!(
+                facts.idor_keys,
+                base_facts.idor_keys,
+                "idor_keys differ for {}",
+                spec.name()
+            );
+            assert_eq!(
+                facts.session_roots,
+                base_facts.session_roots,
+                "session_roots differ for {}",
+                spec.name()
+            );
+            assert_eq!(
+                facts.sanitizer_facts,
+                base_facts.sanitizer_facts,
+                "sanitizer_facts differ for {}",
+                spec.name()
+            );
+            assert_eq!(
+                facts.propagators,
+                base_facts.propagators,
+                "propagators differ for {}",
+                spec.name()
+            );
+            assert_eq!(
+                facts.propagator_blocks_receiver,
+                base_facts.propagator_blocks_receiver,
+                "propagator_blocks_receiver differ for {}",
+                spec.name()
+            );
+            // Route patterns have no spec-seed counterpart yet (the harness
+            // still reads the spec directly): the pack must carry exactly
+            // what the spec declares, keyed by language name.
+            let expected: Vec<String> = spec
+                .route_registration_patterns()
+                .iter()
+                .map(|p| (*p).to_string())
+                .collect();
+            let actual = facts
+                .route_patterns
+                .get(spec.name())
+                .cloned()
+                .unwrap_or_default();
+            assert_eq!(
+                actual,
+                expected,
+                "route_patterns differ for {}",
+                spec.name()
+            );
+        }
+    }
+
+    /// The wildcard group installs before language groups, and a language
+    /// absent from the scan's language set is filtered out entirely.
+    #[test]
+    fn language_entries_filter_by_language_with_wildcard_first() {
+        let entries = vec![
+            LearnedFactEntry::LanguageSink {
+                language: "*".to_string(),
+                call: "shared.eval".to_string(),
+                role: "execution".to_string(),
+            },
+            LearnedFactEntry::LanguageSink {
+                language: "go".to_string(),
+                call: "os/exec.Command".to_string(),
+                role: "execution".to_string(),
+            },
+        ];
+        let mut config = TaintConfig::default();
+        let mut facts = FactTable::default();
+        apply_language_entries(&mut config, &mut facts, &entries, &["typescript"]);
+        assert!(
+            config.sinks.contains("eval"),
+            "wildcard sink installs for any language"
+        );
+        assert!(
+            !config.sinks.contains("Command"),
+            "go-only sink filtered out of a typescript scan"
+        );
     }
 }
