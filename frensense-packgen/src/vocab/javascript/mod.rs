@@ -7,9 +7,9 @@
 //! this static data is the sole source).
 //!
 //! JavaScript and TypeScript share one vocabulary set - in lang, both
-//! specs returned the same statics (the JS spec even delegated
-//! `request_param_names` / `route_registration_patterns` to the TS
-//! spec) - so one vocabulary definition backs two pack language keys.
+//! specs returned the same statics (the JS spec even delegated its
+//! request-param and route-pattern tables to the TS spec) - so one
+//! vocabulary definition backs two pack language keys.
 
 mod propagators;
 mod sanitizers;
@@ -17,14 +17,15 @@ mod tables;
 
 use super::LanguageVocab;
 
-/// The conventional request-parameter source names, verbatim from
-/// `spec_ts.rs::request_param_names` (both specs emit them).
+/// The conventional request-parameter source names, formerly
+/// `spec_ts.rs::request_param_names` (both specs emitted them).
 static REQUEST_PARAM_NAMES: &[&str] = &[
     "req", "request", "ctx", "context", "event", "c", "e", "r", "input", "args", "parent", "info",
 ];
 
-/// The route-registration call shapes, verbatim from
-/// `spec_ts.rs::route_registration_patterns` (both specs emit them).
+/// The route-registration call shapes, formerly
+/// `spec_ts.rs::route_registration_patterns` (both specs emitted them).
+/// The harness reads these from `FactTable::route_patterns` (Phase 6.4).
 static ROUTE_PATTERNS: &[&str] = &[
     "app.get(",
     "app.post(",

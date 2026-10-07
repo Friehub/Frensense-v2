@@ -52,7 +52,9 @@ pub fn propose_with_trace(
     // Memory allocation / deallocation wrapper discovery from corpus examples:
     let mut family_irs = Vec::new();
     for (path, src, ext) in family.positives.iter().chain(family.negatives.iter()) {
-        if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
+        if let Ok(fns) =
+            frensense_engine::harness::lower_source_with_facts(path, src, ext, Some(builtin))
+        {
             // Sort by function name: `lower_source` returns an
             // `FxHashMap` whose iteration order is insertion- and
             // hasher-dependent, and IR order feeds summary inference plus
@@ -125,8 +127,8 @@ pub fn propose_with_trace(
 
     // Guard/transform calls present in negatives but not in positives,
     // these are likely the *reason* the negative is safe.
-    let pos_calls = collect_calls(&family.positives);
-    let neg_calls = collect_calls(&family.negatives);
+    let pos_calls = collect_calls(&family.positives, Some(builtin));
+    let neg_calls = collect_calls(&family.negatives, Some(builtin));
     for (call, shape) in &neg_calls {
         if pos_calls.contains_key(call) {
             notes.push(format!(
@@ -253,7 +255,7 @@ pub fn propose_with_trace(
                 family
                     .negatives
                     .iter()
-                    .map(|v| collect_calls(std::slice::from_ref(v)))
+                    .map(|v| collect_calls(std::slice::from_ref(v), Some(builtin)))
                     .all(|calls| calls.contains_key(g))
             };
             let mut eligible_guards: Vec<&String> = neg_calls
@@ -278,7 +280,7 @@ pub fn propose_with_trace(
             if family
                 .negatives
                 .iter()
-                .any(|v| variant_has_range_check_on_call(&[v.clone()], call))
+                .any(|v| variant_has_range_check_on_call(&[v.clone()], call, Some(builtin)))
             {
                 unless_range_check = Some(vec!["<".into(), ">".into(), "<=".into(), ">=".into()]);
             }
@@ -328,7 +330,7 @@ pub fn propose_with_trace(
                 family
                     .negatives
                     .iter()
-                    .map(|v| collect_calls(std::slice::from_ref(v)))
+                    .map(|v| collect_calls(std::slice::from_ref(v), Some(builtin)))
                     .all(|calls| calls.contains_key(g))
             };
             // Shape (b-native): required guard call in the same function.
@@ -402,7 +404,9 @@ pub fn propose_with_trace(
             // enforcement lives outside the trigger's function, so the fact
             // uses Module scope (the engine accepts the definition site as
             // enforcement evidence).
-            if let Some(helper) = cross_function_helper(family, &pos_calls, &neg_calls) {
+            if let Some(helper) =
+                cross_function_helper(family, &pos_calls, &neg_calls, Some(builtin))
+            {
                 if builtin.sanitizer_fact(&helper).is_none() {
                     candidates.push(Candidate::Policy {
                         rule: format!("policy_{trigger}_with_{helper}"),
@@ -423,7 +427,9 @@ pub fn propose_with_trace(
 
     let mut pos_irs = Vec::new();
     for (path, src, ext) in &family.positives {
-        if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
+        if let Ok(fns) =
+            frensense_engine::harness::lower_source_with_facts(path, src, ext, Some(builtin))
+        {
             let mut fns: Vec<_> = fns.into_iter().collect();
             fns.sort_by(|a, b| a.0.cmp(&b.0));
             pos_irs.extend(fns.into_iter().map(|(_, ir)| ir));
@@ -431,7 +437,9 @@ pub fn propose_with_trace(
     }
     let mut neg_irs = Vec::new();
     for (path, src, ext) in &family.negatives {
-        if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
+        if let Ok(fns) =
+            frensense_engine::harness::lower_source_with_facts(path, src, ext, Some(builtin))
+        {
             let mut fns: Vec<_> = fns.into_iter().collect();
             fns.sort_by(|a, b| a.0.cmp(&b.0));
             neg_irs.extend(fns.into_iter().map(|(_, ir)| ir));

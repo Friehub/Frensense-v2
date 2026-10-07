@@ -242,10 +242,13 @@
 //!
 //! **After:**
 //! ```rust,ignore
-//! // Route detection - Express-style registration patterns per language
-//! let is_route = spec.route_registration_patterns()
-//!     .iter()
-//!     .any(|p| callee_text.contains(p.trim_end_matches('(')));
+//! // Route detection - Express-style registration patterns come from the
+//! // default pack (FactTable::route_patterns) since Phase 6.4; the spec
+//! // keeps only the mechanism-adjacent verb suffix list
+//! let is_route = spec.known_route_verbs().iter()
+//!     .any(|s| callee_text.ends_with(s))
+//!     || facts.route_patterns.get(spec.name()).is_some_and(|pats|
+//!         pats.iter().any(|p| callee_text.ends_with(p.trim_end_matches('('))));
 //!
 //! // Decorator detection - replaces hardcoded NestJS decorator list
 //! let is_route = spec.is_http_route_decorator(decorator_name);

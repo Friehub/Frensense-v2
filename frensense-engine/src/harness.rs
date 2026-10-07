@@ -78,7 +78,7 @@ pub fn lower_source_with_facts(
             if !is_twin {
                 let name = name.unwrap_or_else(|| format!("<fn@{}>", node.start_byte()));
                 let mut ir = lower_one(&name, node, source, spec, facts);
-                ir.enclosing_fn = enclosing_extracted_name(node, source, path, spec);
+                ir.enclosing_fn = enclosing_extracted_name(node, source, path, spec, facts);
                 insert_ir(&mut irs, ir, node.start_byte());
             }
         }
@@ -106,7 +106,7 @@ pub fn lower_source_with_facts(
                 if value.kind() == "arrow_function" || value.kind() == "function_expression" {
                     bound_fns.insert(value.start_byte());
                     let mut ir = lower_one(&name, value, source, spec, facts);
-                    ir.enclosing_fn = enclosing_extracted_name(value, source, path, spec);
+                    ir.enclosing_fn = enclosing_extracted_name(value, source, path, spec, facts);
                     insert_ir(&mut irs, ir, value.start_byte());
                 } else if !inside_function(node, spec) {
                     // Top-level non-function static initializer: allowlist
@@ -131,7 +131,7 @@ pub fn lower_source_with_facts(
             )
         {
             let callee_text = &source[callee.start_byte()..callee.end_byte()];
-            if is_route_registration(callee_text, spec) {
+            if is_route_registration(callee_text, spec, facts) {
                 let mut ac = args.walk();
                 let arg_nodes: Vec<_> = args.named_children(&mut ac).collect();
                 for a in &arg_nodes {
@@ -139,7 +139,7 @@ pub fn lower_source_with_facts(
                         let name = format!("<{}:handler@{}>", path, a.start_byte());
                         bound_fns.insert(a.start_byte());
                         let mut ir = lower_one(&name, *a, source, spec, facts);
-                        ir.enclosing_fn = enclosing_extracted_name(*a, source, path, spec);
+                        ir.enclosing_fn = enclosing_extracted_name(*a, source, path, spec, facts);
                         insert_ir(&mut irs, ir, a.start_byte());
                     }
                 }
@@ -223,6 +223,7 @@ fn extracted_ancestor_name(
     source: &str,
     path: &str,
     spec: &dyn frensense_lang::spec::LanguageSpec,
+    facts: Option<&FactTable>,
 ) -> Option<String> {
     // Direct declaration name (function_declaration, method_definition,
     // named function expression) - same order as extraction.
@@ -248,7 +249,7 @@ fn extracted_ancestor_name(
         && let Some(call) = args.parent()
         && call.kind() == "call_expression"
         && let Some(callee) = call.child_by_field_name("function")
-        && is_route_registration(&source[callee.start_byte()..callee.end_byte()], spec)
+        && is_route_registration(&source[callee.start_byte()..callee.end_byte()], spec, facts)
     {
         return Some(format!("<{}:handler@{}>", path, fn_node.start_byte()));
     }
@@ -263,18 +264,23 @@ fn enclosing_extracted_name(
     source: &str,
     path: &str,
     spec: &dyn frensense_lang::spec::LanguageSpec,
+    facts: Option<&FactTable>,
 ) -> Option<String> {
     let mut cur = node.parent();
     while let Some(ancestor) = cur {
         if spec.is_function_node(ancestor.kind()) {
-            return extracted_ancestor_name(ancestor, source, path, spec);
+            return extracted_ancestor_name(ancestor, source, path, spec, facts);
         }
         cur = ancestor.parent();
     }
     None
 }
 
-fn is_route_registration(callee_text: &str, spec: &dyn frensense_lang::spec::LanguageSpec) -> bool {
+fn is_route_registration(
+    callee_text: &str,
+    spec: &dyn frensense_lang::spec::LanguageSpec,
+    facts: Option<&FactTable>,
+) -> bool {
     if spec
         .known_route_verbs()
         .iter()
@@ -284,10 +290,15 @@ fn is_route_registration(callee_text: &str, spec: &dyn frensense_lang::spec::Lan
     }
     // Receiver-qualified patterns (`app.patch(`) match on their stem, so
     // they extend the verb list wherever the spec is narrower than the
-    // source dialect.
-    spec.route_registration_patterns()
-        .iter()
-        .any(|p| callee_text.ends_with(p.trim_end_matches('(')))
+    // source dialect. The patterns are pack vocabulary (Phase 6.4): the
+    // default pack installs them into `FactTable::route_patterns` keyed by
+    // language, so bare lowering without facts gets verbs only.
+    facts
+        .and_then(|f| f.route_patterns.get(spec.name()))
+        .is_some_and(|pats| {
+            pats.iter()
+                .any(|p| callee_text.ends_with(p.trim_end_matches('(')))
+        })
 }
 
 fn lower_one(
@@ -414,7 +425,8 @@ fn find_param_identifier(node: tree_sitter::Node<'_>) -> Option<tree_sitter::Nod
 
 #[cfg(test)]
 mod tests {
-    use super::lower_source;
+    use super::{lower_source, lower_source_with_facts};
+    use crate::analysis::taint::facts::seeded_tables;
 
     fn keys(src: &str) -> Vec<String> {
         let fns = lower_source("t.ts", src, "ts").unwrap();
@@ -423,9 +435,11 @@ mod tests {
         ks
     }
 
-    /// The spec's route-registration patterns extend the verb suffix list:
+    /// The pack's route-registration patterns extend the verb suffix list:
     /// `.patch` is not in `known_route_verbs`, so an `app.patch(...)` arrow
-    /// handler only extracts under the pattern stem (`app.patch(`).
+    /// handler only extracts under the pattern stem (`app.patch(`). Since
+    /// Phase 6.4 the patterns come from the seeded fact table (the pack),
+    /// not the language spec.
     #[test]
     fn route_registration_pattern_extracts_handler() {
         let src = r#"
@@ -435,7 +449,8 @@ app.patch("/item", (req, res) => {
   res.send("ok");
 });
 "#;
-        let fns = lower_source("t.ts", src, "ts").unwrap();
+        let (_, facts) = seeded_tables(["ts"]);
+        let fns = lower_source_with_facts("t.ts", src, "ts", Some(&facts)).unwrap();
         let handlers: Vec<&String> = fns.keys().filter(|k| k.contains("handler@")).collect();
         assert!(!handlers.is_empty(), "app.patch handler missing: {fns:?}");
     }

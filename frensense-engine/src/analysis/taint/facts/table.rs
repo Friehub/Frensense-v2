@@ -791,8 +791,9 @@ pub enum LearnedFactEntry {
     /// A session-root accessor for one language (the generator's
     /// per-language session-root vocabulary).
     LanguageSessionRoot { language: String, root: String },
-    /// A route-registration call pattern for one language (generated from
-    /// `LanguageSpec::route_registration_patterns`), keyed for the lowering
+    /// A route-registration call pattern for one language (the generator's
+    /// per-language route vocabulary, formerly read from the language
+    /// spec), keyed for the lowering
     /// harness.
     LanguageRoutePattern { language: String, pattern: String },
 }

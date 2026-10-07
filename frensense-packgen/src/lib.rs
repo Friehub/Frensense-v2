@@ -13,10 +13,11 @@
 //! parses it; this crate is its sole generator, and `packgen --check`
 //! (plus the drift test here) keeps the asset from going stale.
 //!
-//! The one value still read from `frensense-lang` at generation time is
-//! nothing: emission is fully static. (Lang keeps the severity
-//! ladder/tag and `route_registration_patterns` for scan-time readers;
-//! the pack's route patterns are the generator's static copies.)
+//! The pack is now the sole source of provider vocabulary: emission is
+//! fully static, and `frensense-lang` keeps only mechanism (grammar,
+//! node classification, the severity ladder/tag). Scan-time readers
+//! (e.g. the lowering harness's route detection) get their vocabulary
+//! from the installed [`FactTable`] sections, never from lang.
 //!
 //! Emission order is the install order `apply_language_entries` expects
 //! and must never change without regenerating the asset: the

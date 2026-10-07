@@ -110,8 +110,4 @@ impl LanguageSpec for JavaScriptSpec {
     ) -> Option<TaintOrigin> {
         classify_js_param(name, type_annotation)
     }
-
-    fn route_registration_patterns(&self) -> &'static [&'static str] {
-        TypeScriptSpec.route_registration_patterns()
-    }
 }

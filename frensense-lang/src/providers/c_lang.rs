@@ -213,10 +213,6 @@ impl LanguageSpec for CSpec {
         }
     }
 
-    fn route_registration_patterns(&self) -> &'static [&'static str] {
-        &[]
-    }
-
     /// C owns the memory-safety rule domain: temporal (free-then-use,
     /// double-free) and spatial (buffer overflow / out-of-bounds) rules rank
     /// Critical with memory-safety advisory templates.

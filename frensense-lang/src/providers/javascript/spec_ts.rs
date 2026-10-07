@@ -146,18 +146,4 @@ impl LanguageSpec for TypeScriptSpec {
                 | "UseInterceptors"
         )
     }
-
-    fn route_registration_patterns(&self) -> &'static [&'static str] {
-        &[
-            "app.get(",
-            "app.post(",
-            "app.put(",
-            "app.delete(",
-            "app.patch(",
-            "router.get(",
-            "router.post(",
-            "fastify.get(",
-            "hono.get(",
-        ]
-    }
 }

@@ -535,16 +535,6 @@ pub trait LanguageSpec: Send + Sync + 'static {
     fn known_rule_registry(&self) -> &'static [crate::severity::RuleEntry] {
         &[]
     }
-
-    // ── Engine knowledge not yet covered by spec ─────────────────────────────
-
-    /// Route registration call patterns (e.g. `"app.get("`, `"router.post("`).
-    ///
-    /// Returns `&[]` for languages that don't use Express-style registration
-    /// (Go uses `http.HandleFunc`, Python uses `@app.route`, Rust uses macros).
-    fn route_registration_patterns(&self) -> &'static [&'static str] {
-        &[]
-    }
 }
 
 // ── Helper: extract the last segment of a dotted call ────────────────────────

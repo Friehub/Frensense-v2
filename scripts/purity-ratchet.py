@@ -21,8 +21,8 @@ strings and tables until the assertions themselves are rewritten):
                           frensense-lang (knowledge-as-Rust-literals -
                           Phase 5.2/6.1 moves them into the .frc pack)
   lang_provider_refs      provider (security-vocabulary) trait method names
-                          in frensense-lang (Phase 6.3d deleted them; the
-                          vocabulary lives in frensense-packgen)
+                          in frensense-lang (Phases 6.3d/6.4 deleted them;
+                          the vocabulary lives in frensense-packgen)
 
 Usage:
   scripts/purity-ratchet.py            check against baseline (CI mode)
@@ -71,7 +71,7 @@ COUNTERS = [
             r"\b(?:known_sink_names|known_sink_signatures|known_idor_sinks"
             r"|known_session_roots|known_source_patterns|request_param_names"
             r"|known_sanitizer_names|classify_sanitizer|propagator_rules"
-            r"|is_predicate_guard)\b"
+            r"|is_predicate_guard|route_registration_patterns)\b"
         ),
     ),
 ]

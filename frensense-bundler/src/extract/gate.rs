@@ -73,10 +73,10 @@ impl PreparedFamily {
         let neg = scan::prepare(&f.negatives)?;
         let mut calls = BTreeSet::new();
         calls.extend(
-            collect_calls(&f.positives)
+            collect_calls(&f.positives, None)
                 .keys()
                 .cloned()
-                .chain(collect_calls(&f.negatives).keys().cloned()),
+                .chain(collect_calls(&f.negatives, None).keys().cloned()),
         );
         Ok(Self {
             id: f.id.clone(),
