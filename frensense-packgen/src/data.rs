@@ -336,3 +336,41 @@ pub static BOOTSTRAP_BUFFER_BUILTINS: std::sync::LazyLock<Vec<BufferBuiltinSpec>
             bi("read", Some(1), None, 2),
         ]
     });
+
+// ── Structural vocabularies (Phase 6.5) ────────────────────────────────────────
+//
+// The seven tables that used to seed from the `LanguageSpec` trait
+// defaults (`known_guard_denylist`, `known_stack_allocators`, ...).
+// Moved verbatim in Phase 6.5 so the bare spec seed carries no data at
+// all: the pack's language-agnostic entries are their only home.
+
+/// Guard-denylist markers: comparing user input against a literal that
+/// contains one of these rejects the input (`path.contains("..")` →
+/// traversal blocked). A lexical fact of path handling in every language;
+/// bundles may extend it via `GuardDenylistPattern` facts.
+pub static BOOTSTRAP_GUARD_DENYLIST: &[&str] = &[".."];
+
+/// Calls whose results live on the current stack frame, not the heap:
+/// leak-style checkers must never treat them as leakable allocations
+/// (spatial checks still track their capacity like any other buffer).
+pub static BOOTSTRAP_STACK_ALLOCATORS: &[&str] = &["alloca", "_alloca", "__builtin_alloca"];
+
+/// Collection constructors (`Set`, `Map`) whose literal elements the
+/// allowlist-definition check reads.
+pub static BOOTSTRAP_COLLECTION_CONSTRUCTORS: &[&str] = &["Set", "Map"];
+
+/// Methods that describe a schema's keys/shape (the schema-policy check
+/// reads them as evidence of a declared shape).
+pub static BOOTSTRAP_SCHEMA_DESCRIBE_METHODS: &[&str] = &["describe", "description"];
+
+/// String literals that compare as the language's null pointer (the C
+/// lowering renders the `NULL` macro as the literal `"NULL"`).
+pub static BOOTSTRAP_NULL_TOKENS: &[&str] = &["NULL"];
+
+/// Read-accessor method names of trusted session stores
+/// (`authenticatedUsers.get(token)`).
+pub static BOOTSTRAP_SESSION_ACCESSORS: &[&str] = &["get"];
+
+/// Formal parameter names that receive the implicit receiver (`self` in
+/// Python/Rust, `this` in JavaScript).
+pub static BOOTSTRAP_RECEIVER_PARAMS: &[&str] = &["self", "this"];

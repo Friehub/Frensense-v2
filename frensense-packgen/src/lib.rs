@@ -143,6 +143,32 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
             consumes_params: f.consumes_params.to_vec(),
         });
     }
+    // Phase 6.5: the seven structural vocabularies, formerly the bare
+    // spec seed's only content (guard denylist via the per-pattern
+    // variant bundles already use, the rest one entry per table).
+    for pattern in data::BOOTSTRAP_GUARD_DENYLIST {
+        entries.push(LearnedFactEntry::GuardDenylistPattern {
+            pattern: (*pattern).to_string(),
+        });
+    }
+    entries.push(LearnedFactEntry::StackAllocators {
+        values: owned(data::BOOTSTRAP_STACK_ALLOCATORS),
+    });
+    entries.push(LearnedFactEntry::CollectionConstructors {
+        values: owned(data::BOOTSTRAP_COLLECTION_CONSTRUCTORS),
+    });
+    entries.push(LearnedFactEntry::SchemaDescribeMethods {
+        values: owned(data::BOOTSTRAP_SCHEMA_DESCRIBE_METHODS),
+    });
+    entries.push(LearnedFactEntry::NullTokens {
+        values: owned(data::BOOTSTRAP_NULL_TOKENS),
+    });
+    entries.push(LearnedFactEntry::SessionAccessors {
+        values: owned(data::BOOTSTRAP_SESSION_ACCESSORS),
+    });
+    entries.push(LearnedFactEntry::ReceiverParams {
+        values: owned(data::BOOTSTRAP_RECEIVER_PARAMS),
+    });
     // Phase 6.2: one language-keyed section per language, installed by
     // `apply_language_entries` filtered to the scan's languages (the
     // language-agnostic variants above stay shared). Sorted by language
@@ -375,6 +401,37 @@ mod tests {
                 spec.buffer_builtins.is_empty(),
                 "spec still seeds buffer_builtins for {ext}"
             );
+            // Phase 6.5: the seven structural vocabularies moved from the
+            // spec seed into the pack - the bare seed now carries no data
+            // at all.
+            assert!(
+                spec.guard_denylist_patterns.is_empty(),
+                "spec still seeds guard_denylist_patterns for {ext}"
+            );
+            assert!(
+                spec.stack_allocators.is_empty(),
+                "spec still seeds stack_allocators for {ext}"
+            );
+            assert!(
+                spec.collection_constructors.is_empty(),
+                "spec still seeds collection_constructors for {ext}"
+            );
+            assert!(
+                spec.schema_describe_methods.is_empty(),
+                "spec still seeds schema_describe_methods for {ext}"
+            );
+            assert!(
+                spec.null_tokens.is_empty(),
+                "spec still seeds null_tokens for {ext}"
+            );
+            assert!(
+                spec.session_accessors.is_empty(),
+                "spec still seeds session_accessors for {ext}"
+            );
+            assert!(
+                spec.receiver_params.is_empty(),
+                "spec still seeds receiver_params for {ext}"
+            );
 
             assert_eq!(
                 with_pack.containment_callees, pack.containment_callees,
@@ -458,6 +515,34 @@ mod tests {
                 "memory_functions drifted for {ext}"
             );
             assert_eq!(
+                with_pack.guard_denylist_patterns, pack.guard_denylist_patterns,
+                "guard_denylist_patterns drifted for {ext}"
+            );
+            assert_eq!(
+                with_pack.stack_allocators, pack.stack_allocators,
+                "stack_allocators drifted for {ext}"
+            );
+            assert_eq!(
+                with_pack.collection_constructors, pack.collection_constructors,
+                "collection_constructors drifted for {ext}"
+            );
+            assert_eq!(
+                with_pack.schema_describe_methods, pack.schema_describe_methods,
+                "schema_describe_methods drifted for {ext}"
+            );
+            assert_eq!(
+                with_pack.null_tokens, pack.null_tokens,
+                "null_tokens drifted for {ext}"
+            );
+            assert_eq!(
+                with_pack.session_accessors, pack.session_accessors,
+                "session_accessors drifted for {ext}"
+            );
+            assert_eq!(
+                with_pack.receiver_params, pack.receiver_params,
+                "receiver_params drifted for {ext}"
+            );
+            assert_eq!(
                 MemorySummaryRegistry::from_facts(&with_pack).summaries,
                 MemorySummaryRegistry::from_facts(&pack).summaries,
                 "memory summaries drifted for {ext}"
@@ -465,23 +550,22 @@ mod tests {
         }
     }
 
-    /// Phase 6.2d/6.3d sole-source contract: lang no longer declares any
-    /// provider knowledge (the provider trait methods are deleted), so
-    /// the generator's static vocabularies are the only source. For every
-    /// vocabulary the bare [`tables_from_exts`] seed yields empty
-    /// source/sink/sanitizer sets and empty provider tables, and
-    /// installing that vocabulary's pack sections via
+    /// Phase 6.2d/6.3d/6.5 sole-source contract: lang no longer declares
+    /// any provider or structural knowledge (those trait methods are
+    /// deleted), so the generator's static vocabularies are the only
+    /// source. For every vocabulary the bare [`tables_from_exts`] seed
+    /// yields empty source/sink/sanitizer sets and empty provider tables,
+    /// and installing that vocabulary's pack sections via
     /// [`apply_language_entries`] is what populates all of them - with
-    /// exactly the static values the vocabulary declares. The structural
-    /// vocabularies (stack allocators, guard denylist, ...) stay
-    /// spec-seeded by design and are out of scope here.
+    /// exactly the static values the vocabulary declares (the structural
+    /// tables are covered by [`default_pack_is_the_sole_source_of_the_vacated_tables`]).
     #[test]
     fn language_pack_entries_are_the_sole_source_of_provider_knowledge() {
         use crate::role_map::sink_role_for_label;
 
-        // One canonical extension per language key: the bare seed is
-        // spec-derived and language-keyed, so any extension of the
-        // language's spec exercises the same seed.
+        // One canonical extension per language key (the bare seed is
+        // empty since Phase 6.5; the extension only names the language's
+        // spec the pack sections are keyed by).
         fn ext_for(language: &str) -> &str {
             match language {
                 "typescript" => "ts",

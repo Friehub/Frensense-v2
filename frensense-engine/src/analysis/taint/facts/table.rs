@@ -133,28 +133,28 @@ pub struct FactTable {
     /// Empty means the caller built a bare table; the OOB check then sees
     /// no buffer vocabulary.
     pub buffer_builtins: Vec<BufferBuiltinSpec>,
-    /// Stack-frame allocators (`alloca`, ...) seeded from the spec's
-    /// `known_stack_allocators`; leak-style checkers exclude them.
+    /// Stack-frame allocators (`alloca`, ...), default-pack-seeded
+    /// (Phase 6.5); leak-style checkers exclude them.
     pub stack_allocators: Vec<String>,
     /// Route-registration call patterns per language
     /// (`(language or "*", patterns)`), default-pack-seeded (Phase 6.2);
     /// the lowering harness unions these with the spec's route verbs.
     pub route_patterns: FxHashMap<String, Vec<String>>,
-    /// Collection constructors (`Set`, `Map`) seeded from the spec's
-    /// `known_collection_constructors`; the allowlist-definition check
-    /// reads their literal elements.
+    /// Collection constructors (`Set`, `Map`), default-pack-seeded
+    /// (Phase 6.5); the allowlist-definition check reads their literal
+    /// elements.
     pub collection_constructors: FxHashSet<String>,
-    /// Schema-describing methods (`describe`, `description`) seeded from
-    /// the spec's `known_schema_describe_methods`.
+    /// Schema-describing methods (`describe`, `description`),
+    /// default-pack-seeded (Phase 6.5).
     pub schema_describe_methods: FxHashSet<String>,
-    /// String literals that compare as the null pointer (`NULL`) seeded
-    /// from the spec's `known_null_tokens`.
+    /// String literals that compare as the null pointer (`NULL`),
+    /// default-pack-seeded (Phase 6.5).
     pub null_tokens: FxHashSet<String>,
-    /// Read-accessor method names of trusted session stores (`get`)
-    /// seeded from the spec's `known_session_accessors`.
+    /// Read-accessor method names of trusted session stores (`get`),
+    /// default-pack-seeded (Phase 6.5).
     pub session_accessors: FxHashSet<String>,
     /// Formal parameter names receiving the implicit receiver (`self`,
-    /// `this`) seeded from the spec's `known_receiver_params`.
+    /// `this`), default-pack-seeded (Phase 6.5).
     pub receiver_params: FxHashSet<String>,
     /// Dynamic IDOR-class query keys learned from a bundle or specification.
     pub idor_keys: FxHashSet<String>,
@@ -167,8 +167,8 @@ pub struct FactTable {
     /// set (only explicit declarations appear), so unknown calls and
     /// bundle-learned propagators keep the default receiver pass-through.
     pub propagator_blocks_receiver: FxHashSet<String>,
-    /// Guard denylist string patterns: spec-seeded
-    /// (`known_guard_denylist`) and bundle-learned
+    /// Guard denylist string patterns: default-pack-seeded
+    /// (`GuardDenylistPattern`, Phase 6.5) and bundle-learned
     /// (`GuardDenylistPattern`).
     pub guard_denylist_patterns: Vec<String>,
 }
@@ -469,9 +469,9 @@ impl FactTable {
         self.idor_finder_sinks.contains(sink) || self.idor_finder_sinks.contains(last)
     }
 
-    /// Is `name` (bare, dotted, or `::`-qualified) a spec-declared stack
+    /// Is `name` (bare, dotted, or `::`-qualified) a declared stack
     /// allocator? Frame-local storage is never a leak candidate; the
-    /// vocabulary is seeded via `known_stack_allocators`.
+    /// vocabulary is default-pack-seeded (Phase 6.5).
     pub fn is_stack_allocator(&self, name: &str) -> bool {
         let s = name.rsplit('.').next().unwrap_or(name);
         let s = s.rsplit("::").next().unwrap_or(s);
@@ -572,8 +572,8 @@ impl FactTable {
     }
 
     /// Check whether a string literal matches a guard denylist pattern.
-    /// Patterns are spec/bundle vocabulary (seeded from
-    /// `LanguageSpec::known_guard_denylist`, extended by
+    /// Patterns are pack/bundle vocabulary (the default pack's
+    /// `GuardDenylistPattern` entries, extended by learned
     /// `GuardDenylistPattern` facts) - the engine ships no built-in list.
     pub fn is_guard_denylist(&self, literal: &str) -> bool {
         self.guard_denylist_patterns
@@ -796,6 +796,26 @@ pub enum LearnedFactEntry {
     /// spec), keyed for the lowering
     /// harness.
     LanguageRoutePattern { language: String, pattern: String },
+    /// Stack-frame allocators (`alloca`, ...) - the leak checker's
+    /// frame-lifetime exclusion set (Phase 6.5: moved from the spec seed
+    /// into the pack; `GuardDenylistPattern` already carries the guard
+    /// denylist the same way).
+    StackAllocators { values: Vec<String> },
+    /// Collection constructors (`Set`, `Map`) whose literal elements the
+    /// allowlist-definition check reads (Phase 6.5, pack-seeded).
+    CollectionConstructors { values: Vec<String> },
+    /// Schema-describing methods (`describe`, `description`) for the
+    /// schema-policy check (Phase 6.5, pack-seeded).
+    SchemaDescribeMethods { values: Vec<String> },
+    /// String literals that compare as the language's null pointer
+    /// (`NULL`) for the leak checker (Phase 6.5, pack-seeded).
+    NullTokens { values: Vec<String> },
+    /// Read-accessor method names of trusted session stores (`get`)
+    /// (Phase 6.5, pack-seeded).
+    SessionAccessors { values: Vec<String> },
+    /// Formal parameter names receiving the implicit receiver (`self`,
+    /// `this`) (Phase 6.5, pack-seeded).
+    ReceiverParams { values: Vec<String> },
 }
 
 impl LearnedFactEntry {
@@ -1157,6 +1177,30 @@ impl LearnedFactEntry {
             }
             LearnedFactEntry::SuspiciousHashWrappers { calls } => {
                 table.suspicious_hash_wrappers.extend(calls.iter().cloned());
+            }
+            // Phase 6.5: the seven structural vocabularies ship in the
+            // default pack (formerly the bare spec seed).
+            LearnedFactEntry::StackAllocators { values } => {
+                for v in values {
+                    if !table.stack_allocators.contains(v) {
+                        table.stack_allocators.push(v.clone());
+                    }
+                }
+            }
+            LearnedFactEntry::CollectionConstructors { values } => {
+                table.collection_constructors.extend(values.iter().cloned());
+            }
+            LearnedFactEntry::SchemaDescribeMethods { values } => {
+                table.schema_describe_methods.extend(values.iter().cloned());
+            }
+            LearnedFactEntry::NullTokens { values } => {
+                table.null_tokens.extend(values.iter().cloned());
+            }
+            LearnedFactEntry::SessionAccessors { values } => {
+                table.session_accessors.extend(values.iter().cloned());
+            }
+            LearnedFactEntry::ReceiverParams { values } => {
+                table.receiver_params.extend(values.iter().cloned());
             }
             LearnedFactEntry::BufferBuiltin {
                 name,

@@ -379,5 +379,22 @@ pub fn fact_key(e: &LearnedFactEntry) -> (String, String) {
             "language_route_pattern".into(),
             format!("{language}:{pattern}"),
         ),
+        // Phase 6.5 structural vocabularies: pack-only whole-table
+        // entries, keyed by their contents like the other table-shaped
+        // facts.
+        LearnedFactEntry::StackAllocators { values } => {
+            ("stack_allocators".into(), values.join(","))
+        }
+        LearnedFactEntry::CollectionConstructors { values } => {
+            ("collection_constructors".into(), values.join(","))
+        }
+        LearnedFactEntry::SchemaDescribeMethods { values } => {
+            ("schema_describe_methods".into(), values.join(","))
+        }
+        LearnedFactEntry::NullTokens { values } => ("null_tokens".into(), values.join(",")),
+        LearnedFactEntry::SessionAccessors { values } => {
+            ("session_accessors".into(), values.join(","))
+        }
+        LearnedFactEntry::ReceiverParams { values } => ("receiver_params".into(), values.join(",")),
     }
 }

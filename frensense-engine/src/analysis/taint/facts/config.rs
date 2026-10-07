@@ -7,99 +7,28 @@ use rustc_hash::FxHashMap;
 
 use crate::analysis::taint::config::TaintConfig;
 
-/// Build the structural half of a [`FactTable`] from a `frensense-lang`
-/// [`LanguageSpec`]: the mechanism vocabularies that remain spec-owned by
-/// design. All provider knowledge (known sinks, sources, sanitizers,
-/// propagators, IDOR vocabulary, session roots) ships in the default
-/// pack's language sections instead - see [`apply_language_entries`],
-/// which is now their sole source. Bundle-learned facts can then be
-/// merged *over* this table (learned wins on collision).
-pub fn fact_table_from_spec(spec: &dyn frensense_lang::spec::LanguageSpec) -> FactTable {
-    let mut t = FactTable::default();
-    // Denylist-guard patterns (`path.contains("..")`): spec-owned
-    // vocabulary, bundles may extend via GuardDenylistPattern facts.
-    for pattern in spec.known_guard_denylist() {
-        if !t.guard_denylist_patterns.contains(&(*pattern).to_string()) {
-            t.guard_denylist_patterns.push((*pattern).to_string());
-        }
-    }
-    // Memory contracts, buffer builtins, the guard/credential/schema
-    // vocabularies, hint sets and weak-crypto policy tables no longer
-    // seed from the spec (Phase 6.1), nor do sinks, sources, sanitizers,
-    // propagators, IDOR vocabulary or session roots (Phase 6.2d): the
-    // default pack carries them and every consumer merges it between this
-    // seed and the consumer bundle (seeding order: spec -> default pack ->
-    // consumer). Spec-seeded here: stack allocators and the small
-    // structural vocabularies below.
-    // Stack-frame allocators (alloca, ...): spec-owned, consumed by the
-    // allocation-lifetime (leak) check.
-    t.stack_allocators = spec
-        .known_stack_allocators()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    // Vocabularies the checks read directly: collection constructors
-    // (allowlist definitions), schema describe methods, null-compare
-    // tokens, session read accessors, receiver parameter names.
-    t.collection_constructors = spec
-        .known_collection_constructors()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t.schema_describe_methods = spec
-        .known_schema_describe_methods()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t.null_tokens = spec
-        .known_null_tokens()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t.session_accessors = spec
-        .known_session_accessors()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t.receiver_params = spec
-        .known_receiver_params()
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
-    t
+/// Build the (empty) structural seed of a [`FactTable`] for a set of file
+/// extensions (the harness/CLI contract's first seeding step: the scan
+/// runner feeds it the scanned files' extensions, the fact bundler feeds
+/// it a family's extensions).
+///
+/// Since Phase 6.5 the bare spec seed carries **no data at all**: every
+/// table - including the seven structural vocabularies (guard denylist,
+/// stack allocators, collection constructors, schema describe methods,
+/// null tokens, session accessors, receiver params) - ships in the
+/// default pack's language-agnostic entries, which every consumer merges
+/// between this seed and the consumer bundle (seeding order: spec ->
+/// default pack -> consumer, last-wins). What remains spec-derived is
+/// mechanism read directly at scan time (grammar classification, route
+/// verbs, ambiguous verbs at install time, the rule registry), never
+/// through this seed.
+pub fn tables_from_exts<'a>(_exts: impl IntoIterator<Item = &'a str>) -> (TaintConfig, FactTable) {
+    (TaintConfig::default(), FactTable::default())
 }
 
-/// Build the merged `(TaintConfig, FactTable)` for a set of file
-/// extensions: one entry per distinct language spec present, exactly as
-/// the consumer CLI merges them when scanning those files.
-///
-/// This is the single table-assembly function for both sides of the
-/// harness/CLI contract: the scan runner feeds it the extensions of the
-/// scanned files, the fact bundler feeds it a family's extensions. Both
-/// must produce the same tables, or a family can learn under one dialect
-/// and be replayed under another - a Go propagator rule silencing taint
-/// in a TypeScript positive, or a Python sanitizer quieting a TypeScript
-/// negative the CLI would flag.
-///
-/// The config half is empty and the fact half carries only the structural
-/// spec vocabularies until the consumer calls [`apply_language_entries`]
-/// with the default pack's entries (see
-/// [`tables_from_exts_with_pack`] for the full production assembly).
-pub fn tables_from_exts<'a>(exts: impl IntoIterator<Item = &'a str>) -> (TaintConfig, FactTable) {
-    let mut facts = FactTable::default();
-    let mut seen: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
-    for ext in exts {
-        if let Some(spec) = frensense_lang::spec_for_ext(ext)
-            && seen.insert(spec.name())
-        {
-            facts.merge(&fact_table_from_spec(spec));
-        }
-    }
-    (TaintConfig::default(), facts)
-}
-
-/// Production table assembly for a set of extensions: the spec seed
-/// ([`tables_from_exts`]) + the default pack's language-agnostic entries
+/// Production table assembly for a set of extensions: the (empty) spec
+/// seed ([`tables_from_exts`]) + the default pack's language-agnostic
+/// entries
 /// merged at [`Provenance::Spec`], then its language-keyed sections
 /// installed for those extensions' languages. This is byte-for-byte the
 /// order `build_spec_tables` (scan runner) and `family_tables` (fact
@@ -125,9 +54,9 @@ pub fn tables_from_exts_with_pack<'a>(
 }
 
 /// The distinct language names for a set of file extensions, in first
-/// appearance order - the exact per-spec merge order [`tables_from_exts`]
+/// appearance order - the exact per-spec merge order the seeding pipeline
 /// uses. Feed the result to [`apply_language_entries`] so its group merges
-/// land in the same order the spec-seeded tables were merged.
+/// land in the same order as the seed.
 pub fn languages_for_exts<'a>(exts: impl IntoIterator<Item = &'a str>) -> Vec<&'static str> {
     let mut seen: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
     let mut out = Vec::new();

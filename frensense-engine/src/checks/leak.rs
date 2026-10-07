@@ -15,7 +15,7 @@
 //! merged into the registry (`MemorySummaryRegistry::from_facts` -
 //! spec vocab plus bundle-learned contracts), never from hardcoded names
 //! here. Stack allocators (`alloca` and friends) come from
-//! `FactTable::stack_allocators` (spec-seeded via `known_stack_allocators`)
+//! `FactTable::stack_allocators` (default-pack-seeded since Phase 6.5)
 //! and are never leak candidates: their storage dies with the frame. The
 //! analysis itself (join, phi merge, escape, null-guard skip) is the
 //! stable engine "how".

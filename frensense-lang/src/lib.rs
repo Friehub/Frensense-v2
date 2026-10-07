@@ -279,7 +279,6 @@
 //! }
 //! ```
 
-pub mod memory;
 pub mod providers;
 pub mod registry;
 pub mod rules;

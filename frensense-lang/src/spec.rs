@@ -465,67 +465,11 @@ pub trait LanguageSpec: Send + Sync + 'static {
         ]
     }
 
-    /// String patterns marking a *denylist guard* literal: comparing user
-    /// input against a literal containing any of these patterns rejects
-    /// the input (`path.contains("..")` → traversal blocked). The engine's
-    /// guard analysis reads the set from the fact table; it is seeded from
-    /// this method and extended by `.frc` bundles
-    /// (`GuardDenylistPattern`).
-    ///
-    /// Defaults to the path-traversal marker - a lexical fact of path
-    /// handling in every language. Providers may extend.
-    fn known_guard_denylist(&self) -> &'static [&'static str] {
-        &[".."]
-    }
-
-    /// Stack-frame allocator vocabulary (`alloca`, ...) through
-    /// `FactTable::stack_allocators`, so leak-style checkers never treat
-    /// frame-local storage as leakable.
-    ///
-    /// Defaults to [`crate::memory::BOOTSTRAP_STACK_ALLOCATORS`].
-    fn known_stack_allocators(&self) -> &'static [&'static str] {
-        crate::memory::BOOTSTRAP_STACK_ALLOCATORS
-    }
-
-    /// Collection constructors (`Set`, `Map`) whose literal elements the
-    /// allowlist-definition check reads through
-    /// `FactTable::collection_constructors`.
-    fn known_collection_constructors(&self) -> &'static [&'static str] {
-        &["Set", "Map"]
-    }
-
-    /// Methods that describe a schema's keys/shape (`describe`,
-    /// `description`) through `FactTable::schema_describe_methods`.
-    fn known_schema_describe_methods(&self) -> &'static [&'static str] {
-        &["describe", "description"]
-    }
-
-    /// String literals that compare as the language's null pointer
-    /// (the C lowering renders the `NULL` macro as the literal `"NULL"`)
-    /// through `FactTable::null_tokens`.
-    fn known_null_tokens(&self) -> &'static [&'static str] {
-        &["NULL"]
-    }
-
     /// Route-registration call suffixes (`.post`, `.get`, ...) whose
     /// function arguments the harness extracts as handlers. The entries
     /// are matched as suffixes of the callee text.
     fn known_route_verbs(&self) -> &'static [&'static str] {
         &[".post", ".get", ".put", ".delete", ".use", ".all"]
-    }
-
-    /// Read-accessor method names of trusted session stores
-    /// (`authenticatedUsers.get(token)`) through
-    /// `FactTable::session_accessors`.
-    fn known_session_accessors(&self) -> &'static [&'static str] {
-        &["get"]
-    }
-
-    /// Formal parameter names that receive the implicit receiver
-    /// (`self` in Python/Rust, `this` in JavaScript) through
-    /// `FactTable::receiver_params`.
-    fn known_receiver_params(&self) -> &'static [&'static str] {
-        &["self", "this"]
     }
 
     /// Rule ids this language declares with full advisory metadata
