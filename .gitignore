@@ -110,7 +110,6 @@ corpus-facts.frc
 !docs/FRENSENSE_CORPUS_GUIDE.md
 !docs/TEACHABILITY.md
 !docs/SPEC_FALSE_POSITIVE_REDUCTION.md
-!docs/ENGINE_PURITY_REFACTOR.md
 !docs-site/**
 docs-site/node_modules/
 **/node_modules/
