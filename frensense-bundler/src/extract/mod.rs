@@ -151,7 +151,9 @@ fn extract_facts_with(
         }
     }
 
-    // Pass 2: replay gate. Every family is lowered once up front; each
+    // Pass 2: replay gate. Every family is lowered once up front, under
+    // that family's own seeded tables (spec + default pack) so gate
+    // lowering and CLI lowering see the same pack vocabulary; each
     // candidate trial then re-runs only the taint engine + checker per
     // family (no re-lowering). Baseline separation is measured under each
     // family's own language tables; a candidate fact must be validated by
@@ -163,11 +165,17 @@ fn extract_facts_with(
     // every fact.
     let prepared: Vec<PreparedFamily> = families
         .iter()
-        .filter_map(|f| match PreparedFamily::new(f) {
-            Ok(p) => Some(p),
-            Err(e) => {
-                eprintln!("[facts] skip family {}: {e}", f.id);
-                None
+        .filter_map(|f| {
+            let Some((_, facts)) = fam_tables.get(&f.id) else {
+                eprintln!("[facts] skip family {}: no seeded tables", f.id);
+                return None;
+            };
+            match PreparedFamily::new(f, facts) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    eprintln!("[facts] skip family {}: {e}", f.id);
+                    None
+                }
             }
         })
         .collect();

@@ -58,6 +58,12 @@ pub fn scan_variant(
 /// One family's variants, lowered once. The gate re-scans families per
 /// candidate fact; without pre-lowering the gate is O(candidates x families)
 /// lowerings and times out at corpus scale.
+///
+/// Lowering runs under the family's own seeded tables (spec + default
+/// pack) so the gate lowers with exactly the pack vocabulary the CLI
+/// scan lowers with (route-registration patterns since Phase 6.4,
+/// dynamic grammar facts once a family teaches them) - gate and CLI
+/// lowering can never diverge on pack vocabulary.
 pub struct PreparedFamily {
     pub id: String,
     pub pos: scan::PreparedProgram,
@@ -68,15 +74,15 @@ pub struct PreparedFamily {
 }
 
 impl PreparedFamily {
-    pub fn new(f: &Family) -> Result<Self, String> {
-        let pos = scan::prepare(&f.positives)?;
-        let neg = scan::prepare(&f.negatives)?;
+    pub fn new(f: &Family, facts: &FactTable) -> Result<Self, String> {
+        let pos = scan::prepare_with_facts(&f.positives, Some(facts))?;
+        let neg = scan::prepare_with_facts(&f.negatives, Some(facts))?;
         let mut calls = BTreeSet::new();
         calls.extend(
-            collect_calls(&f.positives, None)
+            collect_calls(&f.positives, Some(facts))
                 .keys()
                 .cloned()
-                .chain(collect_calls(&f.negatives, None).keys().cloned()),
+                .chain(collect_calls(&f.negatives, Some(facts)).keys().cloned()),
         );
         Ok(Self {
             id: f.id.clone(),

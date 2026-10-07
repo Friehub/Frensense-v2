@@ -569,7 +569,7 @@ mod policy_proposal_tests {
         // negative stays silent.
         let (learned, _) = extract_facts_with_tables(&families, &config, &table);
         let family = &families[0];
-        let prep = gate::PreparedFamily::new(family).unwrap();
+        let prep = gate::PreparedFamily::new(family, &table).unwrap();
         assert!(
             prep.separates(&config, &learned),
             "family must separate under learned facts: positive alerts, negative is silent"
