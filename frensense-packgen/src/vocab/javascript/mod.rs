@@ -55,10 +55,10 @@ const JAVASCRIPT_VOCAB: LanguageVocab = LanguageVocab {
     ..TYPESCRIPT_VOCAB
 };
 
-pub(crate) fn typescript() -> &'static LanguageVocab {
+pub(crate) fn typescript_vocab() -> &'static LanguageVocab {
     &TYPESCRIPT_VOCAB
 }
 
-pub(crate) fn javascript() -> &'static LanguageVocab {
+pub(crate) fn javascript_vocab() -> &'static LanguageVocab {
     &JAVASCRIPT_VOCAB
 }

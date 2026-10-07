@@ -2,25 +2,32 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-//! Generator-owned per-language provider vocabulary (Phase 6.3b).
-//!
-//! The static tables under [`javascript`] are verbatim copies of what the
-//! `frensense-lang` providers still ship (lang sheds them in 6.3d); the
-//! transitional parity test here proves the static path emits exactly the
-//! same [`LearnedFactEntry`] sequence as the spec-derived path
-//! ([`crate::language_entries_for_spec`]), per language. Emission still
-//! goes through the specs until 6.3c; the parity test is what makes the
-//! later switch and the lang deletion provably behavior-neutral.
+//! Generator-owned per-language provider vocabulary. Added go/python/rust/c
+//! in Phase 6.3c (JS/TS in 6.3b); translation converts the former trait
+//! method bodies and statics into one static [`LanguageVocab`] per
+//! language key. A parity test proves each static path emits exactly the
+//! spec-derived entries, and the committed asset (built from this data
+//! since 6.3c) stays byte-identical through the migration.
 
 use frensense_engine::analysis::taint::facts::LearnedFactEntry;
-use frensense_lang::spec::{PropagatorRule, SanitizerKind, SinkLabel};
+use frensense_lang::spec::SinkLabel;
 
+mod c;
+mod go;
 mod javascript;
-pub(crate) use javascript::{javascript, typescript};
+mod python;
+mod rust;
+
+/// Sanitizer classification helper: the last segment of a dotted call.
+/// Moved from `frensense_lang` (used by the per-language classifiers).
+pub(crate) fn call_last_segment(call: &str) -> &str {
+    call.rsplit('.').next().unwrap_or(call)
+}
 
 /// A language's provider vocabulary, static form. Mirrors the
-/// `LanguageSpec::known_*` provider methods the generator reads, in
-/// emission order.
+/// `LanguageSpec::known_*` provider methods the generator read, in
+/// emission order. `known_idor_sinks` / `known_session_roots` had trait
+/// defaults (empty); vocabulary-carrying languages list their data here.
 pub(crate) struct LanguageVocab {
     /// The pack's language key (`spec.name()`).
     pub language: &'static str,
@@ -30,8 +37,8 @@ pub(crate) struct LanguageVocab {
     pub source_patterns: &'static [&'static str],
     pub request_param_names: &'static [&'static str],
     pub sanitizer_names: &'static [&'static str],
-    pub classify_sanitizer: fn(&str) -> Option<SanitizerKind>,
-    pub propagators: &'static [PropagatorRule],
+    pub classify_sanitizer: fn(&str) -> Option<frensense_lang::spec::SanitizerKind>,
+    pub propagators: &'static [frensense_lang::spec::PropagatorRule],
     pub session_roots: &'static [&'static str],
     pub route_patterns: &'static [&'static str],
 }
@@ -39,8 +46,8 @@ pub(crate) struct LanguageVocab {
 /// The predicate-guard default (`LanguageSpec::is_predicate_guard`'s
 /// default body). No provider overrides it, so the static path applies
 /// the same heuristic the spec path gets via the trait.
-fn is_predicate_guard(name: &str, kind: Option<&SanitizerKind>) -> bool {
-    kind.is_some_and(|k| matches!(k, SanitizerKind::Full))
+fn is_predicate_guard(name: &str, kind: Option<&frensense_lang::spec::SanitizerKind>) -> bool {
+    kind.is_some_and(|k| matches!(k, frensense_lang::spec::SanitizerKind::Full))
         || name == "test"
         || name == "isValid"
         || name.starts_with("is")
@@ -122,23 +129,33 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
     entries
 }
 
+/// Every vocabulary, in the pack's emission order (sorted by language
+/// name): c, go, javascript, python, rust, typescript.
+pub(crate) fn all_vocab() -> Vec<&'static LanguageVocab> {
+    vec![
+        c::vocab(),
+        go::vocab(),
+        javascript::javascript_vocab(),
+        python::vocab(),
+        rust::vocab(),
+        javascript::typescript_vocab(),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Transitional parity (6.3b): the extracted static vocabulary emits
-    /// exactly what the spec-derived path emits, per extracted language.
-    /// When 6.3c switches emission to the static path and 6.3d deletes
-    /// the provider trait bodies, this test's spec half goes with them.
+    /// The parity gate (6.3b/c): every extracted language's static
+    /// vocabulary emits exactly the spec-derived entries. While the
+    /// provider trait methods still exist, both paths are live; when
+    /// 6.3d deletes them, the spec half of this test goes with them.
     #[test]
     fn extracted_vocab_matches_spec_derived_entries() {
-        let spec_of = |name: &str| {
-            frensense_lang::registry::LanguageRegistry::global()
-                .for_name(name)
-                .unwrap_or_else(|| panic!("{name} spec must be registered"))
-        };
-        for vocab in [javascript(), typescript()] {
-            let spec = spec_of(vocab.language);
+        for vocab in all_vocab() {
+            let spec = frensense_lang::registry::LanguageRegistry::global()
+                .for_name(vocab.language)
+                .unwrap_or_else(|| panic!("{} spec must be registered", vocab.language));
             let static_entries = entries_for_static(vocab);
             let spec_entries = crate::language_entries_for_spec(spec);
             assert_eq!(

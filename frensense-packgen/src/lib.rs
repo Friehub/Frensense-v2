@@ -228,18 +228,12 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
     // languages (the language-agnostic variants above stay shared). Sorted
     // by language name: the registry's by_name map iterates in hash order,
     // and the asset must be byte-deterministic.
-    let mut specs: Vec<&dyn frensense_lang::spec::LanguageSpec> =
-        frensense_lang::all_specs().collect();
-    specs.sort_unstable_by_key(|spec| spec.name());
-    for spec in specs {
-        // Phase 6.3b/6.3c: extracted languages emit from the generator's
-        // static vocabulary (parity-proven equal to the spec-derived
-        // path in `vocab`'s test); the rest still read their specs.
-        entries.extend(match spec.name() {
-            "javascript" => vocab::entries_for_static(vocab::javascript()),
-            "typescript" => vocab::entries_for_static(vocab::typescript()),
-            _ => language_entries_for_spec(spec),
-        });
+    // Phase 6.3c: every language emits from the generator's static
+    // vocabulary (all_vocab is in the pack's sorted emission order).
+    // `language_entries_for_spec` remains only as the parity test's
+    // reference path until 6.3d deletes it with lang's provider bodies.
+    for v in vocab::all_vocab() {
+        entries.extend(vocab::entries_for_static(v));
     }
     entries
 }
