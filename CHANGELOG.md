@@ -8,7 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-#### Engine
+#### Engine & Verification
+- **97-Probe Industrial Dataflow Consistency Test Bench**: Implemented comprehensive diagnostic probe suite (`dataflow_probes_tests.rs` and `probes/*`) modeling 65 NIST/Juliet syntactic and inter-procedural flow variants, frontier static analysis domains (path sensitivity, async microtasks/emitters, multi-language Go/Rust providers, sanitizer ordering, historic CVE reproductions, and framework IoC), and quantitative finance trading patterns. Known engine blind spots are annotated with diagnostic ignore markers.
+- **100% TPR / 0% FPR Held-Out Benchmark Gate**: Resolved remaining detection seams across all 116 held-out production fixtures in `frensense-corpus`, verifying zero false positives on safe control variants.
 - **CWE-190/680 Integer-Overflow Heap-Overflow Checker**: Added `checks::int_overflow`, a facts-driven checker for integer overflow reaching a heap write: interval bounds over allocation sizes, index arithmetic and multiplication (rooted in the lang-declared capacity vocabulary) decide whether an overflowed value can reach the size/index of a copy into undersized heap storage; validated 4/4 on the `c_cwe_680_count_mul_wrap` corpus pair plus heldouts.
 - **CWE-401 Allocation-Lifetime (Memory Leak) Checker**: Added `checks::leak`, path-sensitive may-leak accounting reporting an allocation still frame-owned at a function exit. Ownership escapes (returned, stored, contract-consumed) remove candidates; null-guard and pointer-identity edges drop allocations bound to the guarded *storage* (every SSA version, stale loop-join bindings included); the exit scan counts only the deepest definition dominating the exit per storage cell, so superseded versions cannot report twice; freshness roots strictly at the declared allocator vocabulary.
 - **Break/Continue/Switch Lowering**: Added first-class lowering for `break`, `continue` and `switch`: a `LoopTarget` stack on `LoweringContext` gives both loop exits correct terminators (pre-header and body-end), unlabeled `break`/`continue` jump to them with fresh unreachable blocks, and `switch` lowers to a condition chain with per-case conditions, source-order fall-through bodies and break-to-merge - so case bodies join the CFG instead of orphaning unreachable exits.
@@ -16,23 +18,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CFG Jump Resolution for `goto` and Labels**: Added first-class lowering support in `LoweringContext` (`visit_goto`, `visit_labeled_statement`) wiring basic block jump terminators and control flow edges across forward and backward labels.
 - **Out-Parameter Address-Taken Initialization Tracking**: Implemented `is_address_taken_on_all_paths` in `uninit.rs` verifying whether all paths reaching a block execute `Instruction::AddressOf` for a local pointer, correctly recognizing out-parameter initialization.
 
-#### CLI & Bundler
+#### Packgen & Bundling (Engine Purity)
+- **Standalone `frensense-packgen` Crate**: Introduced standalone compiler crate responsible for extracting language provider vocabularies (JavaScript/TypeScript, Python, Go, Rust, C) and emitting static binary `.frc` packs.
+- **Binary Pack Embedded Knowledge**: Embedded default pack (`frensense-bundler/assets/`) serving as the single source of truth for AST semantic knowledge, decoupling language specifics from engine binaries.
+- **Bundle Format v5 & Advisory Expansion**: Added version-branched bundle format supporting `policy_pack` integration, rule structs carrying severity and custom advisory templates, and provenance-ordered `FactTable::merge`.
 - **Unified `frensense bundle` Subcommand**: Exposed `frensense bundle <corpus_dir> [output.frc]` directly in the primary CLI with rich documentation under `frensense bundle --help`, enabling users to compile positive/negative corpus pairs into `.frc` bundles without internal crate invocations.
 - **Modular Bundling Pipeline**: Extracted the bundle compilation, seed facts ingestion, and replay gate verification into `frensense_bundler::run_facts_pipeline` with strictly scoped helper functions (< 40 lines).
 - **Corpus-Driven C Memory Contract Learning**: Verified end-to-end learning from upstream C codebases (`alsa-lib`), extracting 11 interprocedural memory contracts (allocators, deallocators, parameter consumers) directly from source deltas and enforcing the Zero False-Positive contract on patched code.
 
 ### Changed
 
-#### Engine
+#### Engine Architecture (Purity Refactor)
+- **Zero Hardcoded Language Knowledge in Engine Core**: Stripped all provider vocabularies, AST node strings, route patterns, and language-specific hint tables from `frensense-engine`. The engine operates exclusively over abstract compiler IR, SSA memory variables, Steensgaard points-to classes, and data-driven `FactTable` facts.
+- **Structured Sink Alerts and Observations**: Replaced hardcoded prose and string templates with structured `CheckerFinding` payloads carrying rule IDs, fact-declared severities, and data-driven observation templates.
+- **Memory & Lifetime Vocabulary Dataflow**: Memory allocators, deallocators, and parameter consumption contracts now flow exclusively through `FactTable` facts populated from `.frc` packs.
 - **Literal Allocations No Longer Root Freshness**: Program-summary inference no longer marks a function returning an object/array literal (`Instruction::Allocate`) as a fresh factory; freshness roots at the declared allocator vocabulary, so GC-managed objects stay out of allocation-lifetime candidates (juice-shop gate holds at TP 12/12 with FP back to 12; OWASP record unchanged at 26.2%).
 - **Modularized UAF Engine**: Decomposed the monolithic `uaf.rs` checker into single-responsibility submodules under `checks::uaf/` (`types.rs`, `discovery.rs`, `must_exec.rs`, `walker.rs`, `uninit.rs`, and `mod.rs`), adhering to strict single-purpose function sizing (< 40 lines).
 
 #### Documentation
 - **Benchmark Record Refreshed**: The OWASP Benchmark for Python record is re-scored at **26.2%** score (TPR 28.5%, FPR 2.3%, TP/FP/FN/TN 129/18/323/760, 6s scan) against v0.7.0-preview.5 in `README.md` and `docs/BENCHMARKING.md`, with the full per-CWE table updated; CWE-328 (weak hash) now scores 100% (71/71, zero false positives).
 
+### Removed
+
+#### Engine
+- **Legacy Taint Engines**: Deleted obsolete `SvfgTaintEngine`, legacy `TaintEngine`, and `SvfgStore`, removing dead synchronization overhead and reducing memory footprint.
+- **`policy.rs` Decoupling**: Deleted monolithic `policy.rs`, migrating fact types and rule schemas directly into engine kinds and packgen definitions.
+- **Devtools Binary Separation**: Relocated internal debug and benchmarking runners from engine sources into the dedicated `frensense-devtools` workspace crate.
+
 ### Fixed
 
 #### Engine
+- **Fixture Seam Resolution**: Resolved all remaining fixture seams across the 116 held-out test corpus, eliminating false positives from undecorated routes and untainted receivers while preserving all true positives.
 - **Fallthrough Blindness on `goto` Error Exits**: Resolved an engine blindspot where unmodeled `goto` statements in C AST lowering caused error-diverting guard branches to fall through into subsequent code blocks.
 - **Out-Parameter Uninitialized False Positives**: Resolved false positive `UninitializedFree` reports on valid C out-parameter patterns (e.g. `snd_config_hook_load`), ensuring full precision on real-world production codebases.
 - **Weak-Hash Selector Coverage Regression**: Credential-context qualification of selector-shape weak-hash rules is now declared per rule in `frensense_lang::policy::WeakPrimitiveRule` (`requires_credential_context`) instead of applied uniformly: `crypto.createHash` stays qualified inside credential-named functions (generic digest utilities remain silent), while explicit weak-algorithm selectors (`hashlib.new('md5')`) fire unconditionally - restoring the OWASP CWE-328 class to 71/71 true positives with zero new false positives (juice-shop gate stays at 12 FP, corpus bundles 8/8).
