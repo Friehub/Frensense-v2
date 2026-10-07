@@ -4,7 +4,7 @@
 
 //! Propagator rules: how taint flows through string/array operations.
 
-use frensense_lang::spec::PropagatorRule;
+use crate::role_map::PropagatorRule;
 
 pub(super) static JS_PROPAGATORS: &[PropagatorRule] = &[
     // String methods - receiver taints return

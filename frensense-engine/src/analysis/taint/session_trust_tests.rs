@@ -46,8 +46,8 @@ export function handler (req: any) {
 
     fn run(src: &str) -> Vec<crate::analysis::taint::engine::SinkFinding> {
         let files = vec![("test.ts".to_string(), src.to_string(), "ts".to_string())];
-        // Session roots are language vocabulary (`known_session_roots`);
-        // the production-seeded table already carries them.
+        // Session roots are pack vocabulary (the default pack's
+        // per-language tables); the production-seeded table already carries them.
         let (config, facts) = seeded_tables(["ts"]);
         let prepared = prepare(&files).expect("prepare");
         scan_prepared(&prepared, &config, &facts).findings

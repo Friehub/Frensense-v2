@@ -186,6 +186,7 @@ dependencies = [
  "frensense-bundler",
  "frensense-engine",
  "frensense-lang",
+ "serde",
 ]
 
 [[package]]

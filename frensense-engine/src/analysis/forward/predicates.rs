@@ -24,7 +24,7 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
     if idx >= b.instructions.len() {
         // Sentinel node: function parameter. A parameter whose conventional
         // name is a configured source (e.g. "req", "input", "body") is itself
-        // a taint source, the language spec's request_param_names.
+        // a taint source, the pack's conventional request-param vocabulary.
         if let Some(meta) = ir.var_metadata.get(&var)
             && let Some(name) = &meta.source_name
         {
@@ -337,7 +337,7 @@ pub(crate) fn sink_alert_with_facts(
         return None; // safe binding channel, no alert
     }
     // Identity-payload emission policy: an IDOR-class finder sink (vocabulary
-    // from the spec's `known_idor_sinks` or a `.frc` bundle) reports ONLY
+    // from the default pack or a `.frc` bundle) reports ONLY
     // when the tainted argument IS an identity payload - a top-level key from
     // the identity set answers "which record". Leaf values inside
     // parameterized clauses (`{ where: { id: taint } }`), non-identity object

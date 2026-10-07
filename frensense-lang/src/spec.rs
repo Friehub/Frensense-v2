@@ -141,29 +141,6 @@ pub enum NodeRole {
 
 impl NodeRole {}
 
-/// Sanitizer strength: what kind of injection does this call defeat?
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum SanitizerKind {
-    /// Completely removes taint (e.g. numeric coercion: `int(user_input)`).
-    Full,
-    /// Defeats HTML/XSS injection only.
-    HtmlEscape,
-    /// Defeats URL-based attacks only.
-    UrlEncode,
-    /// Parameterised query - defeats SQL injection only.
-    SqlParameterize,
-    /// NoSQL sanitization - defeats NoSQL injection only.
-    NoSqlParameterize,
-    /// Session-store accessor trust: `store.get(token)` returns a
-    /// server-issued session object (undefined for unknown tokens), so
-    /// identity fields read off the result are not attacker-controlled.
-    /// Receiver-aware: only applies when the receiver root is a declared
-    /// session store.
-    SessionTrust,
-    /// Path canonicalization - defeats path traversal only.
-    PathNormalize,
-}
-
 /// Broad category for what a package is used for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PackageCategory {
@@ -181,60 +158,6 @@ pub enum PackageCategory {
     Crypto,
     Logging,
     Testing,
-}
-
-/// Standard classification labels for sink functions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum SinkLabel {
-    CodeExecution,
-    SqlInjection,
-    NoSqlInjection,
-    CommandInjection,
-    PathTraversal,
-    Ssrf,
-    OpenRedirect,
-    Xss,
-    XssDom,
-    XssReflected,
-    HeaderInjection,
-    CookiePoisoning,
-    ContentTypeInjection,
-    StorageWrite,
-    LogLeak,
-    ResponseLeak,
-    CredentialLeak,
-    TemplateSsti,
-    UnsafeDeserialize,
-    LdapInjection,
-    XpathInjection,
-    PrototypePollution,
-    Toctou,
-    GraphqlInjection,
-    Xxe,
-    Jwt,
-    JwtWeakAlgorithm,
-    JwtUnsafeDecode,
-    UnsafeMemory,
-    BufferOverflow,
-    FormatString,
-    Unknown,
-}
-
-impl SinkLabel {
-    pub fn tags(&self) -> &'static [&'static str] {
-        match self {
-            Self::Xss | Self::XssDom | Self::XssReflected => &["xss"],
-            Self::PrototypePollution => &["prototype", "prototype_pollution"],
-            Self::Ssrf => &["ssrf"],
-            Self::OpenRedirect => &["redirect", "open_redirect"],
-            Self::SqlInjection => &["sql", "sqli"],
-            Self::CommandInjection => &["execution", "command_injection"],
-            Self::CodeExecution => &["execution", "code_execution"],
-            Self::PathTraversal => &["traversal", "path_traversal"],
-            Self::TemplateSsti => &["template", "ssti"],
-            _ => &[],
-        }
-    }
 }
 
 /// Broad origin of tainted data.
@@ -272,26 +195,6 @@ impl From<&str> for TaintOrigin {
             _ => Self::Custom(s.to_string()),
         }
     }
-}
-
-/// A propagator rule describes how taint flows through a specific call.
-///
-/// Example: `fmt.Sprintf` in Go - the format string is not tainted, but
-/// if *any argument* is tainted the return value is tainted.
-#[derive(Debug, Clone)]
-pub struct PropagatorRule {
-    /// Short call name or method name, e.g. `"Sprintf"`, `"format"`, `"join"`.
-    /// Matched against the last segment of a member chain.
-    pub call: &'static str,
-    /// Argument index that carries taint into the return (0-based).
-    /// `None` means *no* argument taints the return: only the receiver can
-    /// (per `tainted_receiver`). Arguments of such calls are typically the
-    /// changed data (replacement strings, match patterns, indices); letting
-    /// them inherit taint would re-flag outputs that only replaced the
-    /// tainted content - the zero-FP contract wins over recall here.
-    pub tainted_arg: Option<usize>,
-    /// If `true`, a tainted receiver taints the return value.
-    pub tainted_receiver: bool,
 }
 
 /// A parsed import as extracted by [`LanguageSpec::extract_imports`].
@@ -545,37 +448,6 @@ pub trait LanguageSpec: Send + Sync + 'static {
         false
     }
 
-    /// Names of function parameters that conventionally carry HTTP request data.
-    ///
-    /// Used as a fallback when no type annotation is available.
-    /// Returns `&[]` for languages without HTTP framework conventions (e.g. C).
-    fn request_param_names(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    /// Known sink function names for this language.
-    ///
-    /// Returns `(call_name, sink_description)` pairs.  The sink_description is
-    /// a short label used in fingerprint hashing, not for display.
-    fn known_sink_names(&self) -> &'static [(&'static str, crate::spec::SinkLabel)] {
-        &[]
-    }
-
-    /// Per-argument-slot danger facts for sinks whose argument positions
-    /// carry different semantics.
-    ///
-    /// Returns `(call_name, dangerous_slots, binding_args_safe)` where
-    /// `dangerous_slots` lists the argument positions whose taint is an
-    /// alert (empty = every slot dangerous) and `binding_args_safe` marks
-    /// non-dangerous slots as the API's safe binding channel (e.g. the
-    /// params array of a parameterized `query(sql, params)`).
-    ///
-    /// Without this, sinks like `jwt.verify(token, secret)` alert on slot 1
-    /// (the developer-controlled secret), a structural false positive.
-    fn known_sink_signatures(&self) -> &'static [(&'static str, &'static [usize], bool)] {
-        &[]
-    }
-
     /// HTTP methods that are ambiguous as bare last-segment call names:
     /// routers (`app.get`), maps (`m.set`), http clients (`got.post`) and
     /// caches (`kv.put`) all share them. A dotted spec entry with one of
@@ -593,22 +465,6 @@ pub trait LanguageSpec: Send + Sync + 'static {
         ]
     }
 
-    /// IDOR-class finder sinks: `(call, identity keys)`.
-    ///
-    /// A tainted argument composing an object literal with one of these
-    /// top-level keys is an *identity payload* - it answers "which record"
-    /// - and is reported as an access-control (Idor) finding. Sinks listed
-    /// here only report such payloads: leaf values inside parameterized
-    /// clauses (`{ where: { id: taint } }`), non-identity object fields and
-    /// bare scalars are structurally unprovable as access-control
-    /// violations and are not reported (zero-FP policy).
-    ///
-    /// Vocabulary belongs to the language spec (or a `.frc` bundle), never
-    /// to the engine.
-    fn known_idor_sinks(&self) -> &'static [(&'static str, &'static [&'static str])] {
-        &[]
-    }
-
     /// String patterns marking a *denylist guard* literal: comparing user
     /// input against a literal containing any of these patterns rejects
     /// the input (`path.contains("..")` → traversal blocked). The engine's
@@ -620,20 +476,6 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// handling in every language. Providers may extend.
     fn known_guard_denylist(&self) -> &'static [&'static str] {
         &[".."]
-    }
-
-    /// Is this sanitizer a *predicate guard* - a boolean check consumed by
-    /// a branch (`if (isSafe(x)) return;`) rather than a value
-    /// transforming call? Guards gate paths; transforms rewrite values.
-    ///
-    /// Default: full sanitizers plus JS-style predicate naming (`test`,
-    /// `isValid`, `is*`). Providers with different naming conventions
-    /// (e.g. Go's `IsX`, Python's `is_x`) override.
-    fn is_predicate_guard(&self, name: &str, kind: Option<&SanitizerKind>) -> bool {
-        kind.is_some_and(|k| matches!(k, SanitizerKind::Full))
-            || name == "test"
-            || name == "isValid"
-            || name.starts_with("is")
     }
 
     /// Stack-frame allocator vocabulary (`alloca`, ...) through
@@ -670,42 +512,6 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// are matched as suffixes of the callee text.
     fn known_route_verbs(&self) -> &'static [&'static str] {
         &[".post", ".get", ".put", ".delete", ".use", ".all"]
-    }
-
-    /// Known taint source accessor patterns.
-    ///
-    /// e.g. `"req.body"`, `"request.args"`, `"r.URL.Query"`.
-    fn known_source_patterns(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    // ── Taint propagation ─────────────────────────────────────────────────
-
-    /// Propagator rules for this language's standard library / builtins.
-    ///
-    /// The engine uses these to decide whether the return value of a call is
-    /// tainted when one of its arguments is.
-    fn propagator_rules(&self) -> &'static [PropagatorRule];
-
-    /// Is this call a sanitizer?  Returns the strength if so.
-    fn classify_sanitizer(&self, call_name: &str) -> Option<SanitizerKind>;
-
-    /// Static list of sanitizer call names for this language.
-    ///
-    /// Used to build the engine's [`TaintConfig`] sanitizer set and the
-    /// [`FactTable`](..) sanitizer facts without probing `classify_sanitizer`
-    /// with every identifier in a file. Keep in sync with
-    /// [`classify_sanitizer`](Self::classify_sanitizer).
-    fn known_sanitizer_names(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    /// Receiver roots of trusted session stores (`authenticatedUsers` for
-    /// `authenticatedUsers.get(token)`). The engine treats values derived
-    /// from a session accessor's return as server-issued, not
-    /// attacker-controlled. Empty by default.
-    fn known_session_roots(&self) -> &'static [&'static str] {
-        &[]
     }
 
     /// Read-accessor method names of trusted session stores

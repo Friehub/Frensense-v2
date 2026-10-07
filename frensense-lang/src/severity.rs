@@ -21,8 +21,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::spec::SinkLabel;
-
 /// Advisory severity ranking.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Severity {
@@ -61,9 +59,10 @@ impl Severity {
 /// unescaped. Classifying by role lets consumers rank findings by what
 /// the sink does instead of treating every flow as Critical.
 ///
-/// Roles are derived from this crate's per-sink [`SinkLabel`]s (single
-/// source of truth, no parallel table) and ride on the engine's sink
-/// signatures so both taint engines see them.
+/// Since Phase 6.3 the default pack stores each sink's role name
+/// directly (the pack generator maps its vocabulary labels onto these
+/// roles at generation time); this crate owns the role type, the
+/// default role->tier ladder and the stable reporting tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SinkRole {
@@ -93,47 +92,6 @@ pub enum SinkRole {
 }
 
 impl SinkRole {
-    /// Map a language-spec label to a role. Labels not listed here keep
-    /// `Other` (conservative: treated as execution by the consumer).
-    #[must_use]
-    pub fn from_label(label: SinkLabel) -> Self {
-        use SinkLabel as L;
-        match label {
-            L::SqlInjection
-            | L::NoSqlInjection
-            | L::CommandInjection
-            | L::CodeExecution
-            | L::TemplateSsti
-            | L::UnsafeDeserialize
-            | L::LdapInjection
-            | L::XpathInjection
-            | L::GraphqlInjection
-            | L::Xxe
-            | L::PrototypePollution
-            | L::FormatString => SinkRole::Execution,
-
-            L::Ssrf | L::OpenRedirect | L::PathTraversal | L::Toctou => SinkRole::Resource,
-
-            L::StorageWrite => SinkRole::Storage,
-
-            L::Jwt => SinkRole::Crypto,
-
-            L::Xss | L::XssDom | L::XssReflected => SinkRole::Xss,
-
-            L::ResponseLeak | L::HeaderInjection | L::CookiePoisoning | L::ContentTypeInjection => {
-                SinkRole::Response
-            }
-
-            L::JwtUnsafeDecode => SinkRole::Validation,
-
-            L::LogLeak | L::CredentialLeak => SinkRole::Response,
-
-            L::JwtWeakAlgorithm | L::UnsafeMemory | L::BufferOverflow | L::Unknown => {
-                SinkRole::Other
-            }
-        }
-    }
-
     /// The default tier for this role: the ladder lives here (D4), not in
     /// the engine. Consumers map it onto their own reporting policy.
     #[must_use]

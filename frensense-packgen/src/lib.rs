@@ -6,11 +6,17 @@
 //!
 //! Owns the vocabularies the committed `assets/frensense-default.frc` is
 //! built from: the language-agnostic bootstrap tables ([`data`], moved
-//! here from the bundler) and the per-language provider sections read
-//! from `frensense-lang` specs (until 6.3b/6.3c move those too). The
+//! here from the bundler) and the per-language provider vocabularies
+//! ([`vocab`], moved here from `frensense-lang` in 6.3b-6.3d, together
+//! with the vocabulary types and derivations in [`role_map`]). The
 //! bundler embeds the committed asset via `include_bytes!` and only
 //! parses it; this crate is its sole generator, and `packgen --check`
 //! (plus the drift test here) keeps the asset from going stale.
+//!
+//! The one value still read from `frensense-lang` at generation time is
+//! nothing: emission is fully static. (Lang keeps the severity
+//! ladder/tag and `route_registration_patterns` for scan-time readers;
+//! the pack's route patterns are the generator's static copies.)
 //!
 //! Emission order is the install order `apply_language_entries` expects
 //! and must never change without regenerating the asset: the
@@ -18,6 +24,7 @@
 //! registered spec, sorted by language name for byte-determinism.
 
 mod data;
+mod role_map;
 mod vocab;
 
 use frensense_bundler::format::{write_bundle, BundlePayloadV5};
@@ -28,94 +35,6 @@ use frensense_engine::checks::memory_summary::CapacitySpec;
 
 fn owned(vals: &[&str]) -> Vec<String> {
     vals.iter().map(|s| (*s).to_string()).collect()
-}
-
-/// Emit the language-keyed provider knowledge for one spec as
-/// [`LearnedFactEntry`]s (Phase 6.2): the per-language sink, source,
-/// sanitizer, propagator, session-root and route-registration tables that
-/// used to seed through `LanguageSpec::known_*` methods.
-///
-/// Emission order is the install order `apply_language_entries` expects:
-/// all sink names first (roles resolved from `SinkLabel` via the engine's
-/// snake_case role names), then per-slot rules (which inherit the role of
-/// the just-installed name entry), idor sinks (which attach keys to those
-/// signatures), sources, sanitizers (guard style precomputed via the
-/// spec-owned predicate-guard classifier), propagators, session roots and
-/// route patterns.
-pub fn language_entries_for_spec(
-    spec: &dyn frensense_lang::spec::LanguageSpec,
-) -> Vec<LearnedFactEntry> {
-    use frensense_engine::analysis::taint::role::sink_role_name;
-    use frensense_lang::severity::SinkRole;
-
-    let language = spec.name().to_string();
-    let mut entries = Vec::new();
-    for (call, label) in spec.known_sink_names() {
-        entries.push(LearnedFactEntry::LanguageSink {
-            language: language.clone(),
-            call: (*call).to_string(),
-            role: sink_role_name(SinkRole::from_label(*label)).to_string(),
-        });
-    }
-    for (call, slots, binding_safe) in spec.known_sink_signatures() {
-        entries.push(LearnedFactEntry::LanguageSinkSlots {
-            language: language.clone(),
-            call: (*call).to_string(),
-            dangerous_args: slots.iter().copied().collect(),
-            binding_args_safe: *binding_safe,
-        });
-    }
-    for (call, keys) in spec.known_idor_sinks() {
-        entries.push(LearnedFactEntry::LanguageIdorSink {
-            language: language.clone(),
-            call: (*call).to_string(),
-            keys: keys.iter().map(|s| (*s).to_string()).collect(),
-        });
-    }
-    // Sources: conventional request-parameter names are sources too, and
-    // the scan's source set folds both vocabularies together.
-    for p in spec.known_source_patterns() {
-        entries.push(LearnedFactEntry::LanguageSource {
-            language: language.clone(),
-            pattern: (*p).to_string(),
-        });
-    }
-    for p in spec.request_param_names() {
-        entries.push(LearnedFactEntry::LanguageSource {
-            language: language.clone(),
-            pattern: (*p).to_string(),
-        });
-    }
-    for name in spec.known_sanitizer_names() {
-        let classified = spec.classify_sanitizer(name);
-        let guard_style = spec.is_predicate_guard(name, classified.as_ref());
-        entries.push(LearnedFactEntry::LanguageSanitizer {
-            language: language.clone(),
-            call: (*name).to_string(),
-            guard_style,
-        });
-    }
-    for prop in spec.propagator_rules() {
-        entries.push(LearnedFactEntry::LanguagePropagator {
-            language: language.clone(),
-            call: prop.call.to_string(),
-            tainted_arg: prop.tainted_arg,
-            tainted_receiver: prop.tainted_receiver,
-        });
-    }
-    for root in spec.known_session_roots() {
-        entries.push(LearnedFactEntry::LanguageSessionRoot {
-            language: language.clone(),
-            root: (*root).to_string(),
-        });
-    }
-    for pattern in spec.route_registration_patterns() {
-        entries.push(LearnedFactEntry::LanguageRoutePattern {
-            language: language.clone(),
-            pattern: (*pattern).to_string(),
-        });
-    }
-    entries
 }
 
 /// The default pack's entries, generated from lang's bootstrap tables.
@@ -223,15 +142,12 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
             consumes_params: f.consumes_params.to_vec(),
         });
     }
-    // Phase 6.2: one language-keyed section per registered language spec,
-    // installed by `apply_language_entries` filtered to the scan's
-    // languages (the language-agnostic variants above stay shared). Sorted
-    // by language name: the registry's by_name map iterates in hash order,
-    // and the asset must be byte-deterministic.
-    // Phase 6.3c: every language emits from the generator's static
-    // vocabulary (all_vocab is in the pack's sorted emission order).
-    // `language_entries_for_spec` remains only as the parity test's
-    // reference path until 6.3d deletes it with lang's provider bodies.
+    // Phase 6.2: one language-keyed section per language, installed by
+    // `apply_language_entries` filtered to the scan's languages (the
+    // language-agnostic variants above stay shared). Sorted by language
+    // name for byte-determinism. Phase 6.3c: every language emits from
+    // the generator's static vocabulary; 6.3d deleted lang's provider
+    // bodies, so this static path is the only path.
     for v in vocab::all_vocab() {
         entries.extend(vocab::entries_for_static(v));
     }
@@ -548,23 +464,38 @@ mod tests {
         }
     }
 
-    /// Phase 6.2d sole-source contract: the spec seed no longer carries
-    /// provider knowledge. For every registered language the bare
-    /// [`tables_from_exts`] seed yields empty source/sink/sanitizer sets
-    /// and empty provider tables, and installing that language's pack
-    /// sections via [`apply_language_entries`] is what populates all of
-    /// them - with exactly the values the spec declares. The structural
+    /// Phase 6.2d/6.3d sole-source contract: lang no longer declares any
+    /// provider knowledge (the provider trait methods are deleted), so
+    /// the generator's static vocabularies are the only source. For every
+    /// vocabulary the bare [`tables_from_exts`] seed yields empty
+    /// source/sink/sanitizer sets and empty provider tables, and
+    /// installing that vocabulary's pack sections via
+    /// [`apply_language_entries`] is what populates all of them - with
+    /// exactly the static values the vocabulary declares. The structural
     /// vocabularies (stack allocators, guard denylist, ...) stay
     /// spec-seeded by design and are out of scope here.
     #[test]
     fn language_pack_entries_are_the_sole_source_of_provider_knowledge() {
-        use frensense_engine::analysis::taint::role::SinkRole;
+        use crate::role_map::sink_role_for_label;
 
-        for spec in frensense_lang::all_specs() {
-            let lang = spec.name();
+        // One canonical extension per language key: the bare seed is
+        // spec-derived and language-keyed, so any extension of the
+        // language's spec exercises the same seed.
+        fn ext_for(language: &str) -> &str {
+            match language {
+                "typescript" => "ts",
+                "javascript" => "js",
+                "python" => "py",
+                "rust" => "rs",
+                other => other, // c, go
+            }
+        }
+
+        for v in vocab::all_vocab() {
+            let lang = v.language;
 
             // 1. Bare spec seed: nothing provider-shaped.
-            let (bare_config, bare_facts) = tables_from_exts(spec.extensions().iter().copied());
+            let (bare_config, bare_facts) = tables_from_exts([ext_for(lang)]);
             assert!(
                 bare_config.sources.is_empty(),
                 "spec seeds sources for {lang}"
@@ -619,17 +550,17 @@ mod tests {
                 "spec seeds route_patterns for {lang}"
             );
 
-            // 2. Installing this language's pack sections is the only
-            //    source, and it lands exactly the spec's declared values.
-            let entries = language_entries_for_spec(spec);
+            // 2. Installing this vocabulary's pack sections is the only
+            //    source, and it lands exactly the static values.
+            let entries = vocab::entries_for_static(v);
             let mut config = TaintConfig::default();
             let mut facts = FactTable::default();
             apply_language_entries(&mut config, &mut facts, &entries, &[lang]);
 
-            let expected_sources: std::collections::BTreeSet<String> = spec
-                .known_source_patterns()
+            let expected_sources: std::collections::BTreeSet<String> = v
+                .source_patterns
                 .iter()
-                .chain(spec.request_param_names().iter())
+                .chain(v.request_param_names.iter())
                 .map(|p| (*p).to_string())
                 .collect();
             let actual_sources: std::collections::BTreeSet<String> =
@@ -639,8 +570,8 @@ mod tests {
                 "sources differ for {lang}"
             );
 
-            let expected_sinks: std::collections::BTreeSet<String> = spec
-                .known_sink_names()
+            let expected_sinks: std::collections::BTreeSet<String> = v
+                .sink_names
                 .iter()
                 .map(|(call, _)| call.rsplit('.').next().unwrap_or(call).to_string())
                 .collect();
@@ -648,11 +579,8 @@ mod tests {
                 config.sinks.iter().cloned().collect();
             assert_eq!(actual_sinks, expected_sinks, "sinks differ for {lang}");
 
-            let expected_sanitizers: std::collections::BTreeSet<String> = spec
-                .known_sanitizer_names()
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect();
+            let expected_sanitizers: std::collections::BTreeSet<String> =
+                v.sanitizer_names.iter().map(|s| (*s).to_string()).collect();
             let actual_sanitizers: std::collections::BTreeSet<String> =
                 config.sanitizers.iter().cloned().collect();
             assert_eq!(
@@ -670,19 +598,19 @@ mod tests {
             );
 
             // 3. Spot-check the sink signatures the pack installed: every
-            //    spec sink name resolves under its full path with the
-            //    spec's role, every per-slot rule keeps its slots, and the
-            //    last segment resolves to some signature (bare-wins rule:
-            //    a dotted entry's last segment may carry a different role
-            //    when a bare entry owns the shared name).
-            for (call, label) in spec.known_sink_names() {
+            //    vocabulary sink name resolves under its full path with
+            //    the mapped role, every per-slot rule keeps its slots, and
+            //    the last segment resolves to some signature (bare-wins
+            //    rule: a dotted entry's last segment may carry a different
+            //    role when a bare entry owns the shared name).
+            for (call, label) in v.sink_names {
                 let last = call.rsplit('.').next().unwrap_or(call);
                 let sig = facts
                     .sink_signature(call)
                     .unwrap_or_else(|| panic!("{call} must be a sink for {lang}"));
                 assert_eq!(
                     sig.role,
-                    SinkRole::from_label(*label),
+                    sink_role_for_label(*label),
                     "role for {call} ({lang})"
                 );
                 assert!(
@@ -690,7 +618,7 @@ mod tests {
                     "last-segment alias for {call} ({lang}) must resolve"
                 );
             }
-            for (call, slots, binding_safe) in spec.known_sink_signatures() {
+            for (call, slots, binding_safe) in v.sink_signatures {
                 let sig = facts
                     .sink_signature(call)
                     .unwrap_or_else(|| panic!("{call} must have a signature for {lang}"));
@@ -707,7 +635,7 @@ mod tests {
                     "binding safety for {call} ({lang})"
                 );
             }
-            for (call, keys) in spec.known_idor_sinks() {
+            for (call, keys) in v.idor_sinks {
                 assert!(
                     facts.is_idor_finder_sink(call),
                     "{call} must be an IDOR finder sink for {lang}"
@@ -719,13 +647,13 @@ mod tests {
                     );
                 }
             }
-            for root in spec.known_session_roots() {
+            for root in v.session_roots {
                 assert!(
                     facts.session_roots.contains(*root),
                     "{root} must be a session root for {lang}"
                 );
             }
-            for prop in spec.propagator_rules() {
+            for prop in v.propagators {
                 assert!(
                     facts.propagators.contains_key(prop.call),
                     "{} must be a propagator for {lang}",
@@ -733,14 +661,9 @@ mod tests {
                 );
             }
 
-            // Route patterns have no spec-seed counterpart (the harness
-            // still reads the spec directly): the pack must carry exactly
-            // what the spec declares, keyed by language name.
-            let expected: Vec<String> = spec
-                .route_registration_patterns()
-                .iter()
-                .map(|p| (*p).to_string())
-                .collect();
+            // Route patterns: the pack must carry exactly what the
+            // vocabulary declares, keyed by language name.
+            let expected: Vec<String> = v.route_patterns.iter().map(|p| (*p).to_string()).collect();
             let actual = facts.route_patterns.get(lang).cloned().unwrap_or_default();
             assert_eq!(actual, expected, "route_patterns differ for {lang}");
         }

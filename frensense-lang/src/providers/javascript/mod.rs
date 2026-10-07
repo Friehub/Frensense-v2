@@ -12,20 +12,19 @@
 //! - [`ast`] - shared AST classification (node → [`NodeRole`])
 //! - [`imports`] - ESM/CommonJS import extraction
 //! - [`packages`] - npm package → [`PackageCategory`] knowledge
-//! - [`sanitizers`] / [`propagators`] - taint-transfer rules
 //! - [`params`] - parameter → [`TaintOrigin`](crate::spec::TaintOrigin) classification
-//! - [`tables`] - static sink/source tables
 //! - [`spec_ts`] / [`spec_js`] - the two `LanguageSpec` impls
+//!
+//! Security vocabulary (sinks, sources, sanitizers, propagators, session
+//! roots, route patterns) lives in `frensense-packgen` since Phase 6.3;
+//! the specs here are mechanism-only.
 
 mod ast;
 mod imports;
 mod packages;
 mod params;
-mod propagators;
-mod sanitizers;
 mod spec_js;
 mod spec_ts;
-mod tables;
 
 pub use spec_js::JavaScriptSpec;
 pub use spec_ts::TypeScriptSpec;

@@ -4,7 +4,8 @@
 
 //! Sanitizer name classification shared by the JS and TS specs.
 
-use frensense_lang::spec::{call_last_segment, SanitizerKind};
+use crate::role_map::SanitizerKind;
+use crate::vocab::call_last_segment;
 
 pub(super) fn js_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
     match call_last_segment(call) {

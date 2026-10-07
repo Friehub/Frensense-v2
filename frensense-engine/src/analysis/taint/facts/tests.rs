@@ -238,8 +238,8 @@ fn generic_promise_verbs_are_not_sinks() {
 
 #[test]
 fn spec_drives_idor_vocabulary() {
-    // IDOR finder vocabulary is spec-owned (frensense-lang
-    // `known_idor_sinks`), not engine built-ins: the spec says which calls
+    // IDOR finder vocabulary is pack-owned (frensense-packgen's
+    // per-language tables), not engine built-ins: the pack says which calls
     // take identity payloads and which top-level keys mark one. Clause
     // wrappers (`where`) are NOT identity keys - a where-wrapped leaf value
     // is a parameterized filter, structurally unprovable as an

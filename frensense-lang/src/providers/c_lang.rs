@@ -7,10 +7,7 @@
 
 use tree_sitter::Node;
 
-use crate::spec::{
-    call_last_segment, node_text, Import, LanguageSpec, NodeRole, PackageCategory, PropagatorRule,
-    SanitizerKind, TaintOrigin,
-};
+use crate::spec::{node_text, Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin};
 
 // ── AST classification ────────────────────────────────────────────────────────
 
@@ -136,151 +133,6 @@ fn c_package_category(pkg: &str) -> Option<PackageCategory> {
     }
 }
 
-// ── Static sink/source tables ─────────────────────────────────────────────────
-
-static C_SINK_NAMES: &[(&'static str, crate::spec::SinkLabel)] = &[
-    // Code Execution
-    ("eval", crate::spec::SinkLabel::CodeExecution),
-    ("system", crate::spec::SinkLabel::CommandInjection),
-    ("popen", crate::spec::SinkLabel::CommandInjection),
-    ("exec", crate::spec::SinkLabel::CommandInjection),
-    ("execve", crate::spec::SinkLabel::CommandInjection),
-    ("execl", crate::spec::SinkLabel::CommandInjection),
-    ("execlp", crate::spec::SinkLabel::CommandInjection),
-    ("execvp", crate::spec::SinkLabel::CommandInjection),
-    ("execvpe", crate::spec::SinkLabel::CommandInjection),
-    ("spawn", crate::spec::SinkLabel::CommandInjection),
-    ("spawnSync", crate::spec::SinkLabel::CommandInjection),
-    // SQL Injection
-    ("mysql_query", crate::spec::SinkLabel::SqlInjection),
-    ("sqlite3_exec", crate::spec::SinkLabel::SqlInjection),
-    ("execute", crate::spec::SinkLabel::SqlInjection),
-    ("query", crate::spec::SinkLabel::SqlInjection),
-    ("prepare", crate::spec::SinkLabel::SqlInjection),
-    // Path Traversal
-    ("fopen", crate::spec::SinkLabel::PathTraversal),
-    ("open", crate::spec::SinkLabel::PathTraversal),
-    ("read", crate::spec::SinkLabel::PathTraversal),
-    ("write", crate::spec::SinkLabel::PathTraversal),
-    ("readFile", crate::spec::SinkLabel::PathTraversal),
-    ("writeFile", crate::spec::SinkLabel::PathTraversal),
-    ("readFileSync", crate::spec::SinkLabel::PathTraversal),
-    ("join", crate::spec::SinkLabel::PathTraversal),
-    ("unlink", crate::spec::SinkLabel::PathTraversal),
-    ("stat", crate::spec::SinkLabel::PathTraversal),
-    ("access", crate::spec::SinkLabel::PathTraversal),
-    // Buffer Overflow / Memory Safety
-    //
-    // Unsized copies only: a tainted source into gets/strcpy/strcat is an
-    // unbounded write. Sized copies (memcpy, memmove, memset, strncpy,
-    // strncat) are deliberately NOT taint sinks - they carry an explicit
-    // length, so boundedness is a spatial question for the capacity-based
-    // checker, and every idiomatic `memcpy(buf, getenv_derived, n)` pattern
-    // (config parsing, path building) alerted on normal input handling.
-    ("gets", crate::spec::SinkLabel::BufferOverflow),
-    ("strcpy", crate::spec::SinkLabel::BufferOverflow),
-    ("strcat", crate::spec::SinkLabel::BufferOverflow),
-    ("sprintf", crate::spec::SinkLabel::FormatString),
-    ("vsprintf", crate::spec::SinkLabel::FormatString),
-    ("printf", crate::spec::SinkLabel::FormatString),
-    ("snprintf", crate::spec::SinkLabel::FormatString),
-    ("sscanf", crate::spec::SinkLabel::FormatString),
-    ("mktemp", crate::spec::SinkLabel::PathTraversal),
-    ("tmpnam", crate::spec::SinkLabel::PathTraversal),
-    // SSRF
-    ("fetch", crate::spec::SinkLabel::Ssrf),
-    ("get", crate::spec::SinkLabel::Ssrf),
-    ("post", crate::spec::SinkLabel::Ssrf),
-    ("request", crate::spec::SinkLabel::Ssrf),
-    ("got", crate::spec::SinkLabel::Ssrf),
-    // Open Redirect
-    ("redirect", crate::spec::SinkLabel::OpenRedirect),
-    // XSS
-    ("innerHTML", crate::spec::SinkLabel::XssDom),
-    ("outerHTML", crate::spec::SinkLabel::XssDom),
-    ("dangerouslySetInnerHTML", crate::spec::SinkLabel::XssDom),
-    // SSTI
-    ("render", crate::spec::SinkLabel::TemplateSsti),
-    ("render_template", crate::spec::SinkLabel::TemplateSsti),
-    ("ejs.render", crate::spec::SinkLabel::TemplateSsti),
-    ("pug.compile", crate::spec::SinkLabel::TemplateSsti),
-    ("handlebars.compile", crate::spec::SinkLabel::TemplateSsti),
-    ("nunjucks.render", crate::spec::SinkLabel::TemplateSsti),
-    // Unsafe Deserialization
-    ("pickle.loads", crate::spec::SinkLabel::UnsafeDeserialize),
-    ("yaml.load", crate::spec::SinkLabel::UnsafeDeserialize),
-    (
-        "bincode::deserialize",
-        crate::spec::SinkLabel::UnsafeDeserialize,
-    ),
-    (
-        "serde_json::from_str",
-        crate::spec::SinkLabel::UnsafeDeserialize,
-    ),
-    // Prototype Pollution
-    ("Object.assign", crate::spec::SinkLabel::PrototypePollution),
-    ("_.merge", crate::spec::SinkLabel::PrototypePollution),
-    ("_.defaultsDeep", crate::spec::SinkLabel::PrototypePollution),
-    ("_.set", crate::spec::SinkLabel::PrototypePollution),
-    ("$.extend", crate::spec::SinkLabel::PrototypePollution),
-    ("setPrototypeOf", crate::spec::SinkLabel::PrototypePollution),
-    // XXE
-    ("DOMParser", crate::spec::SinkLabel::Xxe),
-    // JWT
-    ("jwt.sign", crate::spec::SinkLabel::Jwt),
-    // MongoDB / ORM
-    ("update", crate::spec::SinkLabel::NoSqlInjection),
-    ("updateOne", crate::spec::SinkLabel::NoSqlInjection),
-    ("updateMany", crate::spec::SinkLabel::NoSqlInjection),
-    ("insert", crate::spec::SinkLabel::NoSqlInjection),
-    ("insertOne", crate::spec::SinkLabel::NoSqlInjection),
-    ("insertMany", crate::spec::SinkLabel::NoSqlInjection),
-    ("delete", crate::spec::SinkLabel::NoSqlInjection),
-    ("deleteOne", crate::spec::SinkLabel::NoSqlInjection),
-    ("deleteMany", crate::spec::SinkLabel::NoSqlInjection),
-    ("find", crate::spec::SinkLabel::NoSqlInjection),
-    ("findOne", crate::spec::SinkLabel::NoSqlInjection),
-    ("findAll", crate::spec::SinkLabel::NoSqlInjection),
-    // Storage Write
-    ("put", crate::spec::SinkLabel::StorageWrite),
-    ("setItem", crate::spec::SinkLabel::StorageWrite),
-    // Log Leak
-    ("log", crate::spec::SinkLabel::LogLeak),
-    ("error", crate::spec::SinkLabel::LogLeak),
-    ("info", crate::spec::SinkLabel::LogLeak),
-    ("debug", crate::spec::SinkLabel::LogLeak),
-];
-
-static C_SOURCE_PATTERNS: &[&str] = &["argv", "getenv", "fgets", "scanf", "stdin"];
-
-static C_PROPAGATORS: &[PropagatorRule] = &[
-    PropagatorRule {
-        call: "sprintf",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "snprintf",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "strcat",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "strcpy",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "strdup",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-];
-
 // ── CSpec ─────────────────────────────────────────────────────────────────────
 
 pub struct CSpec;
@@ -359,46 +211,6 @@ impl LanguageSpec for CSpec {
             "argc" | "argv" => Some(TaintOrigin::UserInput),
             _ => None,
         }
-    }
-
-    fn known_sink_names(&self) -> &'static [(&'static str, crate::spec::SinkLabel)] {
-        C_SINK_NAMES
-    }
-
-    /// Format-string sinks: only the FORMAT slot is dangerous. A tainted
-    /// destination buffer (`sprintf(malloc(strlen(input)), ...)`) or tainted
-    /// data being formatted (`snprintf(dst, n, "%s", input)`) is normal I/O,
-    /// not a vulnerability - alerting on every slot made every getenv-driven
-    /// path builder a Critical finding on real C (alsa-lib, cJSON).
-    fn known_sink_signatures(&self) -> &'static [(&'static str, &'static [usize], bool)] {
-        // (call, dangerous slots, binding slots safe)
-        // sprintf/vsprintf(dst, fmt, ...), printf(fmt, ...),
-        // snprintf(dst, n, fmt, ...), sscanf(input, fmt, ...).
-        &[
-            ("sprintf", &[1], false),
-            ("vsprintf", &[1], false),
-            ("printf", &[0], false),
-            ("snprintf", &[2], false),
-            ("sscanf", &[1], false),
-        ]
-    }
-
-    fn known_source_patterns(&self) -> &'static [&'static str] {
-        C_SOURCE_PATTERNS
-    }
-
-    fn propagator_rules(&self) -> &'static [PropagatorRule] {
-        C_PROPAGATORS
-    }
-
-    fn classify_sanitizer(&self, call: &str) -> Option<SanitizerKind> {
-        match call_last_segment(call) {
-            "atoi" | "atol" | "atof" | "strtol" | "strtoul" => Some(SanitizerKind::Full),
-            _ => None,
-        }
-    }
-    fn known_sanitizer_names(&self) -> &'static [&'static str] {
-        &["atoi", "atol", "atof", "strtol", "strtoul"]
     }
 
     fn route_registration_patterns(&self) -> &'static [&'static str] {

@@ -277,7 +277,7 @@ export function signToken (payload: string, secret: string) {
 
     /// Taint consumer: a sink argument whose entire backward chain is
     /// constant is promoted to Clean, not Vulnerable. The ts config's
-    /// request_param_names make parameters named like `req` sources, but a
+    /// request-param vocabulary makes parameters named like `req` sources, but a
     /// value that never flows from them stays clean. Direct check: a sink
     /// fed ONLY a string literal must have verdict Clean (the walk dead-ends
     /// at a constant root, no source reachable).

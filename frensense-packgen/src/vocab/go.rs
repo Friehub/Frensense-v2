@@ -3,12 +3,12 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 //! Go provider vocabulary, translated verbatim from
-//! `frensense-lang`'s `providers/go.rs` (Phase 6.3c; lang sheds it in 6.3d). The
-//! parity test in `super` proves the translation is faithful.
+//! `frensense-lang`'s `providers/go.rs` (Phase 6.3c; lang's copy deleted in
+//! 6.3d - this static data is the sole source).
 
 use super::call_last_segment;
 use super::LanguageVocab;
-use frensense_lang::spec::{PropagatorRule, SanitizerKind};
+use crate::role_map::{PropagatorRule, SanitizerKind};
 
 fn go_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
     match call_last_segment(call) {
@@ -172,248 +172,173 @@ pub(super) static GO_REQUEST_PARAM_NAMES: &[&str] =
     // Convention: r=*http.Request, w=http.ResponseWriter, c=*gin.Context
     &["r", "req", "c", "ctx", "w"];
 
-pub(super) static GO_SINK_NAMES: &[(&str, frensense_lang::spec::SinkLabel)] = &[
+pub(super) static GO_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     // Code Execution
-    ("eval", frensense_lang::spec::SinkLabel::CodeExecution),
-    ("exec", frensense_lang::spec::SinkLabel::CommandInjection),
-    ("Exec", frensense_lang::spec::SinkLabel::CommandInjection),
-    ("Command", frensense_lang::spec::SinkLabel::CommandInjection),
-    ("Run", frensense_lang::spec::SinkLabel::CommandInjection),
-    ("Output", frensense_lang::spec::SinkLabel::CommandInjection),
+    ("eval", crate::role_map::SinkLabel::CodeExecution),
+    ("exec", crate::role_map::SinkLabel::CommandInjection),
+    ("Exec", crate::role_map::SinkLabel::CommandInjection),
+    ("Command", crate::role_map::SinkLabel::CommandInjection),
+    ("Run", crate::role_map::SinkLabel::CommandInjection),
+    ("Output", crate::role_map::SinkLabel::CommandInjection),
     (
         "CombinedOutput",
-        frensense_lang::spec::SinkLabel::CommandInjection,
+        crate::role_map::SinkLabel::CommandInjection,
     ),
-    ("spawn", frensense_lang::spec::SinkLabel::CommandInjection),
-    (
-        "spawnSync",
-        frensense_lang::spec::SinkLabel::CommandInjection,
-    ),
+    ("spawn", crate::role_map::SinkLabel::CommandInjection),
+    ("spawnSync", crate::role_map::SinkLabel::CommandInjection),
     // SQL Injection
-    ("Query", frensense_lang::spec::SinkLabel::SqlInjection),
-    ("QueryRow", frensense_lang::spec::SinkLabel::SqlInjection),
-    (
-        "QueryContext",
-        frensense_lang::spec::SinkLabel::SqlInjection,
-    ),
-    ("ExecContext", frensense_lang::spec::SinkLabel::SqlInjection),
-    ("Prepare", frensense_lang::spec::SinkLabel::SqlInjection),
-    (
-        "PrepareContext",
-        frensense_lang::spec::SinkLabel::SqlInjection,
-    ),
-    ("executeRaw", frensense_lang::spec::SinkLabel::SqlInjection),
-    ("queryRaw", frensense_lang::spec::SinkLabel::SqlInjection),
-    ("prepare", frensense_lang::spec::SinkLabel::SqlInjection),
+    ("Query", crate::role_map::SinkLabel::SqlInjection),
+    ("QueryRow", crate::role_map::SinkLabel::SqlInjection),
+    ("QueryContext", crate::role_map::SinkLabel::SqlInjection),
+    ("ExecContext", crate::role_map::SinkLabel::SqlInjection),
+    ("Prepare", crate::role_map::SinkLabel::SqlInjection),
+    ("PrepareContext", crate::role_map::SinkLabel::SqlInjection),
+    ("executeRaw", crate::role_map::SinkLabel::SqlInjection),
+    ("queryRaw", crate::role_map::SinkLabel::SqlInjection),
+    ("prepare", crate::role_map::SinkLabel::SqlInjection),
     // Path Traversal
-    ("ReadFile", frensense_lang::spec::SinkLabel::PathTraversal),
-    ("Open", frensense_lang::spec::SinkLabel::PathTraversal),
-    ("Create", frensense_lang::spec::SinkLabel::PathTraversal),
-    ("WriteFile", frensense_lang::spec::SinkLabel::PathTraversal),
-    ("read", frensense_lang::spec::SinkLabel::PathTraversal),
-    (
-        "read_to_string",
-        frensense_lang::spec::SinkLabel::PathTraversal,
-    ),
-    ("write", frensense_lang::spec::SinkLabel::PathTraversal),
-    ("readFile", frensense_lang::spec::SinkLabel::PathTraversal),
-    ("writeFile", frensense_lang::spec::SinkLabel::PathTraversal),
-    (
-        "readFileSync",
-        frensense_lang::spec::SinkLabel::PathTraversal,
-    ),
-    ("join", frensense_lang::spec::SinkLabel::PathTraversal),
-    ("unlink", frensense_lang::spec::SinkLabel::PathTraversal),
-    ("stat", frensense_lang::spec::SinkLabel::PathTraversal),
-    ("access", frensense_lang::spec::SinkLabel::PathTraversal),
+    ("ReadFile", crate::role_map::SinkLabel::PathTraversal),
+    ("Open", crate::role_map::SinkLabel::PathTraversal),
+    ("Create", crate::role_map::SinkLabel::PathTraversal),
+    ("WriteFile", crate::role_map::SinkLabel::PathTraversal),
+    ("read", crate::role_map::SinkLabel::PathTraversal),
+    ("read_to_string", crate::role_map::SinkLabel::PathTraversal),
+    ("write", crate::role_map::SinkLabel::PathTraversal),
+    ("readFile", crate::role_map::SinkLabel::PathTraversal),
+    ("writeFile", crate::role_map::SinkLabel::PathTraversal),
+    ("readFileSync", crate::role_map::SinkLabel::PathTraversal),
+    ("join", crate::role_map::SinkLabel::PathTraversal),
+    ("unlink", crate::role_map::SinkLabel::PathTraversal),
+    ("stat", crate::role_map::SinkLabel::PathTraversal),
+    ("access", crate::role_map::SinkLabel::PathTraversal),
     // SSRF
-    ("http.Get", frensense_lang::spec::SinkLabel::Ssrf),
-    ("http.Post", frensense_lang::spec::SinkLabel::Ssrf),
-    ("http.Head", frensense_lang::spec::SinkLabel::Ssrf),
-    ("http.Do", frensense_lang::spec::SinkLabel::Ssrf),
-    ("Get", frensense_lang::spec::SinkLabel::Ssrf),
-    ("Post", frensense_lang::spec::SinkLabel::Ssrf),
-    ("Do", frensense_lang::spec::SinkLabel::Ssrf),
-    ("NewRequest", frensense_lang::spec::SinkLabel::Ssrf),
-    ("fetch", frensense_lang::spec::SinkLabel::Ssrf),
-    ("request", frensense_lang::spec::SinkLabel::Ssrf),
-    ("got", frensense_lang::spec::SinkLabel::Ssrf),
+    ("http.Get", crate::role_map::SinkLabel::Ssrf),
+    ("http.Post", crate::role_map::SinkLabel::Ssrf),
+    ("http.Head", crate::role_map::SinkLabel::Ssrf),
+    ("http.Do", crate::role_map::SinkLabel::Ssrf),
+    ("Get", crate::role_map::SinkLabel::Ssrf),
+    ("Post", crate::role_map::SinkLabel::Ssrf),
+    ("Do", crate::role_map::SinkLabel::Ssrf),
+    ("NewRequest", crate::role_map::SinkLabel::Ssrf),
+    ("fetch", crate::role_map::SinkLabel::Ssrf),
+    ("request", crate::role_map::SinkLabel::Ssrf),
+    ("got", crate::role_map::SinkLabel::Ssrf),
     // Open Redirect
-    ("redirect", frensense_lang::spec::SinkLabel::OpenRedirect),
-    ("Redirect", frensense_lang::spec::SinkLabel::OpenRedirect),
-    ("c.redirect", frensense_lang::spec::SinkLabel::OpenRedirect),
-    (
-        "location.href",
-        frensense_lang::spec::SinkLabel::OpenRedirect,
-    ),
-    (
-        "window.location",
-        frensense_lang::spec::SinkLabel::OpenRedirect,
-    ),
+    ("redirect", crate::role_map::SinkLabel::OpenRedirect),
+    ("Redirect", crate::role_map::SinkLabel::OpenRedirect),
+    ("c.redirect", crate::role_map::SinkLabel::OpenRedirect),
+    ("location.href", crate::role_map::SinkLabel::OpenRedirect),
+    ("window.location", crate::role_map::SinkLabel::OpenRedirect),
     // XSS
-    ("innerHTML", frensense_lang::spec::SinkLabel::XssDom),
-    ("outerHTML", frensense_lang::spec::SinkLabel::XssDom),
-    ("document.writeln", frensense_lang::spec::SinkLabel::XssDom),
+    ("innerHTML", crate::role_map::SinkLabel::XssDom),
+    ("outerHTML", crate::role_map::SinkLabel::XssDom),
+    ("document.writeln", crate::role_map::SinkLabel::XssDom),
     (
         "dangerouslySetInnerHTML",
-        frensense_lang::spec::SinkLabel::XssDom,
+        crate::role_map::SinkLabel::XssDom,
     ),
     // SSTI - Template engine renders
-    (
-        "ExecuteTemplate",
-        frensense_lang::spec::SinkLabel::TemplateSsti,
-    ),
-    (
-        "render_template",
-        frensense_lang::spec::SinkLabel::TemplateSsti,
-    ),
+    ("ExecuteTemplate", crate::role_map::SinkLabel::TemplateSsti),
+    ("render_template", crate::role_map::SinkLabel::TemplateSsti),
     (
         "render_template_string",
-        frensense_lang::spec::SinkLabel::TemplateSsti,
+        crate::role_map::SinkLabel::TemplateSsti,
     ),
-    ("ejs.render", frensense_lang::spec::SinkLabel::TemplateSsti),
-    (
-        "nunjucks.render",
-        frensense_lang::spec::SinkLabel::TemplateSsti,
-    ),
-    (
-        "marko.render",
-        frensense_lang::spec::SinkLabel::TemplateSsti,
-    ),
-    ("eta.render", frensense_lang::spec::SinkLabel::TemplateSsti),
-    ("swig.render", frensense_lang::spec::SinkLabel::TemplateSsti),
-    (
-        "liquid.render",
-        frensense_lang::spec::SinkLabel::TemplateSsti,
-    ),
-    (
-        "mustache.render",
-        frensense_lang::spec::SinkLabel::TemplateSsti,
-    ),
+    ("ejs.render", crate::role_map::SinkLabel::TemplateSsti),
+    ("nunjucks.render", crate::role_map::SinkLabel::TemplateSsti),
+    ("marko.render", crate::role_map::SinkLabel::TemplateSsti),
+    ("eta.render", crate::role_map::SinkLabel::TemplateSsti),
+    ("swig.render", crate::role_map::SinkLabel::TemplateSsti),
+    ("liquid.render", crate::role_map::SinkLabel::TemplateSsti),
+    ("mustache.render", crate::role_map::SinkLabel::TemplateSsti),
     // Insecure Deserialization
     (
         "bincode::deserialize",
-        frensense_lang::spec::SinkLabel::UnsafeDeserialize,
+        crate::role_map::SinkLabel::UnsafeDeserialize,
     ),
     (
         "serde_json::from_str",
-        frensense_lang::spec::SinkLabel::UnsafeDeserialize,
+        crate::role_map::SinkLabel::UnsafeDeserialize,
     ),
-    (
-        "yaml.load",
-        frensense_lang::spec::SinkLabel::UnsafeDeserialize,
-    ),
+    ("yaml.load", crate::role_map::SinkLabel::UnsafeDeserialize),
     (
         "js-yaml.load",
-        frensense_lang::spec::SinkLabel::UnsafeDeserialize,
+        crate::role_map::SinkLabel::UnsafeDeserialize,
     ),
     (
         "pickle.loads",
-        frensense_lang::spec::SinkLabel::UnsafeDeserialize,
+        crate::role_map::SinkLabel::UnsafeDeserialize,
     ),
     (
         "msgpack.decode",
-        frensense_lang::spec::SinkLabel::UnsafeDeserialize,
+        crate::role_map::SinkLabel::UnsafeDeserialize,
     ),
     // Prototype Pollution
     (
         "Object.assign",
-        frensense_lang::spec::SinkLabel::PrototypePollution,
+        crate::role_map::SinkLabel::PrototypePollution,
     ),
-    (
-        "_.merge",
-        frensense_lang::spec::SinkLabel::PrototypePollution,
-    ),
+    ("_.merge", crate::role_map::SinkLabel::PrototypePollution),
     (
         "_.defaultsDeep",
-        frensense_lang::spec::SinkLabel::PrototypePollution,
+        crate::role_map::SinkLabel::PrototypePollution,
     ),
-    ("_.set", frensense_lang::spec::SinkLabel::PrototypePollution),
-    (
-        "$.extend",
-        frensense_lang::spec::SinkLabel::PrototypePollution,
-    ),
+    ("_.set", crate::role_map::SinkLabel::PrototypePollution),
+    ("$.extend", crate::role_map::SinkLabel::PrototypePollution),
     (
         "setPrototypeOf",
-        frensense_lang::spec::SinkLabel::PrototypePollution,
+        crate::role_map::SinkLabel::PrototypePollution,
     ),
     // XXE
-    ("DOMParser", frensense_lang::spec::SinkLabel::Xxe),
+    ("DOMParser", crate::role_map::SinkLabel::Xxe),
     // JWT
-    ("jwt.sign", frensense_lang::spec::SinkLabel::Jwt),
+    ("jwt.sign", crate::role_map::SinkLabel::Jwt),
     // Cloudflare Workers / Prisma
-    ("c.redirect", frensense_lang::spec::SinkLabel::OpenRedirect),
-    ("env.KV.put", frensense_lang::spec::SinkLabel::StorageWrite),
-    (
-        "KVNamespace.put",
-        frensense_lang::spec::SinkLabel::StorageWrite,
-    ),
-    (
-        "env.DB.prepare",
-        frensense_lang::spec::SinkLabel::SqlInjection,
-    ),
-    ("res.send", frensense_lang::spec::SinkLabel::ResponseLeak),
-    ("res.json", frensense_lang::spec::SinkLabel::ResponseLeak),
-    (
-        "res.redirect",
-        frensense_lang::spec::SinkLabel::OpenRedirect,
-    ),
-    ("res.render", frensense_lang::spec::SinkLabel::TemplateSsti),
-    (
-        "revalidatePath",
-        frensense_lang::spec::SinkLabel::StorageWrite,
-    ),
+    ("c.redirect", crate::role_map::SinkLabel::OpenRedirect),
+    ("env.KV.put", crate::role_map::SinkLabel::StorageWrite),
+    ("KVNamespace.put", crate::role_map::SinkLabel::StorageWrite),
+    ("env.DB.prepare", crate::role_map::SinkLabel::SqlInjection),
+    ("res.send", crate::role_map::SinkLabel::ResponseLeak),
+    ("res.json", crate::role_map::SinkLabel::ResponseLeak),
+    ("res.redirect", crate::role_map::SinkLabel::OpenRedirect),
+    ("res.render", crate::role_map::SinkLabel::TemplateSsti),
+    ("revalidatePath", crate::role_map::SinkLabel::StorageWrite),
     (
         "prisma.queryRawUnsafe",
-        frensense_lang::spec::SinkLabel::SqlInjection,
+        crate::role_map::SinkLabel::SqlInjection,
     ),
     (
         "prisma.executeRawUnsafe",
-        frensense_lang::spec::SinkLabel::SqlInjection,
+        crate::role_map::SinkLabel::SqlInjection,
     ),
-    (
-        "R2Bucket.put",
-        frensense_lang::spec::SinkLabel::StorageWrite,
-    ),
+    ("R2Bucket.put", crate::role_map::SinkLabel::StorageWrite),
     (
         "D1Database.prepare",
-        frensense_lang::spec::SinkLabel::SqlInjection,
+        crate::role_map::SinkLabel::SqlInjection,
     ),
-    (
-        "DurableObjectStub.fetch",
-        frensense_lang::spec::SinkLabel::Ssrf,
-    ),
-    ("Queue.send", frensense_lang::spec::SinkLabel::Ssrf),
+    ("DurableObjectStub.fetch", crate::role_map::SinkLabel::Ssrf),
+    ("Queue.send", crate::role_map::SinkLabel::Ssrf),
     // MongoDB / ORM
-    ("update", frensense_lang::spec::SinkLabel::NoSqlInjection),
-    ("updateOne", frensense_lang::spec::SinkLabel::NoSqlInjection),
-    (
-        "updateMany",
-        frensense_lang::spec::SinkLabel::NoSqlInjection,
-    ),
-    ("insert", frensense_lang::spec::SinkLabel::NoSqlInjection),
-    ("insertOne", frensense_lang::spec::SinkLabel::NoSqlInjection),
-    (
-        "insertMany",
-        frensense_lang::spec::SinkLabel::NoSqlInjection,
-    ),
-    ("delete", frensense_lang::spec::SinkLabel::NoSqlInjection),
-    ("deleteOne", frensense_lang::spec::SinkLabel::NoSqlInjection),
-    (
-        "deleteMany",
-        frensense_lang::spec::SinkLabel::NoSqlInjection,
-    ),
-    ("find", frensense_lang::spec::SinkLabel::NoSqlInjection),
-    ("findOne", frensense_lang::spec::SinkLabel::NoSqlInjection),
-    ("findAll", frensense_lang::spec::SinkLabel::NoSqlInjection),
+    ("update", crate::role_map::SinkLabel::NoSqlInjection),
+    ("updateOne", crate::role_map::SinkLabel::NoSqlInjection),
+    ("updateMany", crate::role_map::SinkLabel::NoSqlInjection),
+    ("insert", crate::role_map::SinkLabel::NoSqlInjection),
+    ("insertOne", crate::role_map::SinkLabel::NoSqlInjection),
+    ("insertMany", crate::role_map::SinkLabel::NoSqlInjection),
+    ("delete", crate::role_map::SinkLabel::NoSqlInjection),
+    ("deleteOne", crate::role_map::SinkLabel::NoSqlInjection),
+    ("deleteMany", crate::role_map::SinkLabel::NoSqlInjection),
+    ("find", crate::role_map::SinkLabel::NoSqlInjection),
+    ("findOne", crate::role_map::SinkLabel::NoSqlInjection),
+    ("findAll", crate::role_map::SinkLabel::NoSqlInjection),
     // Storage Write
-    ("put", frensense_lang::spec::SinkLabel::StorageWrite),
-    ("setItem", frensense_lang::spec::SinkLabel::StorageWrite),
+    ("put", crate::role_map::SinkLabel::StorageWrite),
+    ("setItem", crate::role_map::SinkLabel::StorageWrite),
     // Log Leak
-    ("log", frensense_lang::spec::SinkLabel::LogLeak),
-    ("error", frensense_lang::spec::SinkLabel::LogLeak),
-    ("info", frensense_lang::spec::SinkLabel::LogLeak),
-    ("debug", frensense_lang::spec::SinkLabel::LogLeak),
+    ("log", crate::role_map::SinkLabel::LogLeak),
+    ("error", crate::role_map::SinkLabel::LogLeak),
+    ("info", crate::role_map::SinkLabel::LogLeak),
+    ("debug", crate::role_map::SinkLabel::LogLeak),
 ];
 
 pub(super) static GO_SOURCE_PATTERNS: &[&str] = &[

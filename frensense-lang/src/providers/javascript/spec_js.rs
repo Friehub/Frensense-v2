@@ -6,9 +6,7 @@
 
 use tree_sitter::Node;
 
-use crate::spec::{
-    Import, LanguageSpec, NodeRole, PackageCategory, PropagatorRule, SanitizerKind, TaintOrigin,
-};
+use crate::spec::{Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin};
 
 use super::{
     ast::{
@@ -18,12 +16,7 @@ use super::{
     imports::extract_js_imports,
     packages::js_package_category,
     params::classify_js_param,
-    propagators::JS_PROPAGATORS,
-    sanitizers::{js_classify_sanitizer, JS_SANITIZER_NAMES},
     spec_ts::TypeScriptSpec,
-    tables::{
-        JS_IDOR_SINKS, JS_SESSION_ROOTS, JS_SINK_NAMES, JS_SINK_SIGNATURES, JS_SOURCE_PATTERNS,
-    },
 };
 
 // ── JavaScript spec ────────────────────────────────────────────────────────────
@@ -116,42 +109,6 @@ impl LanguageSpec for JavaScriptSpec {
         type_annotation: Option<&str>,
     ) -> Option<TaintOrigin> {
         classify_js_param(name, type_annotation)
-    }
-
-    fn request_param_names(&self) -> &'static [&'static str] {
-        TypeScriptSpec.request_param_names()
-    }
-
-    fn known_sink_names(&self) -> &'static [(&'static str, crate::spec::SinkLabel)] {
-        JS_SINK_NAMES
-    }
-
-    fn known_sink_signatures(&self) -> &'static [(&'static str, &'static [usize], bool)] {
-        JS_SINK_SIGNATURES
-    }
-
-    fn known_idor_sinks(&self) -> &'static [(&'static str, &'static [&'static str])] {
-        JS_IDOR_SINKS
-    }
-
-    fn known_source_patterns(&self) -> &'static [&'static str] {
-        JS_SOURCE_PATTERNS
-    }
-
-    fn propagator_rules(&self) -> &'static [PropagatorRule] {
-        JS_PROPAGATORS
-    }
-
-    fn classify_sanitizer(&self, call: &str) -> Option<SanitizerKind> {
-        js_classify_sanitizer(call)
-    }
-
-    fn known_sanitizer_names(&self) -> &'static [&'static str] {
-        JS_SANITIZER_NAMES
-    }
-
-    fn known_session_roots(&self) -> &'static [&'static str] {
-        JS_SESSION_ROOTS
     }
 
     fn route_registration_patterns(&self) -> &'static [&'static str] {

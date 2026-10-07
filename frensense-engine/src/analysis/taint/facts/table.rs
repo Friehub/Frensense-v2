@@ -101,7 +101,7 @@ pub struct FactTable {
     /// Receiver roots of trusted session stores (`authenticatedUsers`):
     /// `store.get(token)` returns a server-issued session object or
     /// undefined, values read off the result are not attacker-controlled
-    /// (see [`SanitizerKind::SessionTrust`]).
+    /// (the pack ships these with session-trust sanitizer facts).
     pub session_roots: FxHashSet<String>,
     /// Taint-source patterns learned from a `.frc` bundle: call names or
     /// member-access paths whose results carry attacker-controlled data.
@@ -746,14 +746,15 @@ pub enum LearnedFactEntry {
     // scan's languages; `"*"` matches every language. Family bundles keep
     // using the language-agnostic variants above.
     /// An all-arguments dangerous sink for one language, with the role the
-    /// spec seed derived from its `SinkLabel` (snake_case [`SinkRole`] name).
+    /// pack generator derived from its vocabulary label (snake_case
+    /// [`SinkRole`] name).
     LanguageSink {
         language: String,
         call: String,
         role: String,
     },
-    /// Per-slot sink rules for one language (generated from
-    /// `LanguageSpec::known_sink_signatures`): which argument slots are
+    /// Per-slot sink rules for one language (the generator's per-language
+    /// sink signature vocabulary): which argument slots are
     /// dangerous / binding-safe.
     LanguageSinkSlots {
         language: String,
@@ -761,35 +762,34 @@ pub enum LearnedFactEntry {
         dangerous_args: BTreeSet<usize>,
         binding_args_safe: bool,
     },
-    /// An IDOR-class finder sink for one language (generated from
-    /// `LanguageSpec::known_idor_sinks`).
+    /// An IDOR-class finder sink for one language (the generator's
+    /// per-language IDOR vocabulary).
     LanguageIdorSink {
         language: String,
         call: String,
         keys: Vec<String>,
     },
-    /// A taint source pattern for one language (generated from
-    /// `LanguageSpec::known_source_patterns` and the conventional
-    /// request-parameter names).
+    /// A taint source pattern for one language (the generator's per-language
+    /// source vocabulary and the conventional request-parameter names).
     LanguageSource { language: String, pattern: String },
-    /// A sanitizer call for one language (generated from
-    /// `LanguageSpec::known_sanitizer_names`, with the predicate-guard
+    /// A sanitizer call for one language (the generator's per-language
+    /// sanitizer vocabulary, with the predicate-guard
     /// classification precomputed by the pack generator).
     LanguageSanitizer {
         language: String,
         call: String,
         guard_style: bool,
     },
-    /// A taint propagator rule for one language (generated from
-    /// `LanguageSpec::propagator_rules`).
+    /// A taint propagator rule for one language (the generator's
+    /// per-language propagator vocabulary).
     LanguagePropagator {
         language: String,
         call: String,
         tainted_arg: Option<usize>,
         tainted_receiver: bool,
     },
-    /// A session-root accessor for one language (generated from
-    /// `LanguageSpec::known_session_roots`).
+    /// A session-root accessor for one language (the generator's
+    /// per-language session-root vocabulary).
     LanguageSessionRoot { language: String, root: String },
     /// A route-registration call pattern for one language (generated from
     /// `LanguageSpec::route_registration_patterns`), keyed for the lowering

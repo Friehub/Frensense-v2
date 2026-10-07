@@ -2,15 +2,17 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-//! Generator-owned per-language provider vocabulary. Added go/python/rust/c
-//! in Phase 6.3c (JS/TS in 6.3b); translation converts the former trait
-//! method bodies and statics into one static [`LanguageVocab`] per
-//! language key. A parity test proves each static path emits exactly the
-//! spec-derived entries, and the committed asset (built from this data
-//! since 6.3c) stays byte-identical through the migration.
+//! Generator-owned per-language provider vocabulary. Extracted from
+//! `frensense-lang` in Phase 6.3b (JS/TS) and 6.3c (go/python/rust/c);
+//! 6.3d deleted the trait methods and static tables these were translated
+//! from, so this static data is the sole source of provider vocabulary.
+//! The committed asset (built from this data since 6.3c) stayed
+//! byte-identical through the whole migration.
 
+use crate::role_map::{
+    is_predicate_guard, sink_role_for_label, PropagatorRule, SanitizerKind, SinkLabel,
+};
 use frensense_engine::analysis::taint::facts::LearnedFactEntry;
-use frensense_lang::spec::SinkLabel;
 
 mod c;
 mod go;
@@ -37,27 +39,16 @@ pub(crate) struct LanguageVocab {
     pub source_patterns: &'static [&'static str],
     pub request_param_names: &'static [&'static str],
     pub sanitizer_names: &'static [&'static str],
-    pub classify_sanitizer: fn(&str) -> Option<frensense_lang::spec::SanitizerKind>,
-    pub propagators: &'static [frensense_lang::spec::PropagatorRule],
+    pub classify_sanitizer: fn(&str) -> Option<SanitizerKind>,
+    pub propagators: &'static [PropagatorRule],
     pub session_roots: &'static [&'static str],
     pub route_patterns: &'static [&'static str],
 }
 
-/// The predicate-guard default (`LanguageSpec::is_predicate_guard`'s
-/// default body). No provider overrides it, so the static path applies
-/// the same heuristic the spec path gets via the trait.
-fn is_predicate_guard(name: &str, kind: Option<&frensense_lang::spec::SanitizerKind>) -> bool {
-    kind.is_some_and(|k| matches!(k, frensense_lang::spec::SanitizerKind::Full))
-        || name == "test"
-        || name == "isValid"
-        || name.starts_with("is")
-}
-
-/// Emit one language's provider sections from static tables - the
-/// emission-order twin of [`crate::language_entries_for_spec`].
+/// Emit one language's provider sections from static tables - the pack's
+/// only provider path since 6.3d.
 pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEntry> {
     use frensense_engine::analysis::taint::role::sink_role_name;
-    use frensense_lang::severity::SinkRole;
 
     let language = v.language.to_string();
     let mut entries = Vec::new();
@@ -65,7 +56,7 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
         entries.push(LearnedFactEntry::LanguageSink {
             language: language.clone(),
             call: (*call).to_string(),
-            role: sink_role_name(SinkRole::from_label(*label)).to_string(),
+            role: sink_role_name(sink_role_for_label(*label)).to_string(),
         });
     }
     for (call, slots, binding_safe) in v.sink_signatures {
@@ -140,29 +131,4 @@ pub(crate) fn all_vocab() -> Vec<&'static LanguageVocab> {
         rust::vocab(),
         javascript::typescript_vocab(),
     ]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The parity gate (6.3b/c): every extracted language's static
-    /// vocabulary emits exactly the spec-derived entries. While the
-    /// provider trait methods still exist, both paths are live; when
-    /// 6.3d deletes them, the spec half of this test goes with them.
-    #[test]
-    fn extracted_vocab_matches_spec_derived_entries() {
-        for vocab in all_vocab() {
-            let spec = frensense_lang::registry::LanguageRegistry::global()
-                .for_name(vocab.language)
-                .unwrap_or_else(|| panic!("{} spec must be registered", vocab.language));
-            let static_entries = entries_for_static(vocab);
-            let spec_entries = crate::language_entries_for_spec(spec);
-            assert_eq!(
-                static_entries, spec_entries,
-                "static vocab drifted from the spec for {}",
-                vocab.language
-            );
-        }
-    }
 }

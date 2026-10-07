@@ -48,8 +48,8 @@ fn test_teachable_allocator_and_deallocator() {
 #[test]
 fn test_teachable_idor_finder_sinks_and_keys() {
     // The engine carries no built-in IDOR vocabulary: which calls are
-    // finder sinks and which keys are identity keys comes from the spec
-    // (`known_idor_sinks`) or a learned bundle.
+    // finder sinks and which keys are identity keys comes from the default
+    // pack or a learned bundle.
     let mut table = FactTable::default();
     assert!(!table.is_idor_finder_sink("find"));
     assert!(!table.is_idor_finder_sink("findOne"));

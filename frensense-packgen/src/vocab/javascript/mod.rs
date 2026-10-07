@@ -3,10 +3,11 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 //! JS/TS provider vocabulary, verbatim from `frensense-lang`'s
-//! `providers/javascript` (Phase 6.3b copy; lang sheds it in 6.3d).
+//! `providers/javascript` (Phase 6.3b copy; lang's copy deleted in 6.3d -
+//! this static data is the sole source).
 //!
 //! JavaScript and TypeScript share one vocabulary set - in lang, both
-//! specs return the same statics (the JS spec even delegates
+//! specs returned the same statics (the JS spec even delegated
 //! `request_param_names` / `route_registration_patterns` to the TS
 //! spec) - so one vocabulary definition backs two pack language keys.
 

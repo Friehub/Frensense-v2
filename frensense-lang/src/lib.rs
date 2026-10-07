@@ -286,6 +286,4 @@ pub mod spec;
 // Convenient re-exports
 pub use registry::{all_specs, spec_for_ext, spec_for_path, LanguageRegistry};
 pub use severity::Severity;
-pub use spec::{
-    Import, LanguageSpec, NodeRole, PackageCategory, PropagatorRule, SanitizerKind, TaintOrigin,
-};
+pub use spec::{Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin};
