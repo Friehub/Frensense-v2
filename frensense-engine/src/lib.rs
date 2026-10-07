@@ -26,10 +26,14 @@
 
 pub mod analysis;
 pub mod checks;
+#[cfg(test)]
+mod dataflow_probes_tests;
 pub mod debug_flags;
 pub mod graph;
 pub mod harness;
 pub mod ir;
+#[cfg(test)]
+mod probes;
 #[cfg(test)]
 mod regression_gate_tests;
 pub mod scan;
