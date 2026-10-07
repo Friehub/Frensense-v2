@@ -396,5 +396,9 @@ pub fn fact_key(e: &LearnedFactEntry) -> (String, String) {
             ("session_accessors".into(), values.join(","))
         }
         LearnedFactEntry::ReceiverParams { values } => ("receiver_params".into(), values.join(",")),
+        LearnedFactEntry::LanguageAmbiguousVerbs { language, values } => (
+            "language_ambiguous_verbs".into(),
+            format!("{language}:{}", values.join(",")),
+        ),
     }
 }

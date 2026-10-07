@@ -33,6 +33,12 @@ pub(crate) fn call_last_segment(call: &str) -> &str {
 pub(crate) struct LanguageVocab {
     /// The pack's language key (`spec.name()`).
     pub language: &'static str,
+    /// HTTP-method verbs ambiguous as bare last-segment call names
+    /// (formerly `LanguageSpec::known_ambiguous_verbs`): dotted sink
+    /// entries with one of these last segments arm receiver gating at
+    /// install time. Every language ships the shared default; a vocab
+    /// may narrow it.
+    pub ambiguous_verbs: &'static [&'static str],
     pub sink_names: &'static [(&'static str, SinkLabel)],
     pub sink_signatures: &'static [(&'static str, &'static [usize], bool)],
     pub idor_sinks: &'static [(&'static str, &'static [&'static str])],
@@ -52,6 +58,13 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
 
     let language = v.language.to_string();
     let mut entries = Vec::new();
+    // Emitted first so the install's pre-scan finds the language's
+    // ambiguous-verb vocabulary before any dotted sink entry consults it
+    // (the install pre-scans anyway, so order is not load-bearing).
+    entries.push(LearnedFactEntry::LanguageAmbiguousVerbs {
+        language: language.clone(),
+        values: v.ambiguous_verbs.iter().map(|s| (*s).to_string()).collect(),
+    });
     for (call, label) in v.sink_names {
         entries.push(LearnedFactEntry::LanguageSink {
             language: language.clone(),

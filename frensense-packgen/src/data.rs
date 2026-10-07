@@ -374,3 +374,15 @@ pub static BOOTSTRAP_SESSION_ACCESSORS: &[&str] = &["get"];
 /// Formal parameter names that receive the implicit receiver (`self` in
 /// Python/Rust, `this` in JavaScript).
 pub static BOOTSTRAP_RECEIVER_PARAMS: &[&str] = &["self", "this"];
+
+/// HTTP-method verbs that are ambiguous as bare last-segment call names:
+/// routers (`app.get`), maps (`m.set`), http clients (`got.post`) and
+/// caches (`kv.put`) all share them. A dotted sink entry with one of
+/// these last segments arms receiver gating at pack-install time - the
+/// call only counts as a sink when its receiver root is a declared client
+/// root (the entry's first segment). Formerly
+/// `LanguageSpec::known_ambiguous_verbs` (a trait default no provider
+/// ever overrode), shed into the pack in Phase 6.6.
+pub static BOOTSTRAP_AMBIGUOUS_VERBS: &[&str] = &[
+    "get", "post", "put", "delete", "patch", "head", "options", "request", "set", "render",
+];

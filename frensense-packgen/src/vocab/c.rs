@@ -195,6 +195,7 @@ fn c_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
 
 pub(super) const C_VOCAB: LanguageVocab = LanguageVocab {
     language: "c",
+    ambiguous_verbs: crate::data::BOOTSTRAP_AMBIGUOUS_VERBS,
     sink_names: C_SINK_NAMES,
     sink_signatures: C_SINK_SIGNATURES,
     idor_sinks: &[],

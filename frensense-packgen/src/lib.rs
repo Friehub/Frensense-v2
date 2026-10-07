@@ -268,6 +268,10 @@ mod tests {
         assert!(has(|e| matches!(e, LearnedFactEntry::KeySizeRule { .. })));
         assert!(has(|e| matches!(
             e,
+            LearnedFactEntry::LanguageAmbiguousVerbs { .. }
+        )));
+        assert!(has(|e| matches!(
+            e,
             LearnedFactEntry::SuspiciousHashWrappers { .. }
         )));
         assert!(has(|e| matches!(e, LearnedFactEntry::BufferBuiltin { .. })));
@@ -751,6 +755,39 @@ mod tests {
             let expected: Vec<String> = v.route_patterns.iter().map(|p| (*p).to_string()).collect();
             let actual = facts.route_patterns.get(lang).cloned().unwrap_or_default();
             assert_eq!(actual, expected, "route_patterns differ for {lang}");
+
+            // Ambiguous verbs (Phase 6.6): this language's pack-declared
+            // verb list arms receiver gating while its dotted sink
+            // entries install - `verb_sinks` and `client_roots` must hold
+            // exactly the dotted sinks whose last segment is one of them
+            // (the bare spec seed stays empty; step 1 asserted that).
+            let expected_verbs: std::collections::BTreeSet<String> = v
+                .sink_names
+                .iter()
+                .filter(|(call, _)| {
+                    let last = call.rsplit('.').next().unwrap_or(call);
+                    last != *call && v.ambiguous_verbs.contains(&last)
+                })
+                .map(|(call, _)| call.rsplit('.').next().unwrap_or(call).to_string())
+                .collect();
+            let expected_roots: std::collections::BTreeSet<String> = v
+                .sink_names
+                .iter()
+                .filter(|(call, _)| {
+                    let last = call.rsplit('.').next().unwrap_or(call);
+                    last != *call && v.ambiguous_verbs.contains(&last)
+                })
+                .map(|(call, _)| call.split('.').next().unwrap_or(call).to_string())
+                .collect();
+            let actual_verbs: std::collections::BTreeSet<String> =
+                facts.verb_sinks.iter().cloned().collect();
+            let actual_roots: std::collections::BTreeSet<String> =
+                facts.client_roots.iter().cloned().collect();
+            assert_eq!(actual_verbs, expected_verbs, "verb_sinks differ for {lang}");
+            assert_eq!(
+                actual_roots, expected_roots,
+                "client_roots differ for {lang}"
+            );
         }
     }
 }

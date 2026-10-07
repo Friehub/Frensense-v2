@@ -20,8 +20,7 @@ use crate::analysis::taint::config::TaintConfig;
 /// between this seed and the consumer bundle (seeding order: spec ->
 /// default pack -> consumer, last-wins). What remains spec-derived is
 /// mechanism read directly at scan time (grammar classification, route
-/// verbs, ambiguous verbs at install time, the rule registry), never
-/// through this seed.
+/// verbs, the rule registry), never through this seed.
 pub fn tables_from_exts<'a>(_exts: impl IntoIterator<Item = &'a str>) -> (TaintConfig, FactTable) {
     (TaintConfig::default(), FactTable::default())
 }
@@ -83,7 +82,8 @@ fn entry_language(e: &LearnedFactEntry) -> Option<&str> {
         | LearnedFactEntry::LanguageSanitizer { language, .. }
         | LearnedFactEntry::LanguagePropagator { language, .. }
         | LearnedFactEntry::LanguageSessionRoot { language, .. }
-        | LearnedFactEntry::LanguageRoutePattern { language, .. } => Some(language),
+        | LearnedFactEntry::LanguageRoutePattern { language, .. }
+        | LearnedFactEntry::LanguageAmbiguousVerbs { language, .. } => Some(language),
         _ => None,
     }
 }
@@ -131,18 +131,13 @@ pub fn apply_language_entries(
         let Some(group) = groups.get(lang) else {
             continue;
         };
-        // The ambiguous-verb vocabulary stays spec-owned (mechanism): the
-        // sink install uses it for verb-sink bookkeeping.
-        let ambiguous: &[&str] = frensense_lang::registry::LanguageRegistry::global()
-            .for_name(lang)
-            .map_or(&[], |s| s.known_ambiguous_verbs());
         // Build this language's contribution in a fresh temp table, exactly
         // like a per-spec seed merge, then merge it in: the
         // merge's last-wins/widens rules resolve cross-language collisions
         // the same way `tables_from_exts` merges per-spec tables.
         let mut c = TaintConfig::default();
         let mut f = FactTable::default();
-        install_language_group(&mut c, &mut f, group, ambiguous);
+        install_language_group(&mut c, &mut f, group);
         config.sources.extend(c.sources);
         config.sinks.extend(c.sinks);
         config.sanitizers.extend(c.sanitizers);
@@ -150,14 +145,28 @@ pub fn apply_language_entries(
     }
 }
 
-/// One language group, in pack order: sink names, sink slots, idor sinks,
-/// sources, sanitizers, propagators, session roots, route patterns.
+/// One language group, in pack order: the language's ambiguous-verb
+/// vocabulary, sink names, sink slots, idor sinks, sources, sanitizers,
+/// propagators, session roots, route patterns.
 fn install_language_group(
     config: &mut TaintConfig,
     facts: &mut FactTable,
     group: &[&LearnedFactEntry],
-    ambiguous_verbs: &[&str],
 ) {
+    // The pack's per-language ambiguous-verb vocabulary (Phase 6.6:
+    // formerly the language spec's `known_ambiguous_verbs`), consulted
+    // while installing the dotted sink entries below. Pre-scanned from
+    // this group so the receiver gating never depends on entry order
+    // within the section.
+    let ambiguous: Vec<&str> = group
+        .iter()
+        .filter_map(|e| match e {
+            LearnedFactEntry::LanguageAmbiguousVerbs { values, .. } => Some(values),
+            _ => None,
+        })
+        .flatten()
+        .map(String::as_str)
+        .collect();
     for e in group {
         match e {
             LearnedFactEntry::LanguageSink { call, role, .. } => {
@@ -185,7 +194,7 @@ fn install_language_group(
                             .receiver_roles
                             .entry((root.to_string(), last.to_string()))
                             .or_insert(role);
-                        if ambiguous_verbs.contains(&last) {
+                        if ambiguous.contains(&last) {
                             facts.verb_sinks.insert(last.to_string());
                             facts.client_roots.insert(root.to_string());
                         }

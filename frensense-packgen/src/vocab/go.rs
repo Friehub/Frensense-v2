@@ -388,6 +388,7 @@ pub(super) static GO_SANITIZER_NAMES: &[&str] = &[
 
 pub(super) const GO_VOCAB: LanguageVocab = LanguageVocab {
     language: "go",
+    ambiguous_verbs: crate::data::BOOTSTRAP_AMBIGUOUS_VERBS,
     sink_names: GO_SINK_NAMES,
     sink_signatures: GO_SINK_SIGNATURES,
     idor_sinks: &[],

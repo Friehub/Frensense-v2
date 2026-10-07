@@ -40,6 +40,7 @@ static ROUTE_PATTERNS: &[&str] = &[
 
 const TYPESCRIPT_VOCAB: LanguageVocab = LanguageVocab {
     language: "typescript",
+    ambiguous_verbs: crate::data::BOOTSTRAP_AMBIGUOUS_VERBS,
     sink_names: tables::JS_SINK_NAMES,
     sink_signatures: tables::JS_SINK_SIGNATURES,
     idor_sinks: tables::JS_IDOR_SINKS,

@@ -816,6 +816,18 @@ pub enum LearnedFactEntry {
     /// Formal parameter names receiving the implicit receiver (`self`,
     /// `this`) (Phase 6.5, pack-seeded).
     ReceiverParams { values: Vec<String> },
+    /// HTTP-method verbs that are ambiguous as bare last-segment call
+    /// names (routers `app.get`, maps `m.set`, http clients `got.post`,
+    /// caches `kv.put` all share them). A dotted sink entry with one of
+    /// these last segments arms receiver gating: the call only counts as
+    /// a sink when its receiver root is a declared client root (the
+    /// entry's first segment). Phase 6.6: moved from
+    /// `LanguageSpec::known_ambiguous_verbs` (a trait default no
+    /// provider ever overrode) into the pack, one entry per language.
+    LanguageAmbiguousVerbs {
+        language: String,
+        values: Vec<String>,
+    },
 }
 
 impl LearnedFactEntry {
@@ -1230,7 +1242,8 @@ impl LearnedFactEntry {
             | LearnedFactEntry::LanguageSanitizer { .. }
             | LearnedFactEntry::LanguagePropagator { .. }
             | LearnedFactEntry::LanguageSessionRoot { .. }
-            | LearnedFactEntry::LanguageRoutePattern { .. } => {}
+            | LearnedFactEntry::LanguageRoutePattern { .. }
+            | LearnedFactEntry::LanguageAmbiguousVerbs { .. } => {}
         }
     }
 }

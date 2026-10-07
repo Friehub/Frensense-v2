@@ -448,23 +448,6 @@ pub trait LanguageSpec: Send + Sync + 'static {
         false
     }
 
-    /// HTTP methods that are ambiguous as bare last-segment call names:
-    /// routers (`app.get`), maps (`m.set`), http clients (`got.post`) and
-    /// caches (`kv.put`) all share them. A dotted spec entry with one of
-    /// these last segments arms *receiver gating* - the call only counts
-    /// as a sink when its receiver root is a declared client root (the
-    /// dotted entry's first segment).
-    ///
-    /// Defaults to the HTTP method set: every server language has it, and
-    /// a provider with no dotted verb entries gains nothing (the gate only
-    /// arms for entries the provider actually declares). Providers may
-    /// narrow the list.
-    fn known_ambiguous_verbs(&self) -> &'static [&'static str] {
-        &[
-            "get", "post", "put", "delete", "patch", "head", "options", "request", "set", "render",
-        ]
-    }
-
     /// Route-registration call suffixes (`.post`, `.get`, ...) whose
     /// function arguments the harness extracts as handlers. The entries
     /// are matched as suffixes of the callee text.

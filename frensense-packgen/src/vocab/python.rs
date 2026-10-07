@@ -388,6 +388,7 @@ pub(super) static PY_SANITIZER_NAMES: &[&str] = &[
 
 pub(super) const PY_VOCAB: LanguageVocab = LanguageVocab {
     language: "python",
+    ambiguous_verbs: crate::data::BOOTSTRAP_AMBIGUOUS_VERBS,
     sink_names: PY_SINK_NAMES,
     sink_signatures: PY_SINK_SIGNATURES,
     idor_sinks: &[],

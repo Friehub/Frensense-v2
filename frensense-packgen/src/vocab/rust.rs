@@ -362,6 +362,7 @@ pub(super) static RUST_SANITIZER_NAMES: &[&str] = &[
 
 pub(super) const RUST_VOCAB: LanguageVocab = LanguageVocab {
     language: "rust",
+    ambiguous_verbs: crate::data::BOOTSTRAP_AMBIGUOUS_VERBS,
     sink_names: RUST_SINK_NAMES,
     sink_signatures: RUST_SINK_SIGNATURES,
     idor_sinks: &[],
