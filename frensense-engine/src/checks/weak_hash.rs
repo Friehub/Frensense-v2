@@ -163,6 +163,53 @@ fn check_call(
     let callee_seg = last_segment(callee);
     let callee_lower = callee_seg.to_ascii_lowercase();
 
+    if callee_lower == "ajv" {
+        for arg in args {
+            if let Operand::Var(v) = arg {
+                let has_data_true = ir.blocks.values().any(|b| {
+                    b.instructions.iter().any(|i| {
+                        if let Instruction::StoreField {
+                            base, field, src, ..
+                        } = i
+                        {
+                            if *base == *v && field == "$data" {
+                                match src {
+                                    Operand::BoolLiteral(true) => true,
+                                    Operand::StringLiteral(s) => strip_quotes(s) == "true",
+                                    Operand::Var(sv) => {
+                                        values.const_bool(*sv) == Some(true)
+                                            || values.const_str(*sv).map(strip_quotes)
+                                                == Some("true")
+                                    }
+                                    _ => false,
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    })
+                }) || ir
+                    .var_metadata
+                    .get(v)
+                    .is_some_and(|m| m.object_keys.contains(&"$data".to_string()));
+                if has_data_true {
+                    out.push(CheckerFinding {
+                        provenance: Provenance::Spec,
+                        function: ir.name.clone(),
+                        rule: "regex".to_string(),
+                        message: "Insecure Ajv configuration with `$data: true` enables catastrophic ReDoS via payload-supplied regex".to_string(),
+                        params: vec![("callee", callee_seg.to_string())],
+                        span,
+                        severity: "High".to_string(),
+                    });
+                    return;
+                }
+            }
+        }
+    }
+
     for rule in &facts.weak_hash_rules {
         let provenance = Provenance::Spec;
         // Selector shape: `createHash('md5')`. Rules with

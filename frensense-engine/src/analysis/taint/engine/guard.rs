@@ -103,6 +103,18 @@ impl GuardMap {
             None
         }
 
+        let exits = |bid: BlockId| -> bool {
+            let mut cur = bid;
+            for _ in 0..5 {
+                match ir.blocks.get(&cur).map(|b| &b.terminator) {
+                    Some(Terminator::Return { .. } | Terminator::Throw { .. }) => return true,
+                    Some(Terminator::Jump(next)) => cur = *next,
+                    _ => return false,
+                }
+            }
+            false
+        };
+
         let mut block_ids: Vec<BlockId> = ir.blocks.keys().copied().collect();
         block_ids.sort_by_key(|b| b.0);
         for &bid in &block_ids {
@@ -127,7 +139,15 @@ impl GuardMap {
                     match instr {
                         Instruction::CallStatic { .. } | Instruction::CallVirtual { .. } => {
                             for cv in checked_vars(instr) {
-                                let safe_block = if *sense { true_block } else { false_block };
+                                let true_exits = exits(true_block);
+                                let false_exits = exits(false_block);
+                                let safe_block = if true_exits && !false_exits {
+                                    false_block
+                                } else if (false_exits && !true_exits) || *sense {
+                                    true_block
+                                } else {
+                                    false_block
+                                };
                                 guards.entry(cv).or_default().push(safe_block);
                             }
                         }
@@ -151,8 +171,12 @@ impl GuardMap {
                                     | (Operand::IntLiteral(_), _)
                                     | (_, Operand::IntLiteral(_))
                             );
-                            let is_comparison =
-                                op.contains("in") || op == "==" || op == "!=" || op == "not";
+                            let is_comparison = op.contains("in")
+                                || op == "=="
+                                || op == "==="
+                                || op == "!="
+                                || op == "!=="
+                                || op == "not";
                             if literal_sibling && is_comparison {
                                 let is_inverted = op == "!=" || op == "!==" || op == "not in";
                                 let is_denylist = match (lhs, rhs) {
@@ -181,6 +205,15 @@ impl GuardMap {
                                 for op in [lhs, rhs] {
                                     if let Operand::Var(u) = op {
                                         guards.entry(*u).or_default().push(safe_block);
+                                        if let Some(Instruction::UnaryOp {
+                                            op: uop,
+                                            src: Operand::Var(inner),
+                                            ..
+                                        }) = def_site_of(ir, *u)
+                                            && uop == "typeof"
+                                        {
+                                            guards.entry(*inner).or_default().push(safe_block);
+                                        }
                                     }
                                 }
                             }

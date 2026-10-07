@@ -52,7 +52,44 @@ pub enum SinkLabel {
     UnsafeMemory,
     BufferOverflow,
     FormatString,
+    Regex,
     Unknown,
+}
+
+impl SinkLabel {
+    #[must_use]
+    pub fn slug(&self) -> &'static str {
+        match self {
+            Self::PrototypePollution => "prototype",
+            Self::Ssrf => "ssrf",
+            Self::Regex => "regex",
+            Self::OpenRedirect => "redirect",
+            Self::SqlInjection => "sql",
+            Self::NoSqlInjection => "nosql",
+            Self::CommandInjection => "command",
+            Self::CodeExecution => "execution",
+            Self::PathTraversal => "traversal",
+            Self::Xss | Self::XssDom | Self::XssReflected => "xss",
+            Self::TemplateSsti => "template",
+            Self::UnsafeDeserialize => "deserialize",
+            Self::LdapInjection => "ldap",
+            Self::XpathInjection => "xpath",
+            Self::GraphqlInjection => "graphql",
+            Self::Xxe => "xxe",
+            Self::StorageWrite => "storage",
+            Self::LogLeak => "log_leak",
+            Self::ResponseLeak => "response",
+            Self::CredentialLeak => "credential_leak",
+            Self::HeaderInjection => "header_injection",
+            Self::CookiePoisoning => "cookie_poisoning",
+            Self::ContentTypeInjection => "content_type",
+            Self::Toctou => "toctou",
+            Self::Jwt | Self::JwtWeakAlgorithm | Self::JwtUnsafeDecode => "jwt",
+            Self::UnsafeMemory | Self::BufferOverflow => "buffer_overflow",
+            Self::FormatString => "format_string",
+            Self::Unknown => "other",
+        }
+    }
 }
 
 /// Sanitizer strength: what kind of injection does this call defeat?
@@ -116,6 +153,7 @@ pub fn sink_role_for_label(label: SinkLabel) -> SinkRole {
         | L::GraphqlInjection
         | L::Xxe
         | L::PrototypePollution
+        | L::Regex
         | L::FormatString => SinkRole::Execution,
 
         L::Ssrf | L::OpenRedirect | L::PathTraversal | L::Toctou => SinkRole::Resource,

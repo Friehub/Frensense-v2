@@ -99,9 +99,8 @@ pub(super) fn classify_js(kind: &str) -> NodeRole {
         "identifier" | "property_identifier" | "shorthand_property_identifier" => {
             NodeRole::Identifier
         }
-        "string" | "template_string" | "number" | "true" | "false" | "null" | "undefined" => {
-            NodeRole::Literal
-        }
+        "string" | "template_string" | "number" | "true" | "false" | "null" | "undefined"
+        | "regex" => NodeRole::Literal,
 
         // ── Supplementary structural roles ───────────────────────────────
         "formal_parameters" | "parameters" => NodeRole::Parameters,

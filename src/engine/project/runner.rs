@@ -368,6 +368,9 @@ fn advisory_from_finding(
             f.sink, f.function
         ))
         .with_tags(["taint", class_tag]);
+    if let Some(lbl) = f.label.as_deref() {
+        advisory.tags.push(lbl.to_string());
+    }
     // A learned sink's family pattern joins on the sink name; the flow
     // observation stays (it is the finding's own description).
     if let Some(pattern) = bundle_advisories.get(&f.sink) {
@@ -484,6 +487,7 @@ mod shape_dedup_tests {
             verdict: BackwardVerdict::Vulnerable,
             finding_class: FindingClass::Injection,
             role: SinkRole::Execution,
+            label: None,
             source_desc: Some(format!("source-{tag}")),
             sink_span: None,
             path: TaintPath {

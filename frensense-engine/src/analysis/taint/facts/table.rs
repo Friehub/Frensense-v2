@@ -98,6 +98,8 @@ pub struct FactTable {
     /// dotted root, THIS role wins over the bare entry's, the receiver is
     /// the disambiguator, exactly like [`verb_sinks`] for match/no-match.
     pub receiver_roles: FxHashMap<(String, String), crate::analysis::taint::role::SinkRole>,
+    /// Receiver-specific label slugs: (receiver_root, method) -> label slug.
+    pub receiver_labels: FxHashMap<(String, String), String>,
     /// Receiver roots of trusted session stores (`authenticatedUsers`):
     /// `store.get(token)` returns a server-issued session object or
     /// undefined, values read off the result are not attacker-controlled
@@ -358,6 +360,11 @@ impl FactTable {
         // same method, and both disambiguation rules must survive.
         for (k, v) in &other.receiver_roles {
             self.receiver_roles.entry(k.clone()).or_insert(*v);
+        }
+        for (k, v) in &other.receiver_labels {
+            self.receiver_labels
+                .entry(k.clone())
+                .or_insert_with(|| v.clone());
         }
         self.session_roots
             .extend(other.session_roots.iter().cloned());
@@ -878,6 +885,7 @@ impl LearnedFactEntry {
                 // *slots*, they don't reclassify *semantics*.
                 let prior = table.sink_signatures.get(call);
                 let role = prior.map(|s| s.role).unwrap_or_default();
+                let label = prior.and_then(|s| s.label.clone());
                 let idor_keys = prior.map(|s| s.idor_keys.clone()).unwrap_or_default();
                 table.sink_signatures.insert(
                     call.clone(),
@@ -887,6 +895,7 @@ impl LearnedFactEntry {
                         binding_args_safe: *binding_args_safe,
                         idor_keys,
                         role,
+                        label,
                     },
                 );
             }
@@ -1066,6 +1075,7 @@ impl LearnedFactEntry {
                         keys.clone()
                     },
                     role: crate::analysis::taint::role::SinkRole::Resource,
+                    label: None,
                 };
                 table.sink_signatures.insert(call.clone(), sig.clone());
                 table.sink_signatures.entry(last).or_insert(sig);

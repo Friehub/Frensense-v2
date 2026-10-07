@@ -42,30 +42,51 @@ pub fn collect_calls(
                 if let Terminator::Branch { cond, .. } = &block.terminator {
                     if let Operand::Var(c) = cond {
                         cond_vars.insert(*c, ());
-                        // one hop up the def chain (unary ! / binary &&)
-                        for b2 in ir.blocks.values() {
-                            for i in &b2.instructions {
-                                match i {
-                                    Instruction::UnaryOp {
-                                        dest,
-                                        src: Operand::Var(s),
-                                        ..
-                                    }
-                                    | Instruction::BinaryOp {
-                                        dest,
-                                        lhs: Operand::Var(s),
-                                        ..
-                                    }
-                                    | Instruction::BinaryOp {
-                                        dest,
-                                        rhs: Operand::Var(s),
-                                        ..
-                                    } if *dest == *c => {
-                                        cond_vars.insert(*s, ());
-                                    }
-                                    _ => {}
+                    }
+                }
+            }
+            // Multi-hop up the def chain (unary !, binary &&, ||, cast, assign)
+            let mut changed = true;
+            let mut hops = 0;
+            while changed && hops < 6 {
+                changed = false;
+                hops += 1;
+                for b2 in ir.blocks.values() {
+                    for i in &b2.instructions {
+                        match i {
+                            Instruction::UnaryOp {
+                                dest,
+                                src: Operand::Var(s),
+                                ..
+                            }
+                            | Instruction::Cast {
+                                dest,
+                                src: Operand::Var(s),
+                                ..
+                            }
+                            | Instruction::Assign {
+                                dest,
+                                src: Operand::Var(s),
+                            } if cond_vars.contains_key(dest) => {
+                                if cond_vars.insert(*s, ()).is_none() {
+                                    changed = true;
                                 }
                             }
+                            Instruction::BinaryOp { dest, lhs, rhs, .. }
+                                if cond_vars.contains_key(dest) =>
+                            {
+                                if let Operand::Var(s) = lhs {
+                                    if cond_vars.insert(*s, ()).is_none() {
+                                        changed = true;
+                                    }
+                                }
+                                if let Operand::Var(s) = rhs {
+                                    if cond_vars.insert(*s, ()).is_none() {
+                                        changed = true;
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }

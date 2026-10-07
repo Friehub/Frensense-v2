@@ -69,7 +69,11 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
         entries.push(LearnedFactEntry::LanguageSink {
             language: language.clone(),
             call: (*call).to_string(),
-            role: sink_role_name(sink_role_for_label(*label)).to_string(),
+            role: format!(
+                "{}:{}",
+                sink_role_name(sink_role_for_label(*label)),
+                label.slug()
+            ),
         });
     }
     for (call, slots, binding_safe) in v.sink_signatures {

@@ -232,11 +232,23 @@ mod tests {
     #[test]
     #[ignore = "writes the committed asset; run explicitly when tables change"]
     fn regenerate_default_pack_asset() {
+        let bytes = build_default_bundle();
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("assets")
             .join("frensense-default.frc");
         std::fs::create_dir_all(path.parent().expect("asset dir")).expect("create asset dir");
-        std::fs::write(&path, build_default_bundle()).expect("write asset");
+        std::fs::write(&path, &bytes).expect("write asset");
+
+        let bundler_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("parent dir")
+            .join("frensense-bundler")
+            .join("assets")
+            .join("frensense-default.frc");
+        if let Some(parent) = bundler_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&bundler_path, &bytes);
     }
 
     #[test]

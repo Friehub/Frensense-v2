@@ -30,6 +30,8 @@ pub struct SinkSignature {
     pub idor_keys: Vec<String>,
     /// What this sink does with its input (drives severity ranking).
     pub role: crate::analysis::taint::role::SinkRole,
+    /// Semantic label slug for identity reporting (e.g. "prototype", "ssrf", "regex").
+    pub label: Option<String>,
 }
 
 impl SinkSignature {
@@ -41,6 +43,7 @@ impl SinkSignature {
             binding_args_safe: false,
             idor_keys: Vec::new(),
             role: crate::analysis::taint::role::SinkRole::Other,
+            label: None,
         }
     }
 
@@ -52,6 +55,7 @@ impl SinkSignature {
             binding_args_safe: false,
             idor_keys: Vec::new(),
             role: crate::analysis::taint::role::SinkRole::Other,
+            label: None,
         }
     }
 

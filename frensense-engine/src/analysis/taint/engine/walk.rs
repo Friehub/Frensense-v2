@@ -204,11 +204,99 @@ impl<'a> BackwardTaintEngine<'a> {
             _ => return,
         };
         let ir = self.prog.functions[fi].ir;
+        if receiver.is_none() {
+            // A static call to a local variable/closure defined in this function
+            // is not an external sink.
+            if ir
+                .var_metadata
+                .values()
+                .any(|m| m.source_name.as_deref() == Some(name))
+            {
+                return;
+            }
+            // Verb sinks (get, post, render, etc.) require a receiver object;
+            // a bare static call is not a client method invocation.
+            if self.facts.verb_sinks.contains(name) {
+                return;
+            }
+        }
         // Receiver-aware sink match: verb-named sinks (get/post/...) from
         // dotted client entries only fire when the receiver root is a known
         // client, `map.get(t)` is a Map accessor, `got.get(t)` is SSRF.
         let receiver_root = match receiver {
-            Some(Operand::Var(r)) => FactTable::receiver_root(ir, *r),
+            Some(Operand::Var(r)) => {
+                let direct = FactTable::receiver_root(ir, *r);
+                if let Some(ref d) = direct {
+                    if self.facts.client_roots.contains(d) {
+                        direct
+                    } else {
+                        // Check if r is defined locally by a factory call
+                        let mut resolved = None;
+                        for b in ir.blocks.values() {
+                            for instr in &b.instructions {
+                                match instr {
+                                    Instruction::CallVirtual {
+                                        dest: Some(d_var),
+                                        method,
+                                        receiver: Operand::Var(cr),
+                                        ..
+                                    } if *d_var == *r
+                                        && (method == "create" || method == "extend") =>
+                                    {
+                                        if let Some(cr_root) = FactTable::receiver_root(ir, *cr)
+                                            && self.facts.client_roots.contains(&cr_root)
+                                        {
+                                            resolved = Some(cr_root);
+                                        }
+                                    }
+                                    Instruction::CallStatic {
+                                        dest: Some(d_var),
+                                        func,
+                                        ..
+                                    } if *d_var == *r
+                                        && (func.ends_with(".create")
+                                            || func.ends_with(".extend")) =>
+                                    {
+                                        if let Some(prefix) = func.split('.').next()
+                                            && self.facts.client_roots.contains(prefix)
+                                        {
+                                            resolved = Some(prefix.to_string());
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        if resolved.is_none() {
+                            // Check if d matches a module-level function / binding in prog
+                            for f in &self.prog.functions {
+                                if f.name == *d || f.name.ends_with(&format!(":{}", d)) {
+                                    for b in f.ir.blocks.values() {
+                                        for instr in &b.instructions {
+                                            if let Instruction::CallVirtual {
+                                                method,
+                                                receiver: Operand::Var(cr),
+                                                ..
+                                            } = instr
+                                                && (method == "create" || method == "extend")
+                                                && let Some(cr_root) =
+                                                    FactTable::receiver_root(f.ir, *cr)
+                                                && self.facts.client_roots.contains(&cr_root)
+                                            {
+                                                resolved = Some(cr_root);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        resolved.or(direct)
+                    }
+                } else {
+                    None
+                }
+            }
             _ => None,
         };
         if !self.facts.is_sink_call(name, receiver_root.as_deref()) {
@@ -222,6 +310,7 @@ impl<'a> BackwardTaintEngine<'a> {
             .facts
             .role_for_call(name, receiver_root.as_deref())
             .unwrap_or_default();
+        let label = self.facts.label_for_call(name, receiver_root.as_deref());
         // Engine purity: every fact-declared sink is explored and reported
         // when tainted data reaches it, regardless of role. Severity policy
         // (Response/Validation rank at `info`) is lang-declared ranking
@@ -303,6 +392,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 verdict,
                 finding_class,
                 role,
+                label: label.clone(),
                 source_desc: state.source_desc.clone(),
                 path,
                 // Span of the SINK CALL itself, not the tainted operand's

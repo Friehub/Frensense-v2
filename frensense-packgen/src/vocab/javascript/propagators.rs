@@ -164,7 +164,7 @@ pub(super) static JS_PROPAGATORS: &[PropagatorRule] = &[
     },
     PropagatorRule {
         call: "render",
-        tainted_arg: Some(0),
+        tainted_arg: None,
         tainted_receiver: false,
     },
     // Path manipulation

@@ -18,7 +18,8 @@ pub use frensense_lang::severity::SinkRole;
 /// (the serde wire form). Unknown names keep the conservative default.
 #[must_use]
 pub fn sink_role_from_name(name: &str) -> SinkRole {
-    match name {
+    let role_part = name.split_once(':').map(|(r, _)| r).unwrap_or(name);
+    match role_part {
         "execution" => SinkRole::Execution,
         "resource" => SinkRole::Resource,
         "storage" => SinkRole::Storage,
@@ -28,6 +29,13 @@ pub fn sink_role_from_name(name: &str) -> SinkRole {
         "validation" => SinkRole::Validation,
         _ => SinkRole::Other,
     }
+}
+
+/// Extract the optional label slug serialized after the colon in a role string
+/// (e.g. `"execution:prototype"` -> `Some("prototype")`).
+#[must_use]
+pub fn sink_label_slug_from_role_str(name: &str) -> Option<&str> {
+    name.split_once(':').map(|(_, slug)| slug)
 }
 
 /// The snake_case wire name of a [`SinkRole`] - the inverse of

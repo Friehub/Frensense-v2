@@ -170,6 +170,8 @@ fn install_language_group(
     for e in group {
         match e {
             LearnedFactEntry::LanguageSink { call, role, .. } => {
+                let slug = crate::analysis::taint::role::sink_label_slug_from_role_str(role)
+                    .map(String::from);
                 let role = crate::analysis::taint::role::sink_role_from_name(role);
                 let key = call.as_str();
                 let last = key.rsplit('.').next().unwrap_or(key);
@@ -178,6 +180,7 @@ fn install_language_group(
                     .entry(key.to_string())
                     .or_insert_with(|| SinkSignature {
                         role,
+                        label: slug.clone(),
                         ..SinkSignature::all_args(key)
                     });
                 config.sinks.insert(last.to_string());
@@ -187,6 +190,7 @@ fn install_language_group(
                         .entry(last.to_string())
                         .or_insert_with(|| SinkSignature {
                             role,
+                            label: slug.clone(),
                             ..SinkSignature::all_args(key)
                         });
                     if let Some(root) = key.split('.').next() {
@@ -194,6 +198,12 @@ fn install_language_group(
                             .receiver_roles
                             .entry((root.to_string(), last.to_string()))
                             .or_insert(role);
+                        if let Some(s) = &slug {
+                            facts
+                                .receiver_labels
+                                .entry((root.to_string(), last.to_string()))
+                                .or_insert_with(|| s.clone());
+                        }
                         if ambiguous.contains(&last) {
                             facts.verb_sinks.insert(last.to_string());
                             facts.client_roots.insert(root.to_string());
@@ -207,10 +217,10 @@ fn install_language_group(
                 binding_args_safe,
                 ..
             } => {
-                let role = facts
+                let (role, label) = facts
                     .sink_signatures
                     .get(call.as_str())
-                    .map(|s| s.role)
+                    .map(|s| (s.role, s.label.clone()))
                     .unwrap_or_default();
                 let entry = SinkSignature {
                     call: call.clone(),
@@ -218,6 +228,7 @@ fn install_language_group(
                     binding_args_safe: *binding_args_safe,
                     idor_keys: Vec::new(),
                     role,
+                    label,
                 };
                 facts.sink_signatures.insert(call.clone(), entry.clone());
                 let last = call.rsplit('.').next().unwrap_or(call);

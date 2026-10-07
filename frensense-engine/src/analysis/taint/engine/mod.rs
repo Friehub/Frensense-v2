@@ -108,6 +108,8 @@ pub struct SinkFinding {
     pub finding_class: FindingClass,
     /// What the sink does with its input, the primary severity signal.
     pub role: crate::analysis::taint::role::SinkRole,
+    /// Semantic label slug for identity reporting (e.g. "prototype", "ssrf", "regex").
+    pub label: Option<String>,
     /// Human description of the taint origin (the source access path,
     /// e.g. `req.body.target`), populated for `Vulnerable` verdicts.
     pub source_desc: Option<String>,

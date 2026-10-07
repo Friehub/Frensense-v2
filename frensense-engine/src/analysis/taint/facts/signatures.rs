@@ -77,6 +77,18 @@ impl FactTable {
         self.sink_signature(last).map(|s| s.role)
     }
 
+    /// Semantic label slug for a sink call, receiver-aware.
+    pub fn label_for_call(&self, last: &str, receiver_root: Option<&str>) -> Option<String> {
+        if let Some(root) = receiver_root
+            && let Some(slug) = self
+                .receiver_labels
+                .get(&(root.to_string(), last.to_string()))
+        {
+            return Some(slug.clone());
+        }
+        self.sink_signature(last).and_then(|s| s.label.clone())
+    }
+
     /// Sanitizer fact for a call; `None` if not a sanitizer.
     pub fn sanitizer_fact(&self, call: &str) -> Option<&SanitizerFact> {
         self.sanitizer_facts.get(call)

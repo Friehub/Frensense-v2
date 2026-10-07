@@ -137,6 +137,8 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     // Code Execution
     ("eval", crate::role_map::SinkLabel::CodeExecution),
     ("Function", crate::role_map::SinkLabel::CodeExecution),
+    ("RegExp", crate::role_map::SinkLabel::Regex),
+    ("RegExp.compile", crate::role_map::SinkLabel::Regex),
     ("setTimeout", crate::role_map::SinkLabel::CodeExecution),
     ("setInterval", crate::role_map::SinkLabel::CodeExecution),
     ("runInNewContext", crate::role_map::SinkLabel::CodeExecution),
