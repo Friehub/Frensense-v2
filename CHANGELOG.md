@@ -4,11 +4,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0-preview.5] - 2026-10-09
 
 ### Added
 
-#### Engine & Verification
+#### CLI & Reporting UX
+- **Compiler-Grade Diagnostic Formatter**: Redesigned human terminal finding reports with `rustc`-style pointer notation (`--> path:line:col (in 'symbol')`), de-duplicated titles, aligned 15-character metadata columns (`Details:`, `Impact:`, `Remediation:`), and structured numbered taint flow traces with localized line references.
+- **File Output Support (`-o, --output <file>`)**: Enabled writing raw machine reports (`--json`, `--sarif`, `--github`) directly to disk while presenting interactive scan banners, duration timing, and summary audit blocks in the terminal. Pure stdout is preserved when piping without `-o`.
+- **CLI Flags Audit & Atomic Parsing**: Unified command-line parsing into an atomic single-pass engine, resolving positional path conflicts. Removed deprecated flags (`--min-confidence`, `--config`, `--baseline`), added standardized short aliases (`-o`, `-s`, `-l`, `-b`, `-f`), and added validation for missing arguments and unknown flags.
+- **Corpus Intellectual Property Protection**: Scrubbed internal corpus family names (e.g. `ts_express_sendfile_traversal`), training provenance (`(learned from family ...)`), and `Corpus-verified` labels from all findings. Prioritized author-declared `// [frensense] observation:` metadata blocks and added engine-level sanitization across all output formats.
+- **Rule Bundles Hub & Capability Datasheets**: Added pointers and documentation to the rule bundles hub (`https://frensense.friehub.cloud/bundles`) and signed CWE Capability Datasheets (`CWE_DATASHEET.md` / `cwe_datasheet.json`) supporting Free Community and Commercial Enterprise distribution tiers.
+
+#### Engine Dataflow & Blindspot Remediations
+- **P0 Sink-Agnostic Sanitizer Collapse Remediation (BS-15)**: Re-homed and qualified `SanitizerKind` with `SinkRole` and sink labels (`defeats_role_and_label`) in `frensense-lang`, preventing HTML sanitizers from clearing command and code execution sinks. Threaded role qualifications through `frensense-packgen` and backward taint walks in `walk.rs`.
+- **P1 Scoped Identifier Callgraph Dropping in Rust (BS-18)**: Expanded tree-sitter queries in `frensense-lang` to match `(scoped_identifier)` within call expressions and let bindings (`Command::new`, `std::process::Command::new`). Routed `match_expression` to `NodeRole::Match` and delegated trailing expression returns cleanly through `LanguageSpec::implicit_return_node`.
 - **97-Probe Industrial Dataflow Consistency Test Bench**: Implemented comprehensive diagnostic probe suite (`dataflow_probes_tests.rs` and `probes/*`) modeling 65 NIST/Juliet syntactic and inter-procedural flow variants, frontier static analysis domains (path sensitivity, async microtasks/emitters, multi-language Go/Rust providers, sanitizer ordering, historic CVE reproductions, and framework IoC), and quantitative finance trading patterns. Known engine blind spots are annotated with diagnostic ignore markers.
 - **100% TPR / 0% FPR Held-Out Benchmark Gate**: Resolved remaining detection seams across all 116 held-out production fixtures in `frensense-corpus`, verifying zero false positives on safe control variants.
 - **CWE-190/680 Integer-Overflow Heap-Overflow Checker**: Added `checks::int_overflow`, a facts-driven checker for integer overflow reaching a heap write: interval bounds over allocation sizes, index arithmetic and multiplication (rooted in the lang-declared capacity vocabulary) decide whether an overflowed value can reach the size/index of a copy into undersized heap storage; validated 4/4 on the `c_cwe_680_count_mul_wrap` corpus pair plus heldouts.

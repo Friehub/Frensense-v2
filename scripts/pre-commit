@@ -1,147 +1,55 @@
 #!/bin/bash
-# Frensense Pre-Commit Hook
-# Validates code formatting, lints, tests, and advanced verification tools:
-# 1. cargo-mutants (mutation analysis on staged diffs)
-# 2. Miri (undefined behavior and memory safety verification)
-# 3. cargo-geiger (unsafe code usage audit)
-# 4. cargo-semver-checks (API breaking change verification)
+# Frensense Pre-Commit Hook (fast path)
+#
+# Runs the checks that finish in seconds-to-a-minute so committing stays
+# cheap. The full gate (what CI runs) is `./scripts/local-ci.sh` - run it
+# before opening a PR.
+#
+# Policy: this hook NEVER mutates staged content. Anything it cannot fix
+# itself is reported and left to the author.
 
-set -e
+set -u
 
-echo "[INFO] Starting pre-commit integrity checks..."
+echo "[INFO] Frensense pre-commit: fast integrity checks..."
 FAILURES=0
 
-# 0. Sanitize unicode em dashes in staged text/code files
-STAGED_DOCS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(md|rs|ts|js|json|toml)$' || true)
-if [ -n "$STAGED_DOCS" ]; then
-    for FILE in $STAGED_DOCS; do
+# 0. Em-dash notice (warn only - never rewrite staged files)
+STAGED_TEXT=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(md|rs|ts|js|json|toml)$' || true)
+if [ -n "$STAGED_TEXT" ]; then
+    for FILE in $STAGED_TEXT; do
         if [ -f "$FILE" ] && grep -q '—' "$FILE"; then
-            echo "[INFO] Normalizing em dash in $FILE"
-            sed -i 's/—/-/g' "$FILE"
-            git add "$FILE"
+            echo "[WARN] $FILE contains em dashes (—). The repo style is ASCII"
+            echo "       hyphens (-). Fix manually if you care; commit is not blocked."
         fi
     done
 fi
 
 # 1. Formatting Check
-echo "[CHECK 1/7] Verifying code formatting..."
+echo "[CHECK 1/3] Verifying code formatting..."
 if ! cargo fmt --all -- --check; then
     echo "[FAIL] Code formatting check failed. Run 'cargo fmt' to fix."
     FAILURES=$((FAILURES + 1))
 fi
 
-# 2. Clippy Semantic Lints
-echo "[CHECK 2/7] Running workspace lints..."
-if ! cargo clippy --workspace --all-targets -- -D warnings; then
-    echo "[FAIL] Clippy linter found warnings or errors."
+# 2. Clippy Semantic Lints (same flags as CI: warnings are errors)
+echo "[CHECK 2/3] Running workspace lints (clippy, warnings are errors)..."
+if ! cargo clippy --all-features --all-targets -- -D warnings; then
+    echo "[FAIL] Clippy found warnings or errors."
     FAILURES=$((FAILURES + 1))
 fi
 
-# 3. Fast Workspace Unit Tests
-echo "[CHECK 3/7] Running workspace unit tests..."
+# 3. Fast Unit Tests (lib + bins only; the full suite runs in local-ci.sh / CI)
+echo "[CHECK 3/3] Running workspace unit tests (lib + bins)..."
 if ! cargo test --workspace --lib --bins; then
     echo "[FAIL] Workspace unit tests failed."
     FAILURES=$((FAILURES + 1))
 fi
 
-# 4. cargo-geiger: Unsafe Code Audit
-echo "[CHECK 4/7] Auditing unsafe code usage (cargo-geiger)..."
-if [ "${SKIP_GEIGER:-0}" = "1" ]; then
-    echo "[SKIP] Geiger check skipped via SKIP_GEIGER=1"
-elif command -v cargo-geiger >/dev/null 2>&1 || cargo geiger --version >/dev/null 2>&1; then
-    if ! cargo geiger --package frensense --package frensense-engine --package frensense-bundler; then
-        echo "[FAIL] cargo-geiger reported unsafe code violations or failed analysis."
-        FAILURES=$((FAILURES + 1))
-    else
-        echo "[PASS] cargo-geiger audit completed."
-    fi
-else
-    echo "[ERROR] cargo-geiger is not installed. To install: cargo install cargo-geiger"
-    if [ "${STRICT_HOOK:-0}" = "1" ]; then
-        FAILURES=$((FAILURES + 1))
-    fi
-fi
-
-# 5. cargo-semver-checks: Semantic Versioning & Breaking API Check
-echo "[CHECK 5/7] Verifying API semver compatibility (cargo-semver-checks)..."
-if [ "${SKIP_SEMVER:-0}" = "1" ]; then
-    echo "[SKIP] Semver check skipped via SKIP_SEMVER=1"
-elif command -v cargo-semver-checks >/dev/null 2>&1 || cargo semver-checks --version >/dev/null 2>&1; then
-    STAGED_API_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '(Cargo\.toml|src/lib\.rs)' || true)
-    if [ -n "$STAGED_API_FILES" ] || [ "${STRICT_HOOK:-0}" = "1" ]; then
-        echo "[INFO] Executing semver check on package 'frensense' against baseline HEAD..."
-        if ! cargo semver-checks check-release --package frensense --baseline-rev HEAD 2>&1; then
-            echo "[FAIL] cargo-semver-checks reported semver break or rustdoc incompatibility."
-            FAILURES=$((FAILURES + 1))
-        else
-            echo "[PASS] cargo-semver-checks verified API compatibility."
-        fi
-    else
-        echo "[PASS] No public API or manifest modifications detected in staged commit."
-    fi
-else
-    echo "[ERROR] cargo-semver-checks is not installed. To install: cargo install cargo-semver-checks"
-    if [ "${STRICT_HOOK:-0}" = "1" ]; then
-        FAILURES=$((FAILURES + 1))
-    fi
-fi
-
-# 6. Miri: Undefined Behavior & Memory Safety Verification
-echo "[CHECK 6/7] Running undefined behavior checks (Miri)..."
-if [ "${SKIP_MIRI:-0}" = "1" ]; then
-    echo "[SKIP] Miri check skipped via SKIP_MIRI=1"
-else
-    MIRI_CMD=""
-    if cargo miri --version >/dev/null 2>&1; then
-        MIRI_CMD="cargo miri"
-    elif cargo +nightly miri --version >/dev/null 2>&1; then
-        MIRI_CMD="cargo +nightly miri"
-    fi
-
-    if [ -n "$MIRI_CMD" ]; then
-        echo "[INFO] Executing Miri on memory and value-flow unit tests..."
-        if ! $MIRI_CMD test -p frensense-engine --lib checks::uaf_tests::uaf_spec::free_then_use_fires; then
-            echo "[FAIL] Miri verification failed or encountered undefined behavior."
-            FAILURES=$((FAILURES + 1))
-        else
-            echo "[PASS] Miri verification completed without UB."
-        fi
-    else
-        echo "[ERROR] Miri is not installed for active toolchain. To install: rustup component add --toolchain nightly miri"
-        if [ "${STRICT_HOOK:-0}" = "1" ]; then
-            FAILURES=$((FAILURES + 1))
-        fi
-    fi
-fi
-
-# 7. cargo-mutants: Mutation Testing on Staged Diffs
-echo "[CHECK 7/7] Running mutation testing (cargo-mutants)..."
-if [ "${SKIP_MUTANTS:-0}" = "1" ]; then
-    echo "[SKIP] Mutation testing skipped via SKIP_MUTANTS=1"
-elif command -v cargo-mutants >/dev/null 2>&1 || cargo mutants --version >/dev/null 2>&1; then
-    STAGED_RS_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.rs$' || true)
-    if [ -n "$STAGED_RS_FILES" ] || [ "${STRICT_HOOK:-0}" = "1" ]; then
-        echo "[INFO] Running mutation analysis on staged Rust files..."
-        if ! cargo mutants --in-diff --timeout 60 --no-shuffle; then
-            echo "[FAIL] cargo-mutants discovered surviving mutants."
-            FAILURES=$((FAILURES + 1))
-        else
-            echo "[PASS] All generated mutants were killed by test suite."
-        fi
-    else
-        echo "[PASS] No Rust source files staged for mutation testing."
-    fi
-else
-    echo "[ERROR] cargo-mutants is not installed. To install: cargo install cargo-mutants"
-    if [ "${STRICT_HOOK:-0}" = "1" ]; then
-        FAILURES=$((FAILURES + 1))
-    fi
-fi
-
 if [ "$FAILURES" -gt 0 ]; then
-    echo "[FAILURE] $FAILURES pre-commit integrity check(s) failed or require attention."
+    echo "[FAILURE] $FAILURES pre-commit check(s) failed."
+    echo "[HINT] Run './scripts/local-ci.sh' for the full gate before opening a PR."
     exit 1
 fi
 
-echo "[SUCCESS] All pre-commit integrity checks completed successfully."
+echo "[SUCCESS] Fast pre-commit checks passed."
 exit 0

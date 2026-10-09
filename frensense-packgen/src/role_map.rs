@@ -92,28 +92,7 @@ impl SinkLabel {
     }
 }
 
-/// Sanitizer strength: what kind of injection does this call defeat?
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum SanitizerKind {
-    /// Completely removes taint (e.g. numeric coercion: `int(user_input)`).
-    Full,
-    /// Defeats HTML/XSS injection only.
-    HtmlEscape,
-    /// Defeats URL-based attacks only.
-    UrlEncode,
-    /// Parameterised query - defeats SQL injection only.
-    SqlParameterize,
-    /// NoSQL sanitization - defeats NoSQL injection only.
-    NoSqlParameterize,
-    /// Session-store accessor trust: `store.get(token)` returns a
-    /// server-issued session object (undefined for unknown tokens), so
-    /// identity fields read off the result are not attacker-controlled.
-    /// Receiver-aware: only applies when the receiver root is a declared
-    /// session store.
-    SessionTrust,
-    /// Path canonicalization - defeats path traversal only.
-    PathNormalize,
-}
+pub use frensense_lang::severity::SanitizerKind;
 
 /// A propagator rule describes how taint flows through a specific call.
 ///

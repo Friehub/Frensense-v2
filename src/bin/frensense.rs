@@ -6,10 +6,11 @@
 //! The frensense CLI: collect files → compiler scan → report.
 
 use frensense::cli::{
-    CliOptions, compare_baseline, get_input_paths, parse_options, print_results, save_baseline,
+    compare_baseline, parse_options, print_results, print_scan_banner, save_baseline,
 };
 use frensense::engine::Engine;
 use frensense::{FRENSENSE_VERSION, Result};
+use frensense_engine::analysis::taint::facts::LearnedFactEntry;
 
 fn print_help() {
     println!("Frensense v{FRENSENSE_VERSION}, deterministic dataflow security scanner.");
@@ -17,6 +18,9 @@ fn print_help() {
     println!("Usage: frensense [path] [options]");
     println!(
         "       frensense bundle [<corpus_dir>] [output.frc] [-c/-o]  Compile corpus pairs into a .frc bundle"
+    );
+    println!(
+        "       frensense bundle info <file.frc>             Inspect metadata and facts of a .frc bundle"
     );
     println!(
         "       frensense watch [path] [options]            Re-scan on file changes, print new findings"
@@ -29,25 +33,38 @@ fn print_help() {
     );
     println!();
     println!("Options:");
+    println!("  -o, --output <file>        Write report to file (text, json, sarif, or github)");
     println!("  --json                     Output findings as JSON");
     println!("  --sarif                    Output findings in SARIF format");
     println!(
         "  --github                   GitHub Actions annotations (::error/::warning/::notice)"
     );
+    println!("  -f, --format <format>      Report format: text, json, sarif, github");
     println!("  --strict                   Exit with code 1 if any findings");
-    println!("  --severity <level>         Minimum severity: critical, warning, info");
-    println!("  --language <lang>          Language filter (rust, typescript, javascript, python)");
-    println!("  --min-confidence <0-1>     Minimum confidence threshold");
-    println!("  --corpus-bundle <file>     .frc bundle whose learned facts teach the engine");
+    println!(
+        "  -s, --severity <level>     Minimum severity: critical, warning, info (default: warning)"
+    );
+    println!(
+        "  -l, --language <lang>      Language filter: rust, typescript, javascript, python, c"
+    );
+    println!(
+        "  -b, --bundle <file>        .frc rules bundle (download: https://frensense.friehub.cloud/bundles)"
+    );
     println!("  --diff-only                Only scan files changed since the last git commit");
     println!("  --emit-baseline <file>     Save current findings as a baseline");
     println!("  --compare-baseline <file>  Fail on new findings vs. baseline");
+    println!("  -h, --help                 Print this help");
+    println!("  -v, --version              Print version");
+    println!();
+    println!("Rule Bundles (.frc):");
+    println!("  Community and commercial rule bundles: https://frensense.friehub.cloud/bundles");
 }
 
 fn print_bundle_help() {
-    println!("Frensense Bundle Compiler: compile corpus pairs into a .frc facts bundle.");
+    println!("Frensense Bundle Compiler & Inspector: compile or inspect .frc facts bundles.");
     println!();
     println!("Usage: frensense bundle [<corpus_dir>] [output.frc] [-c <dir>] [-o <file>]");
+    println!("       frensense bundle info <file.frc>");
     println!();
     println!("Arguments:");
     println!(
@@ -58,6 +75,9 @@ fn print_bundle_help() {
     );
     println!(
         "  [output.frc]  Destination file for compiled facts bundle (default: frensense-corpus.frc)."
+    );
+    println!(
+        "  info <file>   Inspect .frc binary header, version, checksum, and fact distributions."
     );
     println!();
     println!("Options:");
@@ -81,9 +101,86 @@ fn print_bundle_help() {
     println!(
         "  3. Run 'frensense bundle <corpus_dir> [output.frc]' to compile and replay-verify the facts."
     );
+    println!("  4. Run 'frensense bundle info <output.frc>' to inspect the compiled bundle.");
     println!(
-        "  4. Run 'frensense <path> --corpus-bundle <output.frc>' to scan using the learned bundle."
+        "  5. Run 'frensense <path> --corpus-bundle <output.frc>' to scan using the learned bundle."
     );
+}
+
+fn print_bundle_info(bundle_path: &std::path::Path) -> std::result::Result<(), String> {
+    let bytes = std::fs::read(bundle_path)
+        .map_err(|e| format!("failed to read bundle {}: {e}", bundle_path.display()))?;
+    let loaded = frensense_bundler::format::load_bundle(&bytes)
+        .map_err(|e| format!("failed to deserialize bundle: {e}"))?;
+
+    let magic_str = std::str::from_utf8(&loaded.header.magic).unwrap_or("????");
+    let checksum_hex: String = loaded
+        .header
+        .checksum
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+
+    let mut sources = 0;
+    let mut sinks = 0;
+    let mut sanitizers = 0;
+    let mut policies = 0;
+    let mut checks = 0;
+    let mut memory_contracts = 0;
+    let mut other = 0;
+
+    for fact in &loaded.learned_facts {
+        match fact {
+            LearnedFactEntry::Source { .. } => sources += 1,
+            LearnedFactEntry::Sink { .. } => sinks += 1,
+            LearnedFactEntry::Sanitizer { .. } => sanitizers += 1,
+            LearnedFactEntry::Policy { .. } => policies += 1,
+            LearnedFactEntry::Check { .. } => checks += 1,
+            LearnedFactEntry::MemoryContract { .. }
+            | LearnedFactEntry::Allocator { .. }
+            | LearnedFactEntry::Deallocator { .. } => memory_contracts += 1,
+            _ => other += 1,
+        }
+    }
+
+    println!("============================= Bundle Details =============================");
+    println!("Path:               {}", bundle_path.display());
+    println!("Magic:              {magic_str}");
+    println!("Format Version:     v{}", loaded.header.version);
+    println!("Payload Size:       {} bytes", bytes.len());
+    println!("BLAKE3 Checksum:    {checksum_hex}");
+    println!("Pattern Count:      {}", loaded.patterns.len());
+    println!("Learned Facts:      {}", loaded.learned_facts.len());
+    println!("  - Taint Sources:  {sources}");
+    println!("  - Taint Sinks:    {sinks}");
+    println!("  - Sanitizers:     {sanitizers}");
+    println!("  - Co-occurrence:  {policies}");
+    println!("  - Checks:         {checks}");
+    if memory_contracts > 0 {
+        println!("  - Memory Facts:   {memory_contracts}");
+    }
+    if other > 0 {
+        println!("  - Other Facts:    {other}");
+    }
+    if !loaded.policy_pack.is_empty() {
+        println!("Authored Policies:  {}", loaded.policy_pack.len());
+    }
+    println!("==========================================================================");
+
+    if !loaded.patterns.is_empty() {
+        println!();
+        println!("Advisory Patterns:");
+        for pat in &loaded.patterns {
+            let cwe = pat.cwe.as_deref().unwrap_or("N/A");
+            let sev = pat.severity.as_deref().unwrap_or("Unspecified");
+            println!("  - [{}] {} (Severity: {})", pat.id, cwe, sev);
+            if !pat.rules.is_empty() {
+                println!("      Rules: {}", pat.rules.join(", "));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Parse arguments following the `bundle` subcommand: positionals fill the
@@ -145,6 +242,31 @@ fn handle_bundle_command(args: &[String]) -> Result<bool> {
     if args.get(1).map(|s| s.as_str()) != Some("bundle") {
         return Ok(false);
     }
+    if let Some(sub) = args.get(2)
+        && (sub == "info" || sub == "inspect")
+    {
+        if args.get(3).map(|s| s.as_str()) == Some("-h")
+            || args.get(3).map(|s| s.as_str()) == Some("--help")
+        {
+            println!("Frensense Bundle Inspector: inspect metadata and facts of a .frc bundle.");
+            println!();
+            println!("Usage: frensense bundle info <file.frc>");
+            std::process::exit(0);
+        }
+        let bundle_path = match args.get(3) {
+            Some(p) => std::path::PathBuf::from(p),
+            None => {
+                eprintln!("Error: missing bundle file path");
+                eprintln!("Usage: frensense bundle info <file.frc>");
+                std::process::exit(2);
+            }
+        };
+        if let Err(e) = print_bundle_info(&bundle_path) {
+            eprintln!("Bundle inspection error: {e}");
+            std::process::exit(1);
+        }
+        return Ok(true);
+    }
     match parse_bundle_args(args) {
         Ok(None) => {
             print_bundle_help();
@@ -160,17 +282,18 @@ fn handle_bundle_command(args: &[String]) -> Result<bool> {
         Err(e) => {
             eprintln!("Error: {e}");
             eprintln!("Usage: frensense bundle [<corpus_dir>] [output.frc] [-c <dir>] [-o <file>]");
+            eprintln!("       frensense bundle info <file.frc>");
             std::process::exit(2);
         }
     }
 }
 
 fn handle_early_args(args: &[String]) -> bool {
-    if args.len() < 2 || (args.len() == 2 && args.iter().any(|a| a == "--help" || a == "-h")) {
+    if args.len() < 2 || args.iter().any(|a| a == "--help" || a == "-h") {
         print_help();
         std::process::exit(0);
     }
-    if args.iter().any(|a| a == "--version") {
+    if args.iter().any(|a| a == "--version" || a == "-v") {
         println!("frensense {FRENSENSE_VERSION}");
         std::process::exit(0);
     }
@@ -186,12 +309,12 @@ fn run_watch(args: Vec<String>) -> Result<()> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    let input_paths = get_input_paths(&args);
-    let input_path = input_paths
+    let options = parse_options(&args).map_err(frensense::FrensenseError::Config)?;
+    let input_path = options
+        .paths
         .first()
         .cloned()
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let options: CliOptions = parse_options(&args);
 
     let language_filter: Option<Vec<&'static str>> = options
         .language_filter
@@ -200,7 +323,6 @@ fn run_watch(args: Vec<String>) -> Result<()> {
         .map(|exts| exts.to_vec());
     let corpus_bundle = options.corpus_bundle_path.clone();
     let severity = options.severity_filter;
-    let min_confidence = options.min_confidence;
 
     // Stop-file: polled by a detached thread, lets scripts/tests end the
     // loop deterministically without signaling machinery. SIGINT keeps the
@@ -232,7 +354,6 @@ fn run_watch(args: Vec<String>) -> Result<()> {
                 engine.set_corpus_bundle_path(p.clone());
             }
             engine.set_severity_filter(severity);
-            engine.set_min_confidence(min_confidence);
             engine
         },
         |engine, path| engine.run(path),
@@ -333,12 +454,33 @@ fn main() -> Result<()> {
         return run_lsp();
     }
 
-    let input_paths = get_input_paths(&args);
+    let options = match parse_options(&args) {
+        Ok(opts) => opts,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            eprintln!("Run 'frensense --help' for usage information");
+            std::process::exit(2);
+        }
+    };
+
+    let input_paths = options.paths.clone();
     let input_path = input_paths
         .first()
         .cloned()
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let options: CliOptions = parse_options(&args);
+
+    let is_machine_format = matches!(options.format.as_str(), "json" | "sarif" | "github")
+        && options.output_path.is_none();
+    if !is_machine_format {
+        print_scan_banner(
+            &input_path,
+            options.corpus_bundle_path.as_deref(),
+            options.language_filter.as_deref(),
+            options.output_path.as_deref(),
+        );
+    }
+
+    let start_time = std::time::Instant::now();
 
     let mut engine = Engine::new();
     if let Some(ref path) = options.corpus_bundle_path {
@@ -350,7 +492,6 @@ fn main() -> Result<()> {
         engine.set_language_filter(exts.to_vec());
     }
     engine.set_severity_filter(options.severity_filter);
-    engine.set_min_confidence(options.min_confidence);
 
     let advisories = if options.diff_only {
         let repo_dir = if input_path.is_dir() {
@@ -402,7 +543,13 @@ fn main() -> Result<()> {
         all
     };
 
-    print_results(&advisories, &options.format, &input_path)?;
+    print_results(
+        &advisories,
+        &options.format,
+        &input_path,
+        Some(start_time.elapsed()),
+        options.output_path.as_deref(),
+    )?;
 
     if let Some(path) = &options.emit_baseline_path {
         save_baseline(&advisories, path)?;

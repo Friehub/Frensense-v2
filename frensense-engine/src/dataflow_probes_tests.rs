@@ -872,7 +872,6 @@ mod tier3_cross_file_probes {
     }
 
     #[test]
-    #[ignore = "Blind spot: Import alias renaming callgraph linkage"]
     fn probe_73_import_alias_rename() {
         let file_a = r#"
             export function rawSink(x: any) {
@@ -1091,7 +1090,6 @@ def view_handler(request):
     }
 
     #[test]
-    #[ignore = "Blind spot: Cross-file re-export with alias linkage"]
     fn probe_82_cross_file_reexport_with_alias() {
         let file_raw = r#"
             export function coreSink(p: any) {

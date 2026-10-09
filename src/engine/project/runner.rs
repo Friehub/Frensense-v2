@@ -258,6 +258,29 @@ fn apply_bundle_pattern(
     }
 }
 
+/// Strip internal corpus names, family identifiers, and training provenance
+/// from finding messages so corpus details remain hidden from end users.
+pub fn sanitize_corpus_provenance(s: &str) -> String {
+    let mut clean = s.to_string();
+    while let Some(idx) = clean.find("(learned from family ") {
+        if let Some(end) = clean[idx..].find(')') {
+            clean.replace_range(idx..idx + end + 1, "");
+        } else {
+            break;
+        }
+    }
+    while let Some(idx) = clean.find("(learned from ") {
+        if let Some(end) = clean[idx..].find(')') {
+            clean.replace_range(idx..idx + end + 1, "");
+        } else {
+            break;
+        }
+    }
+    clean = clean.replace("Corpus-verified policy violation:", "Policy violation:");
+    clean = clean.replace("Corpus-verified ", "");
+    clean.trim().to_string()
+}
+
 /// Build the compiler-style advisory for one non-dataflow policy finding.
 fn advisory_from_checker(
     c: &frensense_engine::checks::CheckerFinding,
@@ -287,16 +310,27 @@ fn advisory_from_checker(
             &c.params,
         );
     let pattern = bundle_advisories.get(&c.rule);
-    // Prose precedence: fact-authored `message` > matched bundle pattern's
-    // observation > lang template.
+    // Prose precedence: pattern-authored observation > fact message > lang template.
+    // If the fact message was a generic policy fallback ("Policy violation: `call`"),
+    // prefer the specific pattern observation when available.
     let observation = if !c.message.is_empty() {
-        c.message.clone()
+        let clean = sanitize_corpus_provenance(&c.message);
+        if (clean.starts_with("Policy violation: `") || clean.starts_with("Policy violation:"))
+            && pattern.and_then(|p| p.observation.as_ref()).is_some()
+        {
+            pattern
+                .and_then(|p| p.observation.as_ref())
+                .map(|o| sanitize_corpus_provenance(o))
+                .unwrap_or(clean)
+        } else {
+            clean
+        }
     } else if let Some(p) = pattern
         && let Some(o) = &p.observation
     {
-        o.clone()
+        sanitize_corpus_provenance(o)
     } else {
-        observation
+        sanitize_corpus_provenance(&observation)
     };
     let mut advisory = Advisory::bare(title, severity, file_id, path, observation)
         .with_confidence(1.0)

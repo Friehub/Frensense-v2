@@ -67,7 +67,6 @@ fn probe_ml_03_go_struct_field_flow() {
 }
 
 #[test]
-#[ignore = "Blind spot: Rust scoped identifier resolution for env::var and Command::new"]
 fn probe_ml_04_rust_env_command_unwrap() {
     let src = r#"
         use std::process::Command;
@@ -81,7 +80,6 @@ fn probe_ml_04_rust_env_command_unwrap() {
 }
 
 #[test]
-#[ignore = "Blind spot: Rust match arm pattern binding with scoped Command call"]
 fn probe_ml_05_rust_match_result_flow() {
     let src = r#"
         use std::process::Command;

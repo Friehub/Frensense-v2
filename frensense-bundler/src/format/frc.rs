@@ -13,7 +13,7 @@
 pub const BUNDLE_MAGIC: &[u8; 4] = b"FRC1";
 pub const BUNDLE_VERSION: u32 = 5;
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct BundleHeader {
     pub magic: [u8; 4],
     pub version: u32,

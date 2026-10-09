@@ -13,14 +13,14 @@ contributors, with a few ground rules that keep main stable:
 2. **The agent must run the full gate locally before the PR is opened:**
 
    ```bash
-   cargo fmt --all -- --check
-   cargo clippy --all-features --all-targets -- -D warnings
-   cargo test --workspace
+   ./scripts/local-ci.sh
    ```
 
-   CI runs exactly these (plus smoke tests of the `frensense`, MCP, and LSP
-   binaries). A red CI run from skipping the local gate wastes everyone's
-   time.
+   This script is a 1:1 mirror of CI's quality checks (purity ratchet,
+   rustfmt, packgen drift check, clippy, full test suite) in the same
+   order — if it passes locally, CI's quality jobs pass. AI agents:
+   read [AGENTS.md](AGENTS.md) for the full agent contract, including the
+   engine architecture and the knowledge-lane rules.
 3. **A human reviews and submits.** The PR must be opened by a person who
    has read the diff; the commit author line should say who (or what) wrote
    the change, and commits must be signed (`git commit -s`).
@@ -36,7 +36,9 @@ contributors, with a few ground rules that keep main stable:
 
 | check | command | policy |
 |---|---|---|
+| Purity ratchet | `python3 scripts/purity-ratchet.py` | engine purity debt must not grow |
 | Style | `cargo fmt --all -- --check` | must pass |
+| Pack drift | `cargo run -p frensense-packgen -- --check` | default pack asset must match generator |
 | Lint | `cargo clippy --all-features --all-targets -- -D warnings` | warnings are errors |
 | Tests | `cargo test --workspace --all-features` | must pass |
 | MSRV | `cargo +1.95 check --all-features` | must compile |
@@ -89,7 +91,8 @@ Alternatives if you outgrow this: CLA Assistant (cla-assistant.io, free app, sig
 git clone https://github.com/Friehub/Frensense.git
 cd Frensense
 cargo build --workspace
-cargo test --workspace
+./scripts/local-ci.sh   # the full pre-PR gate (identical to CI)
+make setup              # install the fast pre-commit hook (fmt/clippy/unit tests)
 ```
 
 Requirements: a recent stable Rust toolchain. The CLI entry point is `src/bin/frensense.rs`.

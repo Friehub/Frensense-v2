@@ -6,7 +6,7 @@
 
 use tree_sitter::Node;
 
-use crate::spec::{node_text, Import};
+use crate::spec::{node_text, Export, Import};
 
 pub(super) fn extract_js_imports<'tree>(root: Node<'tree>, source: &str) -> Vec<Import> {
     let mut imports = Vec::new();
@@ -94,21 +94,16 @@ fn extract_import_clause(node: Node<'_>, source: &str, package: &str, out: &mut 
                     symbol: Some(node_text(child, source).to_owned()),
                 });
             }
+            "named_imports" => {
+                for j in 0..child.named_child_count() {
+                    let spec = child.named_child(j).unwrap();
+                    if spec.kind() == "import_specifier" {
+                        extract_import_specifier(spec, source, package, out);
+                    }
+                }
+            }
             "import_specifier" => {
-                // `import { Foo as Bar }` → local=Bar, symbol=Foo
-                let name = child
-                    .child_by_field_name("name")
-                    .map(|n| node_text(n, source))
-                    .unwrap_or("");
-                let alias = child
-                    .child_by_field_name("alias")
-                    .map(|n| node_text(n, source))
-                    .unwrap_or(name);
-                out.push(Import {
-                    local_name: alias.to_owned(),
-                    package: package.to_owned(),
-                    symbol: Some(name.to_owned()),
-                });
+                extract_import_specifier(child, source, package, out);
             }
             "namespace_import" => {
                 // `import * as ns`
@@ -123,6 +118,99 @@ fn extract_import_clause(node: Node<'_>, source: &str, package: &str, out: &mut 
             _ => {}
         }
     }
+}
+
+fn extract_import_specifier(child: Node<'_>, source: &str, package: &str, out: &mut Vec<Import>) {
+    // `import { Foo as Bar }` → local=Bar, symbol=Foo
+    let name = child
+        .child_by_field_name("name")
+        .map(|n| node_text(n, source))
+        .unwrap_or("");
+    let alias = child
+        .child_by_field_name("alias")
+        .map(|n| node_text(n, source))
+        .unwrap_or(name);
+    out.push(Import {
+        local_name: alias.to_owned(),
+        package: package.to_owned(),
+        symbol: Some(name.to_owned()),
+    });
+}
+
+pub(super) fn extract_js_exports<'tree>(root: Node<'tree>, source: &str) -> Vec<Export> {
+    let mut exports = Vec::new();
+    let mut cursor = root.walk();
+
+    'outer: loop {
+        let node = cursor.node();
+
+        if node.kind() == "export_statement" {
+            let from_module =
+                find_string_child(node, source).map(|s| s.trim_matches(['"', '\'']).to_owned());
+
+            let mut has_clause = false;
+            for i in 0..node.named_child_count() {
+                let child = node.named_child(i).unwrap();
+                match child.kind() {
+                    "export_clause" => {
+                        has_clause = true;
+                        for j in 0..child.named_child_count() {
+                            let spec = child.named_child(j).unwrap();
+                            if spec.kind() == "export_specifier" {
+                                let name = spec
+                                    .child_by_field_name("name")
+                                    .map(|n| node_text(n, source))
+                                    .unwrap_or("");
+                                let alias = spec
+                                    .child_by_field_name("alias")
+                                    .map(|n| node_text(n, source))
+                                    .unwrap_or(name);
+                                exports.push(Export {
+                                    exported_name: alias.to_owned(),
+                                    local_name: name.to_owned(),
+                                    from_module: from_module.clone(),
+                                });
+                            }
+                        }
+                    }
+                    "function_declaration" => {
+                        has_clause = true;
+                        if let Some(name_node) = child.child_by_field_name("name") {
+                            let name = node_text(name_node, source);
+                            exports.push(Export {
+                                exported_name: name.to_owned(),
+                                local_name: name.to_owned(),
+                                from_module: None,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if !has_clause && from_module.is_some() && node_text(node, source).contains('*') {
+                exports.push(Export {
+                    exported_name: "*".to_owned(),
+                    local_name: "*".to_owned(),
+                    from_module: from_module.clone(),
+                });
+            }
+        }
+
+        if cursor.goto_first_child() {
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                break 'outer;
+            }
+        }
+    }
+
+    exports
 }
 
 fn find_string_child<'s>(node: Node<'_>, source: &'s str) -> Option<&'s str> {

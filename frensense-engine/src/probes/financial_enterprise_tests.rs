@@ -15,7 +15,6 @@
 use super::*;
 
 #[test]
-#[ignore = "Blind spot: Rust scoped call query for Command and and_then pipeline"]
 fn probe_fin_01_rust_monadic_result_pipeline() {
     let src = r#"
         use std::process::Command;
@@ -33,8 +32,8 @@ fn probe_fin_01_rust_monadic_result_pipeline() {
         }
 
         pub fn test() {
-            let raw = std::env::var("RAW_ORDER").unwrap();
-            let _ = parse_order(&raw)
+            let raw_order = std::env::var("RAW_ORDER").unwrap();
+            let _ = parse_order(&raw_order)
                 .and_then(risk_check)
                 .map(execute_market_order);
         }

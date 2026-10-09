@@ -91,9 +91,24 @@ impl<'a> ProgramSvfg<'a> {
                     } else {
                         None
                     };
+                    let is_higher_order = matches!(
+                        callee_name.as_str(),
+                        "map"
+                            | "and_then"
+                            | "then"
+                            | "flatMap"
+                            | "flat_map"
+                            | "forEach"
+                            | "for_each"
+                            | "filter"
+                    );
+                    if is_higher_order && let Some(r_node) = recv_node {
+                        bargs.push((r_node, 0));
+                    }
                     for (slot, a) in args.iter().enumerate() {
                         if let Operand::Var(v) = a {
-                            bargs.push((NodeKey::instr(block, idx, *v), slot));
+                            let s = if is_higher_order { slot + 1 } else { slot };
+                            bargs.push((NodeKey::instr(block, idx, *v), s));
                         }
                     }
                     let ret_node = dest.map(|d| NodeKey::instr(block, idx, d));

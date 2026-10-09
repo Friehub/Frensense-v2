@@ -67,6 +67,8 @@ impl<'a> LoweringContext<'a> {
 
             NodeRole::Branch => self.visit_branch(node),
 
+            NodeRole::Match => self.visit_match(node),
+
             NodeRole::Return => self.visit_return(node),
 
             // ─── OPERATORS ────────────────────────────────────────────────────

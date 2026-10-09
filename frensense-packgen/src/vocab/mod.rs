@@ -108,9 +108,17 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
     for name in v.sanitizer_names {
         let classified = (v.classify_sanitizer)(name);
         let guard_style = is_predicate_guard(name, classified.as_ref());
+        let kind = classified.map(|k| k.slug().to_string()).unwrap_or_else(|| {
+            if guard_style {
+                frensense_engine::analysis::taint::facts::ALLOWLIST_SANITIZER_KIND.to_string()
+            } else {
+                frensense_engine::analysis::taint::facts::DEFAULT_SANITIZER_KIND.to_string()
+            }
+        });
         entries.push(LearnedFactEntry::LanguageSanitizer {
             language: language.clone(),
             call: (*name).to_string(),
+            kind,
             guard_style,
         });
     }

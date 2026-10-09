@@ -6,38 +6,36 @@ outline: [2, 3]
 
 > How to teach Frensense new vulnerabilities. Frensense is **corpus-based, not
 > rule-based**: there is no rule language to learn and no YAML to write. You
-> show the engine a vulnerable example and its fixed counterpart, and the
+> provide a vulnerable example and its remediated counterpart, and the
 > bundler verifies and distills the difference into a portable `.frc` bundle.
 
 ## 1. The mental model
 
-A Frensense **family** is one vulnerability idea, expressed as a pair:
+A Frensense **family** represents one vulnerability concept, expressed as a pair of files:
 
-- `<family>_positive.<ext>`, the vulnerable version
-- `<family>_negative.<ext>`, the fixed / safe version
+- `<family>_positive.<ext>`: the vulnerable version
+- `<family>_negative.<ext>`: the fixed / safe version
 
-The bundler lowers both through the same engine a scan uses, computes the
-delta (what call the negative avoids, what guard it adds), and proposes a
-*fact*. Every proposed fact then passes a **replay gate**: the fact is only
-published if, after installing it, the positive alerts and the negative stays
-silent, and no other family that already separated regresses. If a fact
-cannot prove itself against your corpus, it is never published. That is the
-quality control, and it is why there is no rule linting to do.
+The bundler lowers both through the same engine that the scanner uses, computes the semantic delta (e.g., what call the negative avoids, what guard or sanitizing transform it adds), and proposes a *fact*. Every proposed fact then passes a **replay gate**: the fact is only published if, after installing it, the positive alerts, the negative stays silent, and no other family that already separated at baseline regresses. If a fact cannot prove itself against your corpus, it is never published. That provides built-in quality control without manual rule linting.
 
-Facts ship inside an `.frc` bundle (binary, versioned, blake3-checksummed).
-The engine merges bundle facts **over** its built-in tables, bundle knowledge
-always wins on collision, and coarse all-args facts never widen precise
-slot-restricted ones.
+Facts ship inside an `.frc` bundle (binary, versioned, checksummed). The engine merges bundle facts **over** its built-in tables, bundle knowledge always wins on collision, and coarse all-args facts never widen precise slot-restricted ones.
 
-Supported languages: `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `rs`.
+Supported languages: `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `rs`, `c`.
 
 ## 2. Quick start (5 minutes)
 
-Build a family, run the bundler, scan with the bundle:
+Build a family, compile the bundle, and scan with it:
 
 ```bash
 mkdir -p mycorpus/ts_sqli
 cat > mycorpus/ts_sqli/ts_sqli_positive.ts <<'EOF'
+// [frensense]
+// observation: User id concatenated into SQL query string
+// impact: Attacker can read or modify arbitrary database rows
+// improvement: Use parameterized query binding ($1)
+// cwe: CWE-89
+// severity: Critical
+
 import { Pool } from "pg";
 const pool = new Pool();
 export async function getUser(req: any) {
@@ -45,6 +43,7 @@ export async function getUser(req: any) {
   return pool.query("SELECT * FROM users WHERE id = " + id);
 }
 EOF
+
 cat > mycorpus/ts_sqli/ts_sqli_negative.ts <<'EOF'
 // SAFE: parameterized query keeps user data out of the SQL string.
 import { Pool } from "pg";
@@ -55,179 +54,166 @@ export async function getUser(req: any) {
 }
 EOF
 
-# Build the bundle (bundler binary ships alongside the frensense CLI)
-frensense-bundler mycorpus my.frc
+# Build the bundle (using the frensense CLI or frensense-bundler)
+frensense bundle mycorpus my.frc
 # [facts] 1 families grouped from mycorpus
 # [facts] round-trip OK: 1 learned facts in bundle
-#   [provisional] sink:... ← ts_sqli        (support 1 = provisional)
+#   [provisional] sanitizer:... <- ts_sqli
 
-# Scan a target with it
+# Scan a target project with the learned bundle
 frensense path/to/target --corpus-bundle my.frc
 ```
 
-Or drop the bundle into the scanned project root as
-`frensense-corpus.frc`, it is picked up automatically. The MCP server and
-LSP pick it up via the `FRENSENSE_CORPUS_BUNDLE` environment variable.
+You can also drop the bundle into your project root as `frensense-corpus.frc`; it is picked up automatically. The MCP server and LSP pick it up via the `FRENSENSE_CORPUS_BUNDLE` environment variable.
 
 ## 3. Naming and layout rules
 
-- Family id = filename stem before `_positive` / `_negative`.
-  `ts_sqli_positive.ts` → family `ts_sqli`.
-- Multiple negatives are allowed (`..._negative.ts`, `..._negative2.ts`) and
-  multiple positives too. More negatives = stronger gate.
-- Directories are free-form metadata. `<lang>/<CWE>/<family>/` works, and
-  moving a family between directories does not change its id.
-- **Do not mix languages under one stem.** `foo_positive.py` and
-  `foo_negative.ts` would collide; the bundler detects this and splits them
-  into `foo (python)` / `foo (typescript)` with a warning. Prefer explicit
-  language prefixes (`py_foo_positive.py`, `ts_foo_positive.ts`), that is
-  how the upstream corpus is organized.
-- Facts are matched by **call name** (last segment), language-blind by
-  design: a learned `execute` sink fires in any language that calls
-  `execute`. Name your triggers specifically.
+- **Family ID**: Filename stem before `_positive` / `_negative`.  
+  `ts_sqli_positive.ts` -> family `ts_sqli`.
+- **Language Prefixes**: Always prefix stems with the language (`c_`, `py_`, `ts_`, `rs_`, `go_`). Mixing languages under the same stem collides during grouping.
+- **Multiple Variants**: You can add multiple positive and negative variants to strengthen the gate (`ts_sqli_negative.ts`, `ts_sqli_negative2.ts`).
+- **Held-Out Blinding Variants (`_heldout_`)**:  
+  To verify generalization without training memorization, add blind check pairs:
+  ```text
+  ts_sqli_heldout_positive.ts
+  ts_sqli_heldout_negative.ts
+  ```
+  The bundler explicitly skips any file with `_heldout` during fact extraction, allowing your test runner to verify detection against unseen variants.
+- **Directory Layout**: Directories are free-form metadata (`<lang>/<cwe>/<family>/`). Moving a family between directories does not alter its learned facts.
 
 ## 4. The `[frensense]` metadata block
 
-The positive file may open with a comment block carrying advisory text that
-is baked into the bundle and shown to users of every surface (CLI, MCP, LSP):
+The positive file may open with a structured comment block in the first 30 lines. This text is baked directly into the `.frc` bundle and displayed across all scanner interfaces (CLI, MCP, LSP):
 
 ```typescript
 // [frensense]
-// observation: User id concatenated into the SQL string.
-// impact: An attacker can read or modify any row in the database.
-// improvement: Use the parameterized binding channel ($1) instead.
+// observation: User id concatenated into SQL query string
+// impact: Attacker can read or modify arbitrary database rows
+// improvement: Use parameterized query binding ($1)
 // cwe: CWE-89
 // cvss: 9.1
 // owasp: A03:2021
 // severity: Critical
-
-import { Pool } from "pg";
-...
 ```
 
-- Python families use `#` comments; everything else `//`.
-- All fields are optional; the block ends at the first non-comment line.
-- The negative file must **not** carry the block. Start it with
-  `// SAFE: <why this version is safe>`.
+- **Comment Prefixes**: Python uses `#`; C, TypeScript, Rust, and Go use `//`.
+- **Fields**:
+  - `observation`: Specific description of the vulnerability pattern.
+  - `impact`: Technical consequence if exploited.
+  - `improvement`: Recommended remediation guidance.
+  - `cwe`: Standard identifier (e.g. `CWE-89`, `CWE-918`).
+  - `cvss`: Float score (0.0 to 10.0).
+  - `owasp`: OWASP Top 10 category (e.g. `A03:2021`).
+  - `severity`: `Critical`, `High`, `Warning`, or `Info`.
+- **Negative Files**: Negative files must **not** carry the `[frensense]` block. Open negative files with:
+  ```typescript
+  // SAFE: <explanation of why this variant is secure>
+  ```
 
 ## 5. What each family shape teaches
 
-### 5.1 Taint families (sinks & sanitizers)
+### 5.1 Dataflow taint families (sinks & sanitizers)
 
-Default shape: no special annotation needed. If the positive does not alert
-under the current tables and contains an unknown call, the bundler proposes
-it as a **sink**; if the negative avoids a call the positive makes (or guards
-with a predicate-style call), it proposes a **sanitizer**.
+Default shape: no special annotation needed.
 
-Use this when: your framework/API has an injection-shaped call the engine
-does not know, or a function that neutralizes input.
+- **Sanitizers**: If the negative contains a function that sanitizes or validates input before the sink, the bundler extracts a sanitizer fact:
+  - *Predicate guards (`allowlist`)*: Functions returning booleans feeding branch conditions (`if (!isValid(x)) return`).
+  - *Transforms (`encode`)*: Functions that encode or transform values (`x = sanitize(x)`).
+- **Sinks**: If the positive calls an un-modeled sensitive function that does not alert under built-in tables, the bundler proposes the call as a new sink.
 
-### 5.2 Policy families (non-dataflow rules)
+#### Avoid reserved collection & utility names
 
-Use this when the bug is *not* about data flowing anywhere, it is about a
-call being **present without its enforcement** (missing authz, raw render,
-unaudited privileged action). Taint cannot see these; policy facts can.
+The bundler filters common utility and accessor calls to avoid noise. The following names are **never** proposed as sanitizers or sinks:
 
-Authoring rules:
+```text
+get, set, has, then, catch, finally, toString, valueOf, push,
+pop, map, filter, reduce, forEach, join, split, len, length,
+keys, values, entries, stringify, parse
+```
 
-1. In the positive, add `// check-call: <trigger>` in the first 30 lines
-   (Python: `# check-call:`). The trigger is the call whose *unguarded
-   presence* is the violation. The trigger must be **called** somewhere in
-   the file, a bare declaration teaches nothing.
-2. Positives call the trigger **without** enforcement; negatives call the
-   trigger **with** enforcement (a guard helper before it, or an inline
-   range check on its argument).
-3. The learned fact fires only when the guard is absent, so scanning clean
-   code stays silent.
+Always use descriptive names like `isValid()`, `isAllowed()`, or `cleanInput()`.
+
+### 5.2 Policy families (`check-call:`)
+
+Used when the flaw is not data flowing into a sink, but rather an unmitigated action executed without required authorization or checks:
+
+1. Add `// check-call: <trigger>` (or `# check-call:`) in the first 30 lines of the positive variant.
+2. In the positive variant, invoke the trigger without protection.
+3. In the negative variant, invoke the trigger guarded by a validation helper (`if (isAuthorized())`) or numeric range comparison.
 
 ```typescript
 // ts_priv_positive.ts
-// check-call: resetPassword
-function resetPassword(email: string) { return email; }
-export function handler(req: any) {
-  resetPassword(req.body.email);          // no guard → violation
+// check-call: deleteAccount
+export function handle(req: any) {
+  deleteAccount(req.body.userId); // Unguarded call -> alerts
 }
 
 // ts_priv_negative.ts
-function authorize() { return true; }
-function resetPassword(email: string) { return email; }
-export function handler(req: any) {
-  if (authorize()) {
-    resetPassword(req.body.email);        // guarded → silent
+// SAFE: guarded by permission check
+function hasAdminRole(): boolean { return true; }
+export function handle(req: any) {
+  if (hasAdminRole()) {
+    deleteAccount(req.body.userId); // Guarded -> clean
   }
 }
 ```
 
-Verified end-to-end: after bundling this pair, a target calling
-`resetPassword` unguarded reports
-`Policy violation: policy_resetPassword`; the same target calling it behind
-`authorize()` reports nothing.
+The resulting bundle learns `check:policy_deleteAccount(deleteAccount, guard=Some("hasAdminRole"))`.
 
-The generalized `Policy` facts (required calls, banned calls, module-scope
-enforcement) are produced by the same declared-trigger shape, the bundler
-mines what the negatives demonstrate and the gate validates it.
+### 5.3 Integer overflow rules (`check-rule:`)
+
+For systems languages (C/C++), integer overflow prover rules can be declared via metadata:
+
+```c
+// [frensense]
+// check-rule: integer_overflow_alloc
+// wrap-max: 18446744073709551615
+// observation: Integer multiplication in allocation size wraps on 64-bit platforms
+// severity: Critical
+```
+
+This registers an allocation size overflow check in the prover table.
 
 ## 6. Statuses: `provisional` vs `confirmed`
 
-The bundler prints each published fact with its status:
+When compiling a bundle, the bundler outputs a status for each learned fact:
 
-- `provisional`, one family voted for the fact (support = 1)
-- `confirmed`, two or more independent families voted (support ≥ 2)
+- `provisional`: Supported by 1 corpus family (support = 1). Fully active and installed.
+- `confirmed`: Independently supported by 2 or more distinct corpus families (support >= 2).
 
-Both kinds are installed by the engine. To upgrade a fact to `confirmed`,
-author a second family for the same call/behavior (different code, same
-lesson), the votes accumulate.
+To upgrade a fact to `confirmed`, author a second independent family demonstrating the same defense pattern in a different context.
 
-## 7. Verification workflow (do this before publishing a bundle)
+## 7. Verification workflow
 
 ```bash
-# 1. Build and read the bundler's report: every fact must be one you intended.
-frensense-bundler mycorpus my.frc
+# 1. Compile bundle and review published facts
+frensense bundle mycorpus my.frc
 
-# 2. Build a small "target" directory mixing vulnerable and fixed snippets
-#    and scan it with the bundle. Unguarded positives must alert; guarded
-#    negatives must stay silent.
-frensense targets/ --corpus-bundle my.frc --json
+# 2. Run with debug trace if a fact failed to appear
+FXDBG=1 frensense bundle mycorpus my.frc
 
-# 3. Scan a real clean project with the bundle, zero findings on untouched
-#    code is the FP gate. If a fact fires on clean code, your negatives
-#    under-specified the enforcement: tighten the family and rebuild.
+# 3. Verify on target test files
+frensense test_targets/ --corpus-bundle my.frc --json
+
+# 4. Verify against clean code to ensure zero false positives
+frensense clean_codebase/ --corpus-bundle my.frc
 ```
 
-Set `FXDBG=1` when running the bundler to see every candidate and where the
-gate accepted or rejected it, useful when a fact you expected does not
-appear (its family failed to separate).
+## 8. Common pitfalls
 
-## 8. Common mistakes
+| Symptom | Cause | Remedy |
+|---|---|---|
+| Expected fact missing | Family did not separate: positive stayed silent or negative still alerted. | Run with `FXDBG=1` to inspect baseline alert flags. |
+| Sanitizer not proposed | Name matches the built-in noise list (`has`, `get`, `map`). | Rename helper to a domain-specific guard (e.g. `isValidDomain`). |
+| Exception treated as guard | Guard name ends with `Error` or `Exception`. | Guard names ending in `Error` are filtered out; name the function `validate()` or `check()`. |
+| Cross-family regression | Proposed fact suppresses an existing positive or causes another negative to alert. | Ensure the negative variant does not use overly broad sanitizers. |
 
-| Symptom | Cause |
-|---|---|
-| Fact you expected is missing | The family never separated: check the positive actually alerts (it may need taint from a param named `req`/`request`/...), or the negative still alerts. |
-| `check-call` ignored | It must be in the first 30 lines, `//`/`#` prefix matching the language, and the trigger must be *called*, not just declared. |
-| Policy fires on clean code | The negative's guard helper was named with a synthetic lowering name, or the guard is genuinely absent in the "clean" code. Re-check the negative. |
-| Bundle silently ignored | Wrong `--corpus-bundle` path, or a bundle from an older engine (version mismatch), the bundler round-trip check catches format errors at build time. |
-| Two languages merged into one family | Same stem used across languages; rename with language prefixes. |
-| A `<fn@...>`-looking rule name appears | The bundler never publishes these (filtered), but if you see one, file a bug, it means a synthetic lowering name leaked into a fact. |
+## 9. Authoring checklist
 
-## 9. Distributing bundles
-
-- The engine accepts `--corpus-bundle <file>`, auto-discovers
-  `frensense-corpus.frc` in the scanned root, and (for MCP/LSP) reads
-  `FRENSENSE_CORPUS_BUNDLE`.
-- Bundles are small (typically kilobytes), checksummed, and merge cleanly, 
-  a project may use your framework bundle plus its own deployment bundle
-  simultaneously; facts from both are installed, later merges never lose
-  earlier ones, and dedup is by rule id.
-- `FRENSENSE_SEED_FACTS` / `corpus/facts/seed_facts.json` add deployment
-  hints (e.g. trusted session-store roots) that are merged before bundle
-  facts.
-
-## 10. Authoring checklist
-
-- [ ] Family named `<id>_positive.<ext>` / `<id>_negative.<ext>`, language-prefixed stem
-- [ ] Negative differs from positive **only** in the fix (same imports, same structure)
-- [ ] `[frensense]` block on the positive with observation / impact / improvement / cwe / severity
-- [ ] `check-call:` only for policy families, and the trigger is called in both variants
-- [ ] Bundler output reviewed, every published fact intended, statuses noted
-- [ ] Unguarded target alerts, guarded target silent, clean project silent
-- [ ] Second family authored for facts you want `confirmed`
+- [ ] Language-prefixed filename stem (`ts_`, `py_`, `c_`).
+- [ ] Positive file contains complete `[frensense]` block with observation, impact, and improvement.
+- [ ] Negative file contains `// SAFE:` comment.
+- [ ] Negative differs from positive strictly in the remediation logic.
+- [ ] Guard and sanitizer functions avoid reserved accessor names.
+- [ ] `frensense bundle` succeeds with `round-trip OK`.
+- [ ] Positive alerts, negative stays silent, clean code produces zero findings.

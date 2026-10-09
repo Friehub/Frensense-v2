@@ -97,12 +97,11 @@ pub fn propose_with_trace(
                 .as_deref()
                 .unwrap_or("critical")
                 .to_ascii_lowercase(),
-            message: family.metadata.observation.clone().unwrap_or_else(|| {
-                format!(
-                    "Integer overflow in allocation size (learned from family {})",
-                    family.id
-                )
-            }),
+            message: family
+                .metadata
+                .observation
+                .clone()
+                .unwrap_or_else(|| "Integer overflow in allocation size".to_string()),
         });
     }
 
@@ -234,10 +233,11 @@ pub fn propose_with_trace(
             continue;
         }
         let rule = format!("policy_{call}");
-        let message = format!(
-            "Corpus-verified policy violation: `{call}` (learned from family {})",
-            family.id
-        );
+        let message = family
+            .metadata
+            .observation
+            .clone()
+            .unwrap_or_else(|| format!("Policy violation: `{call}`"));
         // Enforcement modalities the negatives demonstrate. A negative can
         // enforce via a named helper, an inline literal range check, or
         // both; the fact records every modality observed and the engine
@@ -357,10 +357,7 @@ pub fn propose_with_trace(
                     rule: format!("policy_{trigger}"),
                     call: trigger.clone(),
                     message: family.metadata.observation.clone().unwrap_or_else(|| {
-                        format!(
-                            "Corpus-verified policy violation: `{trigger}` requires `{guard}` guard (learned from family {})",
-                            family.id
-                        )
+                        format!("Policy violation: `{trigger}` requires `{guard}` guard")
                     }),
                     require: vec![PolicyRequirement::GuardCall {
                         call: (*guard).clone(),
@@ -388,10 +385,11 @@ pub fn propose_with_trace(
                 candidates.push(Candidate::Policy {
                     rule: format!("policy_{trigger}_no_{banned_call}"),
                     call: trigger.clone(),
-                    message: format!(
-                        "Corpus-verified policy violation: `{trigger}` must not co-occur with `{banned_call}` (learned from family {})",
-                        family.id
-                    ),
+                    message: family.metadata.observation.clone().unwrap_or_else(|| {
+                        format!(
+                            "Policy violation: `{trigger}` must not co-occur with `{banned_call}`"
+                        )
+                    }),
                     require: vec![PolicyRequirement::NotCall {
                         call: banned_call.clone(),
                     }],
@@ -411,10 +409,9 @@ pub fn propose_with_trace(
                     candidates.push(Candidate::Policy {
                         rule: format!("policy_{trigger}_with_{helper}"),
                         call: trigger.clone(),
-                        message: format!(
-                            "Corpus-verified policy violation: `{trigger}` requires `{helper}` enforcement (learned from family {})",
-                            family.id
-                        ),
+                        message: family.metadata.observation.clone().unwrap_or_else(|| {
+                            format!("Policy violation: `{trigger}` requires `{helper}` enforcement")
+                        }),
                         require: vec![PolicyRequirement::RequireCall {
                             any_of: vec![helper.clone()],
                         }],
@@ -459,10 +456,11 @@ pub fn propose_with_trace(
                 candidates.push(Candidate::Policy {
                     rule: format!("policy_{call}_banned_arg_{slot}_{pos_val}"),
                     call: call.clone(),
-                    message: format!(
-                        "Corpus-verified policy violation: argument {} of `{call}` must not be '{pos_val}' (learned from family {})",
-                        slot, family.id
-                    ),
+                    message: family.metadata.observation.clone().unwrap_or_else(|| {
+                        format!(
+                            "Policy violation: argument {slot} of `{call}` must not be '{pos_val}'"
+                        )
+                    }),
                     require: vec![PolicyRequirement::BannedArgLiteral {
                         slot: *slot,
                         values: vec![pos_val.clone()],
@@ -475,10 +473,9 @@ pub fn propose_with_trace(
                             candidates.push(Candidate::Policy {
                                 rule: format!("policy_{call}_required_arg_{slot}_{neg_val}"),
                                 call: call.clone(),
-                                message: format!(
-                                    "Corpus-verified policy violation: argument {} of `{call}` requires '{neg_val}' (learned from family {})",
-                                    slot, family.id
-                                ),
+                                message: family.metadata.observation.clone().unwrap_or_else(|| {
+                                    format!("Policy violation: argument {slot} of `{call}` requires '{neg_val}'")
+                                }),
                                 require: vec![PolicyRequirement::RequiredArgLiteral {
                                     slot: *slot,
                                     values: vec![neg_val.clone()],
@@ -500,12 +497,11 @@ pub fn propose_with_trace(
                             .as_deref()
                             .unwrap_or("warning")
                             .to_ascii_lowercase(),
-                        message: family.metadata.observation.clone().unwrap_or_else(|| {
-                            format!(
-                                "Weak cryptography call `{call}` (learned from family {})",
-                                family.id
-                            )
-                        }),
+                        message: family
+                            .metadata
+                            .observation
+                            .clone()
+                            .unwrap_or_else(|| format!("Weak cryptography call `{call}`")),
                     },
                 });
             }
@@ -536,12 +532,11 @@ pub fn propose_with_trace(
                             .as_deref()
                             .unwrap_or("warning")
                             .to_ascii_lowercase(),
-                        message: family.metadata.observation.clone().unwrap_or_else(|| {
-                            format!(
-                                "Weak cryptography call `{call}` (learned from family {})",
-                                family.id
-                            )
-                        }),
+                        message: family
+                            .metadata
+                            .observation
+                            .clone()
+                            .unwrap_or_else(|| format!("Weak cryptography call `{call}`")),
                     },
                 });
             }

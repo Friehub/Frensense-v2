@@ -214,7 +214,7 @@ export function a(c: any, db: any) {
         let src = r#"
 export function outer(c: any, db: any) {
   function inner(x: any) {
-    return db.prepare("SELECT " + escapeHtml(x)).all()
+    return db.prepare("SELECT " + sqlEscape(x)).all()
   }
   return inner(c.req.query("q"))
 }

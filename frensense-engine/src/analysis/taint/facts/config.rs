@@ -272,21 +272,18 @@ fn install_language_group(
                 config.sources.insert(pattern.clone());
             }
             LearnedFactEntry::LanguageSanitizer {
-                call, guard_style, ..
+                call,
+                kind,
+                guard_style,
+                ..
             } => {
                 config.sanitizers.insert(call.clone());
-                let kind = if *guard_style {
-                    ALLOWLIST_SANITIZER_KIND
-                } else {
-                    DEFAULT_SANITIZER_KIND
-                }
-                .to_string();
                 facts
                     .sanitizer_facts
                     .entry(call.clone())
                     .or_insert_with(|| SanitizerFact {
                         call: call.clone(),
-                        kind,
+                        kind: kind.clone(),
                         sanitizes_args: Default::default(),
                         guard_style: *guard_style,
                     });

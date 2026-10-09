@@ -95,7 +95,9 @@ impl<'a> ProgramSvfg<'a> {
                 if b.callees.is_empty()
                     && let Some(r) = b.ret_node
                 {
-                    if let Some(propagating_slots) = facts.propagator_input_args(&b.callee_name) {
+                    if let Some(propagating_slots) = facts.propagator_input_args(&b.callee_name)
+                        && !propagating_slots.is_empty()
+                    {
                         for (a, slot) in &b.args {
                             if !propagating_slots.contains(slot) {
                                 suppressible.push((*a, r));

@@ -324,7 +324,19 @@ fn lower_one(
         bind_params(&mut ctx, params, source);
     }
     if let Some(body) = fn_node.child_by_field_name("body") {
-        ctx.visit_node(body);
+        let has_implicit_ret = spec.implicit_return_node(fn_node, body).is_some();
+        let ret_op = ctx.visit_node(body);
+        if has_implicit_ret
+            && let Some(ret) = ret_op
+            && ctx
+                .ir
+                .blocks
+                .get(&ctx.current_block)
+                .is_none_or(|b| matches!(b.terminator, Terminator::None))
+        {
+            ctx.ir
+                .set_terminator(ctx.current_block, Terminator::Return { src: Some(ret) });
+        }
     }
     SSABuilder::new(ctx.ir).build()
 }

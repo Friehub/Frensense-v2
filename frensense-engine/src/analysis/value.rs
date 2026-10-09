@@ -156,7 +156,7 @@ fn binary_interval(op: &str, (al, ah): (i64, i64), (bl, bh): (i64, i64)) -> Valu
     let add = |x: i64, y: i64| x.saturating_add(y);
     match op {
         "+" | "concat" => Value::Range(add(al, bl), add(ah, bh)),
-        "-" => Value::Range(add(al, -bh), add(ah, -bl)),
+        "-" => Value::Range(al.saturating_sub(bh), ah.saturating_sub(bl)),
         "*" => {
             // Widen to i128 so wide ranges cannot wrap (or panic in
             // debug): the corner products are clamped back to i64,
@@ -221,9 +221,11 @@ fn transfer(state: &AbsState, instr: &Instruction) -> Option<(VarId, Value)> {
         Instruction::UnaryOp { dest, op, src } => {
             let v = operand_value(state, src);
             let out = match op.as_str() {
-                "-" => v
-                    .interval()
-                    .map_or(Value::Top, |(lo, hi)| Value::Range(-hi, -lo)),
+                "-" => v.interval().map_or(Value::Top, |(lo, hi)| {
+                    let n_hi = if hi == i64::MIN { i64::MAX } else { -hi };
+                    let n_lo = if lo == i64::MIN { i64::MAX } else { -lo };
+                    Value::Range(n_hi.min(n_lo), n_hi.max(n_lo))
+                }),
                 "!" => match v {
                     Value::BoolConst(b) => Value::BoolConst(!b),
                     _ => Value::Top,

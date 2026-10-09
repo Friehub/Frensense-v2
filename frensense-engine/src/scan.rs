@@ -47,6 +47,7 @@ pub struct PreparedProgram {
     irs: FxHashMap<String, FunctionIR>,
     fn_file: FxHashMap<String, String>,
     file_source: FxHashMap<String, String>,
+    pub file_aliases: FxHashMap<String, FxHashMap<String, String>>,
 }
 
 /// Lower every file once, remembering which file each function came from
@@ -93,10 +94,15 @@ pub fn prepare_with_facts(
             irs.insert(key, ir);
         }
     }
+
+    let ir_names: rustc_hash::FxHashSet<String> = irs.keys().cloned().collect();
+    let file_aliases = crate::graph::module::ModuleAliasResolver::build(files, &ir_names, &fn_file);
+
     Ok(PreparedProgram {
         irs,
         fn_file,
         file_source,
+        file_aliases,
     })
 }
 
@@ -136,7 +142,13 @@ pub fn scan_prepared(
     // The program graph is built first: non-dataflow checks that walk
     // interprocedural value flow (UAF free/use pairs) reuse it, and the
     // taint engine below gets the same instance.
-    let prog = ProgramSvfg::new_with_facts(statics, config, facts);
+    let prog = ProgramSvfg::new_with_module_aliases(
+        statics,
+        config,
+        facts,
+        Some(&prepared.file_aliases),
+        Some(&prepared.fn_file),
+    );
 
     // Non-dataflow policy checks run on the same lowered IR, no taint
     // needed, so weak-crypto/config bugs surface even with zero taint paths.

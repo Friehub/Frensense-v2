@@ -11,6 +11,7 @@
 
 pub mod callgraph;
 pub mod heap;
+pub mod module;
 pub mod steensgaard;
 pub mod svfg;
 

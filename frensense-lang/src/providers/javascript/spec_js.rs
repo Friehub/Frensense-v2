@@ -6,14 +6,14 @@
 
 use tree_sitter::Node;
 
-use crate::spec::{Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin};
+use crate::spec::{Export, Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin};
 
 use super::{
     ast::{
         classify_js, is_js_cast, is_js_destructuring_pattern, is_js_pair_entry, is_js_pair_pattern,
         is_js_template_literal_fragment, is_js_template_string, is_js_ternary_straight_line,
     },
-    imports::extract_js_imports,
+    imports::{extract_js_exports, extract_js_imports},
     packages::js_package_category,
     params::classify_js_param,
     spec_ts::TypeScriptSpec,
@@ -71,6 +71,14 @@ impl LanguageSpec for JavaScriptSpec {
         is_js_ternary_straight_line(kind)
     }
 
+    fn implicit_return_node<'a>(&self, fn_node: Node<'a>, body: Node<'a>) -> Option<Node<'a>> {
+        if fn_node.kind() == "arrow_function" && body.kind() != "statement_block" {
+            Some(body)
+        } else {
+            None
+        }
+    }
+
     fn wrap_region(&self, code: &str) -> String {
         format!("function _region() {{\n{}\n}}", code)
     }
@@ -81,6 +89,10 @@ impl LanguageSpec for JavaScriptSpec {
 
     fn extract_imports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Import> {
         extract_js_imports(root, source)
+    }
+
+    fn extract_exports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Export> {
+        extract_js_exports(root, source)
     }
 
     fn symbol_query(&self) -> Option<&'static str> {

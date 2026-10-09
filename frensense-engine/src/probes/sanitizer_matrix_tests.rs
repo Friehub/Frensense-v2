@@ -49,7 +49,6 @@ fn probe_sm_03_single_replace_regex_bypass() {
 }
 
 #[test]
-#[ignore = "Blind spot: Sink-agnostic global sanitizer smearing across execution sinks"]
 fn probe_sm_04_html_escape_into_command_sink() {
     let src = r#"
         export function test(req: any) {

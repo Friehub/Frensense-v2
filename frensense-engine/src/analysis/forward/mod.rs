@@ -124,6 +124,17 @@ impl<'a> ProgramSvfg<'a> {
         config: &TaintConfig,
         facts: &FactTable,
     ) -> Self {
+        Self::new_with_module_aliases(irs, config, facts, None, None)
+    }
+
+    /// Build a [`ProgramSvfg`] with explicit module aliases and function-to-file mappings.
+    pub fn new_with_module_aliases(
+        irs: &FxHashMap<String, &'a FunctionIR>,
+        config: &TaintConfig,
+        facts: &FactTable,
+        aliases: Option<&FxHashMap<String, FxHashMap<String, String>>>,
+        fn_file: Option<&FxHashMap<String, String>>,
+    ) -> Self {
         // 1. Build per-function SVFGs (deterministic name order).
         let mut names: Vec<&String> = irs.keys().collect();
         names.sort();
@@ -163,7 +174,9 @@ impl<'a> ProgramSvfg<'a> {
         for (name, ir) in irs.iter() {
             borrowed.insert(name.clone(), ir);
         }
-        let callgraph = CallGraphBuilder::new(&borrowed).build();
+        let callgraph = CallGraphBuilder::new(&borrowed)
+            .with_aliases(aliases, fn_file)
+            .build();
 
         prog.discover_bindings(&callgraph);
         prog.compute_topological_order();

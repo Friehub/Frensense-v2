@@ -201,6 +201,8 @@ pub struct BackwardTaintEngine<'a> {
 /// another sink root with a different outcome, that's the point of verdicts).
 #[derive(Default)]
 struct ExploreState {
+    sink_role: crate::analysis::taint::role::SinkRole,
+    sink_label: Option<String>,
     saw_source: bool,
     /// The first source node reached (for path reconstruction).
     source_node: Option<(usize, NodeKey)>,

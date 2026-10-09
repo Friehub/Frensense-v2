@@ -111,8 +111,9 @@ pub struct BundlePayloadV5 {
     pub policy_pack: Vec<AuthoredPolicyEntry>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LoadedBundle {
+    pub header: BundleHeader,
     pub patterns: Vec<BundlePattern>,
     /// Learned facts from §9 (empty for legacy bundles).
     pub learned_facts: Vec<LearnedFactEntry>,
@@ -165,6 +166,7 @@ pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
     }
 
     Ok(LoadedBundle {
+        header,
         patterns,
         learned_facts,
         policy_pack,

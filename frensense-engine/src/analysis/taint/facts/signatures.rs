@@ -53,7 +53,19 @@ impl FactTable {
 
     /// Signature for a sink call; `None` if the call is not a configured sink.
     pub fn sink_signature(&self, call: &str) -> Option<&SinkSignature> {
-        self.sink_signatures.get(call)
+        if let Some(sig) = self.sink_signatures.get(call) {
+            return Some(sig);
+        }
+        if call.contains("::") {
+            let parts: Vec<&str> = call.split("::").collect();
+            for i in 1..parts.len() {
+                let suffix = parts[i..].join("::");
+                if let Some(sig) = self.sink_signatures.get(&suffix) {
+                    return Some(sig);
+                }
+            }
+        }
+        None
     }
 
     /// Role for a sink call, receiver-aware.
@@ -106,7 +118,7 @@ impl FactTable {
     pub fn is_sink_call(&self, last: &str, receiver_root: Option<&str>) -> bool {
         if !self.verb_sinks.contains(last) {
             // Ordinary sink: presence in the signature table decides.
-            return self.sink_signatures.contains_key(last);
+            return self.sink_signature(last).is_some();
         }
         match receiver_root {
             Some(root) => self.client_roots.contains(root),

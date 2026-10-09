@@ -121,6 +121,76 @@ impl SinkRole {
     }
 }
 
+/// Sanitizer strength: what kind of injection does this call defeat?
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SanitizerKind {
+    /// Completely removes taint (e.g. numeric coercion: `int(user_input)`).
+    Full,
+    /// Defeats HTML/XSS injection only.
+    HtmlEscape,
+    /// Defeats URL-based attacks only.
+    UrlEncode,
+    /// Parameterised query - defeats SQL injection only.
+    SqlParameterize,
+    /// NoSQL sanitization - defeats NoSQL injection only.
+    NoSqlParameterize,
+    /// Session-store accessor trust: `store.get(token)` returns a
+    /// server-issued session object (undefined for unknown tokens), so
+    /// identity fields read off the result are not attacker-controlled.
+    /// Receiver-aware: only applies when the receiver root is a declared
+    /// session store.
+    SessionTrust,
+    /// Path canonicalization - defeats path traversal only.
+    PathNormalize,
+}
+
+impl SanitizerKind {
+    #[must_use]
+    pub fn slug(&self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::HtmlEscape => "html_escape",
+            Self::UrlEncode => "url_encode",
+            Self::SqlParameterize => "sql_parameterize",
+            Self::NoSqlParameterize => "nosql_parameterize",
+            Self::SessionTrust => "session_trust",
+            Self::PathNormalize => "path_normalize",
+        }
+    }
+
+    #[must_use]
+    pub fn from_slug(slug: &str) -> Option<Self> {
+        match slug {
+            "full" => Some(Self::Full),
+            "html_escape" => Some(Self::HtmlEscape),
+            "url_encode" => Some(Self::UrlEncode),
+            "sql_parameterize" => Some(Self::SqlParameterize),
+            "nosql_parameterize" => Some(Self::NoSqlParameterize),
+            "session_trust" => Some(Self::SessionTrust),
+            "path_normalize" => Some(Self::PathNormalize),
+            _ => None,
+        }
+    }
+
+    /// Determines whether this sanitizer defeats a sink with the specified role and optional label.
+    #[must_use]
+    pub fn defeats_role_and_label(&self, role: SinkRole, label: Option<&str>) -> bool {
+        match self {
+            Self::Full => true,
+            Self::HtmlEscape => {
+                matches!(role, SinkRole::Xss | SinkRole::Response)
+            }
+            Self::UrlEncode => {
+                matches!(role, SinkRole::Response | SinkRole::Resource)
+            }
+            Self::SqlParameterize => label == Some("sql"),
+            Self::NoSqlParameterize => label == Some("nosql"),
+            Self::SessionTrust => true,
+            Self::PathNormalize => matches!(role, SinkRole::Resource) || label == Some("traversal"),
+        }
+    }
+}
+
 /// Shape classification of a dataflow finding (mirrors the engine's
 /// `FindingClass`, which cannot be referenced from this crate).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

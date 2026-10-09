@@ -60,7 +60,7 @@ fn classify_rust(kind: &str) -> NodeRole {
         },
 
         // ── Control flow ─────────────────────────────────────────────────
-        "if_expression" | "if_let_expression" | "match_expression" => NodeRole::Branch,
+        "if_expression" | "if_let_expression" => NodeRole::Branch,
         "for_expression" | "while_expression" | "while_let_expression" | "loop_expression" => {
             NodeRole::Loop
         }
@@ -255,7 +255,10 @@ const RUST_CALL_QUERY: &str = r#"
     (function_item name: (identifier) @caller
         body: (block
             (expression_statement
-                (call_expression function: (identifier) @call))))
+                (call_expression function: [
+                    (identifier) @call
+                    (scoped_identifier) @call
+                ]))))
     (function_item name: (identifier) @caller
         body: (block
             (expression_statement
@@ -263,7 +266,21 @@ const RUST_CALL_QUERY: &str = r#"
     (function_item name: (identifier) @caller
         body: (block
             (expression_statement
-                (macro_invocation macro: (identifier) @call))))
+                (macro_invocation macro: [
+                    (identifier) @call
+                    (scoped_identifier) @call
+                ]))))
+    (function_item name: (identifier) @caller
+        body: (block
+            (let_declaration
+                value: (call_expression function: [
+                    (identifier) @call
+                    (scoped_identifier) @call
+                ]))))
+    (function_item name: (identifier) @caller
+        body: (block
+            (let_declaration
+                value: (method_call_expression method: (field_identifier) @call))))
 "#;
 
 // ── RustSpec ──────────────────────────────────────────────────────────────────
@@ -292,6 +309,22 @@ impl LanguageSpec for RustSpec {
 
     fn is_cast(&self, kind: &str) -> bool {
         kind == "type_cast_expression"
+    }
+
+    fn implicit_return_node<'a>(&self, _fn_node: Node<'a>, body: Node<'a>) -> Option<Node<'a>> {
+        if body.kind() == "block" {
+            let mut cursor = body.walk();
+            let named_children: Vec<_> = body.named_children(&mut cursor).collect();
+            if let Some(last) = named_children.last() {
+                if !matches!(
+                    last.kind(),
+                    "expression_statement" | "let_declaration" | "empty_statement"
+                ) {
+                    return Some(*last);
+                }
+            }
+        }
+        None
     }
 
     // tree-sitter-rust: `field_expression` property children are

@@ -6,7 +6,7 @@ use super::*;
 
 use std::collections::VecDeque;
 
-use crate::analysis::forward::{is_sanitizer_use_with_facts, is_source, sink_alert_with_facts};
+use crate::analysis::forward::{is_sanitizer_effective_for_role, is_source, sink_alert_with_facts};
 use crate::dbg_trace;
 use crate::debug_flags::DebugFlags;
 use crate::graph::svfg::NodeKind;
@@ -270,7 +270,11 @@ impl<'a> BackwardTaintEngine<'a> {
                         if resolved.is_none() {
                             // Check if d matches a module-level function / binding in prog
                             for f in &self.prog.functions {
-                                if f.name == *d || f.name.ends_with(&format!(":{}", d)) {
+                                if f.name == *d
+                                    || f.name
+                                        .strip_suffix(d.as_str())
+                                        .is_some_and(|p| p.ends_with(':'))
+                                {
                                     for b in f.ir.blocks.values() {
                                         for instr in &b.instructions {
                                             if let Instruction::CallVirtual {
@@ -341,7 +345,11 @@ impl<'a> BackwardTaintEngine<'a> {
                 continue;
             };
             let finding_class = alert_info.class;
-            let mut state = ExploreState::default();
+            let mut state = ExploreState {
+                sink_role: role,
+                sink_label: label.clone(),
+                ..Default::default()
+            };
             state.seen_nodes.insert((fi, arg_node));
             self.current_parents.clear();
             self.explore_from(fi, arg_node, &mut state);
@@ -503,11 +511,7 @@ impl<'a> BackwardTaintEngine<'a> {
             dbg_trace!(
                 dbg.walk,
                 "[walk] cf={cf} key={cur:?} kind={:?}",
-                self.prog.functions[cf]
-                    .svfg
-                    .node(&cur)
-                    .map(|n| format!("{:?}", n.kind))
-                    .unwrap_or_else(|| "NONE".into())
+                self.prog.functions[cf].svfg.node(&cur).map(|n| &n.kind)
             );
             let ir = self.prog.functions[cf].ir;
 
@@ -554,8 +558,15 @@ impl<'a> BackwardTaintEngine<'a> {
             }
 
             // Stop: sanitizer use, this branch is clean. Fact-table aware:
-            // includes learned methods like .replace()/.test() guards.
-            if is_sanitizer_use_with_facts(ir, self.config, &self.facts, &cur) {
+            // includes learned methods like .replace()/.test() guards, qualified by sink role.
+            if is_sanitizer_effective_for_role(
+                ir,
+                self.config,
+                &self.facts,
+                &cur,
+                state.sink_role,
+                state.sink_label.as_deref(),
+            ) {
                 state.saw_sanitized_root_only = true;
                 continue;
             }
@@ -636,11 +647,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 dbg_trace!(
                     dbg.deadend,
                     "[deadend] cf={cf} key={cur:?} kind={:?}",
-                    self.prog.functions[cf]
-                        .svfg
-                        .node(&cur)
-                        .map(|n| format!("{:?}", n.kind))
-                        .unwrap_or_else(|| "NONE".into())
+                    self.prog.functions[cf].svfg.node(&cur).map(|n| &n.kind)
                 );
                 // Dead end. Classify: unresolvable roots (formal params never
                 // fed by an analysed call site, or environment-defined values

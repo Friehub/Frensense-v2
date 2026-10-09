@@ -136,11 +136,39 @@ struct FnFacts {
 /// `ProgramSvfg` builder consumes).
 pub struct CallGraphBuilder<'a> {
     irs: &'a FxHashMap<String, &'a FunctionIR>,
+    aliases: Option<&'a FxHashMap<String, FxHashMap<String, String>>>,
+    fn_file: Option<&'a FxHashMap<String, String>>,
 }
 
 impl<'a> CallGraphBuilder<'a> {
     pub fn new(irs: &'a FxHashMap<String, &'a FunctionIR>) -> Self {
-        Self { irs }
+        Self {
+            irs,
+            aliases: None,
+            fn_file: None,
+        }
+    }
+
+    pub fn with_aliases(
+        mut self,
+        aliases: Option<&'a FxHashMap<String, FxHashMap<String, String>>>,
+        fn_file: Option<&'a FxHashMap<String, String>>,
+    ) -> Self {
+        self.aliases = aliases;
+        self.fn_file = fn_file;
+        self
+    }
+
+    fn resolve_call_alias<'b>(&'b self, fname: &str, symbol: &'b str) -> &'b str {
+        if let Some(fn_file) = self.fn_file
+            && let Some(aliases) = self.aliases
+            && let Some(file) = fn_file.get(fname)
+            && let Some(file_map) = aliases.get(file)
+            && let Some(target) = file_map.get(symbol)
+        {
+            return target.as_str();
+        }
+        symbol
     }
 
     pub fn build(&self) -> CallGraph {
@@ -152,6 +180,13 @@ impl<'a> CallGraphBuilder<'a> {
         let mut facts: FxHashMap<&str, FnFacts> = FxHashMap::default();
         for (fname, ir) in self.irs {
             let mut f = FnFacts::default();
+            for (&v, meta) in &ir.var_metadata {
+                if let Some(name) = &meta.source_name
+                    && fn_set.contains(name.as_str())
+                {
+                    f.fn_refs.insert(v, name.clone());
+                }
+            }
             for block in ir.blocks.values() {
                 for instr in &block.instructions {
                     match instr {
@@ -224,16 +259,18 @@ impl<'a> CallGraphBuilder<'a> {
 
                     match instr {
                         Instruction::CallStatic { func, .. } => {
-                            if self.irs.contains_key(func) {
-                                targets.push(CallTarget::Function(func.clone()));
+                            let resolved_func = self.resolve_call_alias(fname, func);
+                            if self.irs.contains_key(resolved_func) {
+                                targets.push(CallTarget::Function(resolved_func.to_string()));
                             } else {
-                                external_name = Some(func.clone());
+                                external_name = Some(resolved_func.to_string());
                             }
                         }
 
                         Instruction::CallVirtual {
                             method, receiver, ..
                         } => {
+                            let resolved_method = self.resolve_call_alias(fname, method);
                             // Receiver → class:
                             let class: Option<String> = match receiver {
                                 Operand::Var(r) => f.classes.get(r).cloned().or_else(|| {
@@ -248,19 +285,21 @@ impl<'a> CallGraphBuilder<'a> {
 
                             match class {
                                 Some(c) => {
-                                    let key = method_key(&c, method);
+                                    let key = method_key(&c, resolved_method);
                                     if self.irs.contains_key(&key) {
                                         targets.push(CallTarget::Method {
                                             class: c,
-                                            method: method.clone(),
+                                            method: resolved_method.to_string(),
                                         });
-                                    } else if self.irs.contains_key(method) {
+                                    } else if self.irs.contains_key(resolved_method) {
                                         // Unqualified registration fallback. The
                                         // push makes the site internal, so no
                                         // external name can be observed here.
-                                        targets.push(CallTarget::Function(method.clone()));
+                                        targets.push(CallTarget::Function(
+                                            resolved_method.to_string(),
+                                        ));
                                     } else {
-                                        external_name = Some(method.clone());
+                                        external_name = Some(resolved_method.to_string());
                                     }
                                 }
                                 None => {
@@ -268,10 +307,12 @@ impl<'a> CallGraphBuilder<'a> {
                                     // unresolved import). External, but if a
                                     // program function shares the bare name,
                                     // keep it as a candidate too (sound).
-                                    if self.irs.contains_key(method) {
-                                        targets.push(CallTarget::Function(method.clone()));
+                                    if self.irs.contains_key(resolved_method) {
+                                        targets.push(CallTarget::Function(
+                                            resolved_method.to_string(),
+                                        ));
                                     }
-                                    external_name = Some(method.clone());
+                                    external_name = Some(resolved_method.to_string());
                                 }
                             }
                         }
@@ -280,7 +321,12 @@ impl<'a> CallGraphBuilder<'a> {
                             match func_ptr {
                                 Operand::Var(v) => {
                                     match self.follow_alias_to_fn(*v, f) {
-                                        Some(fun) => targets.push(CallTarget::Function(fun)),
+                                        Some(fun) => {
+                                            let resolved_fun = self.resolve_call_alias(fname, &fun);
+                                            targets.push(CallTarget::Function(
+                                                resolved_fun.to_string(),
+                                            ));
+                                        }
                                         None => {
                                             // Formal parameter called as a
                                             // function pointer: resolved by
@@ -302,10 +348,12 @@ impl<'a> CallGraphBuilder<'a> {
                                     }
                                 }
                                 Operand::StringLiteral(name) => {
-                                    if self.irs.contains_key(name) {
-                                        targets.push(CallTarget::Function(name.clone()));
+                                    let resolved_name = self.resolve_call_alias(fname, name);
+                                    if self.irs.contains_key(resolved_name) {
+                                        targets
+                                            .push(CallTarget::Function(resolved_name.to_string()));
                                     } else {
-                                        external_name = Some(name.clone());
+                                        external_name = Some(resolved_name.to_string());
                                     }
                                 }
                                 _ => {
@@ -424,15 +472,36 @@ impl<'a> CallGraphBuilder<'a> {
                             }
                             _ => None, // CallPointer target resolution above
                         };
-                        let Some(callee_key) = callee_key else {
-                            continue;
+                        let is_higher_order_method = match instr {
+                            Instruction::CallVirtual { method, .. } => {
+                                matches!(
+                                    method.as_str(),
+                                    "map"
+                                        | "and_then"
+                                        | "then"
+                                        | "flatMap"
+                                        | "flat_map"
+                                        | "forEach"
+                                        | "for_each"
+                                        | "filter"
+                                )
+                            }
+                            _ => false,
                         };
-                        let formal_slot = pos + slot_offset;
-                        if called_params.contains(&(callee_key.clone(), formal_slot)) {
+
+                        if is_higher_order_method {
                             extra_targets
                                 .entry(((*fname).clone(), (block.id.0, idx)))
                                 .or_default()
-                                .push(CallTarget::Function(target_fn));
+                                .push(CallTarget::Function(target_fn.clone()));
+                        } else if let Some(callee_key) = callee_key {
+                            let formal_slot = pos + slot_offset;
+                            if called_params.contains(&(callee_key, formal_slot)) {
+                                extra_targets
+                                    .entry(((*fname).clone(), (block.id.0, idx)))
+                                    .or_default()
+                                    .push(CallTarget::Function(target_fn));
+                            }
                         }
                     }
                 }
@@ -442,6 +511,7 @@ impl<'a> CallGraphBuilder<'a> {
         for (site, mut tgts) in extra_targets {
             tgts.sort();
             tgts.dedup();
+            graph.unresolved.remove(&site);
             let entry = graph.sites.entry(site).or_default();
             for t in tgts {
                 if !entry.contains(&t) {

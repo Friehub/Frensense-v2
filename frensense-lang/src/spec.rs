@@ -209,6 +209,18 @@ pub struct Import {
     pub symbol: Option<String>,
 }
 
+/// A parsed export or re-export as extracted by [`LanguageSpec::extract_exports`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Export {
+    /// The exported symbol name (the name visible to importers).
+    pub exported_name: String,
+    /// The local / source symbol name being exported.
+    pub local_name: String,
+    /// If this is a re-export from another module (e.g. `export { x as y } from "./foo"`),
+    /// the source module package / path. None for local exports.
+    pub from_module: Option<String>,
+}
+
 // ── The trait ─────────────────────────────────────────────────────────────────
 
 /// Everything the frensense engine needs to know about one source language.
@@ -334,6 +346,12 @@ pub trait LanguageSpec: Send + Sync + 'static {
         false
     }
 
+    /// If the function body has an implicit return expression (e.g. Rust trailing expression
+    /// or JS arrow function expression), return the node producing that return value.
+    fn implicit_return_node<'a>(&self, _fn_node: Node<'a>, _body: Node<'a>) -> Option<Node<'a>> {
+        None
+    }
+
     /// Unwraps declarator wrapper nodes (e.g. `pointer_declarator`, `expression_list`, etc.)
     /// to locate the leaf name binding node.
     fn unwrap_declarator_node<'a>(&self, node: Node<'a>) -> Node<'a> {
@@ -404,6 +422,11 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// The engine calls this once per file; the result is stored in the
     /// `ImportMap` and used by the semantic provider.
     fn extract_imports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Import>;
+
+    /// Walk `root` and return all exports and re-exports found in the file.
+    fn extract_exports<'tree>(&self, _root: Node<'tree>, _source: &str) -> Vec<Export> {
+        Vec::new()
+    }
 
     // ── Tree-sitter queries ───────────────────────────────────────────────
 

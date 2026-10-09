@@ -35,6 +35,11 @@ pub(super) static RUST_SINK_SIGNATURES: &[(&str, &[usize], bool)] = &[
     ("fetch_all", &[0], true),
     // ── diesel / generic prepare ──
     ("prepare", &[0], true),
+    // ── std::process::Command / tokio::process::Command ──
+    ("Command::new", &[0], false),
+    ("std::process::Command::new", &[0], false),
+    ("tokio::process::Command::new", &[0], false),
+    ("process::Command::new", &[0], false),
 ];
 
 pub(super) static RUST_PROPAGATORS: &[PropagatorRule] = &[
@@ -213,6 +218,23 @@ pub(super) static RUST_PROPAGATORS: &[PropagatorRule] = &[
         tainted_arg: None,
         tainted_receiver: true,
     },
+    // Monadic combinator
+    PropagatorRule {
+        call: "and_then",
+        tainted_arg: None,
+        tainted_receiver: true,
+    },
+    // Result / Option constructors: argument taints return
+    PropagatorRule {
+        call: "Ok",
+        tainted_arg: None,
+        tainted_receiver: false,
+    },
+    PropagatorRule {
+        call: "Some",
+        tainted_arg: None,
+        tainted_receiver: false,
+    },
 ];
 
 pub(super) static RUST_REQUEST_PARAM_NAMES: &[&str] =
@@ -234,6 +256,19 @@ pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("prepare", crate::role_map::SinkLabel::SqlInjection),
     // Command Injection
     ("Command", crate::role_map::SinkLabel::CommandInjection),
+    ("Command::new", crate::role_map::SinkLabel::CommandInjection),
+    (
+        "std::process::Command::new",
+        crate::role_map::SinkLabel::CommandInjection,
+    ),
+    (
+        "tokio::process::Command::new",
+        crate::role_map::SinkLabel::CommandInjection,
+    ),
+    (
+        "process::Command::new",
+        crate::role_map::SinkLabel::CommandInjection,
+    ),
     ("arg", crate::role_map::SinkLabel::CommandInjection),
     ("args", crate::role_map::SinkLabel::CommandInjection),
     ("status", crate::role_map::SinkLabel::CommandInjection),

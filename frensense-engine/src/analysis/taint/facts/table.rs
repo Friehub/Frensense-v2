@@ -785,6 +785,7 @@ pub enum LearnedFactEntry {
     LanguageSanitizer {
         language: String,
         call: String,
+        kind: String,
         guard_style: bool,
     },
     /// A taint propagator rule for one language (the generator's

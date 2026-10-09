@@ -11,6 +11,9 @@ use super::LanguageVocab;
 use crate::role_map::{PropagatorRule, SanitizerKind};
 
 fn python_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
+    if call == "shlex.quote" {
+        return Some(SanitizerKind::Full);
+    }
     match call_last_segment(call) {
         // Numeric coercion
         "int" | "float" | "bool" | "abs" | "round" => Some(SanitizerKind::Full),

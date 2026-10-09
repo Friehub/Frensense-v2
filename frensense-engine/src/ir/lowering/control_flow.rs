@@ -617,6 +617,185 @@ impl<'a> LoweringContext<'a> {
         }
         None
     }
+
+    pub fn visit_match(&mut self, node: Node) -> Option<Operand> {
+        let mut cursor = node.walk();
+        let children: Vec<Node> = node
+            .children(&mut cursor)
+            .filter(|c| c.is_named())
+            .collect();
+
+        let value_node = node
+            .child_by_field_name("value")
+            .or_else(|| node.child_by_field_name("subject"))
+            .or_else(|| {
+                children
+                    .iter()
+                    .copied()
+                    .find(|c| !c.kind().contains("block") && !c.kind().contains("body"))
+            });
+
+        let scrutinee_op = value_node
+            .and_then(|v| self.visit_node(v))
+            .unwrap_or(Operand::Unknown);
+
+        let body_node = node.child_by_field_name("body").or_else(|| {
+            children
+                .iter()
+                .copied()
+                .find(|c| c.kind().contains("block") || c.kind().contains("body"))
+        });
+
+        let mut arms = Vec::new();
+        if let Some(body) = body_node {
+            let mut bc = body.walk();
+            for arm in body.children(&mut bc) {
+                if !arm.is_named() {
+                    continue;
+                }
+                let kind = arm.kind();
+                if kind.contains("arm") || kind.contains("case") {
+                    arms.push(arm);
+                }
+            }
+        }
+        if arms.is_empty() {
+            return self.visit_children_generic(node);
+        }
+
+        let dispatch_block = self.current_block;
+        let merge_block = self.ir.new_block();
+        let dest = self.ir.new_var(VarMetadata {
+            source_name: None,
+            type_name: None,
+            byte_range: Some((node.start_byte(), node.end_byte())),
+            is_memory_state: false,
+            object_keys: Vec::new(),
+            declared: false,
+        });
+
+        let arm_blocks: Vec<BlockId> = arms.iter().map(|_| self.ir.new_block()).collect();
+
+        let mut cur_dispatch = dispatch_block;
+        for (i, &arm_blk) in arm_blocks.iter().enumerate() {
+            let next_dispatch = if i + 1 < arm_blocks.len() {
+                self.ir.new_block()
+            } else {
+                merge_block
+            };
+
+            let arm_cond = self.new_temp(arms[i]);
+            self.ir.set_terminator(
+                cur_dispatch,
+                Terminator::Branch {
+                    cond: Operand::Var(arm_cond),
+                    true_block: arm_blk,
+                    false_block: next_dispatch,
+                },
+            );
+            self.ir.add_edge(cur_dispatch, arm_blk);
+            self.ir.add_edge(cur_dispatch, next_dispatch);
+            cur_dispatch = next_dispatch;
+        }
+
+        for (i, arm) in arms.iter().enumerate() {
+            self.current_block = arm_blocks[i];
+            self.env.push(FxHashMap::default());
+
+            let pat_node = arm.child_by_field_name("pattern").or_else(|| {
+                let mut ac = arm.walk();
+                arm.children(&mut ac)
+                    .find(|c| c.is_named() && c.kind().contains("pattern"))
+            });
+
+            if let Some(pat) = pat_node {
+                self.bind_match_pattern(pat, &scrutinee_op);
+            }
+
+            let arm_body = arm
+                .child_by_field_name("value")
+                .or_else(|| arm.child_by_field_name("body"))
+                .or_else(|| {
+                    let mut ac = arm.walk();
+                    let kids: Vec<_> = arm.children(&mut ac).filter(|c| c.is_named()).collect();
+                    kids.last().copied()
+                });
+
+            if let Some(body) = arm_body
+                && let Some(res_op) = self.visit_node(body)
+            {
+                self.ir.push_instruction(
+                    self.current_block,
+                    Instruction::Assign { dest, src: res_op },
+                );
+            }
+
+            if self
+                .ir
+                .blocks
+                .get(&self.current_block)
+                .is_none_or(|b| matches!(b.terminator, Terminator::None))
+            {
+                self.ir
+                    .set_terminator(self.current_block, Terminator::Jump(merge_block));
+                self.ir.add_edge(self.current_block, merge_block);
+            }
+
+            self.env.pop();
+        }
+
+        self.current_block = merge_block;
+        Some(Operand::Var(dest))
+    }
+
+    fn bind_match_pattern(&mut self, pat: Node, scrutinee_op: &Operand) {
+        let kind = pat.kind();
+        match kind {
+            "identifier" | "identifier_pattern" => {
+                let name = self.source[pat.start_byte()..pat.end_byte()]
+                    .trim()
+                    .to_string();
+                if !name.is_empty()
+                    && name != "_"
+                    && !name.chars().next().is_some_and(|c| c.is_uppercase())
+                {
+                    let var = self.ir.new_var(VarMetadata {
+                        source_name: Some(name.clone()),
+                        type_name: None,
+                        byte_range: Some((pat.start_byte(), pat.end_byte())),
+                        is_memory_state: false,
+                        object_keys: Vec::new(),
+                        declared: true,
+                    });
+                    self.env.last_mut().unwrap().insert(name, var);
+                    self.ir.push_instruction(
+                        self.current_block,
+                        Instruction::Assign {
+                            dest: var,
+                            src: scrutinee_op.clone(),
+                        },
+                    );
+                }
+            }
+            "tuple_struct_pattern" | "struct_pattern" => {
+                let type_node = pat.child_by_field_name("type");
+                let mut c = pat.walk();
+                for child in pat.children(&mut c) {
+                    if child.is_named() && Some(child) != type_node {
+                        self.bind_match_pattern(child, scrutinee_op);
+                    }
+                }
+            }
+            _ => {
+                let mut c = pat.walk();
+                for child in pat.children(&mut c) {
+                    if child.is_named() {
+                        self.bind_match_pattern(child, scrutinee_op);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// True for `break label;` / `continue label;` - the optional label is a

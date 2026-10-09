@@ -38,12 +38,11 @@ npx @friehub/frensense .
 # Scan a project
 frensense .
 
-# Teach the engine with a .frc knowledge bundle
-frensense . --corpus-bundle frensense-corpus.frc
+# Scan with a security rules bundle (.frc)
+frensense . -b ruleset.frc
 
-# JSON / SARIF output
-frensense . --json
-frensense . --sarif
+# Save report to file (text, json, sarif, or github)
+frensense . -o report.sarif --sarif
 
 # Diff-only (changed files since last commit)
 frensense . --diff-only --strict
@@ -62,7 +61,31 @@ frensense . --github
 ```
 
 The engine auto-discovers a `frensense-corpus.frc` in the project root, or you
-can point `--corpus-bundle` at any bundle file.
+can pass `-b, --bundle <path>` to use any rule bundle.
+
+## Security Rule Bundles (`.frc`) & Capability Datasheets
+
+Frensense uses compiled `.frc` rule bundles to expand analysis capabilities with framework-specific sources, sinks, sanitizers, and zero-day CVE reproductions.
+
+### Acquiring Rule Bundles
+Download pre-compiled rule bundles and their cryptographic verification datasheets at:  
+👉 **[https://frensense.friehub.cloud/bundles](https://frensense.friehub.cloud/bundles)**
+
+- **Free Community Starter Bundles**:
+  - Covers fundamental OWASP Top 10 vulnerabilities across TypeScript, JavaScript, Python, and C.
+  - Pre-packaged in release distributions and community downloads.
+- **Commercial & Enterprise Domain Bundles (Subscription / Paywall)**:
+  - Deep web framework modeling (Express, Next.js, Django, FastAPI, Spring).
+  - Advanced systems security & memory safety (C/C++ interprocedural ownership contracts, UAF, uninitialized pointer leaks).
+  - Specialized industry compliance (Fintech, Cloud Infrastructure, Healthcare).
+  - Rigorous Zero False-Positive guarantee (100% TPR / 0.0% FPR) verified against held-out blind test suites.
+
+### Auditable Capability Datasheets
+Every rule bundle ships with a signed **CWE Capability Datasheet** (`CWE_DATASHEET.md` and `cwe_datasheet.json`) detailing:
+- Exact CWE classifications and vulnerability descriptions.
+- Real-world ground-truth CVE reproductions.
+- Benchmark verification status (100.0% TPR, 0.00% FPR).
+- Execution latency and peak RSS memory requirements.
 
 ### One binary, every surface
 

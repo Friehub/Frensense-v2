@@ -178,6 +178,79 @@ pub(crate) fn is_sanitizer_use(ir: &FunctionIR, config: &TaintConfig, key: &Node
     }
 }
 
+use crate::analysis::taint::role::SinkRole;
+use frensense_lang::severity::SanitizerKind;
+
+/// Fact-table-aware sanitizer check qualified by the sink's role and label.
+/// Returns true if this node is inside a sanitizer that actually defeats the candidate sink.
+pub(crate) fn is_sanitizer_effective_for_role(
+    ir: &FunctionIR,
+    config: &TaintConfig,
+    facts: &FactTable,
+    key: &NodeKey,
+    role: SinkRole,
+    label: Option<&str>,
+) -> bool {
+    let NodeKey {
+        block,
+        instr_idx: Some(idx),
+        ..
+    } = *key
+    else {
+        return false;
+    };
+    let Some(b) = ir.blocks.get(&block) else {
+        return false;
+    };
+    if idx >= b.instructions.len() {
+        return false;
+    }
+    match &b.instructions[idx] {
+        Instruction::CallStatic { func, .. } => {
+            if let Some(fact) = facts.sanitizer_fact(func) {
+                if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
+                    return kind.defeats_role_and_label(role, label);
+                }
+                return true;
+            }
+            if config.sanitizers.contains(func) {
+                return true;
+            }
+            false
+        }
+        Instruction::CallVirtual {
+            method, receiver, ..
+        } => {
+            if let Operand::Var(r) = receiver {
+                let path = FactTable::receiver_access_path(ir, *r);
+                if let Some(ref p) = path {
+                    let full = format!("{p}.{method}");
+                    if let Some(fact) = facts.sanitizer_fact(&full) {
+                        if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
+                            return kind.defeats_role_and_label(role, label);
+                        }
+                        return true;
+                    }
+                }
+                if facts.is_session_path(method, path.as_deref()) {
+                    return true;
+                }
+            }
+            if let Some(fact) = facts.sanitizer_fact(method) {
+                if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
+                    return kind.defeats_role_and_label(role, label);
+                }
+                return true;
+            }
+            if config.sanitizers.contains(method) {
+                return true;
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
 /// Fact-table-aware sanitizer check: configured sanitizers PLUS any call with
 /// a [`SanitizerFact`] in the table (e.g. `.replace()`, `.test()` guard
 /// methods learned from `frensense-lang` tables or a bundle).
@@ -209,16 +282,20 @@ pub(crate) fn is_sanitizer_use_with_facts(
         Instruction::CallVirtual {
             method, receiver, ..
         } => {
-            if facts.sanitizer_fact(method).is_some() {
-                return true;
-            }
-            // Session-store accessor trust: `store.get(token)` returns a
-            // server-issued session object (undefined for unknown tokens),
-            // so values derived from its result are not attacker-controlled.
-            // Receiver-aware: only declared session roots qualify.
             if let Operand::Var(r) = receiver {
                 let path = FactTable::receiver_access_path(ir, *r);
-                return facts.is_session_path(method, path.as_deref());
+                if let Some(ref p) = path {
+                    let full = format!("{p}.{method}");
+                    if facts.sanitizer_fact(&full).is_some() {
+                        return true;
+                    }
+                }
+                if facts.is_session_path(method, path.as_deref()) {
+                    return true;
+                }
+            }
+            if facts.sanitizer_fact(method).is_some() {
+                return true;
             }
             false
         }
