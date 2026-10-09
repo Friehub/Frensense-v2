@@ -107,6 +107,62 @@ async function getDownloadStats(): Promise<DownloadStats> {
 
 const downloadStats = await getDownloadStats()
 
+const SITE_ORIGIN = 'https://frensense.friehub.cloud'
+
+// YAML parses unquoted dates into Date objects (UTC midnight); the manifest
+// wants a stable YYYY-MM-DD for sorting and display by consumers.
+function normalizeDate(value: unknown): string {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    const y = value.getUTCFullYear()
+    const m = String(value.getUTCMonth() + 1).padStart(2, '0')
+    const d = String(value.getUTCDate()).padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+  if (typeof value === 'string') {
+    const iso = value.match(/^(\d{4}-\d{2}-\d{2})/)
+    if (iso) return iso[1]
+    const parsed = new Date(value)
+    if (!Number.isNaN(parsed.getTime())) return normalizeDate(parsed)
+  }
+  return '1970-01-01'
+}
+
+// Machine-readable blog manifest for friehub.com (marketing site proxies it
+// through its /api/posts Pages Function; GitHub Pages sends no CORS headers,
+// so browsers cannot fetch it cross-origin directly). Emitted to dist/posts.json.
+// Posts without a title are skipped, posts without a date sink to the bottom,
+// and the blog index page is excluded. Relative cover paths become absolute.
+async function writePostsManifest(siteConfig: { outDir: string }): Promise<void> {
+  const loader = createContentLoader('blog/*.md', { excerpt: true })
+  const raw = await loader.load()
+
+  const posts = raw
+    .filter((entry) => entry.url !== '/blog/' && entry.frontmatter?.title)
+    .map((entry) => {
+      const cover = (typeof entry.frontmatter?.image === 'string' && entry.frontmatter.image)
+        ? entry.frontmatter.image
+        : '/default-blog-cover.svg'
+      return {
+        source: 'frensense',
+        slug: entry.url.replace(/^\/blog\//, '').replace(/\/$/, ''),
+        url: new URL(entry.url, SITE_ORIGIN).href,
+        title: String(entry.frontmatter.title),
+        date: normalizeDate(entry.frontmatter.date),
+        description: typeof entry.frontmatter.description === 'string' ? entry.frontmatter.description : '',
+        image: new URL(cover, SITE_ORIGIN).href,
+      }
+    })
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+
+  const manifest = { version: 1, generatedAt: new Date().toISOString(), posts }
+  fs.mkdirSync(siteConfig.outDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(siteConfig.outDir, 'posts.json'),
+    `${JSON.stringify(manifest, null, 2)}\n`
+  )
+  console.log(`[posts] wrote ${posts.length} posts to posts.json`)
+}
+
 // frensense v2 documentation site.
 // Deployed at the domain root; the legacy v1 site is served under /v1/.
 export default defineConfig({
@@ -116,7 +172,7 @@ export default defineConfig({
     'Frensense v2, a compiler-mode static analysis engine that lowers every file to a program graph and reports exact source-to-sink taint paths.',
   ignoreDeadLinks: true, // v1 archive pages are copied in after the build, not known to VitePress.
   sitemap: {
-    hostname: 'https://frensense.friehub.cloud'
+    hostname: SITE_ORIGIN
   },
   head: [
     ['link', { rel: 'icon', type: 'image/png', href: '/favicon.png' }],
@@ -197,6 +253,8 @@ export default defineConfig({
   ],
 
   cleanUrls: true,
+
+  buildEnd: writePostsManifest,
 
   themeConfig: {
     siteTitle: 'Frensense',
