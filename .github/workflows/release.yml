@@ -35,7 +35,7 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.3.0
         with:
           fetch-depth: 0
 
@@ -108,7 +108,7 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.3.0
         with:
           ref: ${{ needs.prepare.outputs.tag_name }}
 
@@ -251,7 +251,7 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
         with:
           egress-policy: audit
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.3.0
         with:
           ref: ${{ needs.prepare.outputs.tag_name }}
       - name: Install Rust
@@ -309,7 +309,7 @@ jobs:
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.3.0
         with:
           ref: ${{ needs.prepare.outputs.tag_name }}
 
@@ -390,7 +390,7 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
         with:
           egress-policy: audit
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.3.0
         with:
           ref: ${{ needs.prepare.outputs.tag_name }}
       - name: Download all artifacts
