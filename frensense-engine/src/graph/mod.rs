@@ -8,13 +8,11 @@
 //! * [`callgraph`], dispatch resolution (aliases, methods, re-exports).
 //! * [`heap`], points-to analysis (Andersen, inclusion-based).
 //! * [`steensgaard`], unification points-to (near-linear; R4 phase 1).
-//! * [`store`], serialize/reload the graph store (feature = "serialize").
 
 pub mod callgraph;
 pub mod heap;
+pub mod module;
 pub mod steensgaard;
-#[cfg(feature = "serialize")]
-pub mod store;
 pub mod svfg;
 
 #[cfg(test)]

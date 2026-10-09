@@ -20,6 +20,8 @@
 //! Line drawn: **built-in = how to look; learned = what to conclude.**
 
 pub mod guard_bypass;
+pub mod int_overflow;
+pub mod leak;
 pub mod memory_summary;
 pub mod oob;
 pub mod policy;
@@ -29,6 +31,10 @@ pub mod weak_hash;
 
 #[cfg(test)]
 mod guard_bypass_tests;
+#[cfg(test)]
+mod int_overflow_tests;
+#[cfg(test)]
+mod leak_tests;
 #[cfg(test)]
 mod memory_summary_tests;
 #[cfg(test)]
@@ -42,9 +48,21 @@ mod uaf_tests;
 #[cfg(test)]
 mod weak_hash_tests;
 
+use crate::analysis::forward::ProgramSvfg;
 use crate::analysis::taint::facts::FactTable;
 use crate::ir::function::FunctionIR;
 use rustc_hash::FxHashSet;
+
+pub use crate::analysis::taint::facts::Provenance;
+
+/// Last segment of a call reference: everything after the last `.`, then
+/// after the last `::` (Rust/C++ paths), so `security.hash`, `sha2::digest`
+/// and `ns::mod.fn` all reduce to the bare method name the check
+/// vocabularies are keyed by.
+pub(crate) fn last_segment(call: &str) -> &str {
+    let s = call.rsplit('.').next().unwrap_or(call);
+    s.rsplit("::").next().unwrap_or(s)
+}
 
 /// One non-dataflow policy finding.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,13 +73,35 @@ pub struct CheckerFinding {
     /// Built-in rules use `&'static str` ids; learned rules carry their
     /// bundle-supplied id, interned here.
     pub rule: String,
-    /// Short human description of the violation.
+    /// Short human description of the violation. Carried verbatim when the
+    /// driving knowledge (bundle fact, authored policy) supplied prose.
+    /// Spec checks leave it empty and emit `params` instead; the consumer
+    /// then renders the observation from a `frensense-lang` template
+    /// keyed by `rule`.
     pub message: String,
+    /// Structured observation parameters `(template key, value)` for
+    /// findings whose `message` is empty. Empty when `message` is set.
+    pub params: Vec<(&'static str, String)>,
     /// Byte range of the violating call in the source file, when known.
     pub span: Option<(usize, usize)>,
-    /// `true` when this finding comes from a corpus-learned rule in the
-    /// fact table rather than a built-in seed check.
-    pub learned: bool,
+    /// Advisory severity declared by the driving fact (learned check,
+    /// authored policy, or spec rule), copied verbatim. Empty when the
+    /// driving rule declares none; consumers then resolve severity from
+    /// their own rule registry.
+    pub severity: String,
+    /// Knowledge source: spec seed, authored policy, or bundle-learned fact.
+    pub provenance: Provenance,
+}
+
+/// The single finding identity: two findings from the same function with
+/// the same rule at the same span are the same finding. This is the only
+/// dedup key - [`check_all`] is the one place findings are deduplicated.
+fn finding_key(f: &CheckerFinding) -> (String, String, usize) {
+    (
+        f.function.clone(),
+        f.rule.clone(),
+        f.span.map(|s| s.0).unwrap_or(usize::MAX),
+    )
 }
 
 /// Run every registered check over every function, deduped and ordered by
@@ -73,17 +113,24 @@ pub fn check_all<'a>(
     irs: impl IntoIterator<Item = &'a FunctionIR>,
     facts: &FactTable,
 ) -> Vec<CheckerFinding> {
+    check_all_with_graph(irs, facts, None)
+}
+
+/// [`check_all`] with the program value-flow graph: the UAF checker walks
+/// interprocedural free/use edges (callee parameter frees, caller-side
+/// frees, factory provenance) that intraprocedural IR alone cannot see.
+pub fn check_all_with_graph<'a>(
+    irs: impl IntoIterator<Item = &'a FunctionIR>,
+    facts: &FactTable,
+    prog: Option<&ProgramSvfg<'_>>,
+) -> Vec<CheckerFinding> {
     let mut seen: FxHashSet<(String, String, usize)> = FxHashSet::default();
     let mut all = Vec::new();
     let irs: Vec<&FunctionIR> = irs.into_iter().collect();
     // Program-level rules run once over the whole IR set (they correlate
     // guards in one function with definitions in another).
     for f in guard_bypass::check_allowlist_definitions(&irs, facts) {
-        let key = (
-            f.function.clone(),
-            f.rule.clone(),
-            f.span.map(|s| s.0).unwrap_or(usize::MAX),
-        );
+        let key = finding_key(&f);
         if seen.insert(key) {
             all.push(f);
         }
@@ -92,11 +139,7 @@ pub fn check_all<'a>(
     // module-scoped ones run once over the whole scanned set. Legacy
     // learned checks fire through the same evaluator after conversion.
     for f in policy::check_program(&irs, facts) {
-        let key = (
-            f.function.clone(),
-            f.rule.clone(),
-            f.span.map(|s| s.0).unwrap_or(usize::MAX),
-        );
+        let key = finding_key(&f);
         if seen.insert(key) {
             all.push(f);
         }
@@ -109,15 +152,18 @@ pub fn check_all<'a>(
             .chain(guard_bypass::check(ir, facts))
             .chain(guard_bypass::check_credentials(ir, facts))
             .chain(schema_policy::check(ir, facts))
-            .chain(uaf::check_with_summaries(ir, &mem_summaries))
-            .chain(oob::check_with_summaries(ir, &mem_summaries))
+            .chain(
+                match prog.and_then(|p| p.function_index(&ir.name).map(|fi| (p, fi))) {
+                    Some((p, fi)) => uaf::check_with_prog(fi, p, &mem_summaries),
+                    None => uaf::check_with_summaries(ir, &mem_summaries),
+                },
+            )
+            .chain(oob::check_with_summaries(ir, &mem_summaries, facts))
+            .chain(int_overflow::check(ir, &mem_summaries, facts))
+            .chain(leak::check(ir, &mem_summaries, facts))
             .chain(learned::check(ir, facts));
         for f in findings {
-            let key = (
-                f.function.clone(),
-                f.rule.clone(),
-                f.span.map(|s| s.0).unwrap_or(usize::MAX),
-            );
+            let key = finding_key(&f);
             if seen.insert(key) {
                 all.push(f);
             }
@@ -241,7 +287,7 @@ pub(crate) mod learned {
                     } => (func, args),
                     _ => continue,
                 };
-                for fact in facts.learned_checks_for(callee) {
+                for (fact, provenance) in facts.learned_checks_for(callee) {
                     // Guard qualification: a rule with `unless_guard` is
                     // silent when the guard call is present in the same
                     // function, the corpus says "trigger without
@@ -268,8 +314,10 @@ pub(crate) mod learned {
                         function: ir.name.clone(),
                         rule: fact.rule.clone(),
                         message: fact.message.clone(),
+                        params: Vec::new(),
                         span: instr_span(ir, instr),
-                        learned: true,
+                        severity: fact.severity.clone(),
+                        provenance,
                     });
                 }
             }
@@ -286,9 +334,4 @@ pub(crate) mod learned {
         };
         ir.var_metadata.get(&dest)?.byte_range
     }
-
-    // Silence unused-import warning if Operand becomes unused in future
-    // refinements; kept in the destructure for symmetry with seed checks.
-    #[allow(dead_code)]
-    fn _assert_operand_used(_: &[Operand]) {}
 }

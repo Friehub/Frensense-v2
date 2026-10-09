@@ -43,9 +43,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
 use crate::analysis::forward::{
-    InterproceduralTaintEngine, ProgramSvfg, is_sanitizer_use, is_source, sink_alert,
+    InterproceduralTaintEngine, ProgramSvfg, SinkAlert, is_sanitizer_use, is_source,
+    sink_alert_with_facts,
 };
 use crate::analysis::taint::config::TaintConfig;
+use crate::analysis::taint::facts::FactTable;
 use crate::graph::svfg::NodeKey;
 
 /// Safety valve: most contexts a single function may hold before new ones
@@ -67,9 +69,8 @@ pub const ROOT_CTX: CtxId = u32::MAX;
 /// Alert with the context chain that produced it (for triage / dedup).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContextualAlert {
-    pub message: String,
-    /// Function in which the sink lives.
-    pub function: String,
+    /// The structured sink alert (sink, slot, function, class).
+    pub alert: SinkAlert,
     /// The call-site context under which the taint arrived at the sink.
     pub context: CtxId,
 }
@@ -173,11 +174,6 @@ impl<'a> ContextSensitiveTaintEngine<'a> {
         &self.alerts
     }
 
-    /// Plain alert messages (compatible with the other engines).
-    pub fn alert_messages(&self) -> Vec<String> {
-        self.alerts.iter().map(|a| a.message.clone()).collect()
-    }
-
     /// Taint map for tests / downstream consumers.
     pub fn tainted(&self) -> &FxHashMap<(usize, NodeKey), FxHashSet<CtxId>> {
         &self.tainted
@@ -210,6 +206,7 @@ impl<'a> ContextSensitiveTaintEngine<'a> {
     fn run_phase2(&mut self, relevant: &FxHashSet<usize>) {
         let mut queue: VecDeque<(usize, NodeKey, CtxId)> = VecDeque::new();
         let mut pool = ContextPool::default();
+        let facts = FactTable::from_config(self.config);
 
         let mark = |tainted: &mut FxHashMap<(usize, NodeKey), FxHashSet<CtxId>>,
                     f: usize,
@@ -231,15 +228,14 @@ impl<'a> ContextSensitiveTaintEngine<'a> {
         while let Some((fi, cur, ctx)) = queue.pop_front() {
             let fe = &self.prog.functions[fi];
 
-            if let Some((_, alert)) = sink_alert(fe.ir, self.config, &cur) {
+            if let Some(alert) = sink_alert_with_facts(fe.ir, self.config, &facts, &cur) {
                 let ca = ContextualAlert {
-                    message: alert,
-                    function: fe.name.clone(),
+                    alert,
                     context: ctx,
                 };
-                // Dedup by message: the same sink reached via two different
+                // Dedup by alert: the same sink reached via two different
                 // (genuinely distinct) contexts is one reportable finding.
-                if !self.alerts.iter().any(|a| a.message == ca.message) {
+                if !self.alerts.iter().any(|a| a.alert == ca.alert) {
                     self.alerts.push(ca);
                 }
             }

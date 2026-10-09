@@ -10,8 +10,16 @@
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod schema_policy_tests {
     use crate::analysis::taint::facts::FactTable;
+    use crate::checks::Provenance;
     use crate::checks::check_all;
     use crate::harness::lower_source;
+
+    /// Production-seeded table (spec seed -> default pack -> pack language
+    /// sections): the checks read `FactTable` only, so test fixtures must
+    /// seed the vocabulary exactly like a production scan.
+    fn ts_facts() -> FactTable {
+        crate::analysis::taint::facts::seeded_tables(["ts"]).1
+    }
 
     /// The chatbot tool-schema shape: a z.number() whose describe text
     /// declares a maximum in prose, with no .max() enforcement anywhere.
@@ -33,7 +41,7 @@ export const tools = {
 
     fn run(src: &str) -> Vec<crate::checks::CheckerFinding> {
         let irs = lower_source("test.ts", src, "ts").expect("lower");
-        check_all(irs.values(), &FactTable::default())
+        check_all(irs.values(), &ts_facts())
     }
 
     #[test]
@@ -44,8 +52,14 @@ export const tools = {
             .find(|f| f.rule == "unbounded_number_schema")
             .expect("unbounded schema must fire");
         assert!(
-            f.message.contains("maximum 10"),
-            "message quotes the declared policy"
+            f.params
+                .iter()
+                .any(|(k, v)| *k == "text" && v.contains("maximum 10")),
+            "text param quotes the declared policy"
+        );
+        assert!(
+            f.message.is_empty(),
+            "spec findings carry params, not prose"
         );
         assert!(f.span.is_some(), "span recorded for line reporting");
     }
@@ -132,8 +146,10 @@ export const isRedirectAllowed = (url: string) => redirectAllowlist.has(url)
     /// Learned schema builder positive & negative test.
     #[test]
     fn learned_schema_builder_positive_and_negative() {
-        let mut facts = FactTable::default();
-        facts.schema_builders.insert("customQuantity".into());
+        let mut facts = ts_facts();
+        facts
+            .schema_builders
+            .insert("customQuantity".into(), Provenance::Learned);
 
         // Positive sample: custom builder with prose bound without enforcement
         let pos_src = r#"
@@ -147,7 +163,7 @@ export const schema = {
             .iter()
             .find(|f| f.rule == "unbounded_number_schema")
             .expect("learned builder must fire on positive sample");
-        assert!(f.learned);
+        assert_eq!(f.provenance, Provenance::Learned);
 
         // Negative sample: custom builder with enforcement
         let neg_src = r#"
@@ -168,7 +184,7 @@ export const schema = {
     /// Learned schema enforcer positive & negative test.
     #[test]
     fn learned_schema_enforcer_positive_and_negative() {
-        let mut facts = FactTable::default();
+        let mut facts = ts_facts();
         facts.schema_enforcers.insert("customClamp".into());
 
         // Positive sample: standard number builder with prose bound, but lacking customClamp
@@ -207,8 +223,10 @@ export const schema = {
     /// Learned bound keyword positive & negative test.
     #[test]
     fn learned_bound_keyword_positive_and_negative() {
-        let mut facts = FactTable::default();
-        facts.schema_keywords.insert("ceiling".into());
+        let mut facts = ts_facts();
+        facts
+            .schema_keywords
+            .insert("ceiling".into(), Provenance::Learned);
 
         // Positive sample: description uses 'ceiling 100' without enforcer
         let pos_src = r#"
@@ -223,7 +241,7 @@ export const schema = {
             .iter()
             .find(|f| f.rule == "unbounded_number_schema")
             .expect("learned keyword must trigger on positive sample");
-        assert!(f.learned);
+        assert_eq!(f.provenance, Provenance::Learned);
 
         // Negative sample: description uses 'ceiling 100' with .max(100) enforcer
         let neg_src = r#"

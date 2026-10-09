@@ -125,3 +125,112 @@
   padding: 12px 16px;
   background: var(--vp-c-brand-soft);
 }
+
+/* homepage download strip: registry cards + weekly download counts */
+.download-strip {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 0 24px 8px;
+  text-align: left;
+}
+.download-strip__head {
+  text-align: center;
+  margin-bottom: 28px;
+}
+.download-strip__head h2 {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+}
+.download-strip__head p {
+  color: var(--vp-c-text-2);
+  font-size: 1.05rem;
+}
+.download-strip__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+.dl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px 22px;
+  border: 1px solid var(--vp-c-bg-soft);
+  border-radius: 12px;
+  background-color: var(--vp-c-bg-soft);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.25s, background-color 0.25s;
+}
+.dl-card:hover {
+  border-color: var(--vp-c-brand-1);
+}
+.dl-card__registry {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--vp-c-text-1);
+}
+.dl-card__stat {
+  font-size: 1.7rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--vp-c-brand-1);
+  line-height: 1.1;
+}
+.dl-card__stat em {
+  display: block;
+  font-style: normal;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--vp-c-text-2);
+  margin-top: 2px;
+}
+.dl-card__stat--muted {
+  color: var(--vp-c-text-1);
+}
+.dl-card__cmd {
+  font-family: var(--vp-font-family-mono, monospace);
+  font-size: 0.82rem;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background-color: var(--vp-c-bg);
+  border: 1px solid var(--vp-c-divider);
+  color: var(--vp-c-text-1);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.dl-card__cta {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--vp-c-brand-1);
+}
+.download-strip__foot {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 0.95rem;
+  color: var(--vp-c-text-2);
+}
+.download-strip__foot code {
+  font-size: 0.85em;
+}
+
+/* Place the download strip directly after the hero header and before
+   the features grid: VitePress renders hero -> features -> markdown
+   content in DOM order, so reorder them in the flex column of .VPHome.
+   The markdown content wrapper is `.vp-doc container` (there is no
+   VPHomeContent class on the rendered element). */
+.VPHome {
+  display: flex;
+  flex-direction: column;
+}
+.VPHome > .VPHero {
+  order: 1;
+}
+.VPHome > .vp-doc.container {
+  order: 2;
+}
+.VPHome > .VPFeatures {
+  order: 3;
+}

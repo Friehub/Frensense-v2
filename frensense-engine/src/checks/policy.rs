@@ -7,19 +7,21 @@
 //! A [`PolicyFact`] poses a question at every trigger call: do the policy's
 //! requirements hold in the trigger's scope? A function violating the policy
 //! (trigger present, at least one requirement unsatisfied) yields a
-//! [`CheckerFinding`]. This complements and operates alongside `LearnedCheckFact`
-//! — `unless_guard` is evaluated as a `GuardCall` requirement,
-//! `unless_range_check` as a `RangeCheck` — and adds the presence
-//! forms (`RequireCall`, `NotCall`) plus a cross-function scope, so bundles
-//! can express "privileged action without its audit log", "dangerous call
-//! without any of its sanctioned wrappers", or "trigger helper defined in a
-//! sibling module still counts as enforcement".
+//! [`CheckerFinding`]. This complements and operates alongside
+//! `LearnedCheckFact` - `unless_guard` is evaluated as a `GuardCall`
+//! requirement, `unless_range_check` as a `RangeCheck` - and adds the
+//! presence forms (`RequireCall`, `NotCall`) plus a cross-function scope,
+//! so bundles can express "privileged action without its audit log",
+//! "dangerous call without any of its sanctioned wrappers", or "trigger
+//! helper defined in a sibling module still counts as enforcement".
 
 use rustc_hash::FxHashMap;
 
 use super::CheckerFinding;
+use super::Provenance;
 use super::learned::{call_segments, is_range_guarded};
 use crate::analysis::taint::facts::{FactTable, PolicyFact, PolicyRequirement, PolicyScope};
+use crate::ir::control::{self, DomSets};
 use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand};
 
 /// Evaluate every policy fact in `facts` over the scanned program.
@@ -52,25 +54,40 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
 
     // Learned checks evaluate alongside native policies (deduped by rule id:
     // a bundle shipping both shapes of the same rule must not fire twice).
-    let mut native_rules: Vec<&str> = facts.policy_facts.iter().map(|p| p.rule.as_str()).collect();
+    // Each entry keeps its own provenance so findings report the origin.
+    let mut native_rules: Vec<&str> = facts
+        .policy_facts
+        .iter()
+        .map(|(p, _)| p.rule.as_str())
+        .collect();
     native_rules.sort();
     native_rules.dedup();
-    let mut all_policies: Vec<PolicyFact> = Vec::new();
+    let mut all_policies: Vec<(PolicyFact, Provenance)> = Vec::new();
     all_policies.extend(facts.policy_facts.iter().cloned());
-    for check in &facts.learned_checks {
+    for (check, prov) in &facts.learned_checks {
         if native_rules.contains(&check.rule.as_str()) {
             continue;
         }
-        all_policies.push(PolicyFact::from_legacy(check));
+        all_policies.push((PolicyFact::from_legacy(check), *prov));
     }
 
     let mut findings = Vec::new();
-    for policy in &all_policies {
+    // Dominance for function-scoped guard/require presence: cached per
+    // function across policies (computed at most once per scanned IR).
+    let mut dom_cache: FxHashMap<&str, DomSets> = FxHashMap::default();
+    for (policy, policy_provenance) in &all_policies {
         let trigger_seg = policy
             .when_call
             .rsplit('.')
             .next()
             .unwrap_or(&policy.when_call);
+        let needs_dom = policy.scope == PolicyScope::Function
+            && policy.require.iter().any(|r| {
+                matches!(
+                    r,
+                    PolicyRequirement::GuardCall { .. } | PolicyRequirement::RequireCall { .. }
+                )
+            });
         for ir in irs {
             let segs = match segsets.get(ir.name.as_str()) {
                 Some(s) => s,
@@ -79,14 +96,24 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
             if !segs.iter().any(|s| s == trigger_seg) {
                 continue;
             }
+            let doms: Option<&DomSets> = if needs_dom {
+                let d: &DomSets = dom_cache
+                    .entry(ir.name.as_str())
+                    .or_insert_with(|| control::dominators(ir));
+                Some(d)
+            } else {
+                None
+            };
             let val_info = crate::analysis::value::analyze(ir);
             // Collect every trigger call site in this function with its args.
-            for (bid, args, span) in trigger_sites(ir, trigger_seg) {
+            for (bid, idx, args, span) in trigger_sites(ir, trigger_seg) {
                 let satisfied = policy.require.iter().all(|req| {
                     requirement_holds(
                         req,
                         ir,
                         bid,
+                        idx,
+                        doms,
                         &val_info,
                         args,
                         segs,
@@ -99,8 +126,10 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
                         function: ir.name.clone(),
                         rule: policy.rule.clone(),
                         message: policy.message.clone(),
+                        params: Vec::new(),
                         span,
-                        learned: true,
+                        severity: policy.severity.clone(),
+                        provenance: *policy_provenance,
                     });
                 }
             }
@@ -110,13 +139,14 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
 }
 
 /// Every call instruction in `ir` whose callee's last segment is `seg`,
-/// as (bid, args, span) tuples.
-type TriggerSite<'a> = (BlockId, &'a [Operand], Option<(usize, usize)>);
+/// as (bid, instr index, args, span) tuples. The index orders same-block
+/// guard/trigger pairs.
+type TriggerSite<'a> = (BlockId, usize, &'a [Operand], Option<(usize, usize)>);
 
 fn trigger_sites<'a>(ir: &'a FunctionIR, seg: &str) -> Vec<TriggerSite<'a>> {
     let mut out = Vec::new();
     for (&bid, block) in &ir.blocks {
-        for instr in &block.instructions {
+        for (idx, instr) in block.instructions.iter().enumerate() {
             let (name, args) = match instr {
                 Instruction::CallStatic { func, args, .. } => (func, args),
                 Instruction::CallVirtual { method, args, .. } => (method, args),
@@ -126,7 +156,7 @@ fn trigger_sites<'a>(ir: &'a FunctionIR, seg: &str) -> Vec<TriggerSite<'a>> {
             if last != seg {
                 continue;
             }
-            out.push((bid, args.as_slice(), instr_span(ir, instr)));
+            out.push((bid, idx, args.as_slice(), instr_span(ir, instr)));
         }
     }
     out
@@ -138,6 +168,8 @@ fn requirement_holds(
     req: &PolicyRequirement,
     ir: &FunctionIR,
     block: BlockId,
+    trigger_idx: usize,
+    doms: Option<&DomSets>,
     val_info: &crate::analysis::value::ValueInfo,
     args: &[Operand],
     fn_segs: &[String],
@@ -146,22 +178,30 @@ fn requirement_holds(
 ) -> bool {
     match req {
         PolicyRequirement::GuardCall { call } => {
-            // Enforcement by a named helper: the requirement holds when the
-            // guard call is PRESENT in the scope (legacy `unless_guard`
-            // semantics inverted into the positive form).
+            // Enforcement by a named helper. Function scope is spatial: the
+            // guard must EXECUTE before the trigger on every path (its block
+            // dominates the trigger's, or same block with the guard first) -
+            // a call that may be skipped enforces nothing. Module scope
+            // stays presence (the helper exists somewhere in the module).
             let seg = call.rsplit('.').next().unwrap_or(call);
-            scope_segs(scope, fn_segs, module_segs)
-                .iter()
-                .any(|s| s == seg)
+            if scope == PolicyScope::Module {
+                module_segs.iter().any(|s| s == seg)
+            } else {
+                guard_executes_before(ir, seg, block, trigger_idx, doms)
+            }
         }
         PolicyRequirement::RequireCall { any_of } => {
-            let wanted: Vec<&str> = any_of
-                .iter()
-                .map(|c| c.rsplit('.').next().unwrap_or(c))
-                .collect();
-            scope_segs(scope, fn_segs, module_segs)
-                .iter()
-                .any(|s| wanted.contains(&s.as_str()))
+            if scope == PolicyScope::Module {
+                let wanted: Vec<&str> = any_of
+                    .iter()
+                    .map(|c| c.rsplit('.').next().unwrap_or(c))
+                    .collect();
+                return module_segs.iter().any(|s| wanted.contains(&s.as_str()));
+            }
+            any_of.iter().any(|c| {
+                let seg = c.rsplit('.').next().unwrap_or(c);
+                guard_executes_before(ir, seg, block, trigger_idx, doms)
+            })
         }
         PolicyRequirement::NotCall { call } => {
             let seg = call.rsplit('.').next().unwrap_or(call);
@@ -256,6 +296,46 @@ fn scope_segs<'a>(
         PolicyScope::Function => fn_segs,
         PolicyScope::Module => module_segs,
     }
+}
+
+/// True when some call to `seg` provably executes before the trigger:
+/// its block dominates the trigger's block, or both share a block with the
+/// guard at a lower instruction index. Falls back to mere presence when no
+/// dominance information was computed (caller contract: function-scoped
+/// guard/require requirements always pass one).
+fn guard_executes_before(
+    ir: &FunctionIR,
+    seg: &str,
+    trigger_block: BlockId,
+    trigger_idx: usize,
+    doms: Option<&DomSets>,
+) -> bool {
+    let mut sites: Vec<(BlockId, usize)> = Vec::new();
+    for (&bid, block) in &ir.blocks {
+        for (idx, instr) in block.instructions.iter().enumerate() {
+            let name = match instr {
+                Instruction::CallStatic { func, .. } => func,
+                Instruction::CallVirtual { method, .. } => method,
+                _ => continue,
+            };
+            if name.rsplit('.').next().unwrap_or(name) == seg {
+                sites.push((bid, idx));
+            }
+        }
+    }
+    if sites.is_empty() {
+        return false;
+    }
+    let Some(doms) = doms else {
+        return true;
+    };
+    sites.iter().any(|&(gb, gi)| {
+        if gb == trigger_block {
+            gi < trigger_idx
+        } else {
+            doms.get(&trigger_block).is_some_and(|d| d.contains(&gb))
+        }
+    })
 }
 
 fn instr_span(ir: &FunctionIR, instr: &Instruction) -> Option<(usize, usize)> {

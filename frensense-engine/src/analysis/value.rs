@@ -156,12 +156,21 @@ fn binary_interval(op: &str, (al, ah): (i64, i64), (bl, bh): (i64, i64)) -> Valu
     let add = |x: i64, y: i64| x.saturating_add(y);
     match op {
         "+" | "concat" => Value::Range(add(al, bl), add(ah, bh)),
-        "-" => Value::Range(add(al, -bh), add(ah, -bl)),
+        "-" => Value::Range(al.saturating_sub(bh), ah.saturating_sub(bl)),
         "*" => {
-            let p = [al * bl, al * bh, ah * bl, ah * bh];
+            // Widen to i128 so wide ranges cannot wrap (or panic in
+            // debug): the corner products are clamped back to i64,
+            // which over-approximates the true interval.
+            let p = [
+                i128::from(al) * i128::from(bl),
+                i128::from(al) * i128::from(bh),
+                i128::from(ah) * i128::from(bl),
+                i128::from(ah) * i128::from(bh),
+            ];
+            let clamp = |v: i128| v.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64;
             Value::Range(
-                *p.iter().min().unwrap_or(&al),
-                *p.iter().max().unwrap_or(&ah),
+                clamp(*p.iter().min().unwrap_or(&i128::from(al))),
+                clamp(*p.iter().max().unwrap_or(&i128::from(ah))),
             )
         }
         "<<" if bl == bh && (0..=32).contains(&bl) => Value::Range(al << bl, ah << bh),
@@ -212,9 +221,11 @@ fn transfer(state: &AbsState, instr: &Instruction) -> Option<(VarId, Value)> {
         Instruction::UnaryOp { dest, op, src } => {
             let v = operand_value(state, src);
             let out = match op.as_str() {
-                "-" => v
-                    .interval()
-                    .map_or(Value::Top, |(lo, hi)| Value::Range(-hi, -lo)),
+                "-" => v.interval().map_or(Value::Top, |(lo, hi)| {
+                    let n_hi = if hi == i64::MIN { i64::MAX } else { -hi };
+                    let n_lo = if lo == i64::MIN { i64::MAX } else { -lo };
+                    Value::Range(n_hi.min(n_lo), n_hi.max(n_lo))
+                }),
                 "!" => match v {
                     Value::BoolConst(b) => Value::BoolConst(!b),
                     _ => Value::Top,
@@ -312,7 +323,11 @@ fn sharpen_branch(
 }
 
 /// Compute fixpoint abstract states with edge-sensitive branch sharpening.
-fn fixpoint(ir: &FunctionIR) -> FxHashMap<BlockId, AbsState> {
+/// Returns the block-entry states plus whether the worklist ran to
+/// convergence (`false` when the iteration cap cut the fixpoint short -
+/// states may then hold narrower-than-true values and must not be used
+/// for soundness-critical pruning).
+fn fixpoint(ir: &FunctionIR) -> (FxHashMap<BlockId, AbsState>, bool) {
     // Pre-index definition instructions for fast predicate inspection.
     let mut defs: FxHashMap<VarId, &Instruction> = FxHashMap::default();
     for blk in ir.blocks.values() {
@@ -356,6 +371,7 @@ fn fixpoint(ir: &FunctionIR) -> FxHashMap<BlockId, AbsState> {
     let mut queue: VecDeque<BlockId> = VecDeque::new();
     let mut queued: FxHashSet<BlockId> = FxHashSet::default();
     let mut iterations: usize = 0;
+    let mut converged = true;
     const MAX_ITERATIONS: usize = 64;
 
     for &b in &rpo {
@@ -366,6 +382,7 @@ fn fixpoint(ir: &FunctionIR) -> FxHashMap<BlockId, AbsState> {
     while let Some(bid) = queue.pop_front() {
         iterations += 1;
         if iterations > MAX_ITERATIONS * (ir.blocks.len() + 1) {
+            converged = false;
             break;
         }
         queued.remove(&bid);
@@ -465,7 +482,7 @@ fn fixpoint(ir: &FunctionIR) -> FxHashMap<BlockId, AbsState> {
         }
     }
 
-    in_state
+    (in_state, converged)
 }
 
 /// The per-function analysis result: each variable's value at the point
@@ -477,11 +494,16 @@ pub struct ValueInfo {
     pub blocks: usize,
     /// Block-entry abstract states (keyed by block ID).
     pub block_entry_states: FxHashMap<BlockId, AbsState>,
+    /// Whether the fixpoint worklist ran to convergence. `false` means the
+    /// iteration cap cut the analysis short: states may hold
+    /// narrower-than-true values, so consumers that prune or promote based
+    /// on these values must treat the whole result as `Top`.
+    pub converged: bool,
 }
 
 /// Analyse one function.
 pub fn analyze(ir: &FunctionIR) -> ValueInfo {
-    let in_states = fixpoint(ir);
+    let (in_states, converged) = fixpoint(ir);
 
     let mut values: FxHashMap<VarId, Value> = FxHashMap::default();
     for (bid, mut state) in in_states.clone() {
@@ -509,6 +531,7 @@ pub fn analyze(ir: &FunctionIR) -> ValueInfo {
         values,
         blocks: ir.blocks.len(),
         block_entry_states: in_states,
+        converged,
     }
 }
 

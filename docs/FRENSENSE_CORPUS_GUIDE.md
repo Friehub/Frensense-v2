@@ -9,19 +9,19 @@
 
 A Frensense **family** is one vulnerability idea, expressed as a pair:
 
-- `<family>_positive.<ext>` — the vulnerable version
-- `<family>_negative.<ext>` — the fixed / safe version
+- `<family>_positive.<ext>` - the vulnerable version
+- `<family>_negative.<ext>` - the fixed / safe version
 
 The bundler lowers both through the same engine a scan uses, computes the
 delta (what call the negative avoids, what guard it adds), and proposes a
 *fact*. Every proposed fact then passes a **replay gate**: the fact is only
 published if, after installing it, the positive alerts and the negative stays
-silent — and no other family that already separated regresses. If a fact
+silent - and no other family that already separated regresses. If a fact
 cannot prove itself against your corpus, it is never published. That is the
 quality control, and it is why there is no rule linting to do.
 
 Facts ship inside an `.frc` bundle (binary, versioned, blake3-checksummed).
-The engine merges bundle facts **over** its built-in tables — bundle knowledge
+The engine merges bundle facts **over** its built-in tables - bundle knowledge
 always wins on collision, and coarse all-args facts never widen precise
 slot-restricted ones.
 
@@ -62,7 +62,7 @@ frensense path/to/target --corpus-bundle my.frc
 ```
 
 Or drop the bundle into the scanned project root as
-`frensense-corpus.frc` — it is picked up automatically. The MCP server and
+`frensense-corpus.frc` - it is picked up automatically. The MCP server and
 LSP pick it up via the `FRENSENSE_CORPUS_BUNDLE` environment variable.
 
 ## 3. Naming and layout rules
@@ -76,7 +76,7 @@ LSP pick it up via the `FRENSENSE_CORPUS_BUNDLE` environment variable.
 - **Do not mix languages under one stem.** `foo_positive.py` and
   `foo_negative.ts` would collide; the bundler detects this and splits them
   into `foo (python)` / `foo (typescript)` with a warning. Prefer explicit
-  language prefixes (`py_foo_positive.py`, `ts_foo_positive.ts`) — that is
+  language prefixes (`py_foo_positive.py`, `ts_foo_positive.ts`) - that is
   how the upstream corpus is organized.
 - Facts are matched by **call name** (last segment), language-blind by
   design: a learned `execute` sink fires in any language that calls
@@ -120,7 +120,7 @@ does not know, or a function that neutralizes input.
 
 ### 5.2 Policy families (non-dataflow rules)
 
-Use this when the bug is *not* about data flowing anywhere — it is about a
+Use this when the bug is *not* about data flowing anywhere - it is about a
 call being **present without its enforcement** (missing authz, raw render,
 unaudited privileged action). Taint cannot see these; policy facts can.
 
@@ -129,7 +129,7 @@ Authoring rules:
 1. In the positive, add `// check-call: <trigger>` in the first 30 lines
    (Python: `# check-call:`). The trigger is the call whose *unguarded
    presence* is the violation. The trigger must be **called** somewhere in
-   the file — a bare declaration teaches nothing.
+   the file - a bare declaration teaches nothing.
 2. Positives call the trigger **without** enforcement; negatives call the
    trigger **with** enforcement (a guard helper before it, or an inline
    range check on its argument).
@@ -160,19 +160,19 @@ Verified end-to-end: after bundling this pair, a target calling
 `authorize()` reports nothing.
 
 The generalized `Policy` facts (required calls, banned calls, module-scope
-enforcement) are produced by the same declared-trigger shape — the bundler
+enforcement) are produced by the same declared-trigger shape - the bundler
 mines what the negatives demonstrate and the gate validates it.
 
 ## 6. Statuses: `provisional` vs `confirmed`
 
 The bundler prints each published fact with its status:
 
-- `provisional` — one family voted for the fact (support = 1)
-- `confirmed` — two or more independent families voted (support ≥ 2)
+- `provisional` - one family voted for the fact (support = 1)
+- `confirmed` - two or more independent families voted (support ≥ 2)
 
 Both kinds are installed by the engine. To upgrade a fact to `confirmed`,
 author a second family for the same call/behavior (different code, same
-lesson) — the votes accumulate.
+lesson) - the votes accumulate.
 
 ## 7. Verification workflow (do this before publishing a bundle)
 
@@ -185,13 +185,13 @@ frensense-bundler mycorpus my.frc
 #    negatives must stay silent.
 frensense targets/ --corpus-bundle my.frc --json
 
-# 3. Scan a real clean project with the bundle — zero findings on untouched
+# 3. Scan a real clean project with the bundle - zero findings on untouched
 #    code is the FP gate. If a fact fires on clean code, your negatives
 #    under-specified the enforcement: tighten the family and rebuild.
 ```
 
 Set `FXDBG=1` when running the bundler to see every candidate and where the
-gate accepted or rejected it — useful when a fact you expected does not
+gate accepted or rejected it - useful when a fact you expected does not
 appear (its family failed to separate).
 
 ## 8. Common mistakes
@@ -201,22 +201,21 @@ appear (its family failed to separate).
 | Fact you expected is missing | The family never separated: check the positive actually alerts (it may need taint from a param named `req`/`request`/...), or the negative still alerts. |
 | `check-call` ignored | It must be in the first 30 lines, `//`/`#` prefix matching the language, and the trigger must be *called*, not just declared. |
 | Policy fires on clean code | The negative's guard helper was named with a synthetic lowering name, or the guard is genuinely absent in the "clean" code. Re-check the negative. |
-| Bundle silently ignored | Wrong `--corpus-bundle` path, or a bundle from an older engine (version mismatch) — the bundler round-trip check catches format errors at build time. |
+| Bundle silently ignored | Wrong `--corpus-bundle` path, or a bundle from an older engine (version mismatch) - the bundler round-trip check catches format errors at build time. |
 | Two languages merged into one family | Same stem used across languages; rename with language prefixes. |
-| A `<fn@...>`-looking rule name appears | The bundler never publishes these (filtered), but if you see one, file a bug — it means a synthetic lowering name leaked into a fact. |
+| A `<fn@...>`-looking rule name appears | The bundler never publishes these (filtered), but if you see one, file a bug - it means a synthetic lowering name leaked into a fact. |
 
 ## 9. Distributing bundles
 
 - The engine accepts `--corpus-bundle <file>`, auto-discovers
   `frensense-corpus.frc` in the scanned root, and (for MCP/LSP) reads
   `FRENSENSE_CORPUS_BUNDLE`.
-- Bundles are small (typically kilobytes), checksummed, and merge cleanly —
+- Bundles are small (typically kilobytes), checksummed, and merge cleanly -
   a project may use your framework bundle plus its own deployment bundle
   simultaneously; facts from both are installed, later merges never lose
   earlier ones, and dedup is by rule id.
-- `FRENSENSE_SEED_FACTS` / `corpus/facts/seed_facts.json` add deployment
-  hints (e.g. trusted session-store roots) that are merged before bundle
-  facts.
+- There is no seed sidecar: deployment/language vocabulary (e.g. trusted
+  session-store roots) is declared as `.rs` tables in `frensense-lang`.
 
 ## 10. Authoring checklist
 
@@ -224,6 +223,6 @@ appear (its family failed to separate).
 - [ ] Negative differs from positive **only** in the fix (same imports, same structure)
 - [ ] `[frensense]` block on the positive with observation / impact / improvement / cwe / severity
 - [ ] `check-call:` only for policy families, and the trigger is called in both variants
-- [ ] Bundler output reviewed — every published fact intended, statuses noted
+- [ ] Bundler output reviewed - every published fact intended, statuses noted
 - [ ] Unguarded target alerts, guarded target silent, clean project silent
 - [ ] Second family authored for facts you want `confirmed`

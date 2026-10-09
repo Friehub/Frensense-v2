@@ -16,28 +16,10 @@
 
 use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
+use crate::checks::Provenance;
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
-/// Schema number-builder methods (last segment) that produce an unbounded
-/// numeric field when their builder chain lacks a `.max()`/`.min()` call.
-static NUMBER_BUILDERS: &[&str] = &["number", "int", "float", "bigint"];
-
-/// Bound keywords whose appearance in a description implies a declared
-/// (but unenforced) numeric policy.
-static BOUND_KEYWORDS: &[&str] = &["maximum", "max", "minimum", "min", "limit", "up to"];
-
-/// Methods that would actually enforce a bound on the builder chain.
-static ENFORCERS: &[&str] = &[
-    "max",
-    "min",
-    "minimum",
-    "maximum",
-    "int",
-    "multipleOf",
-    "step",
-];
-
-type BuilderEntry = (String, bool, Option<(usize, usize)>);
+type BuilderEntry = (String, Provenance, Option<(usize, usize)>);
 
 pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     let mut findings = Vec::new();
@@ -57,7 +39,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
             } = instr
             {
                 let seg = method.rsplit('.').next().unwrap_or(method);
-                if seg == "describe" || seg == "description" {
+                if facts.is_schema_describe_method(seg) {
                     let text = args.first().and_then(|a| match a {
                         Operand::StringLiteral(s) => Some(s.clone()),
                         _ => None,
@@ -76,53 +58,42 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                             });
                         described.push((text, span));
                     }
-                } else if ENFORCERS.contains(&seg)
-                    || facts
-                        .schema_enforcers
-                        .iter()
-                        .any(|e| e.eq_ignore_ascii_case(seg))
+                } else if facts
+                    .schema_enforcers
+                    .iter()
+                    .any(|e| e.eq_ignore_ascii_case(seg))
                 {
                     enforcers.push(seg);
-                } else {
-                    let is_builtin_builder = NUMBER_BUILDERS.contains(&seg);
-                    let is_learned_builder = facts
-                        .schema_builders
-                        .iter()
-                        .any(|b| b.eq_ignore_ascii_case(seg));
-                    if is_builtin_builder || is_learned_builder {
-                        let span = dest
-                            .as_ref()
-                            .and_then(|d| ir.var_metadata.get(d))
-                            .and_then(|m| m.byte_range);
-                        builders.push((seg.to_string(), is_learned_builder, span));
-                    }
+                } else if let Some(builder_prov) = facts.schema_builder(seg) {
+                    let span = dest
+                        .as_ref()
+                        .and_then(|d| ir.var_metadata.get(d))
+                        .and_then(|m| m.byte_range);
+                    builders.push((seg.to_string(), builder_prov, span));
                 }
             }
         }
     }
     if enforcers.is_empty() && !described.is_empty() && !builders.is_empty() {
-        for (_builder, builder_learned, span) in &builders {
+        for (_builder, builder_prov, span) in &builders {
             for (text, _dspan) in &described {
                 let lower = text.to_ascii_lowercase();
-                let is_builtin_keyword = BOUND_KEYWORDS.iter().any(|k| lower.contains(k));
-                let is_learned_keyword = facts
-                    .schema_keywords
-                    .iter()
-                    .any(|k| lower.contains(&k.to_ascii_lowercase()));
-                if (is_builtin_keyword || is_learned_keyword)
-                    && lower.chars().any(|c| c.is_ascii_digit())
-                {
+                let keyword_prov = facts.schema_keyword(&lower);
+                if keyword_prov.is_some() && lower.chars().any(|c| c.is_ascii_digit()) {
                     findings.push(CheckerFinding {
-                        learned: *builder_learned || is_learned_keyword,
+                        provenance: if *builder_prov == Provenance::Learned
+                            || keyword_prov == Some(Provenance::Learned)
+                        {
+                            Provenance::Learned
+                        } else {
+                            Provenance::Spec
+                        },
                         function: ir.name.clone(),
-                        rule: "unbounded_number_schema".to_string(),
-                        message: format!(
-                            "Schema declares a numeric policy in prose (`{text}`) but the \
-                             builder chain applies no `.max()`/`.min()` enforcement, the \
-                             declared bound is decorative. Add the constraint to the schema \
-                             and validate in the handler."
-                        ),
+                        rule: frensense_lang::rules::UNBOUNDED_NUMBER_SCHEMA.to_string(),
+                        message: String::new(),
+                        params: vec![("text", text.clone())],
                         span: *span,
+                        severity: String::new(),
                     });
                     break;
                 }

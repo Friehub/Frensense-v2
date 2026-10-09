@@ -18,10 +18,6 @@ pub struct Engine {
     pub(crate) corpus_bundle: Option<&'static [u8]>,
     /// Optional `.frc` bundle loaded from disk at scan time.
     pub(crate) corpus_bundle_path: Option<PathBuf>,
-    /// Optional seed-facts file (corpus-owned, JSON): deployment-specific
-    /// knowledge (session-store roots, project conventions) that is not
-    /// language semantics. Merged over spec tables, under bundle facts.
-    pub(crate) seed_facts_path: Option<PathBuf>,
     pub(crate) severity_filter: Option<Severity>,
     pub(crate) language_filter: Option<Vec<&'static str>>,
     pub(crate) min_confidence: f64,
@@ -33,17 +29,10 @@ impl Engine {
         Self {
             corpus_bundle: None,
             corpus_bundle_path: None,
-            seed_facts_path: None,
             severity_filter: None,
             language_filter: None,
             min_confidence: 0.0,
         }
-    }
-
-    /// Provide a seed-facts file (corpus-owned JSON) to merge over the
-    /// spec-built fact table.
-    pub fn set_seed_facts_path(&mut self, path: PathBuf) {
-        self.seed_facts_path = Some(path);
     }
 
     /// Provide a `.frc` bundle (static bytes) whose learned facts teach the

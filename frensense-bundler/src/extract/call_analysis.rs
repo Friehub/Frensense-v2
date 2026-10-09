@@ -2,6 +2,7 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
+use frensense_engine::analysis::taint::facts::FactTable;
 use frensense_engine::ir::function::{FunctionIR, Instruction, Operand, Terminator, VarId};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeSet;
@@ -19,11 +20,18 @@ pub enum CallShape {
 /// harness lowering). Shape detection: a call whose result feeds only a
 /// Branch/condition is predicate-shaped; a call whose result is re-stored or
 /// passed on is transform-shaped.
-pub fn collect_calls(files: &[(String, String, String)]) -> FxHashMap<String, CallShape> {
+///
+/// `facts` carries the pack vocabulary the lowering consults (route
+/// registration patterns since Phase 6.4); pass `None` for bare lowering.
+pub fn collect_calls(
+    files: &[(String, String, String)],
+    facts: Option<&FactTable>,
+) -> FxHashMap<String, CallShape> {
     let mut calls: FxHashMap<String, CallShape> = FxHashMap::default();
 
     for (path, source, ext) in files {
-        let Ok(irs) = frensense_engine::harness::lower_source(path, source, ext) else {
+        let Ok(irs) = frensense_engine::harness::lower_source_with_facts(path, source, ext, facts)
+        else {
             continue;
         };
         for ir in irs.values() {
@@ -34,30 +42,51 @@ pub fn collect_calls(files: &[(String, String, String)]) -> FxHashMap<String, Ca
                 if let Terminator::Branch { cond, .. } = &block.terminator {
                     if let Operand::Var(c) = cond {
                         cond_vars.insert(*c, ());
-                        // one hop up the def chain (unary ! / binary &&)
-                        for b2 in ir.blocks.values() {
-                            for i in &b2.instructions {
-                                match i {
-                                    Instruction::UnaryOp {
-                                        dest,
-                                        src: Operand::Var(s),
-                                        ..
-                                    }
-                                    | Instruction::BinaryOp {
-                                        dest,
-                                        lhs: Operand::Var(s),
-                                        ..
-                                    }
-                                    | Instruction::BinaryOp {
-                                        dest,
-                                        rhs: Operand::Var(s),
-                                        ..
-                                    } if *dest == *c => {
-                                        cond_vars.insert(*s, ());
-                                    }
-                                    _ => {}
+                    }
+                }
+            }
+            // Multi-hop up the def chain (unary !, binary &&, ||, cast, assign)
+            let mut changed = true;
+            let mut hops = 0;
+            while changed && hops < 6 {
+                changed = false;
+                hops += 1;
+                for b2 in ir.blocks.values() {
+                    for i in &b2.instructions {
+                        match i {
+                            Instruction::UnaryOp {
+                                dest,
+                                src: Operand::Var(s),
+                                ..
+                            }
+                            | Instruction::Cast {
+                                dest,
+                                src: Operand::Var(s),
+                                ..
+                            }
+                            | Instruction::Assign {
+                                dest,
+                                src: Operand::Var(s),
+                            } if cond_vars.contains_key(dest) => {
+                                if cond_vars.insert(*s, ()).is_none() {
+                                    changed = true;
                                 }
                             }
+                            Instruction::BinaryOp { dest, lhs, rhs, .. }
+                                if cond_vars.contains_key(dest) =>
+                            {
+                                if let Operand::Var(s) = lhs {
+                                    if cond_vars.insert(*s, ()).is_none() {
+                                        changed = true;
+                                    }
+                                }
+                                if let Operand::Var(s) = rhs {
+                                    if cond_vars.insert(*s, ()).is_none() {
+                                        changed = true;
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -120,7 +149,7 @@ fn defs_of(instr: &Instruction) -> Vec<VarId> {
 /// Cross-function enforcement helper: a function DEFINED in the negatives
 /// that positives neither define nor call. The negatives are safe because
 /// their module provides the enforcement helper (the definition site is
-/// the strongest in-scope evidence — `policy::check_program`'s
+/// the strongest in-scope evidence - `policy::check_program`'s
 /// module-segment rule), while positives execute the trigger with no
 /// helper anywhere in scope. The helper must not be defined in positives:
 /// if both sides define it, its presence cannot be the separating signal.
@@ -128,9 +157,10 @@ pub fn cross_function_helper(
     family: &Family,
     pos_calls: &FxHashMap<String, CallShape>,
     neg_calls: &FxHashMap<String, CallShape>,
+    facts: Option<&FactTable>,
 ) -> Option<String> {
-    let pos_defs = defined_function_names(&family.positives);
-    let neg_defs = defined_function_names(&family.negatives);
+    let pos_defs = defined_function_names(&family.positives, facts);
+    let neg_defs = defined_function_names(&family.negatives, facts);
     let trigger = family.declared_check_call.as_deref();
     neg_defs
         .iter()
@@ -146,17 +176,21 @@ pub fn cross_function_helper(
 
 /// Last-segment names of every function DEFINED in the given variants
 /// (definition sites, not call sites).
-pub fn defined_function_names(files: &[(String, String, String)]) -> FxHashSet<String> {
+pub fn defined_function_names(
+    files: &[(String, String, String)],
+    facts: Option<&FactTable>,
+) -> FxHashSet<String> {
     let mut out = FxHashSet::default();
     for (path, source, ext) in files {
-        let Ok(irs) = frensense_engine::harness::lower_source(path, source, ext) else {
+        let Ok(irs) = frensense_engine::harness::lower_source_with_facts(path, source, ext, facts)
+        else {
             continue;
         };
         for name in irs.keys() {
             // Skip synthetic lowering names (`<fn@byte>`, `<path:handler@byte>`):
             // they encode the file position where the function was DECLARED in
             // the corpus variant, so a target program can never contain the
-            // same name — a RequireCall fact keyed on one would fire forever.
+            // same name - a RequireCall fact keyed on one would fire forever.
             if name.starts_with('<') {
                 continue;
             }
@@ -170,12 +204,17 @@ pub fn defined_function_names(files: &[(String, String, String)]) -> FxHashSet<S
 /// True when any argument var passed to `call` is compared against a
 /// literal with a range operator (<, >, <=, >=) in the variant's IR,
 /// inline range enforcement.
-pub fn variant_has_range_check_on_call(files: &[(String, String, String)], call: &str) -> bool {
+pub fn variant_has_range_check_on_call(
+    files: &[(String, String, String)],
+    call: &str,
+    facts: Option<&FactTable>,
+) -> bool {
     const RANGE_OPS: &[&str] = &["<", ">", "<=", ">="];
     let Some((path, source, ext)) = files.first() else {
         return false;
     };
-    let Ok(irs) = frensense_engine::harness::lower_source(path, source, ext) else {
+    let Ok(irs) = frensense_engine::harness::lower_source_with_facts(path, source, ext, facts)
+    else {
         return false;
     };
     for ir in irs.values() {

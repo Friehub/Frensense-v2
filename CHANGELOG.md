@@ -4,7 +4,90 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0-preview.5] - 2026-10-09
+
+### Added
+
+#### CLI & Reporting UX
+- **Compiler-Grade Diagnostic Formatter**: Redesigned human terminal finding reports with `rustc`-style pointer notation (`--> path:line:col (in 'symbol')`), de-duplicated titles, aligned 15-character metadata columns (`Details:`, `Impact:`, `Remediation:`), and structured numbered taint flow traces with localized line references.
+- **File Output Support (`-o, --output <file>`)**: Enabled writing raw machine reports (`--json`, `--sarif`, `--github`) directly to disk while presenting interactive scan banners, duration timing, and summary audit blocks in the terminal. Pure stdout is preserved when piping without `-o`.
+- **CLI Flags Audit & Atomic Parsing**: Unified command-line parsing into an atomic single-pass engine, resolving positional path conflicts. Removed deprecated flags (`--min-confidence`, `--config`, `--baseline`), added standardized short aliases (`-o`, `-s`, `-l`, `-b`, `-f`), and added validation for missing arguments and unknown flags.
+- **Corpus Intellectual Property Protection**: Scrubbed internal corpus family names (e.g. `ts_express_sendfile_traversal`), training provenance (`(learned from family ...)`), and `Corpus-verified` labels from all findings. Prioritized author-declared `// [frensense] observation:` metadata blocks and added engine-level sanitization across all output formats.
+- **Rule Bundles Hub & Capability Datasheets**: Added pointers and documentation to the rule bundles hub (`https://frensense.friehub.cloud/bundles`) and signed CWE Capability Datasheets (`CWE_DATASHEET.md` / `cwe_datasheet.json`) supporting Free Community and Commercial Enterprise distribution tiers.
+
+#### Engine Dataflow & Blindspot Remediations
+- **P0 Sink-Agnostic Sanitizer Collapse Remediation (BS-15)**: Re-homed and qualified `SanitizerKind` with `SinkRole` and sink labels (`defeats_role_and_label`) in `frensense-lang`, preventing HTML sanitizers from clearing command and code execution sinks. Threaded role qualifications through `frensense-packgen` and backward taint walks in `walk.rs`.
+- **P1 Scoped Identifier Callgraph Dropping in Rust (BS-18)**: Expanded tree-sitter queries in `frensense-lang` to match `(scoped_identifier)` within call expressions and let bindings (`Command::new`, `std::process::Command::new`). Routed `match_expression` to `NodeRole::Match` and delegated trailing expression returns cleanly through `LanguageSpec::implicit_return_node`.
+- **97-Probe Industrial Dataflow Consistency Test Bench**: Implemented comprehensive diagnostic probe suite (`dataflow_probes_tests.rs` and `probes/*`) modeling 65 NIST/Juliet syntactic and inter-procedural flow variants, frontier static analysis domains (path sensitivity, async microtasks/emitters, multi-language Go/Rust providers, sanitizer ordering, historic CVE reproductions, and framework IoC), and quantitative finance trading patterns. Known engine blind spots are annotated with diagnostic ignore markers.
+- **100% TPR / 0% FPR Held-Out Benchmark Gate**: Resolved remaining detection seams across all 116 held-out production fixtures in `frensense-corpus`, verifying zero false positives on safe control variants.
+- **CWE-190/680 Integer-Overflow Heap-Overflow Checker**: Added `checks::int_overflow`, a facts-driven checker for integer overflow reaching a heap write: interval bounds over allocation sizes, index arithmetic and multiplication (rooted in the lang-declared capacity vocabulary) decide whether an overflowed value can reach the size/index of a copy into undersized heap storage; validated 4/4 on the `c_cwe_680_count_mul_wrap` corpus pair plus heldouts.
+- **CWE-401 Allocation-Lifetime (Memory Leak) Checker**: Added `checks::leak`, path-sensitive may-leak accounting reporting an allocation still frame-owned at a function exit. Ownership escapes (returned, stored, contract-consumed) remove candidates; null-guard and pointer-identity edges drop allocations bound to the guarded *storage* (every SSA version, stale loop-join bindings included); the exit scan counts only the deepest definition dominating the exit per storage cell, so superseded versions cannot report twice; freshness roots strictly at the declared allocator vocabulary.
+- **Break/Continue/Switch Lowering**: Added first-class lowering for `break`, `continue` and `switch`: a `LoopTarget` stack on `LoweringContext` gives both loop exits correct terminators (pre-header and body-end), unlabeled `break`/`continue` jump to them with fresh unreachable blocks, and `switch` lowers to a condition chain with per-case conditions, source-order fall-through bodies and break-to-merge - so case bodies join the CFG instead of orphaning unreachable exits.
+- **CVE-2026-56109 Deallocation on Error Path Detection**: Added analysis in `checks::uaf::uninit` detecting deallocation of uninitialized stack pointers along unchecked error/EOF paths (inequality return checks without dominating `< 0` diversion).
+- **CFG Jump Resolution for `goto` and Labels**: Added first-class lowering support in `LoweringContext` (`visit_goto`, `visit_labeled_statement`) wiring basic block jump terminators and control flow edges across forward and backward labels.
+- **Out-Parameter Address-Taken Initialization Tracking**: Implemented `is_address_taken_on_all_paths` in `uninit.rs` verifying whether all paths reaching a block execute `Instruction::AddressOf` for a local pointer, correctly recognizing out-parameter initialization.
+
+#### Packgen & Bundling (Engine Purity)
+- **Standalone `frensense-packgen` Crate**: Introduced standalone compiler crate responsible for extracting language provider vocabularies (JavaScript/TypeScript, Python, Go, Rust, C) and emitting static binary `.frc` packs.
+- **Binary Pack Embedded Knowledge**: Embedded default pack (`frensense-bundler/assets/`) serving as the single source of truth for AST semantic knowledge, decoupling language specifics from engine binaries.
+- **Bundle Format v5 & Advisory Expansion**: Added version-branched bundle format supporting `policy_pack` integration, rule structs carrying severity and custom advisory templates, and provenance-ordered `FactTable::merge`.
+- **Unified `frensense bundle` Subcommand**: Exposed `frensense bundle <corpus_dir> [output.frc]` directly in the primary CLI with rich documentation under `frensense bundle --help`, enabling users to compile positive/negative corpus pairs into `.frc` bundles without internal crate invocations.
+- **Modular Bundling Pipeline**: Extracted the bundle compilation, seed facts ingestion, and replay gate verification into `frensense_bundler::run_facts_pipeline` with strictly scoped helper functions (< 40 lines).
+- **Corpus-Driven C Memory Contract Learning**: Verified end-to-end learning from upstream C codebases (`alsa-lib`), extracting 11 interprocedural memory contracts (allocators, deallocators, parameter consumers) directly from source deltas and enforcing the Zero False-Positive contract on patched code.
+
+### Changed
+
+#### Engine Architecture (Purity Refactor)
+- **Zero Hardcoded Language Knowledge in Engine Core**: Stripped all provider vocabularies, AST node strings, route patterns, and language-specific hint tables from `frensense-engine`. The engine operates exclusively over abstract compiler IR, SSA memory variables, Steensgaard points-to classes, and data-driven `FactTable` facts.
+- **Structured Sink Alerts and Observations**: Replaced hardcoded prose and string templates with structured `CheckerFinding` payloads carrying rule IDs, fact-declared severities, and data-driven observation templates.
+- **Memory & Lifetime Vocabulary Dataflow**: Memory allocators, deallocators, and parameter consumption contracts now flow exclusively through `FactTable` facts populated from `.frc` packs.
+- **Literal Allocations No Longer Root Freshness**: Program-summary inference no longer marks a function returning an object/array literal (`Instruction::Allocate`) as a fresh factory; freshness roots at the declared allocator vocabulary, so GC-managed objects stay out of allocation-lifetime candidates (juice-shop gate holds at TP 12/12 with FP back to 12; OWASP record unchanged at 26.2%).
+- **Modularized UAF Engine**: Decomposed the monolithic `uaf.rs` checker into single-responsibility submodules under `checks::uaf/` (`types.rs`, `discovery.rs`, `must_exec.rs`, `walker.rs`, `uninit.rs`, and `mod.rs`), adhering to strict single-purpose function sizing (< 40 lines).
+
+#### Documentation
+- **Benchmark Record Refreshed**: The OWASP Benchmark for Python record is re-scored at **26.2%** score (TPR 28.5%, FPR 2.3%, TP/FP/FN/TN 129/18/323/760, 6s scan) against v0.7.0-preview.5 in `README.md` and `docs/BENCHMARKING.md`, with the full per-CWE table updated; CWE-328 (weak hash) now scores 100% (71/71, zero false positives).
+
+### Removed
+
+#### Engine
+- **Legacy Taint Engines**: Deleted obsolete `SvfgTaintEngine`, legacy `TaintEngine`, and `SvfgStore`, removing dead synchronization overhead and reducing memory footprint.
+- **`policy.rs` Decoupling**: Deleted monolithic `policy.rs`, migrating fact types and rule schemas directly into engine kinds and packgen definitions.
+- **Devtools Binary Separation**: Relocated internal debug and benchmarking runners from engine sources into the dedicated `frensense-devtools` workspace crate.
+
+### Fixed
+
+#### Engine
+- **Fixture Seam Resolution**: Resolved all remaining fixture seams across the 116 held-out test corpus, eliminating false positives from undecorated routes and untainted receivers while preserving all true positives.
+- **Fallthrough Blindness on `goto` Error Exits**: Resolved an engine blindspot where unmodeled `goto` statements in C AST lowering caused error-diverting guard branches to fall through into subsequent code blocks.
+- **Out-Parameter Uninitialized False Positives**: Resolved false positive `UninitializedFree` reports on valid C out-parameter patterns (e.g. `snd_config_hook_load`), ensuring full precision on real-world production codebases.
+- **Weak-Hash Selector Coverage Regression**: Credential-context qualification of selector-shape weak-hash rules is now declared per rule in `frensense_lang::policy::WeakPrimitiveRule` (`requires_credential_context`) instead of applied uniformly: `crypto.createHash` stays qualified inside credential-named functions (generic digest utilities remain silent), while explicit weak-algorithm selectors (`hashlib.new('md5')`) fire unconditionally - restoring the OWASP CWE-328 class to 71/71 true positives with zero new false positives (juice-shop gate stays at 12 FP, corpus bundles 8/8).
+
+## [0.7.0-preview.5] - 2026-09-30
+
+Preview release adding graph-based UAF validation over the store-aware program SVFG, control-dependence gating for guard bypass and policy checks, bounded interprocedural path re-expansion, single-owner function IRs with closure-edge feeding, and an exactly-once detection regression gate.
+
+### Added
+
+#### Engine
+- **Graph-Based UAF Validation**: Added `check_with_prog` and `check_all_with_graph`, validating free-to-use flows against store-aware `ProgramSvfg` paths through scan, so a UAF alert requires an end-to-end path rather than a local two-node pattern.
+- **Control Dependence Graph**: Added dominator-based CDG analysis (`ir/control.rs`) exposing the set of predicates controlling each block.
+- **Predicate-Feeds Guard Gating**: Guard bypass checks now require the guard's predicate to actually control the sink's block (`feeds_predicate`), silencing predicate-blockers that never control the risky path.
+- **Policy Trigger-Site Dominance Caching**: Co-occurrence policy checks evaluate requirement satisfaction at trigger sites with dominance caching, so nested requirements resolve without per-node repetition.
+- **Bounded Path Re-Expansion**: Forward taint explores beyond the first call boundary with a bounded interprocedural continuation keyed by (function, node, context-block) and a `seen_nodes` revisit guard, resolving deep parameter-plus-closure chains to the declaring function.
+- **Detection Regression Gate**: Added `regression_gate_tests.rs` locking every nested-function flow shape (parameter, closure, bound-arrow, deep nesting, policy, sanitizer-negative) to exactly one finding with correct owner attribution, plus cross-shape duplicate-result probes.
+
+### Changed
+
+#### Engine
+- **Single-Owner Function IRs**: Every function body is now lowered into exactly one named IR, linked through a new `enclosing_fn` chain; `NodeRole::Function` no longer contributes body copies to the enclosing IR. This removes duplicate findings, misattribution to outer functions, duplicated policy hits, and the linear IR blow-up that nested extractions previously caused.
+- **Closure Edge Feeding**: Free use-nodes inside extracted function bodies are fed from the first enclosing function that defines the name, walking the `enclosing_fn` chain until a defining scope is reached (module scope stops the walk), preserving the flows that previously relied on inlined capture copies; callgraph and callback edges are unchanged.
+- **Extraction Identity Tracking**: Function identity tracking via named children and `bound_fns` with a statics-only `inside_function`, so every extraction site resolves an owner name (`<fn@N>` fallback for nameless functions).
+
+### Fixed
+
+#### Engine
+- **Phantom Const-Function Duplicate Results**: Unnamed const nested functions no longer produce twin IRs and duplicate `<fn@N>` findings; each function resolves a single owner across all nested shapes (verified by duplicate probes: parameter-plus-closure, closure, nested policy, bound-arrow policy, phantom const handler, and returned-arrow cases all return exactly one attributed result).
+- **Receiver Access-Path Attribution**: Session-trust receiver access-path tests now search all IRs, since extracted bodies moved from enclosing IRs to per-function IRs.
 
 ## [0.7.0-preview.4] - 2026-09-29
 

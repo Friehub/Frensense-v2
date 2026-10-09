@@ -11,6 +11,13 @@ pub mod value_spec {
     use crate::analysis::value::{Value, analyze};
     use crate::harness::lower_source;
 
+    /// Production-seeded table (spec seed -> default pack -> pack language
+    /// sections): the checks read `FactTable` only, so test fixtures must
+    /// seed the vocabulary exactly like a production scan.
+    fn ts_facts() -> crate::analysis::taint::facts::FactTable {
+        crate::analysis::taint::facts::seeded_tables(["ts"]).1
+    }
+
     fn var_of<'a>(
         info: &'a crate::analysis::value::ValueInfo,
         ir: &'a crate::ir::function::FunctionIR,
@@ -193,7 +200,7 @@ export function makeKey () {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = crate::analysis::taint::facts::FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| weak_hash::check(ir, &facts))
@@ -212,7 +219,7 @@ export function makeKey () {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = crate::analysis::taint::facts::FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| weak_hash::check(ir, &facts))
@@ -229,7 +236,7 @@ export function makeKey (bits: number) {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = crate::analysis::taint::facts::FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| weak_hash::check(ir, &facts))
@@ -242,7 +249,7 @@ export function makeKey (bits: number) {
     }
 
     /// Checker consumer 2: selector literal through a constant var.
-    /// (`const alg = 'none'; jwtSign(payload, secret, alg)` — the checker
+    /// (`const alg = 'none'; jwtSign(payload, secret, alg)` - the checker
     /// matches callee last segments, so the call must carry the jwt prefix
     /// itself; `jwt.sign` lowers to last segment `sign` and is invisible to
     /// this rule until receiver-chain matching lands.)
@@ -256,7 +263,7 @@ export function signToken (payload: string, secret: string) {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = crate::analysis::taint::facts::FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| weak_hash::check(ir, &facts))
@@ -270,16 +277,13 @@ export function signToken (payload: string, secret: string) {
 
     /// Taint consumer: a sink argument whose entire backward chain is
     /// constant is promoted to Clean, not Vulnerable. The ts config's
-    /// request_param_names make parameters named like `req` sources, but a
+    /// request-param vocabulary makes parameters named like `req` sources, but a
     /// value that never flows from them stays clean. Direct check: a sink
     /// fed ONLY a string literal must have verdict Clean (the walk dead-ends
     /// at a constant root, no source reachable).
     #[test]
     fn constant_sink_argument_is_not_vulnerable() {
-        use crate::analysis::taint::{
-            engine::BackwardVerdict,
-            facts::{config_from_spec, fact_table_from_spec},
-        };
+        use crate::analysis::taint::engine::BackwardVerdict;
         use crate::scan::{prepare, scan_prepared};
 
         let src = r#"
@@ -290,9 +294,7 @@ export function runQuery () {
 }
 "#;
         let files = vec![("t.ts".to_string(), src.to_string(), "ts".to_string())];
-        let spec = frensense_lang::spec_for_ext("ts").unwrap();
-        let config = config_from_spec(spec);
-        let facts = fact_table_from_spec(spec);
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables(["ts"]);
         let prepared = prepare(&files).unwrap();
         let result = scan_prepared(&prepared, &config, &facts);
         assert!(
@@ -312,7 +314,7 @@ export function runQuery () {
     /// The engine promotion path: a source-named variable holding a provable
     /// constant must NOT create a Vulnerable verdict. Built at the IR level
     /// with a config where `getSource` is a source, then a constant assigned
-    /// over it — the lattice proves the value, the walk promotes to Clean.
+    /// over it - the lattice proves the value, the walk promotes to Clean.
     #[test]
     fn const_source_promotion_keeps_real_sources_vulnerable() {
         use crate::analysis::taint::config::TaintConfig;
@@ -331,6 +333,7 @@ export function runQuery () {
                 byte_range: None,
                 is_memory_state: false,
                 object_keys: Vec::new(),
+                declared: false,
             })
         };
         let mem = |ir: &mut FunctionIR, name: &str| {
@@ -340,6 +343,7 @@ export function runQuery () {
                 byte_range: None,
                 is_memory_state: true,
                 object_keys: Vec::new(),
+                declared: false,
             })
         };
 
@@ -404,7 +408,7 @@ export function runQuery () {
     }
 
     /// Soundness guard: a REAL source (call-shaped) must still be
-    /// Vulnerable — the promotion only fires on provable constants.
+    /// Vulnerable - the promotion only fires on provable constants.
     #[test]
     fn real_source_still_vulnerable_after_promotion_wiring() {
         use crate::analysis::taint::config::TaintConfig;
@@ -423,6 +427,7 @@ export function runQuery () {
                 byte_range: None,
                 is_memory_state: false,
                 object_keys: Vec::new(),
+                declared: false,
             })
         };
         let mem = |ir: &mut FunctionIR, name: &str| {
@@ -432,6 +437,7 @@ export function runQuery () {
                 byte_range: None,
                 is_memory_state: true,
                 object_keys: Vec::new(),
+                declared: false,
             })
         };
 
@@ -564,5 +570,302 @@ export function f (k: number) {
         } else {
             panic!("expected entry block terminator to be a Branch");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 2: clean-termination at provably independent values.
+    // -----------------------------------------------------------------------
+
+    /// The walk must cut a backward branch as soon as the value lattice
+    /// proves the node constant - before expanding any predecessors.
+    /// Observable via `stats.nodes_visited`: root only (1) instead of the
+    /// full literal chain (root + def(r) + use(q) + def(q) = 4), and the
+    /// verdict stays Clean.
+    #[test]
+    fn const_argument_branch_is_cut_before_exploration() {
+        use crate::analysis::taint::config::TaintConfig;
+        use crate::analysis::taint::engine::{BackwardTaintEngine, BackwardVerdict};
+        use crate::ir::function::*;
+
+        let cfg = TaintConfig {
+            sources: ["getSource".to_string()].into_iter().collect(),
+            sinks: ["db.execute".to_string()].into_iter().collect(),
+            sanitizers: Default::default(),
+        };
+        let dummy = |ir: &mut FunctionIR, name: &str| {
+            ir.new_var(VarMetadata {
+                source_name: Some(name.to_string()),
+                type_name: None,
+                byte_range: None,
+                is_memory_state: false,
+                object_keys: Vec::new(),
+                declared: false,
+            })
+        };
+        let mem = |ir: &mut FunctionIR, name: &str| {
+            ir.new_var(VarMetadata {
+                source_name: Some(name.to_string()),
+                type_name: None,
+                byte_range: None,
+                is_memory_state: true,
+                object_keys: Vec::new(),
+                declared: false,
+            })
+        };
+
+        // fn main() { q = "lit"; r = q; db.execute(r); }
+        let mut main = FunctionIR::new("main".into());
+        {
+            let b = main.entry_block;
+            let q = dummy(&mut main, "q");
+            main.push_instruction(
+                b,
+                Instruction::Assign {
+                    dest: q,
+                    src: Operand::StringLiteral("lit".to_string()),
+                },
+            );
+            let r = dummy(&mut main, "r");
+            main.push_instruction(
+                b,
+                Instruction::Assign {
+                    dest: r,
+                    src: Operand::Var(q),
+                },
+            );
+            let m1 = mem(&mut main, "m1");
+            main.push_instruction(
+                b,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m1,
+                    mem_in: main.initial_memory_state,
+                    func: "db.execute".into(),
+                    args: vec![Operand::Var(r)],
+                },
+            );
+            main.set_terminator(b, Terminator::Return { src: None });
+        }
+
+        let mut statics = rustc_hash::FxHashMap::default();
+        let leaked: &'static FunctionIR = Box::leak(Box::new(main));
+        statics.insert(leaked.name.clone(), leaked);
+        let prog = crate::analysis::forward::ProgramSvfg::new(&statics, &cfg);
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg);
+        engine.run();
+        assert_eq!(
+            engine.findings.len(),
+            1,
+            "the const-fed sink must still be explored (and cut)"
+        );
+        assert_eq!(
+            engine.findings[0].verdict,
+            BackwardVerdict::Clean,
+            "const-fed sink must be Clean"
+        );
+        assert_eq!(
+            engine.stats.nodes_visited, 1,
+            "const branch must be cut at the root without expanding predecessors \
+             (visited: {:?})",
+            engine.stats.nodes_visited
+        );
+    }
+
+    /// The cut applies across functions too: a constant actual-argument
+    /// reached through the callee's FormalParam is cut at the actual node,
+    /// never walking into the caller's literal chain.
+    #[test]
+    fn const_cross_function_actual_is_cut() {
+        use crate::analysis::taint::config::TaintConfig;
+        use crate::analysis::taint::engine::{BackwardTaintEngine, BackwardVerdict};
+        use crate::ir::function::*;
+
+        let cfg = TaintConfig {
+            sources: ["getSource".to_string()].into_iter().collect(),
+            sinks: ["db.execute".to_string()].into_iter().collect(),
+            sanitizers: Default::default(),
+        };
+        let dummy = |ir: &mut FunctionIR, name: &str| {
+            ir.new_var(VarMetadata {
+                source_name: Some(name.to_string()),
+                type_name: None,
+                byte_range: None,
+                is_memory_state: false,
+                object_keys: Vec::new(),
+                declared: false,
+            })
+        };
+        let mem = |ir: &mut FunctionIR, name: &str| {
+            ir.new_var(VarMetadata {
+                source_name: Some(name.to_string()),
+                type_name: None,
+                byte_range: None,
+                is_memory_state: true,
+                object_keys: Vec::new(),
+                declared: false,
+            })
+        };
+
+        // fn main() { q = "lit"; helper(q); }
+        let mut main = FunctionIR::new("main".into());
+        {
+            let b = main.entry_block;
+            let q = dummy(&mut main, "q");
+            main.push_instruction(
+                b,
+                Instruction::Assign {
+                    dest: q,
+                    src: Operand::StringLiteral("lit".to_string()),
+                },
+            );
+            let m1 = mem(&mut main, "m1");
+            main.push_instruction(
+                b,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m1,
+                    mem_in: main.initial_memory_state,
+                    func: "helper".into(),
+                    args: vec![Operand::Var(q)],
+                },
+            );
+            main.set_terminator(b, Terminator::Return { src: None });
+        }
+
+        // fn helper(p) { db.execute(p); }
+        let mut helper = FunctionIR::new("helper".into());
+        {
+            let b = helper.entry_block;
+            let p = dummy(&mut helper, "p");
+            helper.parameters.push(p);
+            let m1 = mem(&mut helper, "m1");
+            helper.push_instruction(
+                b,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m1,
+                    mem_in: helper.initial_memory_state,
+                    func: "db.execute".into(),
+                    args: vec![Operand::Var(p)],
+                },
+            );
+            helper.set_terminator(b, Terminator::Return { src: None });
+        }
+
+        let mut statics = rustc_hash::FxHashMap::default();
+        let leaked_main: &'static FunctionIR = Box::leak(Box::new(main));
+        let leaked_helper: &'static FunctionIR = Box::leak(Box::new(helper));
+        statics.insert(leaked_main.name.clone(), leaked_main);
+        statics.insert(leaked_helper.name.clone(), leaked_helper);
+        let prog = crate::analysis::forward::ProgramSvfg::new(&statics, &cfg);
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg);
+        engine.run();
+        assert_eq!(engine.findings.len(), 1);
+        assert_eq!(engine.findings[0].verdict, BackwardVerdict::Clean);
+        assert_eq!(
+            engine.stats.nodes_visited, 3,
+            "walk stops at the const actual: sink-arg use, FormalParam, ActualArg \
+             (visited: {})",
+            engine.stats.nodes_visited
+        );
+    }
+
+    /// Prune-safety invariant: only value-producing definitions (Assign,
+    /// BinaryOp, UnaryOp, Cast, all-const phis) ever appear in the lattice.
+    /// Call results, field loads, params, and copies of sources must stay
+    /// `Top` - otherwise the taint engine's const cut could sever a real
+    /// source→sink flow.
+    #[test]
+    fn lattice_values_only_come_from_value_producing_defs() {
+        use crate::analysis::value;
+        use crate::ir::function::*;
+
+        let mut ir = FunctionIR::new("prop".into());
+        let meta = |name: &str, mem: bool| VarMetadata {
+            source_name: Some(name.to_string()),
+            type_name: None,
+            byte_range: None,
+            is_memory_state: mem,
+            object_keys: Vec::new(),
+            declared: false,
+        };
+        let p = ir.new_var(meta("p", false));
+        ir.parameters.push(p);
+
+        // t = getSource() - call dest, must stay Top.
+        let t = ir.new_var(meta("t", false));
+        let m1 = ir.new_var(meta("m1", true));
+        let b = ir.entry_block;
+        ir.push_instruction(
+            b,
+            Instruction::CallStatic {
+                dest: Some(t),
+                mem_out: m1,
+                mem_in: ir.initial_memory_state,
+                func: "getSource".into(),
+                args: vec![],
+            },
+        );
+        // d = p.x - load dest, must stay Top.
+        let d = ir.new_var(meta("d", false));
+        ir.push_instruction(
+            b,
+            Instruction::LoadField {
+                dest: d,
+                mem_in: m1,
+                base: p,
+                field: "x".into(),
+            },
+        );
+        // a = 5; sum = a + 1 - value-producing defs, lattice entries.
+        let a = ir.new_var(meta("a", false));
+        ir.push_instruction(
+            b,
+            Instruction::Assign {
+                dest: a,
+                src: Operand::IntLiteral(5),
+            },
+        );
+        let sum = ir.new_var(meta("sum", false));
+        ir.push_instruction(
+            b,
+            Instruction::BinaryOp {
+                dest: sum,
+                op: "+".into(),
+                lhs: Operand::Var(a),
+                rhs: Operand::IntLiteral(1),
+            },
+        );
+        // c = t - copy of a source, must stay Top.
+        let c = ir.new_var(meta("c", false));
+        ir.push_instruction(
+            b,
+            Instruction::Assign {
+                dest: c,
+                src: Operand::Var(t),
+            },
+        );
+        ir.set_terminator(b, Terminator::Return { src: None });
+
+        let info = value::analyze(&ir);
+        assert!(info.converged, "plain straight-line fn must converge");
+        assert!(info.values.contains_key(&a), "literal assign is a value");
+        assert!(info.values.contains_key(&sum), "folded arith is a value");
+        assert!(
+            !info.values.contains_key(&t),
+            "call results must never enter the lattice"
+        );
+        assert!(
+            !info.values.contains_key(&d),
+            "load dests must never enter the lattice"
+        );
+        assert!(
+            !info.values.contains_key(&c),
+            "copies of sources must never enter the lattice"
+        );
+        assert!(
+            !info.values.contains_key(&p),
+            "params must never enter the lattice"
+        );
     }
 }

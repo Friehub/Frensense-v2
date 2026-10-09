@@ -242,9 +242,13 @@
 //!
 //! **After:**
 //! ```rust,ignore
-//! // Context detection - replaces ROUTE_ENV_KEYWORDS static array
-//! let hints = spec.route_context_hints();
-//! let is_route_context = hints.iter().any(|h| file_source.contains(h));
+//! // Route detection - Express-style registration patterns come from the
+//! // default pack (FactTable::route_patterns) since Phase 6.4; the spec
+//! // keeps only the mechanism-adjacent verb suffix list
+//! let is_route = spec.known_route_verbs().iter()
+//!     .any(|s| callee_text.ends_with(s))
+//!     || facts.route_patterns.get(spec.name()).is_some_and(|pats|
+//!         pats.iter().any(|p| callee_text.ends_with(p.trim_end_matches('('))));
 //!
 //! // Decorator detection - replaces hardcoded NestJS decorator list
 //! let is_route = spec.is_http_route_decorator(decorator_name);
@@ -277,10 +281,11 @@
 
 pub mod providers;
 pub mod registry;
+pub mod rules;
+pub mod severity;
 pub mod spec;
 
 // Convenient re-exports
 pub use registry::{all_specs, spec_for_ext, spec_for_path, LanguageRegistry};
-pub use spec::{
-    Import, LanguageSpec, NodeRole, PackageCategory, PropagatorRule, SanitizerKind, TaintOrigin,
-};
+pub use severity::{SanitizerKind, Severity, SinkRole};
+pub use spec::{Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin};

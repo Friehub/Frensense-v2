@@ -10,10 +10,14 @@ pub mod memory_summary_spec {
     use crate::checks::check_all;
     use crate::harness::lower_source;
 
+    fn c_facts() -> FactTable {
+        crate::analysis::taint::facts::seeded_tables(["c"]).1
+    }
+
     fn hits(src: &str) -> Vec<String> {
         let fns = lower_source("t.c", src, "c").unwrap();
         let ir_refs: Vec<_> = fns.values().collect();
-        let findings = check_all(ir_refs, &FactTable::default());
+        let findings = check_all(ir_refs, &c_facts());
         let mut rules: Vec<String> = findings.into_iter().map(|f| f.rule).collect();
         rules.sort();
         rules
@@ -214,10 +218,10 @@ void caller() {
     /// Corpus/bundle-learned allocation contract: positive sample fires OOB, negative sample stays silent.
     #[test]
     fn bundle_learned_allocator_fires_oob() {
-        use crate::analysis::taint::facts::{FactTable, MemoryContractFact};
+        use crate::analysis::taint::facts::MemoryContractFact;
         use crate::checks::memory_summary::CapacitySpec;
 
-        let mut facts = FactTable::default();
+        let mut facts = c_facts();
         facts.memory_contracts.push(MemoryContractFact {
             name: "custom_kalloc".to_string(),
             returns_fresh: true,
@@ -232,6 +236,7 @@ extern void *custom_kalloc(int size);
 void caller_positive() {
     char *p = custom_kalloc(10);
     p[20] = 1;
+    free(p);
 }
 "#;
         let pos_fns = lower_source("pos.c", pos_src, "c").unwrap();
@@ -251,6 +256,7 @@ extern void *custom_kalloc(int size);
 void caller_negative() {
     char *p = custom_kalloc(10);
     p[5] = 1;
+    free(p);
 }
 "#;
         let neg_fns = lower_source("neg.c", neg_src, "c").unwrap();
@@ -266,10 +272,10 @@ void caller_negative() {
     /// Corpus/bundle-learned deallocator contract: positive sample fires UAF, negative sample stays silent.
     #[test]
     fn bundle_learned_deallocator_fires_uaf() {
-        use crate::analysis::taint::facts::{FactTable, MemoryContractFact};
+        use crate::analysis::taint::facts::MemoryContractFact;
         use crate::checks::memory_summary::CapacitySpec;
 
-        let mut facts = FactTable::default();
+        let mut facts = c_facts();
         facts.memory_contracts.push(MemoryContractFact {
             name: "external_release".to_string(),
             returns_fresh: false,
@@ -320,6 +326,7 @@ void caller_negative() {
     }
 
     /// LearnedFactEntry::MemoryContract round-trips losslessly through bincode.
+    #[cfg(feature = "serialize")]
     #[test]
     fn bundle_contract_roundtrip_bincode() {
         use crate::analysis::taint::facts::LearnedFactEntry;

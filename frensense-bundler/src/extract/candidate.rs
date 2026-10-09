@@ -6,7 +6,8 @@ use std::collections::BTreeSet;
 
 use frensense_engine::analysis::taint::facts::{
     FactTable, GuardBypassFact, LearnedCheckFact, LearnedFactEntry, MemoryContractFact, PolicyFact,
-    PolicyRequirement, PolicyScope, SanitizerFact, SchemaPolicyFact, SinkSignature, WeakCryptoFact,
+    PolicyRequirement, PolicyScope, Provenance, SanitizerFact, SchemaPolicyFact, SinkSignature,
+    WeakCryptoFact,
 };
 use frensense_engine::checks::memory_summary::CapacitySpec;
 
@@ -56,6 +57,15 @@ pub enum Candidate {
     GuardBypass { fact: GuardBypassFact },
     /// Schema policy rule (number builder, enforcer method, or bound keyword).
     SchemaPolicy { fact: SchemaPolicyFact },
+    /// Allocation-size integer-overflow rule declared by the family's
+    /// `[frensense] check-rule:` block (corpus extends the prover's rule
+    /// table; the engine's prover stays stable).
+    IntegerOverflowRule {
+        rule: String,
+        wrap_threshold: u128,
+        severity: String,
+        message: String,
+    },
 }
 
 impl Candidate {
@@ -117,6 +127,17 @@ impl Candidate {
             Candidate::WeakCrypto { fact } => LearnedFactEntry::WeakCrypto(fact.clone()),
             Candidate::GuardBypass { fact } => LearnedFactEntry::GuardBypass(fact.clone()),
             Candidate::SchemaPolicy { fact } => LearnedFactEntry::SchemaPolicy(fact.clone()),
+            Candidate::IntegerOverflowRule {
+                rule,
+                wrap_threshold,
+                severity,
+                message,
+            } => LearnedFactEntry::IntegerOverflowRule {
+                rule: rule.clone(),
+                wrap_threshold: *wrap_threshold,
+                severity: severity.clone(),
+                message: message.clone(),
+            },
         }
     }
 }
@@ -154,14 +175,17 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
             unless_guard,
             unless_range_check,
         } => {
-            table.learned_checks.push(LearnedCheckFact {
-                rule: rule.clone(),
-                call: call.clone(),
-                message: message.clone(),
-                severity: "warning".into(),
-                unless_guard: unless_guard.clone(),
-                unless_range_check: unless_range_check.clone(),
-            });
+            table.learned_checks.push((
+                LearnedCheckFact {
+                    rule: rule.clone(),
+                    call: call.clone(),
+                    message: message.clone(),
+                    severity: "warning".into(),
+                    unless_guard: unless_guard.clone(),
+                    unless_range_check: unless_range_check.clone(),
+                },
+                Provenance::Learned,
+            ));
         }
         Candidate::Policy {
             rule,
@@ -170,14 +194,17 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
             require,
             scope,
         } => {
-            table.policy_facts.push(PolicyFact {
-                rule: rule.clone(),
-                when_call: call.clone(),
-                require: require.clone(),
-                scope: *scope,
-                message: message.clone(),
-                severity: "warning".into(),
-            });
+            table.policy_facts.push((
+                PolicyFact {
+                    rule: rule.clone(),
+                    when_call: call.clone(),
+                    require: require.clone(),
+                    scope: *scope,
+                    message: message.clone(),
+                    severity: "warning".into(),
+                },
+                Provenance::Learned,
+            ));
         }
         Candidate::MemoryContract {
             name,
@@ -214,24 +241,54 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
         }
         Candidate::GuardBypass { fact } => {
             for c in &fact.containment_callees {
-                table.containment_callees.insert(c.clone());
+                table
+                    .containment_callees
+                    .insert(c.clone(), Provenance::Learned);
             }
             for s in &fact.credential_sinks {
-                table.credential_sinks.insert(s.clone());
+                table
+                    .credential_sinks
+                    .insert(s.clone(), Provenance::Learned);
             }
             for p in &fact.credential_params {
-                table.credential_params.insert(p.clone());
+                table
+                    .credential_params
+                    .insert(p.clone(), Provenance::Learned);
             }
         }
         Candidate::SchemaPolicy { fact } => {
             for b in &fact.builders {
-                table.schema_builders.insert(b.clone());
+                table.schema_builders.insert(b.clone(), Provenance::Learned);
             }
             for e in &fact.enforcers {
                 table.schema_enforcers.insert(e.clone());
             }
             for k in &fact.bound_keywords {
-                table.schema_keywords.insert(k.clone());
+                table.schema_keywords.insert(k.clone(), Provenance::Learned);
+            }
+        }
+        Candidate::IntegerOverflowRule {
+            rule,
+            wrap_threshold,
+            severity,
+            message,
+        } => {
+            let fact = frensense_engine::analysis::taint::facts::IntegerOverflowRule {
+                rule_id: rule.clone(),
+                wrap_threshold: *wrap_threshold,
+                severity: severity.clone(),
+                message: message.clone(),
+            };
+            if let Some(existing) = table
+                .integer_overflow_rules
+                .iter_mut()
+                .find(|(r, _)| r.rule_id == fact.rule_id && r.wrap_threshold == fact.wrap_threshold)
+            {
+                *existing = (fact, Provenance::Learned);
+            } else {
+                table
+                    .integer_overflow_rules
+                    .push((fact, Provenance::Learned));
             }
         }
     }
@@ -282,5 +339,66 @@ pub fn fact_key(e: &LearnedFactEntry) -> (String, String) {
         LearnedFactEntry::GuardDenylistPattern { pattern } => {
             ("guard_denylist".into(), pattern.clone())
         }
+        LearnedFactEntry::IntegerOverflowRule { rule, .. } => ("io_rule".into(), rule.clone()),
+        LearnedFactEntry::Hints { kind, .. } => ("hints".into(), format!("{kind:?}")),
+        LearnedFactEntry::WeakPrimitiveRule { rule_id, .. } => {
+            ("weak_primitive".into(), rule_id.clone())
+        }
+        LearnedFactEntry::InsecureConfigRule { rule_id, .. } => {
+            ("insecure_config".into(), rule_id.clone())
+        }
+        LearnedFactEntry::KeySizeRule { rule_id, call, .. } => {
+            ("key_size".into(), format!("{rule_id}:{call}"))
+        }
+        LearnedFactEntry::SuspiciousHashWrappers { calls } => {
+            ("hash_wrappers".into(), calls.join(","))
+        }
+        LearnedFactEntry::BufferBuiltin { name, .. } => ("buffer_builtin".into(), name.clone()),
+        LearnedFactEntry::LanguageSink { language, call, .. } => {
+            ("language_sink".into(), format!("{language}:{call}"))
+        }
+        LearnedFactEntry::LanguageSinkSlots { language, call, .. } => {
+            ("language_sink_slots".into(), format!("{language}:{call}"))
+        }
+        LearnedFactEntry::LanguageIdorSink { language, call, .. } => {
+            ("language_idor_sink".into(), format!("{language}:{call}"))
+        }
+        LearnedFactEntry::LanguageSource { language, pattern } => {
+            ("language_source".into(), format!("{language}:{pattern}"))
+        }
+        LearnedFactEntry::LanguageSanitizer { language, call, .. } => {
+            ("language_sanitizer".into(), format!("{language}:{call}"))
+        }
+        LearnedFactEntry::LanguagePropagator { language, call, .. } => {
+            ("language_propagator".into(), format!("{language}:{call}"))
+        }
+        LearnedFactEntry::LanguageSessionRoot { language, root } => {
+            ("language_session_root".into(), format!("{language}:{root}"))
+        }
+        LearnedFactEntry::LanguageRoutePattern { language, pattern } => (
+            "language_route_pattern".into(),
+            format!("{language}:{pattern}"),
+        ),
+        // Phase 6.5 structural vocabularies: pack-only whole-table
+        // entries, keyed by their contents like the other table-shaped
+        // facts.
+        LearnedFactEntry::StackAllocators { values } => {
+            ("stack_allocators".into(), values.join(","))
+        }
+        LearnedFactEntry::CollectionConstructors { values } => {
+            ("collection_constructors".into(), values.join(","))
+        }
+        LearnedFactEntry::SchemaDescribeMethods { values } => {
+            ("schema_describe_methods".into(), values.join(","))
+        }
+        LearnedFactEntry::NullTokens { values } => ("null_tokens".into(), values.join(",")),
+        LearnedFactEntry::SessionAccessors { values } => {
+            ("session_accessors".into(), values.join(","))
+        }
+        LearnedFactEntry::ReceiverParams { values } => ("receiver_params".into(), values.join(",")),
+        LearnedFactEntry::LanguageAmbiguousVerbs { language, values } => (
+            "language_ambiguous_verbs".into(),
+            format!("{language}:{}", values.join(",")),
+        ),
     }
 }

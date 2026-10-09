@@ -6,9 +6,10 @@ use std::fs;
 use tempfile::TempDir;
 
 use frensense_engine::analysis::taint::config::TaintConfig;
+use frensense_engine::analysis::taint::engine::BackwardVerdict;
 use frensense_engine::analysis::taint::facts::{
-    config_from_spec, fact_table_from_spec, FactTable, LearnedFactEntry, PolicyFact,
-    PolicyRequirement, PolicyScope,
+    tables_from_exts_with_pack, FactTable, LearnedFactEntry, PolicyFact, PolicyRequirement,
+    PolicyScope,
 };
 use frensense_engine::scan;
 
@@ -102,12 +103,7 @@ export function handle(req: any) { return req; }
         assert_eq!(families[0].id, "adv");
         assert_eq!(families[0].metadata.cwe.as_deref(), Some("CWE-79"));
 
-        let (bytes, _) = crate::builder::build_facts_bundle(
-            dir.path(),
-            &TaintConfig::default(),
-            &FactTable::default(),
-        )
-        .unwrap();
+        let (bytes, _) = crate::builder::build_facts_bundle(dir.path()).unwrap();
         let loaded = crate::format::load_bundle(&bytes).unwrap();
         let pat = loaded
             .patterns
@@ -137,12 +133,7 @@ export function handle(req: any) { return req; }
         )
         .unwrap();
 
-        let (bytes, _) = crate::builder::build_facts_bundle(
-            dir.path(),
-            &TaintConfig::default(),
-            &FactTable::default(),
-        )
-        .unwrap();
+        let (bytes, _) = crate::builder::build_facts_bundle(dir.path()).unwrap();
         let loaded = crate::format::load_bundle(&bytes).unwrap();
         let pat = loaded
             .patterns
@@ -248,6 +239,47 @@ mod grouping_tests {
     }
 
     #[test]
+    fn heldout_variants_are_excluded_from_grouping() {
+        // Held-out files are blind-verification material: they must never
+        // contribute a family, facts, or votes to the extracted bundle.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "uaf_positive.c",
+            "void h(void) { char *p; free(p); }\n",
+        );
+        write(
+            &dir,
+            "uaf_negative.c",
+            "void h(void) { char *p = 0; free(p); }\n",
+        );
+        write(
+            &dir,
+            "uaf_heldout_positive.c",
+            "void g(void) { char *q; free(q); }\n",
+        );
+        write(
+            &dir,
+            "uaf_heldout_negative.c",
+            "void g(void) { char *q = 0; free(q); }\n",
+        );
+
+        let families = group_families(dir.path()).unwrap();
+        let ids: Vec<&str> = families.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(ids, vec!["uaf"], "ids: {ids:?}");
+        assert_eq!(
+            families[0].positives.len(),
+            1,
+            "held-out leaked into positives"
+        );
+        assert_eq!(
+            families[0].negatives.len(),
+            1,
+            "held-out leaked into negatives"
+        );
+    }
+
+    #[test]
     fn declared_check_call_survives_language_split() {
         // The metadata comment is language-specific syntax; the py variant
         // declares it and only the python sub-family carries it.
@@ -319,16 +351,15 @@ mod policy_proposal_tests {
     }
 
     fn builtin() -> (TaintConfig, FactTable) {
-        let mut config = TaintConfig::default();
-        let mut table = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            table.merge(&fact_table_from_spec(spec));
-        }
-        (config, table)
+        // Production `family_tables` seeds spec -> default pack -> pack
+        // language sections; mirror it with the production-shaped helper.
+        let all_extensions: Vec<&str> = frensense_lang::all_specs()
+            .flat_map(|s| s.extensions().iter().copied())
+            .collect();
+        tables_from_exts_with_pack(
+            all_extensions,
+            crate::format::default_pack().learned_facts.as_slice(),
+        )
     }
 
     #[test]
@@ -346,7 +377,7 @@ mod policy_proposal_tests {
         );
         let families = group_families(dir.path()).unwrap();
         let (config, table) = builtin();
-        let (learned, published) = extract_facts(&families, &config, &table);
+        let (learned, published) = extract_facts_with_tables(&families, &config, &table);
 
         let _policies: Vec<&PolicyFact> = published
             .iter()
@@ -354,7 +385,7 @@ mod policy_proposal_tests {
                 LearnedFactEntry::Policy { .. } => match learned
                     .policy_facts
                     .iter()
-                    .find(|p| p.rule == rule_of(&f.entry))
+                    .find(|(p, _)| p.rule == rule_of(&f.entry))
                 {
                     _ => None,
                 },
@@ -398,7 +429,7 @@ mod policy_proposal_tests {
         );
         let families = group_families(dir.path()).unwrap();
         let (config, table) = builtin();
-        let (_, published) = extract_facts(&families, &config, &table);
+        let (_, published) = extract_facts_with_tables(&families, &config, &table);
         let entries: Vec<&LearnedFactEntry> = published.iter().map(|f| &f.entry).collect();
         assert!(
             entries.iter().any(|e| matches!(
@@ -430,7 +461,7 @@ mod policy_proposal_tests {
         let families = group_families(dir.path()).unwrap();
         assert!(families[0].declared_check_call.is_none());
         let (config, table) = builtin();
-        let (_, published) = extract_facts(&families, &config, &table);
+        let (_, published) = extract_facts_with_tables(&families, &config, &table);
         assert!(
             published
                 .iter()
@@ -452,8 +483,7 @@ mod policy_proposal_tests {
             "ban_negative.ts",
             "// check-call: evaluate\nfunction run() { evaluate(request); }\n",
         );
-        let (bytes, published) =
-            crate::builder::build_facts_bundle(dir.path(), &builtin().0, &builtin().1).unwrap();
+        let (bytes, published) = crate::builder::build_facts_bundle(dir.path()).unwrap();
         let loaded = crate::format::load_bundle(&bytes).unwrap();
         let has_policy = loaded
             .learned_facts
@@ -504,7 +534,7 @@ mod policy_proposal_tests {
             families.iter().map(|f| &f.id).collect::<Vec<_>>()
         );
 
-        let (_, published) = extract_facts(&families, &config, &table);
+        let (_, published) = extract_facts_with_tables(&families, &config, &table);
 
         // The bundler must publish at least one Check or Policy fact for the
         // `delete_user_account` trigger with the guard.
@@ -537,9 +567,9 @@ mod policy_proposal_tests {
 
         // The learned fact table must separate the family: positive alerts,
         // negative stays silent.
-        let (learned, _) = extract_facts(&families, &config, &table);
+        let (learned, _) = extract_facts_with_tables(&families, &config, &table);
         let family = &families[0];
-        let prep = gate::PreparedFamily::new(family).unwrap();
+        let prep = gate::PreparedFamily::new(family, &table).unwrap();
         assert!(
             prep.separates(&config, &learned),
             "family must separate under learned facts: positive alerts, negative is silent"
@@ -557,16 +587,15 @@ mod slot_regression_tests {
     use super::*;
 
     fn builtin() -> (TaintConfig, FactTable) {
-        let mut config = TaintConfig::default();
-        let mut table = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            table.merge(&fact_table_from_spec(spec));
-        }
-        (config, table)
+        // Production `family_tables` seeds spec -> default pack -> pack
+        // language sections; mirror it with the production-shaped helper.
+        let all_extensions: Vec<&str> = frensense_lang::all_specs()
+            .flat_map(|s| s.extensions().iter().copied())
+            .collect();
+        tables_from_exts_with_pack(
+            all_extensions,
+            crate::format::default_pack().learned_facts.as_slice(),
+        )
     }
 
     fn ts_file(name: &str, source: &str) -> (String, String, String) {
@@ -641,13 +670,16 @@ export function badSearch (req: any) {
 
         let res = scan::scan(&[ts_file("jwt.ts", JWT_VERIFY)], &config, &table);
         assert!(
-            !res.has_alert(),
+            !alerts(&res),
             "jwt.verify(token, secret) must not alert; got {:?}",
-            res.vulnerable().collect::<Vec<_>>()
+            res.findings
+                .iter()
+                .filter(|f| { f.verdict == BackwardVerdict::Vulnerable && f.alert.is_some() })
+                .collect::<Vec<_>>()
         );
 
         let ctrl = scan::scan(&[ts_file("ctrl.ts", CONTROL_SINK)], &config, &table);
-        assert!(ctrl.has_alert(), "control injection flow must still alert");
+        assert!(alerts(&ctrl), "control injection flow must still alert");
     }
 
     #[test]
@@ -663,9 +695,9 @@ export function badSearch (req: any) {
             &config,
             &table,
         );
-        assert!(pos.has_alert(), "taint in the SQL slot must alert");
+        assert!(alerts(&pos), "taint in the SQL slot must alert");
         assert!(
-            !neg.has_alert(),
+            !alerts(&neg),
             "taint in the params binding channel must not alert"
         );
     }
@@ -689,7 +721,7 @@ export function badSearch (req: any) {
             metadata: FamilyMetadata::default(),
         };
 
-        let (learned, published) = extract_facts(&[param, jwt], &config, &table);
+        let (learned, published) = extract_facts_with_tables(&[param, jwt], &config, &table);
 
         let query_fact = published.iter().any(
             |f| matches!(&f.entry, LearnedFactEntry::Sink { call, .. } if call.as_str() == "query"),
@@ -711,9 +743,9 @@ export function badSearch (req: any) {
             &config,
             &merged,
         );
-        assert!(pos.has_alert(), "SQL-slot danger must survive fact merge");
+        assert!(alerts(&pos), "SQL-slot danger must survive fact merge");
         assert!(
-            !neg.has_alert(),
+            !alerts(&neg),
             "binding-channel safety must survive fact merge"
         );
     }

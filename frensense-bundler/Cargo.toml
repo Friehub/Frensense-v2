@@ -1,6 +1,6 @@
 [package]
 name = "frensense-bundler"
-version = "0.7.0-preview.4"
+version = "0.7.0-preview.5"
 license = "GPL-3.0-only"
 edition = "2021"
 description = "Frensense corpus bundler library"
@@ -15,13 +15,12 @@ blake3 = "1.5"
 tracing = "0.1"
 
 tree-sitter = "0.23"
-toml = "0.8"
 regex = "1"
 rustc-hash = "1.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-frensense-lang = { version = "0.7.0-preview.4", path = "../frensense-lang" }
-frensense-engine = { version = "0.7.0-preview.4", path = "../frensense-engine", features = ["serialize"] }
+frensense-lang = { version = "0.7.0-preview.5", path = "../frensense-lang" }
+frensense-engine = { version = "0.7.0-preview.5", path = "../frensense-engine", features = ["serialize"] }
 
 tree-sitter-typescript = "0.23"
 [dev-dependencies]

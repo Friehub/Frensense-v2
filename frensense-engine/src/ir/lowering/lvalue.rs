@@ -26,6 +26,19 @@ impl<'a> LoweringContext<'a> {
                     None
                 }
             }
+            _ if node.kind() == "pointer_expression" => {
+                let arg = node
+                    .child_by_field_name("argument")
+                    .or_else(|| node.named_child(0))?;
+                if let Some(Operand::Var(base)) = self.visit_node(arg) {
+                    Some(LValue::Element {
+                        base,
+                        index: Operand::IntLiteral(0),
+                    })
+                } else {
+                    None
+                }
+            }
             // MemberAccess covers both `obj.field` and `obj[i]`: JS maps
             // subscript_expression here with property_field = "index". Distinguish
             // by attempting to evaluate the property node as an operand.
@@ -33,8 +46,8 @@ impl<'a> LoweringContext<'a> {
                 object_field,
                 property_field,
             } => {
-                let obj_node = node.child_by_field_name(object_field)?;
-                let prop_node = node.child_by_field_name(property_field)?;
+                let obj_node = node.child_by_field_name(object_field.as_ref())?;
+                let prop_node = node.child_by_field_name(property_field.as_ref())?;
 
                 let base_op = self.visit_node(obj_node)?;
 

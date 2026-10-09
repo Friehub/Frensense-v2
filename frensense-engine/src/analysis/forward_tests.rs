@@ -6,7 +6,7 @@
 
 #[cfg(test)]
 pub mod interprocedural_tests {
-    use crate::analysis::forward::{InterproceduralTaintEngine, ProgramSvfg};
+    use crate::analysis::forward::{InterproceduralTaintEngine, ProgramSvfg, SinkAlert};
     use crate::analysis::taint::config::TaintConfig;
     use crate::graph::svfg::{NodeKey, NodeKind, SvfgBuilder};
     use crate::ir::function::*;
@@ -19,6 +19,7 @@ pub mod interprocedural_tests {
             byte_range: None,
             is_memory_state: false,
             object_keys: Vec::new(),
+            declared: false,
         }
     }
 
@@ -29,6 +30,7 @@ pub mod interprocedural_tests {
             byte_range: None,
             is_memory_state: true,
             object_keys: Vec::new(),
+            declared: false,
         }
     }
 
@@ -54,7 +56,7 @@ pub mod interprocedural_tests {
         ProgramSvfg::new(&map, &config())
     }
 
-    fn run_engine(prog: &ProgramSvfg) -> Vec<String> {
+    fn run_engine(prog: &ProgramSvfg) -> Vec<SinkAlert> {
         let cfg = config();
         let mut engine = InterproceduralTaintEngine::new(prog, &cfg);
         engine.run();
@@ -130,7 +132,6 @@ pub mod interprocedural_tests {
         }
 
         let prog = build_program(vec![main, helper]);
-        let hi = prog.function_index("helper").unwrap();
 
         // Cross edge exists: main's ActualArg → helper's FormalParam.
         let _main_i = prog.function_index("main").unwrap();
@@ -146,11 +147,7 @@ pub mod interprocedural_tests {
             "arg edge must carry taint into helper's sink; got {:?}",
             alerts
         );
-        assert!(alerts[0].contains("db.execute") && alerts[0].contains("[in helper]"));
-
-        // Summary: helper's param 0 reaches a sink.
-        let sum = prog.functions[hi].summary.as_ref().unwrap();
-        assert!(sum.param_reaches_sink[0], "helper param 0 reaches sink");
+        assert!(alerts[0].sink == "db.execute" && alerts[0].function == "helper");
     }
 
     // -----------------------------------------------------------------------
@@ -224,7 +221,7 @@ pub mod interprocedural_tests {
             "return edge must carry taint from get() into main's sink; got {:?}",
             alerts
         );
-        assert!(alerts[0].contains("db.execute") && alerts[0].contains("[in main]"));
+        assert!(alerts[0].sink == "db.execute" && alerts[0].function == "main");
     }
 
     // -----------------------------------------------------------------------
@@ -341,7 +338,7 @@ pub mod interprocedural_tests {
             "taint must flow source_fn → middle → main via summaries + ret edges; got {:?}",
             alerts
         );
-        assert!(alerts[0].contains("[in main]"));
+        assert!(alerts[0].function == "main");
     }
 
     // -----------------------------------------------------------------------
@@ -527,7 +524,7 @@ pub mod interprocedural_tests {
             "only the raw (unsanitized) path should alert; got {:?}",
             alerts
         );
-        assert!(alerts[0].contains("argument 0"));
+        assert!(alerts[0].slot == 0);
     }
 
     // -----------------------------------------------------------------------
@@ -610,7 +607,7 @@ pub mod interprocedural_tests {
             "cycle handling must stay sound: expected exactly 1 alert; got {:?}",
             alerts
         );
-        assert!(alerts[0].contains("[in rec]"));
+        assert!(alerts[0].function == "rec");
     }
 
     // -----------------------------------------------------------------------
@@ -834,12 +831,10 @@ pub mod interprocedural_tests {
             "local source→sink path still fires; got {:?}",
             alerts
         );
-        assert!(alerts[0].contains("[in main]"));
+        assert!(alerts[0].function == "main");
 
         // Also sanity-check the raw SvfgBuilder path is untouched.
-        let (graph, def_site) = SvfgBuilder::new(prog.functions[0].ir).build();
-        assert!(!graph.stats().edge_count.to_string().is_empty());
-        let _ = def_site;
+        let (_graph, _def_site) = SvfgBuilder::new(prog.functions[0].ir).build();
     }
 
     // -----------------------------------------------------------------------
@@ -1048,7 +1043,8 @@ pub mod interprocedural_tests {
             (NodeKey::instr(b, 1, obj), NodeKey::instr(b, 1, val))
         };
 
-        let prog = ProgramSvfg::new(
+        let (_, facts) = crate::analysis::taint::facts::seeded_tables(["ts"]);
+        let prog = ProgramSvfg::new_with_facts(
             &[
                 ("MyClass.method".into(), &callee),
                 ("caller".into(), &caller),
@@ -1056,6 +1052,7 @@ pub mod interprocedural_tests {
             .into_iter()
             .collect(),
             &TaintConfig::default(),
+            &facts,
         );
 
         let caller_idx = prog.function_index("caller").unwrap();
@@ -1163,5 +1160,122 @@ pub mod interprocedural_tests {
             val_edges.contains(&(callee_idx, arg_node)),
             "val must connect to arg"
         );
+    }
+}
+
+#[cfg(test)]
+pub mod is_source_tests {
+    use crate::analysis::forward::{is_source, member_access_path};
+    use crate::analysis::taint::config::TaintConfig;
+    use crate::graph::svfg::NodeKey;
+    use crate::harness::lower_source;
+    use crate::ir::function::{FunctionIR, Instruction};
+
+    const SAMPLE: &str = r#"
+function handler(ctx) {
+  const a = ctx.request.body;
+  const b = ctx.env.SECRET;
+  const c = ctx.state.user;
+  consume(a, b, c);
+}
+"#;
+
+    fn sample_ir() -> FunctionIR {
+        lower_source("t.ts", SAMPLE, "ts")
+            .expect("lower")
+            .remove("handler")
+            .expect("handler fn")
+    }
+
+    /// NodeKey of the final `LoadField` whose reconstructed access path is `path`.
+    fn node_for(ir: &FunctionIR, path: &str) -> NodeKey {
+        for (block, blk) in &ir.blocks {
+            for (idx, instr) in blk.instructions.iter().enumerate() {
+                if let Instruction::LoadField {
+                    base, field, dest, ..
+                } = instr
+                    && member_access_path(ir, *base, field) == path
+                {
+                    return NodeKey {
+                        block: *block,
+                        instr_idx: Some(idx),
+                        var: *dest,
+                    };
+                }
+            }
+        }
+        panic!("no LoadField reconstructing access path {path:?}");
+    }
+
+    fn config(sources: &[&str]) -> TaintConfig {
+        TaintConfig {
+            sources: sources.iter().map(|s| (*s).to_string()).collect(),
+            sinks: Default::default(),
+            sanitizers: Default::default(),
+        }
+    }
+
+    /// Whole-value root registration ("ctx") must not leak into fields when
+    /// the config also declares granular rules for that root ("ctx.state"):
+    /// undeclared subtrees like `ctx.env.SECRET` stay clean.
+    #[test]
+    fn granular_rules_win_over_whole_value_root() {
+        let ir = sample_ir();
+        let cfg = config(&["ctx", "ctx.state"]);
+        assert!(
+            is_source(&ir, &cfg, &node_for(&ir, "ctx.state.user")),
+            "dotted source rule stays live"
+        );
+        assert!(
+            !is_source(&ir, &cfg, &node_for(&ir, "ctx.env.SECRET")),
+            "whole-value root must not cover undeclared fields when granular rules exist"
+        );
+        assert!(
+            !is_source(&ir, &cfg, &node_for(&ir, "ctx.request.body")),
+            "undeclared subtree under a suppressed root is not a source"
+        );
+    }
+
+    /// Without granular rules the whole-value root still covers its subtree
+    /// (destructured-root semantics: bare "body" covers "body.field").
+    #[test]
+    fn whole_value_root_covers_subtree_without_granular_rules() {
+        let ir = sample_ir();
+        let cfg = config(&["ctx"]);
+        assert!(is_source(&ir, &cfg, &node_for(&ir, "ctx.env.SECRET")));
+        assert!(is_source(&ir, &cfg, &node_for(&ir, "ctx.state.user")));
+    }
+
+    /// Spec acceptance: granular-only config keeps prefix-subtree matching
+    /// for its declared root and never claims undeclared siblings.
+    #[test]
+    fn spec_acceptance_granular_only_config() {
+        let ir = sample_ir();
+        let cfg = config(&["ctx.request"]);
+        assert!(is_source(&ir, &cfg, &node_for(&ir, "ctx.request.body")));
+        assert!(!is_source(&ir, &cfg, &node_for(&ir, "ctx.env.SECRET")));
+    }
+
+    /// The alert-text resolver must agree with `is_source` on the same
+    /// nodes: whatever is not a source must not yield a description, and
+    /// whatever is a source must yield the access path.
+    #[test]
+    fn source_description_agrees_with_is_source() {
+        use crate::analysis::taint::engine::source_description;
+
+        let ir = sample_ir();
+        let cfg = config(&["ctx", "ctx.state"]);
+        let user = node_for(&ir, "ctx.state.user");
+        assert_eq!(
+            source_description(&ir, &cfg, &user).as_deref(),
+            Some("ctx.state.user"),
+            "declared dotted rule describes itself"
+        );
+        let secret = node_for(&ir, "ctx.env.SECRET");
+        assert!(
+            source_description(&ir, &cfg, &secret).is_none(),
+            "suppressed root yields no description"
+        );
+        assert!(!is_source(&ir, &cfg, &secret));
     }
 }

@@ -14,6 +14,8 @@
 //! forget to implement one. A single trait with good defaults makes the
 //! "forgot to implement" case a compile error, not a silent empty result.
 
+use std::borrow::Cow;
+
 use tree_sitter::Node;
 
 // ── Supporting types ─────────────────────────────────────────────────────────
@@ -21,8 +23,10 @@ use tree_sitter::Node;
 /// What role does a tree-sitter node play in the language?
 ///
 /// Variants carry the **field names** needed to walk child nodes so callers
-/// never need a second lookup.  All `*_field` values are `'static str` - they
-/// come from tree-sitter grammar constants and never allocate.
+/// never need a second lookup. All `*_field` values are `Cow<'static, str>`:
+/// `Borrowed` for spec vocabulary (tree-sitter grammar constants, no
+/// allocation), `Owned` for bundle-learned roles (allocated once per fact,
+/// never leaked).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeRole {
     // ── Definitions ──────────────────────────────────────────────────────
@@ -33,38 +37,38 @@ pub enum NodeRole {
         is_method: bool,
         /// Field holding the function's name identifier, if any.
         /// `None` for arrow functions, lambdas, anonymous closures.
-        name_field: Option<&'static str>,
+        name_field: Option<Cow<'static, str>>,
         /// Field holding the parameter list node.
-        params_field: &'static str,
+        params_field: Cow<'static, str>,
         /// Field holding the body block node.
-        body_field: &'static str,
+        body_field: Cow<'static, str>,
     },
 
     // ── Assignments / declarations ────────────────────────────────────────
     /// A variable declaration with an initializer.
     /// `let x = expr` (JS/Rust), `x := expr` (Go).
     Declaration {
-        name_field: &'static str,
-        value_field: &'static str,
+        name_field: Cow<'static, str>,
+        value_field: Cow<'static, str>,
     },
     /// A mutation of an existing binding.
     /// `x = expr` (all languages), `x += expr`.
     Assignment {
-        lhs_field: &'static str,
-        rhs_field: &'static str,
+        lhs_field: Cow<'static, str>,
+        rhs_field: Cow<'static, str>,
     },
 
     // ── Calls ─────────────────────────────────────────────────────────────
     /// Any function / method invocation.
     Call {
-        callee_field: &'static str,
-        args_field: &'static str,
+        callee_field: Cow<'static, str>,
+        args_field: Cow<'static, str>,
     },
     /// Member / field access producing a value (not a call).
     /// `obj.field`, `obj->field`, `obj.attribute`.
     MemberAccess {
-        object_field: &'static str,
-        property_field: &'static str,
+        object_field: Cow<'static, str>,
+        property_field: Cow<'static, str>,
     },
 
     // ── Control flow ──────────────────────────────────────────────────────
@@ -98,8 +102,12 @@ pub enum NodeRole {
     Block, // { … } / indented block
     /// Value-context composite literal: JS/TS `object` used as a value (not a
     /// statement block), `array`, `object_pattern` in expression position.
-    /// All children are value-producers; taint in ANY child taints the whole
-    /// composite (may-analysis merge, the conservative direction).
+    /// Uniformly-keyed objects and arrays lower to an allocation with one
+    /// store per property/element: field reads resolve through
+    /// field-sensitive heap edges (taint in one property does not pollute
+    /// reads of another), while whole-container consumers see every stored
+    /// value. Objects with unkeyed children (spreads) keep the legacy
+    /// may-analysis union - conservative for taint.
     Composite,
     Import,     // import / use / require
     Export,     // export (JS/TS only)
@@ -133,29 +141,6 @@ pub enum NodeRole {
 
 impl NodeRole {}
 
-/// Sanitizer strength: what kind of injection does this call defeat?
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum SanitizerKind {
-    /// Completely removes taint (e.g. numeric coercion: `int(user_input)`).
-    Full,
-    /// Defeats HTML/XSS injection only.
-    HtmlEscape,
-    /// Defeats URL-based attacks only.
-    UrlEncode,
-    /// Parameterised query - defeats SQL injection only.
-    SqlParameterize,
-    /// NoSQL sanitization - defeats NoSQL injection only.
-    NoSqlParameterize,
-    /// Session-store accessor trust: `store.get(token)` returns a
-    /// server-issued session object (undefined for unknown tokens), so
-    /// identity fields read off the result are not attacker-controlled.
-    /// Receiver-aware: only applies when the receiver root is a declared
-    /// session store.
-    SessionTrust,
-    /// Path canonicalization - defeats path traversal only.
-    PathNormalize,
-}
-
 /// Broad category for what a package is used for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PackageCategory {
@@ -173,43 +158,6 @@ pub enum PackageCategory {
     Crypto,
     Logging,
     Testing,
-}
-
-/// Standard classification labels for sink functions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum SinkLabel {
-    CodeExecution,
-    SqlInjection,
-    NoSqlInjection,
-    CommandInjection,
-    PathTraversal,
-    Ssrf,
-    OpenRedirect,
-    Xss,
-    XssDom,
-    XssReflected,
-    HeaderInjection,
-    CookiePoisoning,
-    ContentTypeInjection,
-    StorageWrite,
-    LogLeak,
-    ResponseLeak,
-    CredentialLeak,
-    TemplateSsti,
-    UnsafeDeserialize,
-    LdapInjection,
-    XpathInjection,
-    PrototypePollution,
-    Toctou,
-    GraphqlInjection,
-    Xxe,
-    Jwt,
-    JwtWeakAlgorithm,
-    JwtUnsafeDecode,
-    UnsafeMemory,
-    BufferOverflow,
-    FormatString,
-    Unknown,
 }
 
 /// Broad origin of tainted data.
@@ -249,22 +197,6 @@ impl From<&str> for TaintOrigin {
     }
 }
 
-/// A propagator rule describes how taint flows through a specific call.
-///
-/// Example: `fmt.Sprintf` in Go - the format string is not tainted, but
-/// if *any argument* is tainted the return value is tainted.
-#[derive(Debug, Clone)]
-pub struct PropagatorRule {
-    /// Short call name or method name, e.g. `"Sprintf"`, `"format"`, `"join"`.
-    /// Matched against the last segment of a member chain.
-    pub call: &'static str,
-    /// Argument index that carries taint into the return (0-based).
-    /// `None` means *any* argument taints the return.
-    pub tainted_arg: Option<usize>,
-    /// If `true`, a tainted receiver taints the return value.
-    pub tainted_receiver: bool,
-}
-
 /// A parsed import as extracted by [`LanguageSpec::extract_imports`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Import {
@@ -275,6 +207,18 @@ pub struct Import {
     /// The specific symbol imported, if the language supports named imports.
     /// e.g. `from flask import Flask` → `symbol = Some("Flask")`.
     pub symbol: Option<String>,
+}
+
+/// A parsed export or re-export as extracted by [`LanguageSpec::extract_exports`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Export {
+    /// The exported symbol name (the name visible to importers).
+    pub exported_name: String,
+    /// The local / source symbol name being exported.
+    pub local_name: String,
+    /// If this is a re-export from another module (e.g. `export { x as y } from "./foo"`),
+    /// the source module package / path. None for local exports.
+    pub from_module: Option<String>,
 }
 
 // ── The trait ─────────────────────────────────────────────────────────────────
@@ -402,6 +346,12 @@ pub trait LanguageSpec: Send + Sync + 'static {
         false
     }
 
+    /// If the function body has an implicit return expression (e.g. Rust trailing expression
+    /// or JS arrow function expression), return the node producing that return value.
+    fn implicit_return_node<'a>(&self, _fn_node: Node<'a>, _body: Node<'a>) -> Option<Node<'a>> {
+        None
+    }
+
     /// Unwraps declarator wrapper nodes (e.g. `pointer_declarator`, `expression_list`, etc.)
     /// to locate the leaf name binding node.
     fn unwrap_declarator_node<'a>(&self, node: Node<'a>) -> Node<'a> {
@@ -473,6 +423,11 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// `ImportMap` and used by the semantic provider.
     fn extract_imports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Import>;
 
+    /// Walk `root` and return all exports and re-exports found in the file.
+    fn extract_exports<'tree>(&self, _root: Node<'tree>, _source: &str) -> Vec<Export> {
+        Vec::new()
+    }
+
     // ── Tree-sitter queries ───────────────────────────────────────────────
 
     /// A tree-sitter query that captures symbol definitions.
@@ -516,134 +471,18 @@ pub trait LanguageSpec: Send + Sync + 'static {
         false
     }
 
-    /// Names of function parameters that conventionally carry HTTP request data.
-    ///
-    /// Used as a fallback when no type annotation is available.
-    /// Returns `&[]` for languages without HTTP framework conventions (e.g. C).
-    fn request_param_names(&self) -> &'static [&'static str] {
-        &[]
+    /// Route-registration call suffixes (`.post`, `.get`, ...) whose
+    /// function arguments the harness extracts as handlers. The entries
+    /// are matched as suffixes of the callee text.
+    fn known_route_verbs(&self) -> &'static [&'static str] {
+        &[".post", ".get", ".put", ".delete", ".use", ".all"]
     }
 
-    /// Known sink function names for this language.
-    ///
-    /// Returns `(call_name, sink_description)` pairs.  The sink_description is
-    /// a short label used in fingerprint hashing, not for display.
-    fn known_sink_names(&self) -> &'static [(&'static str, crate::spec::SinkLabel)] {
-        &[]
-    }
-
-    /// Per-argument-slot danger facts for sinks whose argument positions
-    /// carry different semantics.
-    ///
-    /// Returns `(call_name, dangerous_slots, binding_args_safe)` where
-    /// `dangerous_slots` lists the argument positions whose taint is an
-    /// alert (empty = every slot dangerous) and `binding_args_safe` marks
-    /// non-dangerous slots as the API's safe binding channel (e.g. the
-    /// params array of a parameterized `query(sql, params)`).
-    ///
-    /// Without this, sinks like `jwt.verify(token, secret)` alert on slot 1
-    /// (the developer-controlled secret), a structural false positive.
-    fn known_sink_signatures(&self) -> &'static [(&'static str, &'static [usize], bool)] {
-        &[]
-    }
-
-    /// Known taint source accessor patterns.
-    ///
-    /// e.g. `"req.body"`, `"request.args"`, `"r.URL.Query"`.
-    /// Known motifs (abstract groups of calls) for this language.
-    /// Returns `(motif_name, concrete_call)` pairs.
-    fn known_motif_members(&self) -> &'static [(&'static str, &'static str)] {
-        &[]
-    }
-
-    fn known_source_patterns(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    // ── Taint propagation ─────────────────────────────────────────────────
-
-    /// Propagator rules for this language's standard library / builtins.
-    ///
-    /// The engine uses these to decide whether the return value of a call is
-    /// tainted when one of its arguments is.
-    fn propagator_rules(&self) -> &'static [PropagatorRule];
-
-    /// Is this call a sanitizer?  Returns the strength if so.
-    fn classify_sanitizer(&self, call_name: &str) -> Option<SanitizerKind>;
-
-    /// Static list of sanitizer call names for this language.
-    ///
-    /// Used to build the engine's [`TaintConfig`] sanitizer set and the
-    /// [`FactTable`](..) sanitizer facts without probing `classify_sanitizer`
-    /// with every identifier in a file. Keep in sync with
-    /// [`classify_sanitizer`](Self::classify_sanitizer).
-    fn known_sanitizer_names(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    /// Receiver roots of trusted session stores (`authenticatedUsers` for
-    /// `authenticatedUsers.get(token)`). The engine treats values derived
-    /// from a session accessor's return as server-issued, not
-    /// attacker-controlled. Empty by default.
-    fn known_session_roots(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    // ── Context hints ─────────────────────────────────────────────────────
-
-    /// Text strings whose presence in a source file suggests an HTTP handler
-    /// context.  Used by the text-based context detector as a fast first pass.
-    fn route_context_hints(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    /// Text strings indicating a test / spec file.
-    fn test_context_hints(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    // ── Engine knowledge not yet covered by spec ─────────────────────────────
-
-    /// HTTP response method names for this language.
-    ///
-    /// Returns `&[]` for languages without HTTP framework conventions.
-    fn response_method_names(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    /// Database API method names.
-    ///
-    /// Returns `&[]` for languages without standard DB API conventions.
-    fn db_api_method_names(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    /// Shell execution API names.
-    ///
-    /// Returns `&[]` for languages without standard shell execution APIs.
-    fn shell_api_method_names(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    /// Route registration call patterns (e.g. `"app.get("`, `"router.post("`).
-    ///
-    /// Returns `&[]` for languages that don't use Express-style registration
-    /// (Go uses `http.HandleFunc`, Python uses `@app.route`, Rust uses macros).
-    fn route_registration_patterns(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    /// Semantic categories for fingerprint similarity scoring.
-    ///
-    /// Returns `(category_name, api_names)` pairs.  When the engine extracts a
-    /// fingerprint, each API call is hashed against the `api_names` list.  If
-    /// matched, the `category_name` hash is added to the fingerprint's
-    /// `semantic_markers`.  During scoring, matching semantic markers increase
-    /// `semantic_sim`, which is a key dimension in the similarity gate.
-    ///
-    /// This is distinct from [`package_category()`](LanguageSpec::package_category)
-    /// which maps package names to sink categories for vulnerability detection.
-    fn known_semantic_categories(&self) -> &'static [(&'static str, &'static [&'static str])] {
+    /// Rule ids this language declares with full advisory metadata
+    /// (severity plus title/impact/improvement templates). Rules absent from
+    /// the registry receive the engine's generic policy fallback. Each
+    /// language owns the rules of its own domain. Empty by default.
+    fn known_rule_registry(&self) -> &'static [crate::severity::RuleEntry] {
         &[]
     }
 }

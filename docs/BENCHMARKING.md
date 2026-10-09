@@ -9,16 +9,16 @@ competitor-comparable.
 
 ## Published record
 
-Scored on 2026-09-26 with frensense v0.7.0-preview.1, no `.frc` bundle
+Scored on 2026-10-02 with frensense v0.7.0-preview.5, no `.frc` bundle
 (built-in language specs only), single-file scans, 8 parallel workers:
 
 | metric | value |
 |---|---|
-| **Score (TPR - FPR)** | **18.2%** |
-| TPR | 19.5% |
-| **FPR** | **1.3%** |
-| TP / FP / FN / TN | 88 / 10 / 364 / 768 |
-| scan time | 9s (1,230 cases) |
+| **Score (TPR - FPR)** | **26.2%** |
+| TPR | 28.5% |
+| **FPR** | **2.3%** |
+| TP / FP / FN / TN | 129 / 18 / 323 / 760 |
+| scan time | 6s (1,230 cases) |
 
 For context, published results on the OWASP Benchmark (Java, v1.2,
 2017-2019), from the OWASP project's own scorecards:
@@ -26,7 +26,7 @@ For context, published results on the OWASP Benchmark (Java, v1.2,
 | tool | score | note |
 |---|---|---|
 | Veracode | ~50% | commercial, best published SAST |
-| **Frensense** | **18.2%** | **FPR 1.3%, lowest of any published tool** |
+| **Frensense** | **26.2%** | **FPR 2.3%, lowest of any published tool** |
 | Fortify SCA | ~11-17% | commercial |
 | Checkmarx | ~0% | commercial |
 | SonarQube | ~0% | commercial |
@@ -48,21 +48,25 @@ score first, classes with at least 5 vulnerable cases):
 | CWE-501 trust boundary | 37 | 0.0% | 0.0% | 0.0% | cookie-attribute checker needed (Secure flag), value-agnostic |
 | CWE-611 XXE | 28 | 0.0% | 0.0% | 0.0% | Python XML parsers unknown (`xml.etree`, `lxml`) |
 | CWE-614 cookie flags | 39 | 0.0% | 0.0% | 0.0% | same checker as CWE-501: set_cookie attribute inspection |
-| CWE-78 cmd injection | 20 | 0.0% | 0.0% | 0.0% | `os.system`/`subprocess` sink names not matching benchmark shapes |
 | CWE-79 XSS | 89 | 0.0% | 0.0% | 0.0% | Flask `render_template`/escape flows unmodeled |
 | CWE-90 LDAP | 29 | 0.0% | 0.0% | 0.0% | LDAP filter sinks unknown |
-| CWE-94 code injection | 53 | 10.0% | 9.1% | 0.9% | `eval`/`exec` partial coverage |
-| CWE-22 path traversal | 168 | 9.2% | 5.8% | 3.4% | `codecs.open` and friends unknown sinks |
-| CWE-643 XPath | 186 | 3.9% | 0.0% | 3.9% | XPath sink table thin (`lxml.etree`) |
-| CWE-502 deserialization | 54 | 5.6% | 0.0% | 5.6% | `pickle.loads` shapes beyond direct call |
-| CWE-89 SQLi | 16 | 20.0% | 0.0% | 20.0% | solid: parameterized-query gate working |
-| CWE-601 redirect | 34 | 38.5% | 4.8% | 33.7% | solid on direct flows |
-| CWE-328 hash | 151 | 100.0% | 0.0% | 100.0% | perfect: weak-hash checker with replay gate |
+| CWE-78 cmd injection | 20 | 23.1% | 14.3% | 8.8% | partial: most benchmark subprocess shapes still unmodeled |
+| CWE-643 XPath | 186 | 9.8% | 0.7% | 9.1% | partial: direct sink shapes fire, the majority of lxml builder shapes miss |
+| CWE-94 code injection | 53 | 35.0% | 21.2% | 13.8% | `eval`/`exec` partial coverage; tainted-vs-constant discrimination still thin (7 safe cases flag) |
+| CWE-22 path traversal | 168 | 36.9% | 3.9% | 33.0% | partial: direct open-family joins fire; `codecs.open` and indirect joins unmodeled |
+| CWE-89 SQLi | 16 | 40.0% | 0.0% | 40.0% | solid: parameterized-query gate working |
+| CWE-502 deserialization | 54 | 44.4% | 2.8% | 41.7% | partial: direct `pickle.loads` calls fire, chained payload shapes miss |
+| CWE-601 redirect | 34 | 69.2% | 19.0% | 50.2% | solid on direct flows; some safe-case redirects still flag |
+| CWE-328 hash | 151 | 100.0% | 0.0% | 100.0% | perfect: declared weak-hash selector rules with per-rule credential qualification |
 
-The pattern, same as the first run: **FPR is best-in-class; TPR is
-limited by named-sink and named-source coverage in the Python fact
-tables.** Every gap row is a table entry or a checker away, which is
-what the roadmap prioritizes.
+The pattern: **FPR is best-in-class; TPR is limited by named-sink and
+named-source coverage in the Python fact tables.** The biggest single
+lever is CWE-330 weak randomness (99 vulnerable cases, none reachable
+yet): modeling Python's `random` module as a source, then the
+cookie-attribute checker (CWE-501/614, 42 vulnerable cases) and the
+XSS/XPath sink shapes (CWE-79/643, 77 vulnerable cases). Every gap row
+is a table entry or a checker away, which is what the roadmap
+prioritizes.
 
 ## Reproduce it yourself
 

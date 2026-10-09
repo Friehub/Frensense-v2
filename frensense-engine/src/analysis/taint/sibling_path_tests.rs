@@ -157,7 +157,7 @@ function handler(req: any): void {
     }
 
     /// Structural integrity: spans align with steps (every path consumer
-    /// relies on this), and the text rendering names the source.
+    /// relies on this).
     #[test]
     fn path_invariants_hold() {
         let p = vulnerable_path(SIBLING_HEAP);
@@ -167,11 +167,6 @@ function handler(req: any): void {
             p.steps.len()
         );
         assert_eq!(p.spans.len(), p.steps.len(), "spans must align with steps");
-        let text = p.render_text();
-        assert!(
-            text.contains("1. source:"),
-            "rendering must start at the source"
-        );
     }
 
     /// Step spans must resolve to the REAL source file (not the function

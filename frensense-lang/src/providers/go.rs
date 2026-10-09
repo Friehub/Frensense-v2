@@ -15,10 +15,7 @@
 
 use tree_sitter::Node;
 
-use crate::spec::{
-    call_last_segment, node_text, Import, LanguageSpec, NodeRole, PackageCategory, PropagatorRule,
-    SanitizerKind, TaintOrigin,
-};
+use crate::spec::{node_text, Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin};
 
 // ── AST classification ────────────────────────────────────────────────────────
 
@@ -27,55 +24,55 @@ fn classify_go(kind: &str) -> NodeRole {
         // ── Functions ────────────────────────────────────────────────────
         "function_declaration" => NodeRole::Function {
             is_method: false,
-            name_field: Some("name"),
-            params_field: "parameters",
-            body_field: "body",
+            name_field: Some("name".into()),
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
         // This was the critical missing case - ALL Go struct methods
         "method_declaration" => NodeRole::Function {
             is_method: true,
-            name_field: Some("name"),
-            params_field: "parameters",
-            body_field: "body",
+            name_field: Some("name".into()),
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
         "func_literal" => NodeRole::Function {
             is_method: false,
             name_field: None,
-            params_field: "parameters",
-            body_field: "body",
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
 
         // ── Declarations / assignments ───────────────────────────────────
         // Go := operator - was missing everywhere in the engine before this crate
         "short_var_declaration" => NodeRole::Declaration {
-            name_field: "left",
-            value_field: "right",
+            name_field: "left".into(),
+            value_field: "right".into(),
         },
         // Go = operator (mutation of existing variable)
         "assignment_statement" => NodeRole::Assignment {
-            lhs_field: "left",
-            rhs_field: "right",
+            lhs_field: "left".into(),
+            rhs_field: "right".into(),
         },
         // var x type = expr  (top-level or function-scoped)
         "var_spec" => NodeRole::Declaration {
-            name_field: "name",
-            value_field: "value",
+            name_field: "name".into(),
+            value_field: "value".into(),
         },
         // const x = expr
         "const_spec" => NodeRole::Declaration {
-            name_field: "name",
-            value_field: "value",
+            name_field: "name".into(),
+            value_field: "value".into(),
         },
 
         // ── Calls ────────────────────────────────────────────────────────
         "call_expression" => NodeRole::Call {
-            callee_field: "function",
-            args_field: "arguments",
+            callee_field: "function".into(),
+            args_field: "arguments".into(),
         },
         // pkg.Function or receiver.Method - NOT `member_expression`
         "selector_expression" => NodeRole::MemberAccess {
-            object_field: "operand",
-            property_field: "field",
+            object_field: "operand".into(),
+            property_field: "field".into(),
         },
 
         // ── Control flow ─────────────────────────────────────────────────
@@ -271,176 +268,6 @@ fn go_classify_param(name: Option<&str>, ann: Option<&str>) -> Option<TaintOrigi
     }
 }
 
-// ── Sanitizers ────────────────────────────────────────────────────────────────
-
-fn go_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
-    match call_last_segment(call) {
-        // Numeric coercion - kills injection risk
-        "Atoi" | "ParseInt" | "ParseUint" | "ParseFloat" | "ParseBool" => Some(SanitizerKind::Full),
-        // HTML escaping
-        "EscapeString" | "HTMLEscapeString" | "HTMLEscape" => Some(SanitizerKind::HtmlEscape),
-        // URL encoding
-        "QueryEscape" | "PathEscape" | "PathUnescape" => Some(SanitizerKind::UrlEncode),
-        // Path cleaning - partial mitigation for path traversal
-        "Clean" | "Abs" | "EvalSymlinks" => Some(SanitizerKind::PathNormalize),
-        _ => None,
-    }
-}
-
-// ── Sink signatures (per-slot danger) ──────────────────────────────────────
-
-/// Per-slot sink knowledge for Go. Go's dominant FP class without this:
-/// `database/sql` parameterized queries, db.Query("SELECT … WHERE id = ?",
-/// userInput) binds safely; only a tainted slot 0 (the query string) is an
-/// injection. Signature names are matched by LAST segment at the call site
-/// (method CallVirtual name / CallStatic func), so "Query" covers any
-/// receiver (db.Query, tx.Query, stmt.QueryContext).
-static GO_SINK_SIGNATURES: &[(&str, &[usize], bool)] = &[
-    // ── database/sql: Query/Exec(sql, args...) ──
-    ("Query", &[0], true),
-    ("QueryRow", &[0], true),
-    ("QueryContext", &[0], true),
-    ("Exec", &[0], true),
-    ("ExecContext", &[0], true),
-    ("Prepare", &[0], true),
-    ("PrepareContext", &[0], true),
-    // ── sqlx (dotted names match by last segment): get/select cost slot 0 ──
-    // (sqlx Get(dest, query, args), dest slot 0 is an out-param, but a
-    // tainted dest is an injection only via the query; keep slot 1 only.)
-    // ── D1 (Cloudflare Workers Go-style bindings) ──
-    ("prepare", &[0], true),
-];
-
-// ── Propagators ───────────────────────────────────────────────────────────────
-
-static GO_PROPAGATORS: &[PropagatorRule] = &[
-    // fmt - format string propagates taint from args
-    PropagatorRule {
-        call: "Sprintf",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "Fprintf",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "Errorf",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "Stringer",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
-    // strings - receiver taints return
-    PropagatorRule {
-        call: "Join",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "Replace",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "ReplaceAll",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "TrimSpace",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "Trim",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "ToLower",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "ToUpper",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "Split",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "SplitN",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "Contains",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "HasPrefix",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "HasSuffix",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    // strconv - propagates taint (type conversion, not sanitization)
-    PropagatorRule {
-        call: "Itoa",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "FormatInt",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "AppendInt",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    // path/filepath - path building propagates traversal risk
-    PropagatorRule {
-        call: "Join",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "Base",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    // bytes.Buffer / strings.Builder
-    PropagatorRule {
-        call: "WriteString",
-        tainted_arg: Some(0),
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "Write",
-        tainted_arg: Some(0),
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "String",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-];
-
 // ── Tree-sitter queries ───────────────────────────────────────────────────────
 
 const GO_SYMBOL_QUERY: &str = r#"
@@ -562,340 +389,7 @@ impl LanguageSpec for GoSpec {
 
     fn is_http_route_decorator(&self, _: &str) -> bool {
         // Go has no decorator syntax; route registration is detected via
-        // route_context_hints and the SemanticProvider's call analysis.
+        // route-registration patterns and the call analysis.
         false
-    }
-
-    fn request_param_names(&self) -> &'static [&'static str] {
-        // Convention: r=*http.Request, w=http.ResponseWriter, c=*gin.Context
-        &["r", "req", "c", "ctx", "w"]
-    }
-
-    fn known_sink_signatures(&self) -> &'static [(&'static str, &'static [usize], bool)] {
-        GO_SINK_SIGNATURES
-    }
-
-    fn known_sink_names(&self) -> &'static [(&'static str, crate::spec::SinkLabel)] {
-        &[
-            // Code Execution
-            ("eval", crate::spec::SinkLabel::CodeExecution),
-            ("exec", crate::spec::SinkLabel::CommandInjection),
-            ("Exec", crate::spec::SinkLabel::CommandInjection),
-            ("Command", crate::spec::SinkLabel::CommandInjection),
-            ("Run", crate::spec::SinkLabel::CommandInjection),
-            ("Output", crate::spec::SinkLabel::CommandInjection),
-            ("CombinedOutput", crate::spec::SinkLabel::CommandInjection),
-            ("spawn", crate::spec::SinkLabel::CommandInjection),
-            ("spawnSync", crate::spec::SinkLabel::CommandInjection),
-            // SQL Injection
-            ("Query", crate::spec::SinkLabel::SqlInjection),
-            ("QueryRow", crate::spec::SinkLabel::SqlInjection),
-            ("QueryContext", crate::spec::SinkLabel::SqlInjection),
-            ("ExecContext", crate::spec::SinkLabel::SqlInjection),
-            ("Prepare", crate::spec::SinkLabel::SqlInjection),
-            ("PrepareContext", crate::spec::SinkLabel::SqlInjection),
-            ("executeRaw", crate::spec::SinkLabel::SqlInjection),
-            ("queryRaw", crate::spec::SinkLabel::SqlInjection),
-            ("prepare", crate::spec::SinkLabel::SqlInjection),
-            // Path Traversal
-            ("ReadFile", crate::spec::SinkLabel::PathTraversal),
-            ("Open", crate::spec::SinkLabel::PathTraversal),
-            ("Create", crate::spec::SinkLabel::PathTraversal),
-            ("WriteFile", crate::spec::SinkLabel::PathTraversal),
-            ("read", crate::spec::SinkLabel::PathTraversal),
-            ("read_to_string", crate::spec::SinkLabel::PathTraversal),
-            ("write", crate::spec::SinkLabel::PathTraversal),
-            ("readFile", crate::spec::SinkLabel::PathTraversal),
-            ("writeFile", crate::spec::SinkLabel::PathTraversal),
-            ("readFileSync", crate::spec::SinkLabel::PathTraversal),
-            ("join", crate::spec::SinkLabel::PathTraversal),
-            ("unlink", crate::spec::SinkLabel::PathTraversal),
-            ("stat", crate::spec::SinkLabel::PathTraversal),
-            ("access", crate::spec::SinkLabel::PathTraversal),
-            // SSRF
-            ("http.Get", crate::spec::SinkLabel::Ssrf),
-            ("http.Post", crate::spec::SinkLabel::Ssrf),
-            ("http.Head", crate::spec::SinkLabel::Ssrf),
-            ("http.Do", crate::spec::SinkLabel::Ssrf),
-            ("Get", crate::spec::SinkLabel::Ssrf),
-            ("Post", crate::spec::SinkLabel::Ssrf),
-            ("Do", crate::spec::SinkLabel::Ssrf),
-            ("NewRequest", crate::spec::SinkLabel::Ssrf),
-            ("fetch", crate::spec::SinkLabel::Ssrf),
-            ("request", crate::spec::SinkLabel::Ssrf),
-            ("got", crate::spec::SinkLabel::Ssrf),
-            // Open Redirect
-            ("redirect", crate::spec::SinkLabel::OpenRedirect),
-            ("Redirect", crate::spec::SinkLabel::OpenRedirect),
-            ("c.redirect", crate::spec::SinkLabel::OpenRedirect),
-            ("location.href", crate::spec::SinkLabel::OpenRedirect),
-            ("window.location", crate::spec::SinkLabel::OpenRedirect),
-            // XSS
-            ("innerHTML", crate::spec::SinkLabel::XssDom),
-            ("outerHTML", crate::spec::SinkLabel::XssDom),
-            ("document.writeln", crate::spec::SinkLabel::XssDom),
-            ("dangerouslySetInnerHTML", crate::spec::SinkLabel::XssDom),
-            // SSTI - Template engine renders
-            ("ExecuteTemplate", crate::spec::SinkLabel::TemplateSsti),
-            ("render_template", crate::spec::SinkLabel::TemplateSsti),
-            (
-                "render_template_string",
-                crate::spec::SinkLabel::TemplateSsti,
-            ),
-            ("ejs.render", crate::spec::SinkLabel::TemplateSsti),
-            ("nunjucks.render", crate::spec::SinkLabel::TemplateSsti),
-            ("marko.render", crate::spec::SinkLabel::TemplateSsti),
-            ("eta.render", crate::spec::SinkLabel::TemplateSsti),
-            ("swig.render", crate::spec::SinkLabel::TemplateSsti),
-            ("liquid.render", crate::spec::SinkLabel::TemplateSsti),
-            ("mustache.render", crate::spec::SinkLabel::TemplateSsti),
-            // Insecure Deserialization
-            (
-                "bincode::deserialize",
-                crate::spec::SinkLabel::UnsafeDeserialize,
-            ),
-            (
-                "serde_json::from_str",
-                crate::spec::SinkLabel::UnsafeDeserialize,
-            ),
-            ("yaml.load", crate::spec::SinkLabel::UnsafeDeserialize),
-            ("js-yaml.load", crate::spec::SinkLabel::UnsafeDeserialize),
-            ("pickle.loads", crate::spec::SinkLabel::UnsafeDeserialize),
-            ("msgpack.decode", crate::spec::SinkLabel::UnsafeDeserialize),
-            // Prototype Pollution
-            ("Object.assign", crate::spec::SinkLabel::PrototypePollution),
-            ("_.merge", crate::spec::SinkLabel::PrototypePollution),
-            ("_.defaultsDeep", crate::spec::SinkLabel::PrototypePollution),
-            ("_.set", crate::spec::SinkLabel::PrototypePollution),
-            ("$.extend", crate::spec::SinkLabel::PrototypePollution),
-            ("setPrototypeOf", crate::spec::SinkLabel::PrototypePollution),
-            // XXE
-            ("DOMParser", crate::spec::SinkLabel::Xxe),
-            // JWT
-            ("jwt.sign", crate::spec::SinkLabel::Jwt),
-            // Cloudflare Workers / Prisma
-            ("c.redirect", crate::spec::SinkLabel::OpenRedirect),
-            ("env.KV.put", crate::spec::SinkLabel::StorageWrite),
-            ("KVNamespace.put", crate::spec::SinkLabel::StorageWrite),
-            ("env.DB.prepare", crate::spec::SinkLabel::SqlInjection),
-            ("res.send", crate::spec::SinkLabel::ResponseLeak),
-            ("res.json", crate::spec::SinkLabel::ResponseLeak),
-            ("res.redirect", crate::spec::SinkLabel::OpenRedirect),
-            ("res.render", crate::spec::SinkLabel::TemplateSsti),
-            ("revalidatePath", crate::spec::SinkLabel::StorageWrite),
-            (
-                "prisma.queryRawUnsafe",
-                crate::spec::SinkLabel::SqlInjection,
-            ),
-            (
-                "prisma.executeRawUnsafe",
-                crate::spec::SinkLabel::SqlInjection,
-            ),
-            ("R2Bucket.put", crate::spec::SinkLabel::StorageWrite),
-            ("D1Database.prepare", crate::spec::SinkLabel::SqlInjection),
-            ("DurableObjectStub.fetch", crate::spec::SinkLabel::Ssrf),
-            ("Queue.send", crate::spec::SinkLabel::Ssrf),
-            // MongoDB / ORM
-            ("update", crate::spec::SinkLabel::NoSqlInjection),
-            ("updateOne", crate::spec::SinkLabel::NoSqlInjection),
-            ("updateMany", crate::spec::SinkLabel::NoSqlInjection),
-            ("insert", crate::spec::SinkLabel::NoSqlInjection),
-            ("insertOne", crate::spec::SinkLabel::NoSqlInjection),
-            ("insertMany", crate::spec::SinkLabel::NoSqlInjection),
-            ("delete", crate::spec::SinkLabel::NoSqlInjection),
-            ("deleteOne", crate::spec::SinkLabel::NoSqlInjection),
-            ("deleteMany", crate::spec::SinkLabel::NoSqlInjection),
-            ("find", crate::spec::SinkLabel::NoSqlInjection),
-            ("findOne", crate::spec::SinkLabel::NoSqlInjection),
-            ("findAll", crate::spec::SinkLabel::NoSqlInjection),
-            // Storage Write
-            ("put", crate::spec::SinkLabel::StorageWrite),
-            ("setItem", crate::spec::SinkLabel::StorageWrite),
-            // Log Leak
-            ("log", crate::spec::SinkLabel::LogLeak),
-            ("error", crate::spec::SinkLabel::LogLeak),
-            ("info", crate::spec::SinkLabel::LogLeak),
-            ("debug", crate::spec::SinkLabel::LogLeak),
-        ]
-    }
-
-    fn known_source_patterns(&self) -> &'static [&'static str] {
-        &[
-            // net/http standard library
-            "r.URL.Query",
-            "r.URL.Path",
-            "r.URL.RawQuery",
-            "r.FormValue",
-            "r.PostFormValue",
-            "r.Body",
-            "r.Header.Get",
-            "r.PathValue",
-            // Gin
-            "c.Param",
-            "c.Query",
-            "c.DefaultQuery",
-            "c.PostForm",
-            "c.DefaultPostForm",
-            "c.GetHeader",
-            "c.GetRawData",
-            "c.ShouldBindJSON",
-            "c.ShouldBind",
-            // Echo
-            "c.Param",
-            "c.QueryParam",
-            "c.FormValue",
-            "c.Request().Body",
-            // Fiber
-            "c.Params",
-            "c.Query",
-            "c.Body",
-            "c.FormValue",
-            "c.Get",
-        ]
-    }
-
-    fn propagator_rules(&self) -> &'static [PropagatorRule] {
-        GO_PROPAGATORS
-    }
-
-    fn classify_sanitizer(&self, call: &str) -> Option<SanitizerKind> {
-        go_classify_sanitizer(call)
-    }
-    fn known_sanitizer_names(&self) -> &'static [&'static str] {
-        &[
-            "EscapeString",
-            "EscapeHTML",
-            "QueryEscape",
-            "PathEscape",
-            "template.HTMLEscapeString",
-            "url.QueryEscape",
-            "strconv.Atoi",
-            "Sanitize",
-            "EscapeText",
-        ]
-    }
-
-    fn route_context_hints(&self) -> &'static [&'static str] {
-        &[
-            "http.HandleFunc",
-            "http.Handle",
-            "r.GET(",
-            "r.POST(",
-            "r.PUT(",
-            "r.DELETE(", // Gin
-            "e.GET(",
-            "e.POST(", // Echo
-            "app.Get(",
-            "app.Post(", // Fiber
-            "http.ResponseWriter",
-            "*http.Request",
-            "c.JSON(",
-            "c.String(",
-            "c.Status(", // Gin response
-            "c.JSON(",
-            "c.String(", // Echo/Fiber response
-        ]
-    }
-
-    fn test_context_hints(&self) -> &'static [&'static str] {
-        &[
-            "func Test",
-            "testing.T",
-            "t.Error(",
-            "t.Fatal(",
-            "t.Run(",
-            "testify",
-        ]
-    }
-
-    fn response_method_names(&self) -> &'static [&'static str] {
-        &["WriteHeader", "SetCookie", "WriteString", "ServeHTTP"]
-    }
-
-    fn db_api_method_names(&self) -> &'static [&'static str] {
-        &["QueryRow", "Exec", "Begin", "First", "Updates"]
-    }
-
-    fn shell_api_method_names(&self) -> &'static [&'static str] {
-        &["Command", "Output", "CombinedOutput", "Start"]
-    }
-
-    fn known_semantic_categories(&self) -> &'static [(&'static str, &'static [&'static str])] {
-        &[
-            (
-                "db_query",
-                &[
-                    "Query",
-                    "QueryRow",
-                    "Exec",
-                    "Prepare",
-                    "Find",
-                    "FindOne",
-                    "FindById",
-                    "Aggregate",
-                    "Count",
-                ],
-            ),
-            (
-                "db_write",
-                &[
-                    "Insert", "Update", "Upsert", "Create", "Delete", "Remove", "Save", "Patch",
-                ],
-            ),
-            (
-                "cmd_exec",
-                &[
-                    "Command",
-                    "Output",
-                    "CombinedOutput",
-                    "Start",
-                    "Run",
-                    "exec.Command",
-                    "os/exec",
-                ],
-            ),
-            (
-                "file_read",
-                &["ReadFile", "ReadDir", "Open", "ioutil.ReadFile"],
-            ),
-            (
-                "file_write",
-                &["WriteFile", "Create", "os.Create", "ioutil.WriteFile"],
-            ),
-            (
-                "http_request",
-                &[
-                    "http.Get",
-                    "http.Post",
-                    "http.Do",
-                    "http.NewRequest",
-                    "client.Do",
-                    "client.Get",
-                    "client.Post",
-                ],
-            ),
-            ("url_redirect", &["Redirect", "http.Redirect"]),
-            (
-                "crypto_weak",
-                &["md5.New", "sha1.New", "crypto/md5", "crypto/sha1"],
-            ),
-            (
-                "crypto_strong",
-                &["sha256.New", "sha512.New", "crypto/sha256", "crypto/sha512"],
-            ),
-            (
-                "deserialize",
-                &["json.Unmarshal", "json.Decode", "xml.Unmarshal"],
-            ),
-            (
-                "sanitize",
-                &["template.HTML", "html/template", "bluemonday"],
-            ),
-            ("process", &["os.Exit", "os.Kill", "os.Signal", "syscall"]),
-            (
-                "auth_middleware",
-                &["middleware", "Auth", "Verify", "Validate"],
-            ),
-        ]
     }
 }

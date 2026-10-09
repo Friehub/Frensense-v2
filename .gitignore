@@ -109,6 +109,7 @@ corpus-facts.frc
 !docs/AGENT_INTEGRATION.md
 !docs/FRENSENSE_CORPUS_GUIDE.md
 !docs/TEACHABILITY.md
+!docs/SPEC_FALSE_POSITIVE_REDUCTION.md
 !docs-site/**
 docs-site/node_modules/
 **/node_modules/
@@ -159,3 +160,12 @@ benchmark/
 # VitePress build/cache
 docs-site/.vitepress/dist/
 docs-site/.vitepress/cache/
+
+# Private security corpus and compiled binary bundle artifacts
+/corpus/
+/bundles/
+*.frc
+frensense-bench/cve_corpus/
+
+# Embedded default pack asset (Phase 5.2 / D1): committed despite *.frc
+!frensense-bundler/assets/*.frc

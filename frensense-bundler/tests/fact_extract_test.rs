@@ -3,7 +3,10 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use frensense_bundler::builder::build_facts_bundle;
-use frensense_bundler::fact_extract::{extract_facts, group_families, Family, FamilyMetadata};
+use frensense_bundler::extract::alerts;
+use frensense_bundler::fact_extract::{
+    extract_facts_with_tables, group_families, Family, FamilyMetadata,
+};
 use frensense_bundler::format::load_bundle;
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::facts::{
@@ -78,14 +81,14 @@ export default router;
 
     // Baseline: positive alerts, but negative ALSO alerts (unknown sanitizer).
     let base = frensense_engine::scan::scan(&fams[0].positives, &cfg, &builtin);
-    assert!(base.has_alert(), "positive must alert at baseline");
+    assert!(alerts(&base), "positive must alert at baseline");
     let base_neg = frensense_engine::scan::scan(&fams[0].negatives, &cfg, &builtin);
     assert!(
-        base_neg.has_alert(),
+        alerts(&base_neg),
         "negative alerts at baseline (test unknown), this is the FP the fact should fix"
     );
 
-    let (learned, published) = extract_facts(&fams, &cfg, &builtin);
+    let (learned, published) = extract_facts_with_tables(&fams, &cfg, &builtin);
     let has_test = published.iter().any(
         |f| matches!(&f.entry, LearnedFactEntry::Sanitizer { call, guard_style: true, .. } if call == "test"),
     );
@@ -98,7 +101,7 @@ export default router;
     // The learned table must now separate the family.
     let after = frensense_engine::scan::scan(&fams[0].negatives, &cfg, &learned);
     assert!(
-        !after.has_alert(),
+        !alerts(&after),
         "negative must be clean with the learned fact; findings: {:?}",
         after.findings
     );
@@ -138,12 +141,24 @@ void caller() {
     assert_eq!(fams.len(), 1);
 
     let cfg = config();
-    let builtin = FactTable::default();
+    // Production extraction runs under the family's language spec tables
+    // (`extract_facts`); mirror that here so the registry carries the C
+    // memory vocabulary the fixpoint needs to recognise `free` as consuming.
+    let builtin = {
+        // Production `family_tables` seeds spec -> default pack -> pack
+        // language sections; mirror it with the production-shaped helper so
+        // the registry carries the pack's C memory vocabulary.
+        let (_, t) = frensense_engine::analysis::taint::facts::tables_from_exts_with_pack(
+            ["c"],
+            &frensense_bundler::format::default_pack().learned_facts,
+        );
+        t
+    };
 
     // 2. Fact Extraction:
     // Bundler extracts memory contract from corpus pairs, replay-gates it,
     // and publishes it as a LearnedFactEntry::MemoryContract.
-    let (learned, published) = extract_facts(&fams, &cfg, &builtin);
+    let (learned, published) = extract_facts_with_tables(&fams, &cfg, &builtin);
     let has_my_free = published.iter().any(|f| {
         matches!(&f.entry, LearnedFactEntry::MemoryContract { name, consumes_params, .. }
             if name == "my_free" && consumes_params == &[0])
@@ -187,26 +202,47 @@ void test_app() {
         "c".to_string(),
     )];
 
-    // At baseline (without learned facts), the engine doesn't know external `my_free`:
+    // At baseline (without learned facts), the engine doesn't know external
+    // `my_free`, so no use-after-free can be proven. The ownership model may
+    // still report `memory_leak` here (unknown callees consume nothing by
+    // default, leak.rs): that finding is orthogonal to the contract this
+    // test teaches - the learned `consumes_params` is what unlocks the UAF.
     let baseline_pos = frensense_engine::scan::scan(&consumer_pos, &cfg, &builtin);
+    let baseline_uaf = baseline_pos
+        .checker
+        .iter()
+        .any(|c| c.rule == "use_after_free");
     assert!(
-        !baseline_pos.has_alert(),
-        "consumer positive does NOT alert at baseline because external my_free is unknown"
+        !baseline_uaf,
+        "consumer positive must NOT report use_after_free at baseline because external my_free is unknown; findings: {:?}",
+        baseline_pos.checker
     );
 
     // With learned facts (from the bundle), the engine knows `my_free` consumes param 0:
-    // Positive consumer sample ALERTS on use_after_free.
-    let scan_pos = frensense_engine::scan::scan(&consumer_pos, &cfg, &learned);
+    // Positive consumer sample ALERTS on use_after_free. The consumer CLI scans
+    // under spec-seeded tables merged with the bundle - mirror that here.
+    let scan_facts = {
+        // The CLI runner seeds spec -> default pack -> pack language
+        // sections -> consumer bundle; mirror that order.
+        let mut t = frensense_engine::analysis::taint::facts::tables_from_exts_with_pack(
+            ["c"],
+            &frensense_bundler::format::default_pack().learned_facts,
+        )
+        .1;
+        t.merge(&learned);
+        t
+    };
+    let scan_pos = frensense_engine::scan::scan(&consumer_pos, &cfg, &scan_facts);
     assert!(
-        scan_pos.has_alert(),
+        alerts(&scan_pos),
         "consumer positive sample MUST alert on use_after_free with learned contract; findings: {:?}",
         scan_pos.checker
     );
 
     // Negative consumer sample remains completely SILENT.
-    let scan_neg = frensense_engine::scan::scan(&consumer_neg, &cfg, &learned);
+    let scan_neg = frensense_engine::scan::scan(&consumer_neg, &cfg, &scan_facts);
     assert!(
-        !scan_neg.has_alert(),
+        !alerts(&scan_neg),
         "consumer negative sample MUST stay silent with learned contract; findings: {:?}",
         scan_neg.checker
     );
@@ -245,7 +281,7 @@ export function createSession(host: string) {
     };
 
     // 2. Extract facts via the bundler replay gate:
-    let (learned, published) = extract_facts(&[family], &cfg, &builtin);
+    let (learned, published) = extract_facts_with_tables(&[family], &cfg, &builtin);
     assert!(
         !published.is_empty(),
         "must publish learned facts from separating variants; published: {:?}",
@@ -277,13 +313,13 @@ export function connect() {
 
     // At baseline: does not alert
     let baseline_res = frensense_engine::scan::scan(&consumer_pos, &cfg, &builtin);
-    assert!(!baseline_res.has_alert());
+    assert!(!alerts(&baseline_res));
 
     // With learned bundle facts:
     // Positive sample must alert
     let scan_pos = frensense_engine::scan::scan(&consumer_pos, &cfg, &learned);
     assert!(
-        scan_pos.has_alert(),
+        alerts(&scan_pos),
         "consumer positive MUST alert with learned policy: {:?}",
         scan_pos.checker
     );
@@ -291,7 +327,7 @@ export function connect() {
     // Negative sample must stay completely silent
     let scan_neg = frensense_engine::scan::scan(&consumer_neg, &cfg, &learned);
     assert!(
-        !scan_neg.has_alert(),
+        !alerts(&scan_neg),
         "consumer negative MUST stay silent: {:?}",
         scan_neg.checker
     );
@@ -336,7 +372,7 @@ fn test_security_policy_frc_roundtrip() {
     let cfg = TaintConfig::default();
     let builtin = FactTable::default();
     let (bundle_bytes, published) =
-        build_facts_bundle(dir.path(), &cfg, &builtin).expect("bundle build must not fail");
+        build_facts_bundle(dir.path()).expect("bundle build must not fail");
 
     // At least one Check or Policy fact must have been published
     let has_policy_fact = published.iter().any(|f| match &f.entry {
@@ -370,6 +406,18 @@ fn test_security_policy_frc_roundtrip() {
     let loaded = load_bundle(&bundle_bytes).expect("bundle must deserialize");
     let learned_facts = fact_table_from_entries(&loaded.learned_facts);
 
+    // Phase 2.3: the family's advisory pattern carries the join keys of the
+    // facts it published (checker rule ids / sink names).
+    assert!(
+        loaded.patterns.iter().any(|p| {
+            p.id == "delete_account"
+                && !p.rules.is_empty()
+                && p.rules.iter().any(|r| r.contains("delete_user_account"))
+        }),
+        "pattern must join to the published check/policy rule, patterns: {:#?}",
+        loaded.patterns
+    );
+
     // Scanner test fixtures
     let positive_file = vec![(
         "app_positive.py".to_string(),
@@ -396,7 +444,7 @@ fn test_security_policy_frc_roundtrip() {
     // Without bundle: engine is blind to this custom API -- 0 findings expected
     let baseline = frensense_engine::scan::scan(&positive_file, &cfg, &builtin);
     assert!(
-        !baseline.has_alert(),
+        !alerts(&baseline),
         "no findings expected without bundle (engine has no prior knowledge): {:?}",
         baseline.checker
     );
@@ -404,7 +452,7 @@ fn test_security_policy_frc_roundtrip() {
     // With bundle: positive must alert
     let with_bundle_pos = frensense_engine::scan::scan(&positive_file, &cfg, &learned_facts);
     assert!(
-        with_bundle_pos.has_alert(),
+        alerts(&with_bundle_pos),
         "unguarded positive MUST alert after engine is taught the rule; checker: {:?}",
         with_bundle_pos.checker
     );
@@ -412,7 +460,7 @@ fn test_security_policy_frc_roundtrip() {
     // With bundle: negative must stay silent
     let with_bundle_neg = frensense_engine::scan::scan(&negative_file, &cfg, &learned_facts);
     assert!(
-        !with_bundle_neg.has_alert(),
+        !alerts(&with_bundle_neg),
         "guarded negative MUST stay silent after engine is taught the rule; checker: {:?}",
         with_bundle_neg.checker
     );
@@ -451,7 +499,7 @@ export function isAllowedUrl(targetUrl: string, allowedHost: string) {
     };
 
     // 2. Extract facts via the bundler replay gate:
-    let (learned, published) = extract_facts(&[family], &cfg, &builtin);
+    let (learned, published) = extract_facts_with_tables(&[family], &cfg, &builtin);
     assert!(
         !published.is_empty(),
         "must publish learned facts; published: {:?}",
@@ -484,14 +532,14 @@ export function validateRedirect(url: string) {
     // With learned bundle facts:
     let scan_pos = frensense_engine::scan::scan(&consumer_pos, &cfg, &learned);
     assert!(
-        scan_pos.has_alert(),
+        alerts(&scan_pos),
         "consumer positive with fuzzyMatch MUST alert on guard bypass: {:?}",
         scan_pos.checker
     );
 
     let scan_neg = frensense_engine::scan::scan(&consumer_neg, &cfg, &learned);
     assert!(
-        !scan_neg.has_alert(),
+        !alerts(&scan_neg),
         "consumer negative MUST stay silent: {:?}",
         scan_neg.checker
     );

@@ -19,98 +19,14 @@
 
 use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
+use crate::checks::Provenance;
+use crate::checks::last_segment;
 use crate::ir::function::{FunctionIR, Instruction, Operand};
 
-/// A known call whose string-literal argument selects a weak primitive.
-///
-/// Matches the two shapes real code uses:
-/// - `createHash('md5')`, the selector literal is argument 0.
-/// - `md5(data)` / `MD5(...)`, bare weak-hash functions; no selector needed.
-#[derive(Debug)]
-struct WeakPrimitiveRule {
-    rule_id: &'static str,
-    /// Callee last-segment names that take a selector literal argument.
-    selector_calls: &'static [&'static str],
-    /// Bare function names that are weak by themselves.
-    bare_calls: &'static [&'static str],
-    /// Argument slot of the selector literal (ignored for bare calls).
-    selector_slot: usize,
-    /// Selector literals that mark the call weak (case-insensitive, quotes
-    /// stripped by the caller).
-    weak_selectors: &'static [&'static str],
-}
-
-/// The builtin policy table. Language specs can extend this later via the
-/// same `&'static` pattern as sink names; for now these are the universal
-/// crypto policy facts.
-static WEAK_HASH_RULES: &[WeakPrimitiveRule] = &[
-    // Node crypto: createHash('md5'), createHash('sha1')
-    WeakPrimitiveRule {
-        rule_id: "weak_hash",
-        selector_calls: &["createHash"],
-        bare_calls: &["md5", "sha1"],
-        selector_slot: 0,
-        weak_selectors: &["md5", "md4", "sha1", "sha"],
-    },
-    // Python hashlib / passlib: hashlib.new('md5', ...)
-    WeakPrimitiveRule {
-        rule_id: "weak_hash",
-        selector_calls: &["new"],
-        bare_calls: &["md5", "sha1"],
-        selector_slot: 0,
-        weak_selectors: &["md5", "md4", "sha1", "sha"],
-    },
-    // Java MessageDigest / Go crypto/md5 style, covered by bare names where
-    // applicable; the receiver name (`crypto`) is matched loosely so
-    // `crypto.createHash` and `hashlib.new` both resolve to last segment.
-];
-
-/// Known *string-literal* insecure configuration selectors: calls whose
-/// argument literal itself selects an insecure mode regardless of algorithm.
-static INSECURE_CONFIG_SELECTORS: &[(&str, &[&str], &str)] = &[
-    // jwt.sign(payload, secret, { algorithm: 'none' }) style appears as a
-    // string selector on some APIs; `none`/`HS1` in the `alg` slot.
-    ("jwt", &["none", "hs1"], "insecure_jwt_algorithm"),
-];
-
-/// A key-size rule: a generation call whose constant bit-length argument
-/// falls below the security floor. Value-aware: the argument may be a var
-/// whose lattice value is a provable constant, not just a bare literal.
-struct KeySizeRule {
-    rule_id: &'static str,
-    /// Callee last segment (case-insensitive match).
-    call: &'static str,
-    /// Argument slot carrying the bit length.
-    slot: usize,
-    /// Minimum acceptable bits.
-    min_bits: i64,
-    /// Human label of what the key protects.
-    kind: &'static str,
-}
-
-static KEY_SIZE_RULES: &[KeySizeRule] = &[
-    KeySizeRule {
-        rule_id: "weak_rsa_key_size",
-        call: "generateKeyPair",
-        slot: 0,
-        min_bits: 2048,
-        kind: "RSA",
-    },
-    KeySizeRule {
-        rule_id: "weak_rsa_key_size",
-        call: "generateKey",
-        slot: 0,
-        min_bits: 128,
-        kind: "symmetric keys",
-    },
-];
-
-/// Known *wrapper* names whose entire purpose is hashing: a weak selector
-/// inside the wrapper (checked cross-function by the corpus replay gate) or
-/// a suspicious receiver qualification makes these worth flagging. Bare
-/// wrappers like `security.hash(...)` are the Juice Shop weakPassword shape:
-/// the wrapper resolves to `createHash('md5')` elsewhere in the same file.
-static SUSPICIOUS_HASH_WRAPPERS: &[&str] = &["hash", "hashpw", "hashPassword", "digest"];
+// Weak-hash, key-size and insecure-selector policy tables are FACT DATA:
+// the engine reads only `FactTable` fields, seeded by the language spec
+// (the default pack) and extended by `.frc` bundles. No bootstrap
+// vocabulary is referenced from this module.
 
 fn strip_quotes(lit: &str) -> &str {
     let lit = lit.trim();
@@ -125,28 +41,20 @@ fn strip_quotes(lit: &str) -> &str {
     core
 }
 
-fn last_segment(name: &str) -> &str {
-    name.rsplit('.').next().unwrap_or(name)
-}
-
-/// Resolve a dotted receiver path for a virtual call (`security.hash` →
-/// "security.hash") by walking the receiver var's defining chain.
-fn receiver_path(ir: &FunctionIR, _args: &[Operand], _callee: &str) -> Option<String> {
-    // Cheap static heuristic: only flag when the enclosing function name or
-    // module context suggests security code. The full receiver-chain walk
-    // needs cross-function info; the corpus replay gate (task 9) is the
-    // mechanism that learns wrapper→primitive mappings from pairs.
+/// Security-context qualification for the hash-wrapper rule: the
+/// enclosing function's name when it hints at security code
+/// (`facts.security_context_hints`), else `None`. A cheap static stand-in
+/// for the full receiver-chain walk, which needs cross-function
+/// information; the corpus replay gate learns wrapper-to-primitive
+/// mappings from pairs instead.
+fn receiver_path(ir: &FunctionIR, facts: &FactTable) -> Option<String> {
     let n = ir.name.to_ascii_lowercase();
-    if n.contains("insecure") || n.contains("security") {
+    if facts.security_context_hints.iter().any(|h| n.contains(h)) {
         return Some(ir.name.clone());
     }
     None
 }
 
-/// Run every policy rule over one lowered function.
-/// The weak-hash / weak-crypto rule: scan one function for security-weak
-/// primitives.
-/// Run every policy rule over one lowered function.
 /// The weak-hash / weak-crypto rule: scan one function for security-weak
 /// primitives.
 pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
@@ -161,20 +69,38 @@ pub fn check_function(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding>
     let mut findings = Vec::new();
     for block in ir.blocks.values() {
         for instr in &block.instructions {
-            if let Instruction::CallStatic { func, args, .. }
-            | Instruction::CallVirtual {
-                method: func, args, ..
-            } = instr
-            {
-                check_call(
-                    ir,
-                    func,
+            match instr {
+                Instruction::CallStatic { func, args, .. } => {
+                    check_call(
+                        ir,
+                        func,
+                        func,
+                        args,
+                        instr_span(ir, instr),
+                        &values,
+                        facts,
+                        &mut findings,
+                    );
+                }
+                Instruction::CallVirtual {
+                    method,
+                    receiver,
                     args,
-                    instr_span(ir, instr),
-                    &values,
-                    facts,
-                    &mut findings,
-                );
+                    ..
+                } => {
+                    let path = crate::analysis::forward::receiver_call_path(ir, receiver, method);
+                    check_call(
+                        ir,
+                        method,
+                        &path,
+                        args,
+                        instr_span(ir, instr),
+                        &values,
+                        facts,
+                        &mut findings,
+                    );
+                }
+                _ => {}
             }
         }
     }
@@ -198,7 +124,6 @@ fn arg_str_literal<'a>(
 
 /// Resolve an argument operand to its integer-literal value: direct literal,
 /// or a var whose lattice value is a provable integer constant.
-#[allow(dead_code)] // consumed by value-aware rules added incrementally
 fn arg_int_literal(arg: &Operand, values: &crate::analysis::value::ValueInfo) -> Option<i64> {
     match arg {
         Operand::IntLiteral(n) => Some(*n),
@@ -219,9 +144,11 @@ fn instr_span(ir: &FunctionIR, instr: &Instruction) -> Option<(usize, usize)> {
     ir.var_metadata.get(&dest)?.byte_range
 }
 
+#[allow(clippy::too_many_arguments)] // fact/lattice/out plumbing, no meaningful grouping
 fn check_call(
     ir: &FunctionIR,
     callee: &str,
+    full_path: &str,
     args: &[Operand],
     span: Option<(usize, usize)>,
     values: &crate::analysis::value::ValueInfo,
@@ -236,28 +163,79 @@ fn check_call(
     let callee_seg = last_segment(callee);
     let callee_lower = callee_seg.to_ascii_lowercase();
 
-    for rule in WEAK_HASH_RULES {
-        // Selector shape: `createHash('md5')`.
-        if rule.selector_calls.iter().any(|c| {
-            let c = last_segment(c).to_ascii_lowercase();
-            c == callee_lower
-        }) && let Some(sel) = args
-            .get(rule.selector_slot)
-            .and_then(|a| arg_str_literal(a, values))
-            .map(str::to_ascii_lowercase)
-            && rule.weak_selectors.contains(&sel.as_str())
+    if callee_lower == "ajv" {
+        for arg in args {
+            if let Operand::Var(v) = arg {
+                let has_data_true = ir.blocks.values().any(|b| {
+                    b.instructions.iter().any(|i| {
+                        if let Instruction::StoreField {
+                            base, field, src, ..
+                        } = i
+                        {
+                            if *base == *v && field == "$data" {
+                                match src {
+                                    Operand::BoolLiteral(true) => true,
+                                    Operand::StringLiteral(s) => strip_quotes(s) == "true",
+                                    Operand::Var(sv) => {
+                                        values.const_bool(*sv) == Some(true)
+                                            || values.const_str(*sv).map(strip_quotes)
+                                                == Some("true")
+                                    }
+                                    _ => false,
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    })
+                }) || ir
+                    .var_metadata
+                    .get(v)
+                    .is_some_and(|m| m.object_keys.contains(&"$data".to_string()));
+                if has_data_true {
+                    out.push(CheckerFinding {
+                        provenance: Provenance::Spec,
+                        function: ir.name.clone(),
+                        rule: "regex".to_string(),
+                        message: "Insecure Ajv configuration with `$data: true` enables catastrophic ReDoS via payload-supplied regex".to_string(),
+                        params: vec![("callee", callee_seg.to_string())],
+                        span,
+                        severity: "High".to_string(),
+                    });
+                    return;
+                }
+            }
+        }
+    }
+
+    for rule in &facts.weak_hash_rules {
+        let provenance = Provenance::Spec;
+        // Selector shape: `createHash('md5')`. Rules with
+        // `requires_credential_context` fire only inside credential-named
+        // functions or with credential-named parameters (a general-purpose
+        // `createHash` doubles as a checksum API); rules without it fire
+        // wherever a weak algorithm is named explicitly.
+        if (!rule.requires_credential_context || in_credential_context(ir, facts))
+            && rule.selector_calls.iter().any(|c| {
+                let c = last_segment(c).to_ascii_lowercase();
+                c == callee_lower
+            })
+            && let Some(sel) = args
+                .get(rule.selector_slot)
+                .and_then(|a| arg_str_literal(a, values))
+                .map(str::to_ascii_lowercase)
+            && rule.weak_selectors.contains(&sel)
         {
             out.push(CheckerFinding {
-                learned: false,
+                provenance,
                 function: ir.name.clone(),
                 rule: rule.rule_id.to_string(),
-                message: format!(
-                    "Weak hash primitive '{}' selected by `{}`, not acceptable \
-                     for passwords or security-sensitive digests (use \
-                     bcrypt/argon2/scrypt or SHA-256+)",
-                    sel, callee_seg
-                ),
+                message: String::new(),
+                params: vec![("callee", callee_seg.to_string()), ("sel", sel.to_string())],
                 span,
+                severity: rule.severity.to_string(),
             });
             return; // one finding per call site
         }
@@ -268,16 +246,13 @@ fn check_call(
             .any(|c| last_segment(c).to_ascii_lowercase() == callee_lower)
         {
             out.push(CheckerFinding {
-                learned: false,
+                provenance,
                 function: ir.name.clone(),
                 rule: rule.rule_id.to_string(),
-                message: format!(
-                    "Weak hash function `{}`, not acceptable for passwords or \
-                     security-sensitive digests (use bcrypt/argon2/scrypt or \
-                     SHA-256+)",
-                    callee_seg
-                ),
+                message: String::new(),
+                params: vec![("callee", callee_seg.to_string())],
                 span,
+                severity: rule.severity.to_string(),
             });
             return;
         }
@@ -298,27 +273,25 @@ fn check_call(
                         .any(|ws| ws.to_ascii_lowercase() == sel)
                 {
                     out.push(CheckerFinding {
-                        learned: true,
+                        provenance: Provenance::Learned,
                         function: ir.name.clone(),
                         rule: fact.rule_id.clone(),
-                        message: format!(
-                            "Weak cryptographic primitive '{}' selected by `{}`, not acceptable for security-sensitive operations",
-                            sel, callee_seg
-                        ),
+                        message: String::new(),
+                        params: vec![("callee", callee_seg.to_string()), ("sel", sel.to_string())],
                         span,
+                        severity: fact.severity.clone(),
                     });
                     return;
                 }
             } else {
                 out.push(CheckerFinding {
-                    learned: true,
+                    provenance: Provenance::Learned,
                     function: ir.name.clone(),
                     rule: fact.rule_id.clone(),
-                    message: format!(
-                        "Weak cryptographic call `{}`, not acceptable for security-sensitive operations",
-                        callee_seg
-                    ),
+                    message: String::new(),
+                    params: vec![("callee", callee_seg.to_string())],
                     span,
+                    severity: fact.severity.clone(),
                 });
                 return;
             }
@@ -329,18 +302,18 @@ fn check_call(
     // receiver is a security-ish namespace. Matched by last segment of the
     // receiver chain when available; bare `hash(x)` is too generic to flag
     // on its own, so require a known crypto-receiver qualification.
-    if SUSPICIOUS_HASH_WRAPPERS.contains(&callee_lower.as_str())
-        && let Some(path) = receiver_path(ir, args, callee)
-    {
+    let spec_wrapper = facts
+        .suspicious_hash_wrappers
+        .contains(callee_lower.as_str());
+    if spec_wrapper && let Some(path) = receiver_path(ir, facts) {
         out.push(CheckerFinding {
-            learned: false,
+            provenance: Provenance::Spec,
             function: ir.name.clone(),
-            rule: "weak_hash_wrapper".to_string(),
-            message: format!(
-                "Password hashing routed through opaque wrapper `{path}`, \
-                 verify it uses bcrypt/argon2/scrypt, not MD5/SHA-1",
-            ),
+            rule: frensense_lang::rules::WEAK_HASH_WRAPPER.to_string(),
+            message: String::new(),
+            params: vec![("path", path.clone())],
             span,
+            severity: String::new(),
         });
     }
 
@@ -348,8 +321,9 @@ fn check_call(
     // argument is a PROVABLE CONSTANT below the security floor. The value
     // lattice resolves `const bits = 512; generateKey(bits)` the same as a
     // direct literal, so wrapper indirection doesn't hide the weakness.
-    for rule in KEY_SIZE_RULES {
-        if last_segment(rule.call).to_ascii_lowercase() != callee_lower {
+    for rule in &facts.key_size_rules {
+        let provenance = Provenance::Spec;
+        if last_segment(rule.call.as_str()).to_ascii_lowercase() != callee_lower {
             continue;
         }
         if let Some(slot) = args.get(rule.slot) {
@@ -358,17 +332,17 @@ fn check_call(
                 .unwrap_or(false);
             if weak {
                 out.push(CheckerFinding {
-                    learned: false,
+                    provenance,
                     function: ir.name.clone(),
                     rule: rule.rule_id.to_string(),
-                    message: format!(
-                        "Weak key size passed to `{}`: provably below {} bits (use >= {} bits for {})",
-                        callee_seg,
-                        rule.min_bits,
-                        rule.min_bits,
-                        rule.kind
-                    ),
+                    message: String::new(),
+                    params: vec![
+                        ("callee", callee_seg.to_string()),
+                        ("min_bits", rule.min_bits.to_string()),
+                        ("kind", rule.kind.to_string()),
+                    ],
                     span,
+                    severity: rule.severity.to_string(),
                 });
                 return;
             }
@@ -377,27 +351,69 @@ fn check_call(
 
     // Insecure literal selectors (`{ algorithm: 'none' }` shapes land here
     // once object literals are flattened; for now the string form).
-    for (prefix, selectors, rule_id) in INSECURE_CONFIG_SELECTORS {
-        if !callee_lower.starts_with(prefix) {
+    for rule in &facts.insecure_config_selectors {
+        let provenance = Provenance::Spec;
+        // Match the full dotted call path (`jwt.verify`) or the callee
+        // (`jwtChallenge`); only a *verifier* accepting an insecure
+        // algorithm is the violation - token issuers that merely embed the
+        // literal (`jwtChallenge(id, req, 'none', ...)`) are harness code.
+        let path_lower = full_path.to_ascii_lowercase();
+        if !(path_lower.starts_with(rule.prefix.as_str())
+            || callee_lower.starts_with(rule.prefix.as_str()))
+        {
+            continue;
+        }
+        if !jwt_algorithm_context(&path_lower, &callee_lower, facts) {
             continue;
         }
         for arg in args {
             if let Some(lit) = arg_str_literal(arg, values)
-                && selectors.contains(&lit.to_ascii_lowercase().as_str())
+                && rule.selectors.contains(&lit.to_ascii_lowercase())
             {
                 out.push(CheckerFinding {
-                    learned: false,
+                    provenance,
                     function: ir.name.clone(),
-                    rule: rule_id.to_string(),
-                    message: format!(
-                        "Insecure configuration: `{}` called with insecure \
-                         selector '{lit}'",
-                        callee_seg
-                    ),
+                    rule: rule.rule_id.to_string(),
+                    message: String::new(),
+                    params: vec![("callee", callee_seg.to_string()), ("sel", lit.to_string())],
                     span,
+                    severity: rule.severity.to_string(),
                 });
                 return;
             }
         }
     }
+}
+
+/// Algorithm-operation qualification for `insecure_jwt_algorithm`: the
+/// callee path must hint at an operation whose algorithm choice matters
+/// (verify/decode/sign/...), vocabulary from the default pack
+/// (`FactTable::jwt_algorithm_hints`) - harness wrappers
+/// that merely embed the literal stay silent.
+fn jwt_algorithm_context(path: &str, callee: &str, facts: &FactTable) -> bool {
+    let matches = |s: &str| facts.jwt_algorithm_hints.iter().any(|h| s.contains(h));
+    matches(path) || matches(callee)
+}
+
+/// Credential-context qualification for the selector-shape weak-hash rule:
+/// the enclosing function name or a parameter name must hint at a
+/// credential context (password/secret/token/...). A generic digest
+/// utility (`const digest = (data) => createHash('md5')`) is not a KDF
+/// shape; credential-named wrappers (`hashPassword(clearText)`) are.
+/// Bare weak calls (`md5(data)`) stay unqualified - they are weak by
+/// themselves.
+fn in_credential_context(ir: &FunctionIR, facts: &FactTable) -> bool {
+    let hint_match = |s: &str| {
+        let l = s.to_ascii_lowercase();
+        facts.credential_context_hints.iter().any(|h| l.contains(h))
+    };
+    if hint_match(&ir.name) {
+        return true;
+    }
+    ir.parameters.iter().any(|p| {
+        ir.var_metadata
+            .get(p)
+            .and_then(|m| m.source_name.as_deref())
+            .is_some_and(hint_match)
+    })
 }

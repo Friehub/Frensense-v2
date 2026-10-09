@@ -26,10 +26,16 @@
 
 pub mod analysis;
 pub mod checks;
+#[cfg(test)]
+mod dataflow_probes_tests;
 pub mod debug_flags;
 pub mod graph;
 pub mod harness;
 pub mod ir;
+#[cfg(test)]
+mod probes;
+#[cfg(test)]
+mod regression_gate_tests;
 pub mod scan;
 
 /// Opaque identifier for a source file within a single analysis session.
@@ -40,33 +46,3 @@ pub struct FileId(pub u32);
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScopeId(pub u64);
-
-#[derive(Debug, thiserror::Error)]
-pub enum FrensenseError {
-    #[error("Parse failure: {0}")]
-    ParseFailure(String),
-    #[error("Config error: {0}")]
-    Config(String),
-    #[error("IO error: {0}")]
-    Io(String),
-    #[error("Parser error: {0}")]
-    ParserError(String),
-    #[error("Pattern error: {0}")]
-    Pattern(String),
-    #[error("Engine error: {0}")]
-    Engine(String),
-}
-
-impl From<std::io::Error> for FrensenseError {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e.to_string())
-    }
-}
-
-impl From<tree_sitter::LanguageError> for FrensenseError {
-    fn from(e: tree_sitter::LanguageError) -> Self {
-        Self::ParserError(e.to_string())
-    }
-}
-
-pub type Result<T> = std::result::Result<T, FrensenseError>;

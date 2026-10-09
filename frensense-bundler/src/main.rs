@@ -5,10 +5,78 @@
 //! Frensense bundler CLI: builds a `.frc` facts bundle from positive/negative
 //! corpus pairs.
 //!
-//! Usage: frensense-bundler <corpus_dir> <output.frc> [--facts]
+//! Usage: frensense-bundler [<corpus_dir>] [<output.frc>] [-c <dir>] [-o <file>]
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+const USAGE: &str = "\
+Usage: frensense-bundler [<corpus_dir>] [<output.frc>] [options]
+
+Options:
+  -c, --corpus <dir>   Corpus directory (default: <workspace>/corpus/targets)
+  -o, --output <file>  Output bundle path (default: <workspace>/frensense-corpus.frc)
+  -h, --help           Print this help";
+
+#[derive(Debug)]
+enum Parsed {
+    Help,
+    Paths { corpus: PathBuf, output: PathBuf },
+}
+
+/// Parse bundler CLI arguments: positional args fill the corpus and output
+/// slots left-to-right, `-c`/`-o` (long forms included) set them explicitly,
+/// and anything else beginning with `-` is an error. `release.yml` invokes
+/// the binary as `-- -c corpus/targets -o frensense-corpus.frc`, so flag
+/// handling is load-bearing for release runners.
+fn parse_args(
+    args: &[String],
+    default_corpus: PathBuf,
+    default_output: PathBuf,
+) -> Result<Parsed, String> {
+    let mut corpus: Option<PathBuf> = None;
+    let mut output: Option<PathBuf> = None;
+    let mut it = args.iter().skip(1);
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "-h" | "--help" => return Ok(Parsed::Help),
+            "-c" | "--corpus" => {
+                if corpus.is_some() {
+                    return Err(format!("corpus specified twice ({arg})"));
+                }
+                let value = it
+                    .next()
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                corpus = Some(PathBuf::from(value));
+            }
+            "-o" | "--output" => {
+                if output.is_some() {
+                    return Err(format!("output specified twice ({arg})"));
+                }
+                let value = it
+                    .next()
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                output = Some(PathBuf::from(value));
+            }
+            other if other.starts_with('-') => {
+                return Err(format!("unknown flag: {other}"));
+            }
+            other => {
+                if corpus.is_none() {
+                    corpus = Some(PathBuf::from(other));
+                } else if output.is_none() {
+                    output = Some(PathBuf::from(other));
+                } else {
+                    return Err(format!("unexpected extra argument: {other}"));
+                }
+            }
+        }
+    }
+    Ok(Parsed::Paths {
+        corpus: corpus.unwrap_or(default_corpus),
+        output: output.unwrap_or(default_output),
+    })
+}
 
 fn main() {
     let manifest_dir =
@@ -16,180 +84,160 @@ fn main() {
     let workspace_root = manifest_dir.parent().unwrap();
 
     let args: Vec<String> = env::args().collect();
-    let corpus_dir = args
-        .get(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| workspace_root.join("corpus").join("targets"));
-    let output_path = args
-        .get(2)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| workspace_root.join("frensense-corpus.frc"));
+    let (corpus_dir, output_path) = match parse_args(
+        &args,
+        workspace_root.join("corpus").join("targets"),
+        workspace_root.join("frensense-corpus.frc"),
+    ) {
+        Ok(Parsed::Help) => {
+            println!("{USAGE}");
+            return;
+        }
+        Ok(Parsed::Paths { corpus, output }) => (corpus, output),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            eprintln!("{USAGE}");
+            std::process::exit(2);
+        }
+    };
 
-    if let Err(e) = run_facts_pipeline(&corpus_dir, &output_path) {
+    if let Err(e) = frensense_bundler::run_facts_pipeline(&corpus_dir, &output_path) {
         eprintln!("Error in facts pipeline: {e}");
         std::process::exit(1);
     }
 }
 
-/// §9 facts pipeline entry: uses the engine's shared harness + fact table.
-fn run_facts_pipeline(corpus_dir: &Path, output_path: &Path) -> Result<(), String> {
-    use frensense_engine::analysis::taint::config::TaintConfig;
-    use frensense_engine::analysis::taint::facts::FactTable;
-    use frensense_lang::spec_for_ext;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // Built-in config + fact table from every registered language spec:
-    // the corpus may contain any supported language.
-    let mut config = TaintConfig::default();
-    let mut builtin = FactTable::default();
-    for spec in frensense_lang::all_specs() {
-        let c = frensense_engine::analysis::taint::facts::config_from_spec(spec);
-        config.sources.extend(c.sources);
-        config.sinks.extend(c.sinks);
-        config.sanitizers.extend(c.sanitizers);
-        builtin.merge(&frensense_engine::analysis::taint::facts::fact_table_from_spec(spec));
+    fn args(rest: &[&str]) -> Vec<String> {
+        std::iter::once("frensense-bundler".to_string())
+            .chain(rest.iter().map(|s| s.to_string()))
+            .collect()
     }
-    let _ = spec_for_ext;
 
-    // Corpus-owned seed facts (deployment-specific knowledge) merge over
-    // the spec tables, the fact extractor must see the same base table
-    // the scanner sees.
-    for candidate in [
-        std::env::var("FRENSENSE_SEED_FACTS")
-            .ok()
-            .map(PathBuf::from),
-        Some(PathBuf::from("corpus/facts/seed_facts.json")),
-        Some(corpus_dir.join("../facts/seed_facts.json")),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        if let Err(e) = frensense_engine::analysis::taint::facts::seed::SeedFacts::load_and_apply(
-            &candidate,
-            &mut builtin,
-        ) {
-            eprintln!("[warn] {e}");
-            break;
+    fn defaults() -> (PathBuf, PathBuf) {
+        (
+            PathBuf::from("/ws/corpus/targets"),
+            PathBuf::from("/ws/frensense-corpus.frc"),
+        )
+    }
+
+    fn paths(parsed: Result<Parsed, String>) -> (PathBuf, PathBuf) {
+        match parsed.expect("parse") {
+            Parsed::Paths { corpus, output } => (corpus, output),
+            Parsed::Help => panic!("expected paths, got help"),
         }
     }
 
-    let (bytes, facts) =
-        frensense_bundler::builder::build_facts_bundle(corpus_dir, &config, &builtin)?;
-
-    // Round-trip verify before writing.
-    let loaded = frensense_bundler::format::load_bundle(&bytes)?;
-    eprintln!(
-        "[facts] round-trip OK: {} learned facts in bundle",
-        loaded.learned_facts.len()
-    );
-
-    for f in &facts {
-        let call = match &f.entry {
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::Source { pattern } => {
-                format!("source:{pattern}")
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::Sink { call, .. } => {
-                format!("sink:{call}")
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::Sanitizer {
-                call,
-                kind,
-                ..
-            } => {
-                format!("sanitizer:{call}({kind})")
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::Check {
-                rule,
-                call,
-                unless_guard,
-                ..
-            } => {
-                format!("check:{rule}({call}, guard={unless_guard:?})")
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::Policy {
-                rule,
-                when_call,
-                ..
-            } => {
-                format!("policy:{rule}({when_call})")
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::MemoryContract {
-                name,
-                returns_fresh,
-                consumes_params,
-                ..
-            } => {
-                format!("mem:{name}(fresh={returns_fresh},consumes={consumes_params:?})")
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::WeakCrypto(fact) => {
-                format!(
-                    "weak_crypto:{}(call={},slot={:?})",
-                    fact.rule_id, fact.call, fact.selector_slot
-                )
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::GuardBypass(fact) => {
-                format!(
-                    "guard_bypass(callees={:?},sinks={:?},params={:?})",
-                    fact.containment_callees, fact.credential_sinks, fact.credential_params
-                )
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::SchemaPolicy(fact) => {
-                format!(
-                    "schema_policy(builders={:?},enforcers={:?},keywords={:?})",
-                    fact.builders, fact.enforcers, fact.bound_keywords
-                )
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::GrammarRole {
-                language,
-                node_kind,
-                role,
-            } => {
-                format!("grammar_role:{language}:{node_kind}({role:?})")
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::GrammarFeature {
-                language,
-                node_kind,
-                feature,
-            } => {
-                format!("grammar_feature:{language}:{node_kind}({feature:?})")
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::Allocator { name } => {
-                format!("allocator:{name}")
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::Deallocator { name } => {
-                format!("deallocator:{name}")
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::IdorFinderSink {
-                call,
-                keys,
-            } => {
-                format!("idor_sink:{call}(keys={keys:?})")
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::IdorKey { key } => {
-                format!("idor_key:{key}")
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::Propagator {
-                call,
-                input_args,
-                preserves_taint,
-            } => {
-                format!("propagator:{call}(args={input_args:?},taints={preserves_taint})")
-            }
-            frensense_engine::analysis::taint::facts::LearnedFactEntry::GuardDenylistPattern {
-                pattern,
-            } => {
-                format!("guard_denylist:{pattern}")
-            }
-        };
-
-        eprintln!("  [{}] {} ← {}", f.status, call, f.families.join(", "));
+    #[test]
+    fn no_args_uses_workspace_defaults() {
+        let (d_corpus, d_output) = defaults();
+        let (corpus, output) = paths(parse_args(&args(&[]), d_corpus, d_output));
+        assert_eq!(corpus, PathBuf::from("/ws/corpus/targets"));
+        assert_eq!(output, PathBuf::from("/ws/frensense-corpus.frc"));
     }
 
-    std::fs::write(output_path, &bytes)
-        .map_err(|e| format!("write {}: {e}", output_path.display()))?;
-    eprintln!(
-        "Facts bundle written to {} ({} bytes)",
-        output_path.display(),
-        bytes.len()
-    );
-    Ok(())
+    #[test]
+    fn positional_pair_maps_to_corpus_and_output() {
+        let (d_corpus, d_output) = defaults();
+        let (corpus, output) = paths(parse_args(
+            &args(&["mycorpus", "my.frc"]),
+            d_corpus,
+            d_output,
+        ));
+        assert_eq!(corpus, PathBuf::from("mycorpus"));
+        assert_eq!(output, PathBuf::from("my.frc"));
+    }
+
+    #[test]
+    fn release_ci_flag_form_parses() {
+        let (d_corpus, d_output) = defaults();
+        let (corpus, output) = paths(parse_args(
+            &args(&["-c", "corpus/targets", "-o", "frensense-corpus.frc"]),
+            d_corpus,
+            d_output,
+        ));
+        assert_eq!(corpus, PathBuf::from("corpus/targets"));
+        assert_eq!(output, PathBuf::from("frensense-corpus.frc"));
+    }
+
+    #[test]
+    fn long_flag_forms_parse() {
+        let (d_corpus, d_output) = defaults();
+        let (corpus, output) = paths(parse_args(
+            &args(&["--corpus", "dir", "--output", "file.frc"]),
+            d_corpus,
+            d_output,
+        ));
+        assert_eq!(corpus, PathBuf::from("dir"));
+        assert_eq!(output, PathBuf::from("file.frc"));
+    }
+
+    #[test]
+    fn flag_corpus_with_positional_output() {
+        let (d_corpus, d_output) = defaults();
+        let (corpus, output) = paths(parse_args(
+            &args(&["-c", "dir", "file.frc"]),
+            d_corpus,
+            d_output,
+        ));
+        assert_eq!(corpus, PathBuf::from("dir"));
+        assert_eq!(output, PathBuf::from("file.frc"));
+    }
+
+    #[test]
+    fn positionals_fill_remaining_slots() {
+        let (d_corpus, d_output) = defaults();
+        let (corpus, output) = paths(parse_args(
+            &args(&["-o", "file.frc", "dir"]),
+            d_corpus,
+            d_output,
+        ));
+        assert_eq!(corpus, PathBuf::from("dir"));
+        assert_eq!(output, PathBuf::from("file.frc"));
+    }
+
+    #[test]
+    fn unknown_flag_is_rejected() {
+        let (d_corpus, d_output) = defaults();
+        let err = parse_args(&args(&["--facts"]), d_corpus, d_output).unwrap_err();
+        assert!(err.contains("unknown flag: --facts"), "{err}");
+    }
+
+    #[test]
+    fn missing_flag_value_is_rejected() {
+        let (d_corpus, d_output) = defaults();
+        let err = parse_args(&args(&["-c"]), d_corpus, d_output).unwrap_err();
+        assert!(err.contains("missing value for -c"), "{err}");
+    }
+
+    #[test]
+    fn duplicate_flag_is_rejected() {
+        let (d_corpus, d_output) = defaults();
+        let err = parse_args(&args(&["-c", "a", "-c", "b"]), d_corpus, d_output).unwrap_err();
+        assert!(err.contains("corpus specified twice"), "{err}");
+    }
+
+    #[test]
+    fn extra_positional_is_rejected() {
+        let (d_corpus, d_output) = defaults();
+        let err = parse_args(&args(&["a", "b", "c"]), d_corpus, d_output).unwrap_err();
+        assert!(err.contains("unexpected extra argument: c"), "{err}");
+    }
+
+    #[test]
+    fn help_flag_wins() {
+        let (d_corpus, d_output) = defaults();
+        assert!(matches!(
+            parse_args(&args(&["--help"]), d_corpus, d_output),
+            Ok(Parsed::Help)
+        ));
+        let (d_corpus, d_output) = defaults();
+        assert!(matches!(
+            parse_args(&args(&["-c", "dir", "-h"]), d_corpus, d_output),
+            Ok(Parsed::Help)
+        ));
+    }
 }

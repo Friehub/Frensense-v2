@@ -2,10 +2,10 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-//! `frensense_scan_file` — single-file scan tool for the MCP surface.
+//! `frensense_scan_file` - single-file scan tool for the MCP surface.
 //!
 //! Exists because agents working in an editor loop need a *focused*
-//! question answered — "is THIS file clean?" — not a directory audit.
+//! question answered - "is THIS file clean?" - not a directory audit.
 //! `frensense_audit` answers "is this tree clean" and reports findings
 //! tree-wide; `frensense_scan_file` answers only about the one file and
 //! labels every advisory with it, so the agent can associate fixes with
@@ -65,41 +65,25 @@ pub fn is_supported(path: &Path) -> bool {
     crate::parser::is_supported(path)
 }
 
-/// Severity ranking shared with `frensense_audit`'s filtering.
-#[must_use]
-pub fn severity_rank(s: Severity) -> u8 {
-    match s {
-        Severity::Critical => 3,
-        Severity::Warning => 2,
-        Severity::Info => 1,
-    }
-}
-
-fn threshold_floor(severity_threshold: &str) -> Severity {
-    match severity_threshold {
-        "critical" => Severity::Critical,
-        "warning" => Severity::Warning,
-        _ => Severity::Info,
-    }
-}
-
 /// Filter advisories by severity threshold and minimum confidence.
-/// No language filter here — the file's own extension decides what runs.
+/// No language filter here - the file's own extension decides what runs.
+///
+/// Thin wrapper over [`crate::reporting::apply`], the one reporting
+/// policy every surface shares.
 #[must_use]
 pub fn filter_advisories(
     advisories: Vec<Advisory>,
     severity_threshold: &str,
     min_confidence: f64,
 ) -> Vec<Advisory> {
-    let floor = severity_rank(threshold_floor(severity_threshold));
-    advisories
-        .into_iter()
-        .filter(|a| severity_rank(a.severity) >= floor)
-        .filter(|a| a.confidence >= min_confidence)
-        .collect()
+    crate::reporting::apply(
+        advisories,
+        min_confidence,
+        Some(Severity::parse(severity_threshold)),
+    )
 }
 
-/// Core single-file scan. All analysis goes through `Engine::run` —
+/// Core single-file scan. All analysis goes through `Engine::run` -
 /// no parallel code path, no re-implemented lowering. Errors from the
 /// engine surface as `Err` and are rendered by the caller as a
 /// tool-level `error` field, matching `frensense_audit`'s convention.

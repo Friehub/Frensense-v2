@@ -31,7 +31,6 @@ pub mod two_phase_tests {
                 rustc_hash::FxHashSet<crate::graph::heap::LocId>,
             >|
              -> Vec<(usize, usize)> {
-                #[allow(clippy::disallowed_methods)]
                 let mut v: Vec<(usize, usize)> = pts.iter().map(|(k, s)| (k.0, s.len())).collect();
                 v.sort_unstable();
                 v
@@ -163,8 +162,7 @@ export function handler(req: any): void {
         let fns = lower_source("t.ts", src, "ts").expect("lower");
         let statics: rustc_hash::FxHashMap<String, &crate::ir::function::FunctionIR> =
             fns.iter().map(|(k, v)| (k.clone(), v)).collect();
-        let spec = frensense_lang::spec_for_ext("ts").unwrap();
-        let config = crate::analysis::taint::facts::config_from_spec(spec);
+        let config = crate::analysis::taint::facts::seeded_tables(["ts"]).0;
         let prog = crate::analysis::forward::ProgramSvfg::new(&statics, &config);
         let mut engine = BackwardTaintEngine::new(&prog, &config);
         engine.run();

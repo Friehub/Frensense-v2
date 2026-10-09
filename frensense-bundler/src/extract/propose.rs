@@ -16,7 +16,7 @@ use super::call_analysis::{
 };
 use super::candidate::Candidate;
 use super::family::Family;
-use super::gate::scan_variant;
+use super::gate::{alerts, scan_variant};
 use super::noise::looks_taint_relevant;
 
 /// Propose candidate facts for one family from the pos/neg delta.
@@ -30,13 +30,38 @@ use super::noise::looks_taint_relevant;
 /// * If negatives contain guard/transform calls between the source and the
 ///   sink that positives lack -> propose sanitizer facts.
 pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Vec<Candidate> {
+    propose_with_trace(family, config, builtin).0
+}
+
+/// [`propose`] plus one human-readable note per decision: which branch the
+/// delta took, why a call was NOT proposed (already known to a built-in
+/// table, filtered as noise, positive already alerts so the sink path is
+/// closed), and which candidates were produced.
+///
+/// The bundler prints these under `FXDBG` and stores them in the learn
+/// report (`FXREPORT=<path>`), so a family that teaches nothing can say why
+/// instead of the pipeline staying silent about it.
+pub fn propose_with_trace(
+    family: &Family,
+    config: &TaintConfig,
+    builtin: &FactTable,
+) -> (Vec<Candidate>, Vec<String>) {
+    let mut notes: Vec<String> = Vec::new();
     let mut candidates = Vec::new();
 
     // Memory allocation / deallocation wrapper discovery from corpus examples:
     let mut family_irs = Vec::new();
     for (path, src, ext) in family.positives.iter().chain(family.negatives.iter()) {
-        if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
-            family_irs.extend(fns.into_values());
+        if let Ok(fns) =
+            frensense_engine::harness::lower_source_with_facts(path, src, ext, Some(builtin))
+        {
+            // Sort by function name: `lower_source` returns an
+            // `FxHashMap` whose iteration order is insertion- and
+            // hasher-dependent, and IR order feeds summary inference plus
+            // every downstream proposal - bundle bytes must not depend on it.
+            let mut fns: Vec<_> = fns.into_iter().collect();
+            fns.sort_by(|a, b| a.0.cmp(&b.0));
+            family_irs.extend(fns.into_iter().map(|(_, ir)| ir));
         }
     }
     if !family_irs.is_empty() {
@@ -44,7 +69,7 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
         let summaries =
             MemorySummaryRegistry::from_facts(builtin).infer_program_summaries_into(&ir_refs);
         for (name, summary) in summaries.summaries {
-            if MemorySummaryRegistry::is_builtin(&name) {
+            if crate::format::is_pack_memory_builtin(&name) {
                 continue;
             }
             if summary.returns_fresh || !summary.consumes_params.is_empty() {
@@ -58,27 +83,78 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
         }
     }
 
+    // Corpus-declared allocation-size overflow rule: the positive's
+    // `[frensense]` block names the prover rule this family teaches
+    // (`check-rule:`), so propose it regardless of the taint delta - the
+    // replay gate still validates pos/neg separation before publishing.
+    if let Some(rule) = &family.metadata.check_rule {
+        candidates.push(Candidate::IntegerOverflowRule {
+            rule: rule.clone(),
+            wrap_threshold: family.metadata.wrap_max.unwrap_or(u64::MAX as u128),
+            severity: family
+                .metadata
+                .severity
+                .as_deref()
+                .unwrap_or("critical")
+                .to_ascii_lowercase(),
+            message: family
+                .metadata
+                .observation
+                .clone()
+                .unwrap_or_else(|| "Integer overflow in allocation size".to_string()),
+        });
+    }
+
     let pos = scan_variant(&family.positives, config, builtin);
     let neg = scan_variant(&family.negatives, config, builtin);
-    let pos_alerts = pos.has_alert();
-    let neg_alerts = neg.has_alert();
+    let pos_alerts = alerts(&pos);
+    let neg_alerts = alerts(&neg);
 
     if pos_alerts && !neg_alerts {
         // Taint flow already separates. Return any memory contracts discovered.
-        return candidates;
+        notes.push(
+            "positive alerts and the negative stays silent under the built-in tables: \
+             the family already separates, so no sink/sanitizer fact is needed"
+                .to_string(),
+        );
+        return (candidates, notes);
     }
+    notes.push(format!(
+        "delta under built-in tables: positive_alerts={pos_alerts} \
+         negative_alerts={neg_alerts} (family does not separate)"
+    ));
 
     // Guard/transform calls present in negatives but not in positives,
     // these are likely the *reason* the negative is safe.
-    let pos_calls = collect_calls(&family.positives);
-    let neg_calls = collect_calls(&family.negatives);
+    let pos_calls = collect_calls(&family.positives, Some(builtin));
+    let neg_calls = collect_calls(&family.negatives, Some(builtin));
     for (call, shape) in &neg_calls {
-        if pos_calls.contains_key(call) || builtin.sanitizer_fact(call).is_some() {
+        if pos_calls.contains_key(call) {
+            notes.push(format!(
+                "sanitizer `{call}` not proposed: the positives call it too, so it is not a difference"
+            ));
+            continue;
+        }
+        if builtin.sanitizer_fact(call).is_some() {
+            notes.push(format!(
+                "sanitizer `{call}` not proposed: already a built-in sanitizer"
+            ));
             continue;
         }
         if !looks_taint_relevant(call) {
+            notes.push(format!(
+                "sanitizer `{call}` not proposed: filtered as non-taint-relevant"
+            ));
             continue;
         }
+        notes.push(format!(
+            "sanitizer candidate: `{call}` ({}), present only in negatives",
+            if *shape == CallShape::Predicate {
+                "predicate-style"
+            } else {
+                "transform"
+            }
+        ));
         candidates.push(Candidate::Sanitizer {
             call: call.clone(),
             guard: *shape == CallShape::Predicate,
@@ -89,23 +165,48 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
     // proposals (validated by replay).
     if !pos_alerts {
         for call in pos_calls.keys() {
-            if builtin.sink_signature(call).is_some() || builtin.sanitizer_fact(call).is_some() {
+            if builtin.sink_signature(call).is_some() {
+                notes.push(format!(
+                    "sink `{call}` not proposed: the built-in table already treats it as a sink, \
+                     so it cannot be the reason the positive stays silent"
+                ));
+                continue;
+            }
+            if builtin.sanitizer_fact(call).is_some() {
+                notes.push(format!(
+                    "sink `{call}` not proposed: the built-in table treats it as a sanitizer"
+                ));
                 continue;
             }
             if !looks_taint_relevant(call) {
+                notes.push(format!(
+                    "sink `{call}` not proposed: filtered as non-taint-relevant"
+                ));
                 continue;
             }
             if candidates
                 .iter()
                 .any(|c| matches!(c, Candidate::Sanitizer { call: c2, .. } if c2 == call))
             {
+                notes.push(format!(
+                    "sink `{call}` not proposed: already proposed as a sanitizer for this family"
+                ));
                 continue;
             }
+            notes.push(format!(
+                "sink candidate: `{call}` (unknown to every built-in table)"
+            ));
             candidates.push(Candidate::Sink {
                 call: call.clone(),
                 dangerous: BTreeSet::new(), // all args; replay validates
             });
         }
+    } else {
+        notes.push(
+            "unknown-call sink proposals skipped: they require a silent positive, and this \
+             positive already alerts"
+                .to_string(),
+        );
     }
 
     // Non-dataflow policy deltas: the two family shapes that express
@@ -119,7 +220,7 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
     //     carries `unless_guard` so the engine fires only when the guard
     //     is missing. This is the chatbot/privileged-tool shape.
     for call in pos_calls.keys() {
-        if builtin.learned_checks.iter().any(|c| c.call == *call) {
+        if builtin.learned_checks.iter().any(|(c, _)| c.call == *call) {
             continue; // already learned
         }
         // Family-declared trigger restricts Check proposals to the declared
@@ -132,10 +233,11 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
             continue;
         }
         let rule = format!("policy_{call}");
-        let message = format!(
-            "Corpus-verified policy violation: `{call}` (learned from family {})",
-            family.id
-        );
+        let message = family
+            .metadata
+            .observation
+            .clone()
+            .unwrap_or_else(|| format!("Policy violation: `{call}`"));
         // Enforcement modalities the negatives demonstrate. A negative can
         // enforce via a named helper, an inline literal range check, or
         // both; the fact records every modality observed and the engine
@@ -153,7 +255,7 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
                 family
                     .negatives
                     .iter()
-                    .map(|v| collect_calls(std::slice::from_ref(v)))
+                    .map(|v| collect_calls(std::slice::from_ref(v), Some(builtin)))
                     .all(|calls| calls.contains_key(g))
             };
             let mut eligible_guards: Vec<&String> = neg_calls
@@ -178,7 +280,7 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
             if family
                 .negatives
                 .iter()
-                .any(|v| variant_has_range_check_on_call(&[v.clone()], call))
+                .any(|v| variant_has_range_check_on_call(&[v.clone()], call, Some(builtin)))
             {
                 unless_range_check = Some(vec!["<".into(), ">".into(), "<=".into(), ">=".into()]);
             }
@@ -218,14 +320,17 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
     if let Some(trigger) = family.declared_check_call.clone() {
         if pos_calls.contains_key(&trigger)
             && neg_calls.contains_key(&trigger)
-            && builtin.learned_checks.iter().all(|c| c.call != trigger)
+            && builtin
+                .learned_checks
+                .iter()
+                .all(|(c, _)| c.call != trigger)
         {
             let pos_has = |g: &str| pos_calls.contains_key(g);
             let all_negs_have = |g: &str| {
                 family
                     .negatives
                     .iter()
-                    .map(|v| collect_calls(std::slice::from_ref(v)))
+                    .map(|v| collect_calls(std::slice::from_ref(v), Some(builtin)))
                     .all(|calls| calls.contains_key(g))
             };
             // Shape (b-native): required guard call in the same function.
@@ -252,10 +357,7 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
                     rule: format!("policy_{trigger}"),
                     call: trigger.clone(),
                     message: family.metadata.observation.clone().unwrap_or_else(|| {
-                        format!(
-                            "Corpus-verified policy violation: `{trigger}` requires `{guard}` guard (learned from family {})",
-                            family.id
-                        )
+                        format!("Policy violation: `{trigger}` requires `{guard}` guard")
                     }),
                     require: vec![PolicyRequirement::GuardCall {
                         call: (*guard).clone(),
@@ -265,7 +367,7 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
             }
             // Shape (c): banned-call co-occurrence. Calls the POSITIVES make
             // that no negative makes: candidate `NotCall` requirements.
-            let banned: Vec<String> = pos_calls
+            let mut banned: Vec<String> = pos_calls
                 .keys()
                 .filter(|c| {
                     c.as_str() != trigger
@@ -276,14 +378,18 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
                 })
                 .cloned()
                 .collect();
+            // Pick alphabetically, not in FxHashMap iteration order: the
+            // chosen name is baked into the learned fact's bytes.
+            banned.sort();
             if let Some(banned_call) = banned.first() {
                 candidates.push(Candidate::Policy {
                     rule: format!("policy_{trigger}_no_{banned_call}"),
                     call: trigger.clone(),
-                    message: format!(
-                        "Corpus-verified policy violation: `{trigger}` must not co-occur with `{banned_call}` (learned from family {})",
-                        family.id
-                    ),
+                    message: family.metadata.observation.clone().unwrap_or_else(|| {
+                        format!(
+                            "Policy violation: `{trigger}` must not co-occur with `{banned_call}`"
+                        )
+                    }),
                     require: vec![PolicyRequirement::NotCall {
                         call: banned_call.clone(),
                     }],
@@ -296,15 +402,16 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
             // enforcement lives outside the trigger's function, so the fact
             // uses Module scope (the engine accepts the definition site as
             // enforcement evidence).
-            if let Some(helper) = cross_function_helper(family, &pos_calls, &neg_calls) {
+            if let Some(helper) =
+                cross_function_helper(family, &pos_calls, &neg_calls, Some(builtin))
+            {
                 if builtin.sanitizer_fact(&helper).is_none() {
                     candidates.push(Candidate::Policy {
                         rule: format!("policy_{trigger}_with_{helper}"),
                         call: trigger.clone(),
-                        message: format!(
-                            "Corpus-verified policy violation: `{trigger}` requires `{helper}` enforcement (learned from family {})",
-                            family.id
-                        ),
+                        message: family.metadata.observation.clone().unwrap_or_else(|| {
+                            format!("Policy violation: `{trigger}` requires `{helper}` enforcement")
+                        }),
                         require: vec![PolicyRequirement::RequireCall {
                             any_of: vec![helper.clone()],
                         }],
@@ -317,14 +424,22 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
 
     let mut pos_irs = Vec::new();
     for (path, src, ext) in &family.positives {
-        if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
-            pos_irs.extend(fns.into_values());
+        if let Ok(fns) =
+            frensense_engine::harness::lower_source_with_facts(path, src, ext, Some(builtin))
+        {
+            let mut fns: Vec<_> = fns.into_iter().collect();
+            fns.sort_by(|a, b| a.0.cmp(&b.0));
+            pos_irs.extend(fns.into_iter().map(|(_, ir)| ir));
         }
     }
     let mut neg_irs = Vec::new();
     for (path, src, ext) in &family.negatives {
-        if let Ok(fns) = frensense_engine::harness::lower_source(path, src, ext) {
-            neg_irs.extend(fns.into_values());
+        if let Ok(fns) =
+            frensense_engine::harness::lower_source_with_facts(path, src, ext, Some(builtin))
+        {
+            let mut fns: Vec<_> = fns.into_iter().collect();
+            fns.sort_by(|a, b| a.0.cmp(&b.0));
+            neg_irs.extend(fns.into_iter().map(|(_, ir)| ir));
         }
     }
 
@@ -341,10 +456,11 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
                 candidates.push(Candidate::Policy {
                     rule: format!("policy_{call}_banned_arg_{slot}_{pos_val}"),
                     call: call.clone(),
-                    message: format!(
-                        "Corpus-verified policy violation: argument {} of `{call}` must not be '{pos_val}' (learned from family {})",
-                        slot, family.id
-                    ),
+                    message: family.metadata.observation.clone().unwrap_or_else(|| {
+                        format!(
+                            "Policy violation: argument {slot} of `{call}` must not be '{pos_val}'"
+                        )
+                    }),
                     require: vec![PolicyRequirement::BannedArgLiteral {
                         slot: *slot,
                         values: vec![pos_val.clone()],
@@ -357,10 +473,9 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
                             candidates.push(Candidate::Policy {
                                 rule: format!("policy_{call}_required_arg_{slot}_{neg_val}"),
                                 call: call.clone(),
-                                message: format!(
-                                    "Corpus-verified policy violation: argument {} of `{call}` requires '{neg_val}' (learned from family {})",
-                                    slot, family.id
-                                ),
+                                message: family.metadata.observation.clone().unwrap_or_else(|| {
+                                    format!("Policy violation: argument {slot} of `{call}` requires '{neg_val}'")
+                                }),
                                 require: vec![PolicyRequirement::RequiredArgLiteral {
                                     slot: *slot,
                                     values: vec![neg_val.clone()],
@@ -376,6 +491,17 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
                         call: call.clone(),
                         selector_slot: Some(*slot),
                         weak_selectors: vec![pos_val.clone()],
+                        severity: family
+                            .metadata
+                            .severity
+                            .as_deref()
+                            .unwrap_or("warning")
+                            .to_ascii_lowercase(),
+                        message: family
+                            .metadata
+                            .observation
+                            .clone()
+                            .unwrap_or_else(|| format!("Weak cryptography call `{call}`")),
                     },
                 });
             }
@@ -400,6 +526,17 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
                         call: call.clone(),
                         selector_slot: None,
                         weak_selectors: vec![],
+                        severity: family
+                            .metadata
+                            .severity
+                            .as_deref()
+                            .unwrap_or("warning")
+                            .to_ascii_lowercase(),
+                        message: family
+                            .metadata
+                            .observation
+                            .clone()
+                            .unwrap_or_else(|| format!("Weak cryptography call `{call}`")),
                     },
                 });
             }
@@ -618,5 +755,32 @@ pub fn propose(family: &Family, config: &TaintConfig, builtin: &FactTable) -> Ve
         }
     }
 
+    notes.push(format!(
+        "proposed {} candidate(s): {}",
+        candidates.len(),
+        candidate_keys(&candidates)
+    ));
+    (candidates, notes)
+}
+
+/// Compact `kind:name` list of candidates, for the proposal trace.
+fn candidate_keys(candidates: &[Candidate]) -> String {
+    if candidates.is_empty() {
+        return "(none)".to_string();
+    }
     candidates
+        .iter()
+        .map(|c| match c {
+            Candidate::Sink { call, .. } => format!("sink:{call}"),
+            Candidate::Sanitizer { call, guard } => {
+                format!("san:{call}:{}", if *guard { "guard" } else { "fn" })
+            }
+            Candidate::Check { rule, call, .. } => format!("check:{rule}:{call}"),
+            Candidate::Policy { rule, call, .. } => format!("policy:{rule}:{call}"),
+            Candidate::MemoryContract { name, .. } => format!("mem:{name}"),
+            Candidate::IntegerOverflowRule { rule, .. } => format!("io_rule:{rule}"),
+            _ => "candidate".to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }

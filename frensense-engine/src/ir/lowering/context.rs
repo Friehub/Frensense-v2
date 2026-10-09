@@ -8,6 +8,15 @@ use frensense_lang::{LanguageSpec, NodeRole};
 use rustc_hash::FxHashMap;
 use tree_sitter::Node;
 
+/// Innermost `break`/`continue` target while lowering a loop or C switch.
+/// `break` jumps to `break_target`; `continue` jumps to the innermost
+/// *loop*'s `continue_target` (switches contribute `None` so a `continue`
+/// below them still finds the enclosing loop).
+pub struct LoopTarget {
+    pub break_target: BlockId,
+    pub continue_target: Option<BlockId>,
+}
+
 pub struct LoweringContext<'a> {
     pub spec: &'a dyn LanguageSpec,
     pub source: &'a str,
@@ -23,6 +32,12 @@ pub struct LoweringContext<'a> {
     /// It is mutated by Store/Call instructions. The SSABuilder will automatically
     /// version this into mem_1, mem_2, mem_3 and generate Memory Phis.
     pub memory_var: VarId,
+
+    /// Jump target blocks for labeled statements: label_name -> BlockId
+    pub labels: FxHashMap<String, BlockId>,
+
+    /// Loop/switch stack for `break` and `continue` (innermost last).
+    pub loop_stack: Vec<LoopTarget>,
 
     /// Optional learned fact table providing dynamic grammar overrides.
     pub facts: Option<&'a FactTable>,
@@ -50,7 +65,20 @@ impl<'a> LoweringContext<'a> {
             current_block: entry,
             env: vec![FxHashMap::default()], // Global/Function scope
             memory_var,
+            labels: FxHashMap::default(),
+            loop_stack: Vec::new(),
             facts,
+        }
+    }
+
+    /// Retrieve or allocate a BlockId for a named label.
+    pub fn get_or_create_label_block(&mut self, name: &str) -> BlockId {
+        if let Some(&bid) = self.labels.get(name) {
+            bid
+        } else {
+            let bid = self.ir.new_block();
+            self.labels.insert(name.to_string(), bid);
+            bid
         }
     }
 
@@ -60,7 +88,7 @@ impl<'a> LoweringContext<'a> {
         if let Some(facts) = self.facts
             && let Some(role) = facts.get_grammar_role(lang, kind)
         {
-            return role.clone();
+            return role;
         }
         self.spec.classify(kind)
     }
@@ -186,10 +214,25 @@ impl<'a> LoweringContext<'a> {
             byte_range: Some((node.start_byte(), node.end_byte())),
             is_memory_state: false,
             object_keys: Vec::new(),
+            declared: false,
         });
 
         self.env.last_mut().unwrap().insert(name, new_var);
         Operand::Var(new_var)
+    }
+
+    /// Fresh temporary for lowering-synthesized values (compound assignment,
+    /// increment/decrement). Spanned to `node` so findings on the result
+    /// resolve to the statement that produced it.
+    pub fn new_temp(&mut self, node: Node) -> VarId {
+        self.ir.new_var(VarMetadata {
+            source_name: None,
+            type_name: None,
+            byte_range: Some((node.start_byte(), node.end_byte())),
+            is_memory_state: false,
+            object_keys: Vec::new(),
+            declared: false,
+        })
     }
 
     /// Generic child walk shared by degenerate shapes (returns the last

@@ -14,9 +14,9 @@
 //!
 //! ## Why this matters for taint analysis
 //!
-//! The current `TaintEngine` runs a fixed-point loop over *all* instructions in
-//! *all* blocks, repeating until nothing changes. On a large codebase this visits
-//! huge amounts of irrelevant IR. The SVFG changes the cost model:
+//! The historical fixed-point `TaintEngine` ran a loop over *all* instructions
+//! in *all* blocks, repeating until nothing changed. On a large codebase this
+//! visits huge amounts of irrelevant IR. The SVFG changes the cost model:
 //!
 //!   * Taint propagation = BFS/DFS from **source nodes**, following edges.
 //!   * No fixed-point loop. No visiting blocks that aren't reachable from a source.
@@ -49,9 +49,9 @@
 //! The `use(J, v1) → def(J, v2)` edge is the *intra-instruction flow* edge: it
 //! is what makes taint survive an assignment, a binary op, or a call
 //! destination. Without it, BFS dies at the first use node. This mirrors
-//! exactly what `TaintEngine::process_instruction` does when it moves taint
-//! from operands to dests, the graph just makes it explicit and reusable for
-//! demand-driven backward traversal later (task 4.4).
+//! exactly what the fixed-point engine's `process_instruction` did when it
+//! moved taint from operands to dests, the graph just makes it explicit and
+//! reusable for demand-driven backward traversal (task 4.4).
 //!
 //! Memory states flow the same way: every instruction consuming `mem_in` and
 //! producing `mem_out` gets a `mem_in-use → mem_out-def` edge, so memory taint
@@ -164,7 +164,7 @@ impl SvfgNode {
 /// The Sparse Value-Flow Graph for a single function.
 ///
 /// Build it with [`SvfgBuilder::build`], then query it with the helper
-/// methods or use [`SvfgTaintEngine`] for source-to-sink analysis.
+/// methods.
 #[derive(Debug, Default, Clone)]
 pub struct Svfg {
     pub nodes: FxHashMap<NodeKey, SvfgNode>,
@@ -209,16 +209,6 @@ impl Svfg {
     /// parameter-taint analysis.
     pub fn param_nodes(&self) -> Vec<&SvfgNode> {
         self.nodes_where(|n| n.kind == NodeKind::FormalParam)
-    }
-
-    /// Every node that is a definition (`InstrDef`, `Phi`, or `FormalParam`).
-    pub fn def_nodes(&self) -> Vec<&SvfgNode> {
-        self.nodes_where(|n| {
-            matches!(
-                n.kind,
-                NodeKind::InstrDef | NodeKind::Phi | NodeKind::FormalParam
-            )
-        })
     }
 
     /// Add a directed edge `from → to`. O(1); dedup via hash set.
@@ -376,16 +366,65 @@ impl<'a> SvfgBuilder<'a> {
                 // a) Operand uses: def(v) → use(J, v) → def(J, w) for each defined w.
                 for use_var in Self::instruction_uses(instr) {
                     let use_key = NodeKey::instr(block_id, idx, use_var);
+
+                    // A field read whose base is a fresh allocation is a
+                    // *container identity* use, not a value use: the field's
+                    // value arrives through the Pass-3 store→load edges (or
+                    // is absent = clean). Linking the base def here would let
+                    // the backward walk climb from the load into the
+                    // container's other stores and union every property back
+                    // together - the exact pollution the allocation lowering
+                    // exists to remove.
+                    if self.is_container_identity_use(instr, use_var) {
+                        continue;
+                    }
+
                     self.graph.ensure_node(use_key, NodeKind::InstrUse);
                     self.connect_def_to_use(use_var, use_key);
 
                     // Intra-instruction flow: the consumed value contributes to
                     // everything this instruction defines. This is the edge that
                     // lets taint cross Assign / BinaryOp / Cast / Call-dest etc.
+                    //
+                    // Cut for boolean-producing operations (`a == b`, `a < b`,
+                    // `k in obj`, `instanceof`, `!a`): their destination holds a
+                    // BOOLEAN, whose printable payload is "true"/"false" -
+                    // operand bytes cannot survive into it, so linking
+                    // operand→dest manufactures source→sink paths that do not
+                    // exist (`flag = req.body == "admin"; execute(flag)`), and
+                    // the value lattice cannot see them (comparisons over
+                    // tainted operands fold to Top). Value-returning operators
+                    // keep their edges: `a || b` and `a + b` yield operands.
+                    if Self::defines_boolean_payload(instr) {
+                        continue;
+                    }
                     for &def_var in &defs {
                         let def_key = NodeKey::instr(block_id, idx, def_var);
                         self.graph.add_edge(use_key, def_key);
                     }
+                }
+
+                // a2) A store writes `src` INTO its container: the container's
+                // def node must reach `src` when walked backward, so a whole-
+                // container consumer (`sink(obj)`, `p = obj`) sees every
+                // stored value. Field reads are unaffected: they no longer
+                // climb through the container def (see the identity-use cut
+                // above) and resolve through Pass-3 edges instead.
+                //
+                // The edge always targets the ALLOCATION's own def node
+                // (following binding copies), never a copy's def: the
+                // backward engine stops field-demand walks exactly at
+                // allocation defs, and stores on non-allocation containers
+                // (parameters, unknown bases) keep their pre-existing edge
+                // structure - fill edges there would re-open the
+                // field-mismatch paths Pass 3 exists to filter.
+                if let Instruction::StoreField { base, src, .. }
+                | Instruction::StoreElement { base, src, .. } = instr
+                    && let Operand::Var(sv) = src
+                    && let Some(base_def) = self.allocation_def(*base)
+                {
+                    self.graph
+                        .add_edge(NodeKey::instr(block_id, idx, *sv), base_def);
                 }
 
                 // b) Memory flow: mem_in-use → mem_out-def (pass-through /
@@ -804,6 +843,82 @@ impl<'a> SvfgBuilder<'a> {
         v
     }
 
+    /// The def node of the allocation that `var` resolves to through
+    /// binding copies, or `None` when the chain doesn't end in one.
+    ///
+    /// `const o = {...}` emits `Allocate` into a temporary and binds `o`
+    /// with an `Assign`, so both the temp and the bound name count.
+    fn allocation_def(&self, mut var: VarId) -> Option<NodeKey> {
+        for _ in 0..8 {
+            let key = *self.def_site.get(&var)?;
+            let NodeKey {
+                block,
+                instr_idx: Some(i),
+                ..
+            } = key
+            else {
+                return None;
+            };
+            let ins = self.ir.blocks.get(&block)?.instructions.get(i)?;
+            match ins {
+                Instruction::Allocate { .. } => return Some(key),
+                Instruction::Assign {
+                    src: Operand::Var(v),
+                    ..
+                } => var = *v,
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    /// Does `var` resolve (through binding copies) to an allocation?
+    fn resolves_to_allocation(&self, var: VarId) -> bool {
+        self.allocation_def(var).is_some()
+    }
+
+    /// Is `use_var` the container-identity operand of a field/element read
+    /// whose base resolves to a fresh allocation? Such reads must not
+    /// climb into the container's definition: their field's value arrives
+    /// through the Pass-3 store→load edges only.
+    fn is_container_identity_use(&self, instr: &Instruction, use_var: VarId) -> bool {
+        let base = match instr {
+            Instruction::LoadField { base, .. } | Instruction::LoadElement { base, .. } => *base,
+            _ => return false,
+        };
+        base == use_var && self.resolves_to_allocation(base)
+    }
+
+    /// Does this instruction define a boolean *payload* rather than a
+    /// transformed copy of its operands' bytes?
+    ///
+    /// Comparisons (`==`, `<`, `in`, `instanceof`, ...) and boolean
+    /// negation always print as `"true"`/`"false"`, so taint on the
+    /// operands cannot reach a consumer of the destination. Operators that
+    /// yield an operand's value (`||`, `&&`, arithmetic/string `+`) are
+    /// deliberately excluded - their destinations do carry payload bytes.
+    fn defines_boolean_payload(instr: &Instruction) -> bool {
+        match instr {
+            Instruction::BinaryOp { op, .. } => matches!(
+                op.as_str(),
+                "==" | "==="
+                    | "!="
+                    | "!=="
+                    | "<"
+                    | "<="
+                    | ">"
+                    | ">="
+                    | "in"
+                    | "not in"
+                    | "instanceof"
+                    | "is"
+                    | "is not"
+            ),
+            Instruction::UnaryOp { op, .. } => matches!(op.as_str(), "!" | "not"),
+            _ => false,
+        }
+    }
+
     /// Returns the `mem_in` VarId if this instruction consumes a memory state.
     fn instruction_mem_in(instr: &Instruction) -> Option<VarId> {
         match instr {
@@ -849,289 +964,5 @@ impl<'a> SvfgBuilder<'a> {
             _ => {}
         }
         v
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Graph-traversal taint engine
-// ---------------------------------------------------------------------------
-
-use crate::analysis::taint::config::TaintConfig;
-
-/// A taint engine that operates purely on the SVFG via BFS.
-///
-/// Unlike the fixed-point `TaintEngine`, this one:
-///   * Seeds the worklist with nodes whose defining instruction is a **source**.
-///   * Follows SVFG edges forward (def → use → def → …).
-///   * Checks each reached node against **sinks**.
-///   * Stops at **sanitizer** call sites.
-///   * Applies call pass-through (non-source, non-sanitizer call with a tainted
-///     arg taints the call's dest), matching `TaintEngine` semantics.
-///
-/// Because we follow only edges that exist in the graph, we naturally visit
-/// only variables reachable from a source, exactly the "5% of the program"
-/// mentioned in the spec.
-pub struct SvfgTaintEngine<'a> {
-    ir: &'a FunctionIR,
-    #[allow(dead_code)] // reserved for 4.3 (two-phase points-to integration)
-    heap: &'a PointsToAnalysis,
-    config: &'a TaintConfig,
-    graph: &'a Svfg,
-
-    /// Nodes that have been confirmed tainted.
-    tainted: FxHashSet<NodeKey>,
-
-    pub alerts: Vec<String>,
-}
-
-impl<'a> SvfgTaintEngine<'a> {
-    pub fn new(
-        ir: &'a FunctionIR,
-        heap: &'a PointsToAnalysis,
-        config: &'a TaintConfig,
-        graph: &'a Svfg,
-        _def_site: &'a FxHashMap<VarId, NodeKey>,
-    ) -> Self {
-        Self {
-            ir,
-            heap,
-            config,
-            graph,
-            tainted: FxHashSet::default(),
-            alerts: Vec::new(),
-        }
-    }
-
-    /// Run the BFS-based taint propagation.
-    ///
-    /// # Complexity
-    ///
-    /// O(|reachable nodes from sources|), proportional to taint paths,
-    /// not program size.
-    pub fn run(&mut self) {
-        let mut worklist: std::collections::VecDeque<NodeKey> = std::collections::VecDeque::new();
-
-        // Seed: find all InstrDef nodes whose instruction is a configured source.
-        // We iterate in deterministic key order so alerts come out stable.
-        let mut seed_keys: Vec<NodeKey> = self.graph.nodes.keys().copied().collect();
-        seed_keys.sort_by_key(|k| (k.block.0, k.instr_idx, k.var.0));
-        for key in seed_keys {
-            if self.node_is_source(&key) {
-                self.tainted.insert(key);
-                worklist.push_back(key);
-            }
-        }
-
-        // BFS
-        while let Some(current) = worklist.pop_front() {
-            let node = match self.graph.node(&current) {
-                Some(n) => n,
-                None => continue,
-            };
-
-            for succ_key in node.successors() {
-                // Check for sanitizer: if the successor node represents a
-                // sanitizer call-site use, stop propagation along this edge.
-                if self.node_is_sanitizer_use(&succ_key) {
-                    continue;
-                }
-
-                // Check for sink
-                self.check_sink(&succ_key);
-
-                if !self.tainted.contains(&succ_key) {
-                    self.tainted.insert(succ_key);
-                    worklist.push_back(succ_key);
-                }
-            }
-        }
-    }
-
-    // -----------------------------------------------------------------------
-    // Helpers
-    // -----------------------------------------------------------------------
-
-    /// Returns `true` if the node at `key` is a definition that is a taint
-    /// source (i.e. the defining instruction calls a configured source function).
-    fn node_is_source(&self, key: &NodeKey) -> bool {
-        let NodeKey {
-            block,
-            instr_idx: Some(idx),
-            var,
-        } = *key
-        else {
-            return false;
-        };
-
-        let block_data = match self.ir.blocks.get(&block) {
-            Some(b) => b,
-            None => return false,
-        };
-
-        // Guard: instruction index must be valid (not a sentinel)
-        if idx >= block_data.instructions.len() {
-            return false;
-        }
-
-        match &block_data.instructions[idx] {
-            Instruction::CallStatic {
-                func,
-                dest: Some(dest_var),
-                ..
-            } => self.config.sources.contains(func) && *dest_var == var,
-            Instruction::CallVirtual {
-                method,
-                dest: Some(dest_var),
-                ..
-            } => self.config.sources.contains(method) && *dest_var == var,
-            _ => false,
-        }
-    }
-
-    /// Returns `true` if the node at `key` is a *use* inside a sanitizer call.
-    fn node_is_sanitizer_use(&self, key: &NodeKey) -> bool {
-        let NodeKey {
-            block,
-            instr_idx: Some(idx),
-            ..
-        } = *key
-        else {
-            return false;
-        };
-
-        let block_data = match self.ir.blocks.get(&block) {
-            Some(b) => b,
-            None => return false,
-        };
-
-        if idx >= block_data.instructions.len() {
-            return false;
-        }
-
-        match &block_data.instructions[idx] {
-            Instruction::CallStatic { func, .. } => self.config.sanitizers.contains(func),
-            Instruction::CallVirtual { method, .. } => self.config.sanitizers.contains(method),
-            _ => false,
-        }
-    }
-
-    /// Emits an alert if `key` is a use inside a configured sink.
-    fn check_sink(&mut self, key: &NodeKey) {
-        let NodeKey {
-            block,
-            instr_idx: Some(idx),
-            var,
-        } = *key
-        else {
-            return;
-        };
-
-        let block_data = match self.ir.blocks.get(&block) {
-            Some(b) => b,
-            None => return,
-        };
-
-        if idx >= block_data.instructions.len() {
-            return;
-        }
-
-        let alert = match &block_data.instructions[idx] {
-            Instruction::CallStatic { func, args, .. } if self.config.sinks.contains(func) => args
-                .iter()
-                .position(|a| a == &Operand::Var(var))
-                .map(|pos| {
-                    format!(
-                        "CRITICAL VULNERABILITY: Tainted data reached sink '{}' at argument {}",
-                        func, pos
-                    )
-                }),
-            Instruction::CallVirtual {
-                method,
-                args,
-                receiver,
-                ..
-            } if self.config.sinks.contains(method) => {
-                if receiver == &Operand::Var(var) {
-                    Some(format!(
-                        "CRITICAL VULNERABILITY: Tainted data reached sink '{}' at receiver",
-                        method
-                    ))
-                } else {
-                    args.iter().position(|a| a == &Operand::Var(var)).map(|pos| {
-                        format!(
-                            "CRITICAL VULNERABILITY: Tainted data reached sink '{}' at argument {}",
-                            method, pos
-                        )
-                    })
-                }
-            }
-            _ => None,
-        };
-
-        if let Some(alert) = alert
-            && !self.alerts.contains(&alert)
-        {
-            self.alerts.push(alert);
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Statistics / Debug helpers
-// ---------------------------------------------------------------------------
-
-impl Svfg {
-    /// Returns a summary of the graph for debugging.
-    pub fn stats(&self) -> SvfgStats {
-        let mut def_count = 0;
-        let mut use_count = 0;
-        let mut phi_count = 0;
-        let mut param_count = 0;
-        let mut edge_count = 0;
-
-        for node in self.nodes.values() {
-            edge_count += node.successors.len();
-            match node.kind {
-                NodeKind::InstrDef => def_count += 1,
-                NodeKind::InstrUse => use_count += 1,
-                NodeKind::Phi => phi_count += 1,
-                NodeKind::FormalParam => param_count += 1,
-                _ => {}
-            }
-        }
-
-        SvfgStats {
-            node_count: self.nodes.len(),
-            def_count,
-            use_count,
-            phi_count,
-            param_count,
-            edge_count,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct SvfgStats {
-    pub node_count: usize,
-    pub def_count: usize,
-    pub use_count: usize,
-    pub phi_count: usize,
-    pub param_count: usize,
-    pub edge_count: usize,
-}
-
-impl std::fmt::Display for SvfgStats {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "SVFG {{ nodes: {}, defs: {}, uses: {}, phis: {}, params: {}, edges: {} }}",
-            self.node_count,
-            self.def_count,
-            self.use_count,
-            self.phi_count,
-            self.param_count,
-            self.edge_count,
-        )
     }
 }

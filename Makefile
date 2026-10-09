@@ -5,6 +5,9 @@
 all: fmt check audit test
 
 ## Quality & Safety
+# The canonical gate is scripts/local-ci.sh (1:1 mirror of ci.yml).
+# `make check` runs only the lint step for fast iteration; use
+# `make discipline` (or ./scripts/local-ci.sh) for the full pre-PR gate.
 check:
 	@echo "[CHECK] Running semantic lints (Clippy)..."
 	cargo clippy --all-targets --all-features -- -D warnings
@@ -80,8 +83,9 @@ corpus-gen:
 	@echo "[CORPUS] Generating missing sidecar .toml files..."
 	@python3 scripts/corpus_check.py corpus/targets/ --generate
 
-## Discipline
-discipline: check audit test benchmark
+## Discipline (full pre-PR gate: identical to CI)
+discipline:
+	./scripts/local-ci.sh
 	@echo "[DISCIPLINE] All stabilization checks passed."
 
 help:

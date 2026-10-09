@@ -10,8 +10,14 @@ pub mod oob_spec {
     use crate::harness::lower_source;
 
     fn hits(src: &str) -> Vec<String> {
+        let facts = crate::analysis::taint::facts::seeded_tables(["c"]).1;
+        let summaries = crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&facts);
         let fns = lower_source("t.c", src, "c").unwrap();
-        let mut rules: Vec<String> = fns.values().flat_map(oob::check).map(|f| f.rule).collect();
+        let mut rules: Vec<String> = fns
+            .values()
+            .flat_map(|ir| oob::check_with_summaries(ir, &summaries, &facts))
+            .map(|f| f.rule)
+            .collect();
         rules.sort();
         rules
     }
@@ -266,6 +272,102 @@ void handler (char *p, int idx) {
             rules.is_empty(),
             "unprovable parameter pointer must stay silent: {:?}",
             rules
+        );
+    }
+}
+
+#[cfg(test)]
+pub mod oob_lowering_regressions {
+    use crate::checks::oob;
+    use crate::harness::lower_source;
+
+    fn hits(src: &str) -> Vec<String> {
+        let facts = crate::analysis::taint::facts::seeded_tables(["c"]).1;
+        let summaries = crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&facts);
+        let fns = lower_source("t.c", src, "c").unwrap();
+        let mut rules: Vec<String> = fns
+            .values()
+            .flat_map(|ir| oob::check_with_summaries(ir, &summaries, &facts))
+            .map(|f| f.rule)
+            .collect();
+        rules.sort();
+        rules
+    }
+
+    /// `alloc *= 2` was lowered as `alloc = 2` (compound op dropped), so the
+    /// malloc capacity const-folded to 2 and a correctly sized memcpy fired a
+    /// false buffer_overflow (alsa-lib parse_string).
+    #[test]
+    fn compound_assignment_capacity_stays_silent() {
+        let src = r#"
+#include <stdlib.h>
+#include <string.h>
+void grow(const char *src) {
+  size_t alloc = 256;
+  size_t old = alloc;
+  alloc *= 2;
+  char *p = malloc(alloc);
+  memcpy(p, src, old);
+}
+"#;
+        let rules = hits(src);
+        assert!(
+            rules.is_empty(),
+            "capacity 512 >= 256 must stay silent: {rules:?}"
+        );
+    }
+
+    /// The compound value must flow into bounds checks (the dropped operator
+    /// used to reset the variable to the RHS literal, missing real overflows).
+    #[test]
+    fn compound_assignment_bounds_still_fire() {
+        let src = r#"
+#include <stdlib.h>
+void handler() {
+  int i = 8;
+  i += 5;
+  char *p = malloc(10);
+  p[i] = 1;
+}
+"#;
+        let rules = hits(src);
+        assert!(
+            rules.iter().any(|r| r == "buffer_overflow"),
+            "i = 13 on malloc(10) must fire: {rules:?}"
+        );
+    }
+
+    /// `p[i++]` indexes with the OLD value of `i`.
+    #[test]
+    fn postfix_increment_index_uses_old_value() {
+        let src = r#"
+#include <stdlib.h>
+void handler() {
+  int i = 9;
+  char *p = malloc(10);
+  p[i++] = 1;
+}
+"#;
+        let rules = hits(src);
+        assert!(rules.is_empty(), "index 9 < 10 must stay silent: {rules:?}");
+    }
+
+    /// The increment updates the variable for subsequent uses.
+    #[test]
+    fn postfix_increment_updates_variable() {
+        let src = r#"
+#include <stdlib.h>
+void handler() {
+  int i = 9;
+  char *p = malloc(10);
+  p[i++] = 1;
+  p[i] = 2;
+}
+"#;
+        let rules = hits(src);
+        assert!(
+            rules.iter().any(|r| r == "buffer_overflow"),
+            "i is 10 after i++; the second write must fire: {rules:?}"
         );
     }
 }

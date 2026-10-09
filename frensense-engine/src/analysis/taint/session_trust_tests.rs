@@ -11,7 +11,7 @@
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod session_trust_tests {
     use crate::analysis::taint::engine::BackwardVerdict;
-    use crate::analysis::taint::facts::{config_from_spec, fact_table_from_spec};
+    use crate::analysis::taint::facts::seeded_tables;
     use crate::harness::lower_source;
     use crate::scan::{prepare, scan_prepared};
 
@@ -46,16 +46,9 @@ export function handler (req: any) {
 
     fn run(src: &str) -> Vec<crate::analysis::taint::engine::SinkFinding> {
         let files = vec![("test.ts".to_string(), src.to_string(), "ts".to_string())];
-        let spec = frensense_lang::spec_for_ext("ts").unwrap();
-        let config = config_from_spec(spec);
-        let mut facts = fact_table_from_spec(spec);
-        // Session roots are corpus-owned seed facts now, not spec tables,
-        // apply the same seed document production loads.
-        crate::analysis::taint::facts::seed::SeedFacts::parse(
-            r#"{"session_roots": ["authenticatedUsers"]}"#,
-        )
-        .expect("seed")
-        .apply_to(&mut facts);
+        // Session roots are pack vocabulary (the default pack's
+        // per-language tables); the production-seeded table already carries them.
+        let (config, facts) = seeded_tables(["ts"]);
         let prepared = prepare(&files).expect("prepare");
         scan_prepared(&prepared, &config, &facts).findings
     }
@@ -78,13 +71,7 @@ export function handler (req: any) {
         // No sink in MAP_FLOW; the point is the engine's session predicate
         // doesn't fire on arbitrary receivers, assert via the fact table
         // directly for precision.
-        let spec = frensense_lang::spec_for_ext("ts").unwrap();
-        let mut facts = fact_table_from_spec(spec);
-        crate::analysis::taint::facts::seed::SeedFacts::parse(
-            r#"{"session_roots": ["authenticatedUsers"]}"#,
-        )
-        .expect("seed")
-        .apply_to(&mut facts);
+        let facts = seeded_tables(["ts"]).1;
         assert!(!facts.is_session_path("get", Some("myMap")));
         assert!(facts.is_session_path("get", Some("security.authenticatedUsers")));
         assert!(!facts.is_session_path("put", Some("security.authenticatedUsers")));
@@ -93,16 +80,15 @@ export function handler (req: any) {
     #[test]
     fn receiver_access_path_resolves_namespaced_stores() {
         let irs = lower_source("t.ts", SESSION_FLOW, "ts").unwrap();
-        let (_, ir) = irs
-            .iter()
-            .find(|(n, _)| n.contains("orderHistory") || n.contains("handler"))
-            .expect("fn");
-        // Some var in the function must resolve to a path containing the
-        // session root.
-        let any_path = ir.var_metadata.keys().any(|v| {
-            crate::analysis::taint::facts::FactTable::receiver_access_path(ir, *v)
-                .map(|p| p.contains("authenticatedUsers"))
-                .unwrap_or(false)
+        // The handler body lives in the IR that OWNS it - the returned
+        // arrow (`<fn@N>`), not the `orderHistory` husk that only returns
+        // it - so search every IR for the resolved path.
+        let any_path = irs.values().any(|ir| {
+            ir.var_metadata.keys().any(|v| {
+                crate::analysis::taint::facts::FactTable::receiver_access_path(ir, *v)
+                    .map(|p| p.contains("authenticatedUsers"))
+                    .unwrap_or(false)
+            })
         });
         assert!(
             any_path,

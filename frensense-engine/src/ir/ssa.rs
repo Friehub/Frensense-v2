@@ -40,16 +40,35 @@ impl SSABuilder {
     }
 
     fn compute_immediate_dominators(&self) -> FxHashMap<BlockId, BlockId> {
-        let mut doms: FxHashMap<BlockId, FxHashSet<BlockId>> = FxHashMap::default();
-        let all_blocks: FxHashSet<BlockId> = self.ir.blocks.keys().copied().collect();
+        // Dominance is only defined for blocks reachable from the entry.
+        // Lowering legitimately leaves dead blocks behind (the unused
+        // false_block of an if without else, a merge block after arms that
+        // all return, switch cases whose dispatch edges are not modeled).
+        // Treating them as normal blocks makes their dominator sets
+        // unconstrained (every block "dominates" them), and idom selection
+        // over those ill-defined sets can pick a cycle - which used to spin
+        // the frontier walk forever.
+        let mut reachable: FxHashSet<BlockId> = FxHashSet::default();
+        let mut stack = vec![self.ir.entry_block];
+        reachable.insert(self.ir.entry_block);
+        while let Some(b) = stack.pop() {
+            if let Some(block) = self.ir.blocks.get(&b) {
+                for &s in &block.successors {
+                    if reachable.insert(s) {
+                        stack.push(s);
+                    }
+                }
+            }
+        }
 
-        for &b in &all_blocks {
+        let mut doms: FxHashMap<BlockId, FxHashSet<BlockId>> = FxHashMap::default();
+        for &b in &reachable {
             if b == self.ir.entry_block {
                 let mut s = FxHashSet::default();
                 s.insert(b);
                 doms.insert(b, s);
             } else {
-                doms.insert(b, all_blocks.clone());
+                doms.insert(b, reachable.iter().copied().collect());
             }
         }
 
@@ -57,11 +76,14 @@ impl SSABuilder {
         while changed {
             changed = false;
             for (&b_id, block) in &self.ir.blocks {
-                if b_id == self.ir.entry_block {
+                if !reachable.contains(&b_id) || b_id == self.ir.entry_block {
                     continue;
                 }
 
-                let mut new_dom = all_blocks.clone();
+                // Unreachable predecessors are not on any path from the
+                // entry and must not constrain the intersection; they are
+                // simply absent from `doms`.
+                let mut new_dom: FxHashSet<BlockId> = reachable.iter().copied().collect();
                 for &pred in &block.predecessors {
                     if let Some(pred_doms) = doms.get(&pred) {
                         new_dom = new_dom.intersection(pred_doms).copied().collect();
@@ -114,7 +136,10 @@ impl SSABuilder {
             if block.predecessors.len() >= 2 {
                 for &pred in &block.predecessors {
                     let mut runner = pred;
-                    while runner != *idoms.get(&b_id).unwrap_or(&self.ir.entry_block) {
+                    let mut visited = FxHashSet::default();
+                    while runner != *idoms.get(&b_id).unwrap_or(&self.ir.entry_block)
+                        && visited.insert(runner)
+                    {
                         df.get_mut(&runner).unwrap().insert(b_id);
                         if let Some(&next) = idoms.get(&runner) {
                             runner = next;
@@ -266,6 +291,7 @@ impl SSABuilder {
                 byte_range: None,
                 is_memory_state: false,
                 object_keys: Vec::new(),
+                declared: false,
             });
         let new_id = self.ir.new_var(meta);
         stacks.entry(orig).or_default().push(new_id);

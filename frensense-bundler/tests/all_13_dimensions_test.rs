@@ -21,7 +21,8 @@
 
 use std::collections::BTreeSet;
 
-use frensense_bundler::format::{load_bundle, write_bundle, BundlePayload};
+use frensense_bundler::extract::alerts;
+use frensense_bundler::format::{load_bundle, write_bundle, BundlePayloadV5};
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::engine::FindingClass;
 use frensense_engine::analysis::taint::facts::{
@@ -29,16 +30,35 @@ use frensense_engine::analysis::taint::facts::{
     PolicyRequirement, PolicyScope, SchemaPolicyFact, TeachableNodeRole, WeakCryptoFact,
 };
 use frensense_engine::checks::memory_summary::CapacitySpec;
+use frensense_engine::checks::Provenance;
 use frensense_engine::scan::scan;
 
 fn make_bundle(facts: Vec<LearnedFactEntry>) -> FactTable {
-    let payload = BundlePayload {
+    // Production scans seed spec -> default pack -> pack language sections
+    // via the engine's production-shaped helper, then merge bundle facts
+    // OVER that (`tables_from_exts_with_pack`); mirror that here so the
+    // fixtures exercise the real seeding order. The engine reads
+    // `FactTable` only, so a bare bundle table would hide the vocabulary
+    // from checks.
+    let all_extensions: Vec<&str> = frensense_lang::all_specs()
+        .flat_map(|s| s.extensions().iter().copied())
+        .collect();
+    let mut table = frensense_engine::analysis::taint::facts::tables_from_exts_with_pack(
+        all_extensions,
+        frensense_bundler::format::default_pack()
+            .learned_facts
+            .as_slice(),
+    )
+    .1;
+    let payload = BundlePayloadV5 {
         patterns: vec![],
         learned_facts: facts,
+        policy_pack: vec![],
     };
     let bytes = write_bundle(&payload, 0).expect("write bundle");
     let loaded = load_bundle(&bytes).expect("load bundle");
-    fact_table_from_entries(&loaded.learned_facts)
+    table.merge(&fact_table_from_entries(&loaded.learned_facts));
+    table
 }
 
 // ── Dimension 1: Dangerous Sinks ──────────────────────────────────────────
@@ -67,7 +87,7 @@ fn test_dim_01_dangerous_sinks_per_slot_safety() {
     )];
     let res_pos = scan(&pos_file, &cfg, &facts);
     assert!(
-        res_pos.has_alert(),
+        alerts(&res_pos),
         "untrusted input in slot 0 must trigger an alert"
     );
 
@@ -79,7 +99,7 @@ fn test_dim_01_dangerous_sinks_per_slot_safety() {
     )];
     let res_neg = scan(&neg_file, &cfg, &facts);
     assert!(
-        !res_neg.has_alert(),
+        !alerts(&res_neg),
         "untrusted input in safe binding slot 1 must stay silent: {:?}",
         res_neg.findings
     );
@@ -112,14 +132,14 @@ fn test_dim_02_taint_sources_custom_rpc() {
     // Baseline without learned source: blind to custom RPC -> SILENT
     let baseline = scan(&files, &cfg, &FactTable::default());
     assert!(
-        !baseline.has_alert(),
+        !alerts(&baseline),
         "baseline must not alert without learned source"
     );
 
     // With learned source: ALERTS
     let taught = scan(&files, &cfg, &facts);
     assert!(
-        taught.has_alert(),
+        alerts(&taught),
         "scanner must alert when taint flows from taught source to sink"
     );
 }
@@ -146,7 +166,7 @@ fn test_dim_03_sanitizers_custom_cleanse() {
         "js".into(),
     )];
     let pos_res = scan(&pos_file, &cfg, &facts);
-    assert!(pos_res.has_alert(), "unsanitized flow must alert");
+    assert!(alerts(&pos_res), "unsanitized flow must alert");
 
     // Negative: sanitized flow -> SILENT
     let neg_file = vec![(
@@ -156,7 +176,7 @@ fn test_dim_03_sanitizers_custom_cleanse() {
     )];
     let neg_res = scan(&neg_file, &cfg, &facts);
     assert!(
-        !neg_res.has_alert(),
+        !alerts(&neg_res),
         "flow through learned sanitizer must stay silent: {:?}",
         neg_res.findings
     );
@@ -186,7 +206,7 @@ fn test_dim_04_data_propagators_custom_transform() {
     )];
     let pos_res = scan(&pos_file, &cfg, &facts);
     assert!(
-        pos_res.has_alert(),
+        alerts(&pos_res),
         "taint passed through propagating slot 0 must alert"
     );
 
@@ -198,7 +218,7 @@ fn test_dim_04_data_propagators_custom_transform() {
     )];
     let neg_res = scan(&neg_file, &cfg, &facts);
     assert!(
-        !neg_res.has_alert(),
+        !alerts(&neg_res),
         "taint passed to non-propagating slot 1 must stay silent: {:?}",
         neg_res.findings
     );
@@ -227,7 +247,7 @@ fn test_dim_05_security_policies_guard_call() {
         "py".into(),
     )];
     let pos_res = scan(&pos_file, &cfg, &facts);
-    assert!(pos_res.has_alert(), "unguarded action must alert");
+    assert!(alerts(&pos_res), "unguarded action must alert");
     assert_eq!(pos_res.checker[0].rule, "policy_delete_user_account");
 
     // Negative: guarded action -> SILENT
@@ -238,7 +258,7 @@ fn test_dim_05_security_policies_guard_call() {
     )];
     let neg_res = scan(&neg_file, &cfg, &facts);
     assert!(
-        !neg_res.has_alert(),
+        !alerts(&neg_res),
         "guarded action must stay silent: {:?}",
         neg_res.checker
     );
@@ -266,7 +286,7 @@ fn test_dim_06_structural_checks_range_bound() {
     )];
     let pos_res = scan(&pos_file, &cfg, &facts);
     assert!(
-        pos_res.has_alert(),
+        alerts(&pos_res),
         "allocate_buffer without range check must alert"
     );
 
@@ -278,7 +298,7 @@ fn test_dim_06_structural_checks_range_bound() {
     )];
     let neg_res = scan(&neg_file, &cfg, &facts);
     assert!(
-        !neg_res.has_alert(),
+        !alerts(&neg_res),
         "allocate_buffer with range check must stay silent: {:?}",
         neg_res.checker
     );
@@ -318,7 +338,7 @@ fn test_dim_07_memory_contracts_custom_alloc_free() {
     )];
     let pos_res = scan(&pos_file, &cfg, &facts);
     assert!(
-        pos_res.has_alert(),
+        alerts(&pos_res),
         "use-after-free with custom deallocator must alert"
     );
 
@@ -339,7 +359,7 @@ fn test_dim_07_memory_contracts_custom_alloc_free() {
     )];
     let neg_res = scan(&neg_file, &cfg, &facts);
     assert!(
-        !neg_res.has_alert(),
+        !alerts(&neg_res),
         "safe deallocation must stay silent: {:?}",
         neg_res.checker
     );
@@ -353,6 +373,8 @@ fn test_dim_08_cryptographic_rules_weak_cipher() {
         call: "initCustomCipher".into(),
         selector_slot: Some(0),
         weak_selectors: vec!["des".into(), "rc4".into()],
+        severity: "warning".into(),
+        message: String::new(),
     })]);
 
     let cfg = TaintConfig::default();
@@ -365,18 +387,18 @@ fn test_dim_08_cryptographic_rules_weak_cipher() {
     )];
     let baseline = scan(&pos_file, &cfg, &FactTable::default());
     assert!(
-        !baseline.has_alert(),
+        !alerts(&baseline),
         "baseline must stay silent on unknown cipher API"
     );
 
     // Positive: uses banned 'des' with learned bundle -> ALERTS
     let pos_res = scan(&pos_file, &cfg, &facts);
     assert!(
-        pos_res.has_alert(),
+        alerts(&pos_res),
         "banned cryptographic primitive must alert"
     );
     assert_eq!(pos_res.checker[0].rule, "weak_crypto_custom");
-    assert!(pos_res.checker[0].learned);
+    assert_eq!(pos_res.checker[0].provenance, Provenance::Learned);
 
     // Negative: uses secure 'aes256' -> SILENT
     let neg_file = vec![(
@@ -386,7 +408,7 @@ fn test_dim_08_cryptographic_rules_weak_cipher() {
     )];
     let neg_res = scan(&neg_file, &cfg, &facts);
     assert!(
-        !neg_res.has_alert(),
+        !alerts(&neg_res),
         "secure cryptographic primitive must stay silent: {:?}",
         neg_res.checker
     );
@@ -421,7 +443,7 @@ fn test_dim_09_authorization_guards_containment_bypass() {
     )];
     let pos_res = scan(&pos_file, &cfg, &facts);
     assert!(
-        pos_res.has_alert(),
+        alerts(&pos_res),
         "substring allowlist containment guard must alert"
     );
     assert_eq!(pos_res.checker[0].rule, "substring_allowlist_guard");
@@ -439,7 +461,7 @@ fn test_dim_09_authorization_guards_containment_bypass() {
     )];
     let neg_res = scan(&neg_file, &cfg, &facts);
     assert!(
-        !neg_res.has_alert(),
+        !alerts(&neg_res),
         "exact origin check must stay silent: {:?}",
         neg_res.checker
     );
@@ -470,7 +492,7 @@ fn test_dim_10_schema_validation_custom_enforcer() {
     )];
     let pos_res = scan(&pos_file, &cfg, &facts);
     assert!(
-        pos_res.has_alert(),
+        alerts(&pos_res),
         "unenforced schema bound must alert under learned SchemaPolicy"
     );
     assert_eq!(pos_res.checker[0].rule, "unbounded_number_schema");
@@ -489,7 +511,7 @@ fn test_dim_10_schema_validation_custom_enforcer() {
     )];
     let neg_res = scan(&neg_file, &cfg, &facts);
     assert!(
-        !neg_res.has_alert(),
+        !alerts(&neg_res),
         "enforced schema bound must stay silent: {:?}",
         neg_res.checker
     );
@@ -513,11 +535,11 @@ fn test_dim_11_grammar_syntax_role_mapping() {
 
     assert_eq!(
         facts.get_grammar_role("javascript", "custom_iteration_statement"),
-        Some(&frensense_lang::NodeRole::Loop)
+        Some(frensense_lang::NodeRole::Loop)
     );
     assert_eq!(
         facts.get_grammar_role("python", "yield_expression"),
-        Some(&frensense_lang::NodeRole::Return)
+        Some(frensense_lang::NodeRole::Return)
     );
     assert_eq!(facts.get_grammar_role("javascript", "unknown_node"), None);
 }
@@ -589,7 +611,7 @@ fn test_dim_13_idor_finder_sinks_and_tenant_keys() {
     )];
 
     let res = scan(&pos_file, &cfg, &facts);
-    assert!(res.has_alert(), "IDOR query object must alert");
+    assert!(alerts(&res), "IDOR query object must alert");
     assert!(
         res.findings
             .iter()

@@ -20,6 +20,7 @@ pub mod demand_tests {
             byte_range: None,
             is_memory_state: false,
             object_keys: Vec::new(),
+            declared: false,
         }
     }
 
@@ -30,6 +31,7 @@ pub mod demand_tests {
             byte_range: None,
             is_memory_state: true,
             object_keys: Vec::new(),
+            declared: false,
         }
     }
 
@@ -66,6 +68,20 @@ pub mod demand_tests {
 
     fn run_backward(cfg: &TaintConfig, prog: &ProgramSvfg) -> RunOut {
         let mut engine = BackwardTaintEngine::new(prog, cfg);
+        engine.run();
+        (engine.findings, engine.stats)
+    }
+
+    /// [`run_backward`] with the path-traversal denylist pattern explicitly
+    /// attached: denylist-guard vocabulary is spec/bundle-owned now, and a
+    /// hand-built test program has no spec to seed it from.
+    fn run_backward_with_denylist(cfg: &TaintConfig, prog: &ProgramSvfg) -> RunOut {
+        let mut facts = FactTable::default();
+        crate::analysis::taint::facts::LearnedFactEntry::GuardDenylistPattern {
+            pattern: "..".into(),
+        }
+        .apply(&mut facts);
+        let mut engine = BackwardTaintEngine::new(prog, cfg).with_fact_table(&facts);
         engine.run();
         (engine.findings, engine.stats)
     }
@@ -147,7 +163,12 @@ pub mod demand_tests {
         );
         assert_eq!(vulns[0].function, "helper");
         assert_eq!(vulns[0].sink, "db.execute");
-        assert!(vulns[0].alert.as_deref().unwrap().contains("[in helper]"));
+        assert!(
+            vulns[0]
+                .alert
+                .as_ref()
+                .is_some_and(|a| a.function == "helper")
+        );
 
         // Demand-driven cost: helper must be visited, main must be entered
         // only via the backward walk from its own sink... main has no sink,
@@ -592,7 +613,7 @@ pub mod demand_tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_backward_agrees_with_forward() {
-        use crate::analysis::forward::InterproceduralTaintEngine;
+        use crate::analysis::forward::{InterproceduralTaintEngine, SinkAlert};
 
         let mut main = FunctionIR::new("main".into());
         {
@@ -634,13 +655,14 @@ pub mod demand_tests {
         // Backward.
         let cfg = config();
         let (bwd, _stats) = run_backward(&cfg, &prog);
-        let bwd_alerts: Vec<String> = bwd.iter().filter_map(|f| f.alert.clone()).collect();
+        let bwd_alerts: Vec<SinkAlert> = bwd.iter().filter_map(|f| f.alert.clone()).collect();
 
         assert_eq!(fwd.alerts.len(), 1);
         assert_eq!(bwd_alerts.len(), 1);
-        // Same alert text modulo the message wording (both mention the sink).
-        assert!(fwd.alerts[0].contains("db.execute"));
-        assert!(bwd_alerts[0].contains("db.execute"));
+        // Same alert (sink, slot, function, class) from both directions.
+        assert!(fwd.alerts[0].sink == "db.execute");
+        assert!(bwd_alerts[0].sink == "db.execute");
+        assert_eq!(fwd.alerts[0], bwd_alerts[0]);
     }
 
     // -----------------------------------------------------------------------
@@ -828,7 +850,7 @@ pub mod demand_tests {
             sanitizers: [].into_iter().collect(),
         };
         let prog = build_program(vec![handler]);
-        let (findings, _stats) = run_backward(&cfg, &prog);
+        let (findings, _stats) = run_backward_with_denylist(&cfg, &prog);
 
         let vulns: Vec<_> = findings
             .iter()
@@ -1015,7 +1037,7 @@ pub mod demand_tests {
             sanitizers: [].into_iter().collect(),
         };
         let prog = build_program(vec![handler]);
-        let (findings, _stats) = run_backward(&cfg, &prog);
+        let (findings, _stats) = run_backward_with_denylist(&cfg, &prog);
 
         assert!(
             findings
@@ -1026,7 +1048,7 @@ pub mod demand_tests {
         );
     }
     // -----------------------------------------------------------------------
-    // Branch feasibility: `bar = "safe" if const_true else param` — the
+    // Branch feasibility: `bar = "safe" if const_true else param` - the
     // tainted else arm is dead, so the flow through the phi is not
     // Vulnerable.
     //
@@ -1320,15 +1342,7 @@ pub mod demand_tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_regex_test_guard_sanitizes_flow() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = crate::analysis::taint::facts::config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
-        }
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
 
         let files = vec![(
             "search.ts".to_string(),
@@ -1366,15 +1380,7 @@ export function handleSearch(c: any) {
     // -----------------------------------------------------------------------
     #[test]
     fn test_db_prepare_receiver_suppression() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = crate::analysis::taint::facts::config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
-        }
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
 
         let files = vec![(
             "query.ts".to_string(),
@@ -1406,15 +1412,7 @@ export function handleDb(c: any) {
     // -----------------------------------------------------------------------
     #[test]
     fn test_context_set_not_flagged_as_sink() {
-        let mut config = TaintConfig::default();
-        let mut facts = FactTable::default();
-        for spec in frensense_lang::all_specs() {
-            let c = crate::analysis::taint::facts::config_from_spec(spec);
-            config.sources.extend(c.sources);
-            config.sinks.extend(c.sinks);
-            config.sanitizers.extend(c.sanitizers);
-            facts.merge(&crate::analysis::taint::facts::fact_table_from_spec(spec));
-        }
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
 
         let files = vec![(
             "middleware.ts".to_string(),
@@ -1434,6 +1432,884 @@ export function middleware(c: any) {
             set_findings.is_empty(),
             "c.set must not be treated as a sink, got: {:?}",
             set_findings
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // FP class: bare multer/IO names ("file") in the source vocabulary made
+    // ANY parameter or phi named `file` a taint source, so plain helpers
+    // like `validateFile(file)` / `retrieveCustomFile(...)` alerted on every
+    // readFile/exec use. Request-param names (req, input, ...) keep their
+    // sentinel semantics; dotted patterns (req.file) keep theirs.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_plain_file_param_is_not_a_source() {
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
+
+        let files = vec![(
+            "validate.ts".to_string(),
+            r#"
+export function run (file: string) {
+  require('fs').readFile(file)
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )];
+
+        let result = crate::scan::scan(&files, &config, &facts);
+        let vulns: Vec<_> = result
+            .findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            vulns.is_empty(),
+            "a plain parameter named `file` must not be a taint source, got: {:?}",
+            vulns
+        );
+    }
+
+    #[test]
+    fn test_request_param_is_still_a_source() {
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
+
+        let files = vec![(
+            "handler.ts".to_string(),
+            r#"
+export function run (req: any) {
+  require('fs').readFile(req.body.path)
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )];
+
+        let result = crate::scan::scan(&files, &config, &facts);
+        let vulns: Vec<_> = result
+            .findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(!vulns.is_empty(), "req.body must remain a taint source");
+    }
+
+    // -----------------------------------------------------------------------
+    // Per-slot sink signatures (lang vocabulary): only the view name of
+    // res.render(view, locals) is template-executed - tainted locals data is
+    // not SSTI, tainted view names are.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_render_locals_argument_not_dangerous() {
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
+
+        let files = vec![(
+            "render.ts".to_string(),
+            r#"
+export function render (req: any, res: any) {
+  res.render('view', req.body)
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )];
+
+        let result = crate::scan::scan(&files, &config, &facts);
+        let vulns: Vec<_> = result
+            .findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            vulns.is_empty(),
+            "tainted locals data in res.render(view, locals) must not alert, got: {:?}",
+            vulns
+        );
+    }
+
+    #[test]
+    fn test_render_view_name_argument_dangerous() {
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
+
+        let files = vec![(
+            "render.ts".to_string(),
+            r#"
+export function render (req: any, res: any) {
+  res.render(req.body.theme, {})
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )];
+
+        let result = crate::scan::scan(&files, &config, &facts);
+        let vulns: Vec<_> = result
+            .findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            !vulns.is_empty(),
+            "a tainted view name in res.render(view, locals) must alert"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // writeFile(path, buffer): PathTraversal labels the path slot - a
+    // tainted upload buffer written to a fixed path is not traversal.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_write_file_content_argument_not_dangerous() {
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
+
+        let files = vec![(
+            "upload.ts".to_string(),
+            r#"
+export function save (req: any) {
+  require('fs').writeFile('/tmp/out', req.body.content)
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )];
+
+        let result = crate::scan::scan(&files, &config, &facts);
+        let vulns: Vec<_> = result
+            .findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            vulns.is_empty(),
+            "tainted buffer content in writeFile(path, buffer) must not alert, got: {:?}",
+            vulns
+        );
+    }
+
+    #[test]
+    fn test_write_file_path_argument_dangerous() {
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
+
+        let files = vec![(
+            "upload.ts".to_string(),
+            r#"
+export function save (req: any) {
+  require('fs').writeFile(req.body.path, 'x')
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )];
+
+        let result = crate::scan::scan(&files, &config, &facts);
+        let vulns: Vec<_> = result
+            .findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            !vulns.is_empty(),
+            "a tainted path in writeFile(path, buffer) must alert"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Object-destructured handler params (const { query } / ({ query })) stay
+    // live sources via the bare "query"/"params"/... patterns - the
+    // routes/redirect.ts handler shape depends on it.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_destructured_query_root_still_a_source() {
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables_all();
+
+        let files = vec![(
+            "redirect.ts".to_string(),
+            r#"
+export const redirect = ({ query }: any, res: any) => {
+  const toUrl = query.to
+  res.redirect(toUrl)
+}
+"#
+            .to_string(),
+            "ts".to_string(),
+        )];
+
+        let result = crate::scan::scan(&files, &config, &facts);
+        let vulns: Vec<_> = result
+            .findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            !vulns.is_empty(),
+            "a destructure-rooted query.to flow must remain a source"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression: a shared heap-store source use is first visited with the
+    // guard's *safe* arm as context (guard-stop fires, node never expands),
+    // and the later visit with the *unsafe* arm context - the one that leads
+    // to the source - must not be deduplicated away.
+    //
+    //   b0:    bar = request.form.get("p")        // source
+    //          obj = {}
+    //          obj.data = bar                     // store: shared use(bar) node
+    //          cond = bar == "ok"                 // guard: safe arm = true arm
+    //          branch cond ? armSafe : armOther
+    //   armSafe:  v1 = obj.data                   // heap edge → shared use
+    //   armOther: v2 = obj.data                   // heap edge → shared use
+    //   merge:    v = phi(v1, v2); open(v)
+    //
+    // Backward: phi → v1 def (ctx=merge) expands first (lower block id) and
+    // pushes use(bar)@store with ctx=armSafe → guard-stop on pop. The v2-def
+    // expansion then tries to push the *same* node with ctx=armOther; that
+    // context is the unguarded path through which the source must be found.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_guard_stop_on_shared_store_does_not_hide_unguarded_path() {
+        let mut handler = FunctionIR::new("handler".into());
+        {
+            let b0 = handler.entry_block;
+            let mem0 = handler.initial_memory_state;
+
+            let req = handler.new_var(dummy_meta("request"));
+            let form = handler.new_var(dummy_meta("request.form"));
+            handler.push_instruction(
+                b0,
+                Instruction::LoadField {
+                    dest: form,
+                    mem_in: mem0,
+                    base: req,
+                    field: "form".into(),
+                },
+            );
+            let got = handler.new_var(dummy_meta("got"));
+            let m1 = handler.new_var(mem_meta("m1"));
+            handler.push_instruction(
+                b0,
+                Instruction::CallVirtual {
+                    dest: Some(got),
+                    mem_out: m1,
+                    mem_in: mem0,
+                    method: "get".into(),
+                    receiver: Operand::Var(form),
+                    args: vec![Operand::StringLiteral("\"p\"".into())],
+                },
+            );
+            let bar = handler.new_var(dummy_meta("bar"));
+            handler.push_instruction(
+                b0,
+                Instruction::Assign {
+                    dest: bar,
+                    src: Operand::Var(got),
+                },
+            );
+
+            // obj = {} - clean allocation root for the load bases.
+            let obj = handler.new_var(dummy_meta("obj"));
+            let ma = handler.new_var(mem_meta("ma"));
+            handler.push_instruction(
+                b0,
+                Instruction::Allocate {
+                    dest: obj,
+                    mem_out: ma,
+                    mem_in: mem0,
+                    kind: AllocationKind::Object,
+                },
+            );
+
+            // obj.data = bar - the shared store whose src-use node feeds
+            // both arm loads via heap edges.
+            let ms = handler.new_var(mem_meta("ms"));
+            handler.push_instruction(
+                b0,
+                Instruction::StoreField {
+                    mem_out: ms,
+                    mem_in: ma,
+                    base: obj,
+                    field: "data".into(),
+                    src: Operand::Var(bar),
+                },
+            );
+
+            // cond = bar == "ok" - non-denylist comparison: the true arm
+            // is the guard's safe block.
+            let cond = handler.new_var(dummy_meta("cond"));
+            handler.push_instruction(
+                b0,
+                Instruction::BinaryOp {
+                    dest: cond,
+                    op: "==".into(),
+                    lhs: Operand::Var(bar),
+                    rhs: Operand::StringLiteral("\"ok\"".into()),
+                },
+            );
+
+            // Safe arm created first → lower block id → its phi incoming
+            // sorts first, so the guard-stopped context wins the shared node.
+            let arm_safe = handler.new_block();
+            let arm_other = handler.new_block();
+            let merge = handler.new_block();
+            handler.set_terminator(
+                b0,
+                Terminator::Branch {
+                    cond: Operand::Var(cond),
+                    true_block: arm_safe,
+                    false_block: arm_other,
+                },
+            );
+            handler.add_edge(b0, arm_safe);
+            handler.add_edge(b0, arm_other);
+
+            let v1 = handler.new_var(dummy_meta("v1"));
+            handler.push_instruction(
+                arm_safe,
+                Instruction::LoadField {
+                    dest: v1,
+                    mem_in: ms,
+                    base: obj,
+                    field: "data".into(),
+                },
+            );
+            handler.set_terminator(arm_safe, Terminator::Jump(merge));
+            handler.add_edge(arm_safe, merge);
+
+            let v2 = handler.new_var(dummy_meta("v2"));
+            handler.push_instruction(
+                arm_other,
+                Instruction::LoadField {
+                    dest: v2,
+                    mem_in: ms,
+                    base: obj,
+                    field: "data".into(),
+                },
+            );
+            handler.set_terminator(arm_other, Terminator::Jump(merge));
+            handler.add_edge(arm_other, merge);
+
+            let v = handler.new_var(dummy_meta("v"));
+            handler.push_phi(
+                merge,
+                Phi {
+                    dest: v,
+                    incoming: vec![(arm_safe, v1), (arm_other, v2)],
+                },
+            );
+            let m2 = handler.new_var(mem_meta("m2"));
+            handler.push_instruction(
+                merge,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m2,
+                    mem_in: ms,
+                    func: "open".into(),
+                    args: vec![Operand::Var(v)],
+                },
+            );
+            handler.set_terminator(merge, Terminator::Return { src: None });
+        }
+
+        let cfg = TaintConfig {
+            sources: [
+                "request.form.get".to_string(),
+                "request.form".to_string(),
+                "request".to_string(),
+            ]
+            .into_iter()
+            .collect(),
+            sinks: ["open".to_string()].into_iter().collect(),
+            sanitizers: [].into_iter().collect(),
+        };
+        let prog = build_program(vec![handler]);
+        let (findings, _stats) = run_backward(&cfg, &prog);
+
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.verdict == BackwardVerdict::Vulnerable),
+            "unguarded heap path through the store must reach the source \
+             even when the safe-arm context guard-stopped the shared node, \
+             got {:?}",
+            findings
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 3: boolean-producing comparisons are not taint channels.
+    //
+    //   fn main() { t = getSource(); flag = (t == "admin"); db.execute(flag); }
+    //
+    // `flag` is a BOOLEAN: its printable payload is "true"/"false", which
+    // carries no attacker bytes to the sink. The generic intra-instruction
+    // operand→dest edge manufactures a source→sink path that cannot exist
+    // at runtime, and the value lattice cannot see it (a comparison of a
+    // tainted operand folds to `Top`).
+    // -----------------------------------------------------------------------
+    #[test]
+    fn comparison_dest_is_not_a_taint_channel() {
+        let cfg = TaintConfig {
+            sources: ["getSource".to_string()].into_iter().collect(),
+            sinks: ["db.execute".to_string()].into_iter().collect(),
+            sanitizers: Default::default(),
+        };
+
+        // fn main() { t = getSource(); flag = (t == "admin"); db.execute(flag); }
+        let mut main = FunctionIR::new("main".into());
+        {
+            let b = main.entry_block;
+            let t = main.new_var(dummy_meta("t"));
+            let m1 = main.new_var(mem_meta("m1"));
+            main.push_instruction(
+                b,
+                Instruction::CallStatic {
+                    dest: Some(t),
+                    mem_out: m1,
+                    mem_in: main.initial_memory_state,
+                    func: "getSource".into(),
+                    args: vec![],
+                },
+            );
+            let flag = main.new_var(dummy_meta("flag"));
+            main.push_instruction(
+                b,
+                Instruction::BinaryOp {
+                    dest: flag,
+                    op: "==".into(),
+                    lhs: Operand::Var(t),
+                    rhs: Operand::StringLiteral("admin".to_string()),
+                },
+            );
+            let m2 = main.new_var(mem_meta("m2"));
+            main.push_instruction(
+                b,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m2,
+                    mem_in: m1,
+                    func: "db.execute".into(),
+                    args: vec![Operand::Var(flag)],
+                },
+            );
+            main.set_terminator(b, Terminator::Return { src: None });
+        }
+
+        let mut statics = rustc_hash::FxHashMap::default();
+        let leaked: &'static FunctionIR = Box::leak(Box::new(main));
+        statics.insert(leaked.name.clone(), leaked);
+        let prog = ProgramSvfg::new(&statics, &cfg);
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg);
+        engine.run();
+        assert_eq!(engine.findings.len(), 1, "the sink must be explored");
+        assert_ne!(
+            engine.findings[0].verdict,
+            BackwardVerdict::Vulnerable,
+            "a boolean comparison result must not transport taint to a sink, \
+             got {:?}",
+            engine.findings[0].verdict
+        );
+        assert_eq!(
+            engine.stats.nodes_visited, 2,
+            "walk stops at the comparison def with its operand edges cut \
+             (root + def), visited: {}",
+            engine.stats.nodes_visited
+        );
+    }
+
+    /// Phase-3 guard: value-returning operators keep their operand edges -
+    /// string concatenation and `||` both yield the operand's payload, so
+    /// source flows through them must stay Vulnerable.
+    #[test]
+    fn value_returning_operators_keep_their_edges() {
+        let cfg = TaintConfig {
+            sources: ["getSource".to_string()].into_iter().collect(),
+            sinks: ["db.execute".to_string()].into_iter().collect(),
+            sanitizers: Default::default(),
+        };
+
+        // fn main() {
+        //   t = getSource();
+        //   y = t + "lit";  db.execute(y);   // concat carries the payload
+        //   x = t || "alt"; db.execute(x);   // || yields t when truthy
+        // }
+        let mut main = FunctionIR::new("main".into());
+        {
+            let b = main.entry_block;
+            let t = main.new_var(dummy_meta("t"));
+            let m1 = main.new_var(mem_meta("m1"));
+            main.push_instruction(
+                b,
+                Instruction::CallStatic {
+                    dest: Some(t),
+                    mem_out: m1,
+                    mem_in: main.initial_memory_state,
+                    func: "getSource".into(),
+                    args: vec![],
+                },
+            );
+            let y = main.new_var(dummy_meta("y"));
+            main.push_instruction(
+                b,
+                Instruction::BinaryOp {
+                    dest: y,
+                    op: "+".into(),
+                    lhs: Operand::Var(t),
+                    rhs: Operand::StringLiteral("lit".to_string()),
+                },
+            );
+            let x = main.new_var(dummy_meta("x"));
+            main.push_instruction(
+                b,
+                Instruction::BinaryOp {
+                    dest: x,
+                    op: "||".into(),
+                    lhs: Operand::Var(t),
+                    rhs: Operand::StringLiteral("alt".to_string()),
+                },
+            );
+            let m2 = main.new_var(mem_meta("m2"));
+            main.push_instruction(
+                b,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m2,
+                    mem_in: m1,
+                    func: "db.execute".into(),
+                    args: vec![Operand::Var(y), Operand::Var(x)],
+                },
+            );
+            main.set_terminator(b, Terminator::Return { src: None });
+        }
+
+        let mut statics = rustc_hash::FxHashMap::default();
+        let leaked: &'static FunctionIR = Box::leak(Box::new(main));
+        statics.insert(leaked.name.clone(), leaked);
+        let prog = ProgramSvfg::new(&statics, &cfg);
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg);
+        engine.run();
+        let vulnerable = engine
+            .findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .count();
+        assert_eq!(
+            vulnerable,
+            2,
+            "concat and || operands must both keep reaching the source, got {:?}",
+            engine
+                .findings
+                .iter()
+                .map(|f| (&f.sink, f.arg_slot, &f.verdict))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 4: object/array literals lower to allocation + field stores.
+    // -----------------------------------------------------------------------
+
+    /// Field-sensitive reads: taint in one property must not pollute reads
+    /// of another property of the same literal, while the tainted property
+    /// and the whole container must still reach the source.
+    #[test]
+    fn object_literal_fields_are_read_separately() {
+        let src = r#"
+declare const db: any
+declare const req: any
+export function run () {
+  const o = { clean: "literal", q: req.body.x }
+  db.execute(o.clean)
+  db.execute(o.q)
+  db.execute(o)
+}
+"#;
+        let cfg = TaintConfig {
+            sources: ["req.body".to_string()].into_iter().collect(),
+            sinks: ["execute".to_string()].into_iter().collect(),
+            sanitizers: Default::default(),
+        };
+        let fns = crate::harness::lower_source("t.ts", src, "ts").expect("lower");
+        let mut statics = rustc_hash::FxHashMap::default();
+        for (name, ir) in fns {
+            let leaked: &'static FunctionIR = Box::leak(Box::new(ir));
+            statics.insert(name, leaked);
+        }
+        let prog = ProgramSvfg::new(&statics, &cfg);
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg);
+        engine.run();
+        let verdicts: Vec<BackwardVerdict> = engine
+            .findings
+            .iter()
+            .filter(|f| f.arg_slot != usize::MAX)
+            .map(|f| f.verdict.clone())
+            .collect();
+        assert_eq!(
+            verdicts.len(),
+            3,
+            "all three sink calls must be explored: {verdicts:?}"
+        );
+        assert_ne!(
+            verdicts[0],
+            BackwardVerdict::Vulnerable,
+            "o.clean is a literal field - must not transport taint: {verdicts:?}"
+        );
+        assert_eq!(
+            verdicts[1],
+            BackwardVerdict::Vulnerable,
+            "o.q carries the source - must stay Vulnerable: {verdicts:?}"
+        );
+        assert_eq!(
+            verdicts[2],
+            BackwardVerdict::Vulnerable,
+            "the whole container must still see its stored source: {verdicts:?}"
+        );
+    }
+
+    /// Array literals allocate too: a tainted element must reach the source
+    /// through the element store.
+    #[test]
+    fn array_literal_element_reaches_the_source() {
+        let src = r#"
+declare const db: any
+declare const req: any
+export function run () {
+  const a = [req.body.x, "lit"]
+  db.execute(a[0])
+}
+"#;
+        let cfg = TaintConfig {
+            sources: ["req.body".to_string()].into_iter().collect(),
+            sinks: ["execute".to_string()].into_iter().collect(),
+            sanitizers: Default::default(),
+        };
+        let fns = crate::harness::lower_source("t.ts", src, "ts").expect("lower");
+        let mut statics = rustc_hash::FxHashMap::default();
+        for (name, ir) in fns {
+            let leaked: &'static FunctionIR = Box::leak(Box::new(ir));
+            statics.insert(name, leaked);
+        }
+        let prog = ProgramSvfg::new(&statics, &cfg);
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg);
+        engine.run();
+        let args: Vec<_> = engine
+            .findings
+            .iter()
+            .filter(|f| f.arg_slot != usize::MAX)
+            .collect();
+        assert_eq!(args.len(), 1, "one argument-slot finding expected");
+        assert_eq!(
+            args[0].verdict,
+            BackwardVerdict::Vulnerable,
+            "tainted array element must reach the source"
+        );
+    }
+
+    /// Spread objects keep the legacy union lowering (conservative):
+    /// `{...req.body, safe}` must still taint reads through the container.
+    #[test]
+    fn spread_object_keeps_union_lowering() {
+        let src = r#"
+declare const db: any
+declare const req: any
+export function run () {
+  const o = { ...req.body, safe: "lit" }
+  db.execute(o.safe)
+}
+"#;
+        let cfg = TaintConfig {
+            sources: ["req.body".to_string()].into_iter().collect(),
+            sinks: ["execute".to_string()].into_iter().collect(),
+            sanitizers: Default::default(),
+        };
+        let fns = crate::harness::lower_source("t.ts", src, "ts").expect("lower");
+        let mut statics = rustc_hash::FxHashMap::default();
+        for (name, ir) in fns {
+            let leaked: &'static FunctionIR = Box::leak(Box::new(ir));
+            statics.insert(name, leaked);
+        }
+        let prog = ProgramSvfg::new(&statics, &cfg);
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg);
+        engine.run();
+        let args: Vec<_> = engine
+            .findings
+            .iter()
+            .filter(|f| f.arg_slot != usize::MAX)
+            .collect();
+        assert_eq!(args.len(), 1, "one argument-slot finding expected");
+        assert_eq!(
+            args[0].verdict,
+            BackwardVerdict::Vulnerable,
+            "spread union stays conservative (tainted container taints reads)"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 5: k=1 call-site context at FormalParam crossings.
+    // -----------------------------------------------------------------------
+
+    /// Two call sites of the same callee: the clean caller must not absorb
+    /// the tainted caller's argument through the shared FormalParam node.
+    #[test]
+    fn call_site_context_separates_sibling_callers() {
+        let src = r#"
+function sanitize(x: any): any { return x }
+export function a(req: any): void {
+  sink(sanitize(req.body.x))
+}
+export function b(id: any): void {
+  sink(sanitize(id))
+}
+"#;
+        let cfg = TaintConfig {
+            sources: ["req.body".to_string()].into_iter().collect(),
+            sinks: ["sink".to_string()].into_iter().collect(),
+            sanitizers: Default::default(),
+        };
+        let fns = crate::harness::lower_source("t.ts", src, "ts").expect("lower");
+        let mut statics = rustc_hash::FxHashMap::default();
+        for (name, ir) in fns {
+            let leaked: &'static FunctionIR = Box::leak(Box::new(ir));
+            statics.insert(name, leaked);
+        }
+        let prog = ProgramSvfg::new(&statics, &cfg);
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg);
+        engine.run();
+
+        let a_finding = engine
+            .findings
+            .iter()
+            .find(|f| f.function == "a")
+            .expect("sink in a is explored");
+        let b_finding = engine
+            .findings
+            .iter()
+            .find(|f| f.function == "b")
+            .expect("sink in b is explored");
+        assert_eq!(
+            a_finding.verdict,
+            BackwardVerdict::Vulnerable,
+            "the tainted caller must stay Vulnerable: {:?}",
+            a_finding
+        );
+        assert_ne!(
+            b_finding.verdict,
+            BackwardVerdict::Vulnerable,
+            "the clean caller must not inherit the sibling caller's taint \
+             through the shared callee: {:?}",
+            b_finding
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Engine purity: EVERY fact-declared sink is explored and reported when
+    // tainted data reaches it, regardless of role. Response/Validation sinks
+    // (`res.json`, `jwt.decode`) rank at `info` in advisory severity - that
+    // ranking is lang-declared policy applied at report time, never an
+    // analysis gate (a gate would let low-ranked built-in roles veto any
+    // bundler-learned knowledge about the same sink).
+    //
+    //   fn main() {
+    //     v = getSource();
+    //     res.json(v);      // role=Response  -> explored, reported
+    //     jwt.decode(v);    // role=Validation -> explored, reported
+    //     db.execute(v);    // role=Other      -> reported
+    //   }
+    // -----------------------------------------------------------------------
+    #[test]
+    fn all_role_sinks_are_explored_and_reported() {
+        use crate::analysis::taint::facts::SinkSignature;
+        use crate::analysis::taint::role::SinkRole;
+
+        let mut main = FunctionIR::new("main".into());
+        {
+            let b = main.entry_block;
+            let mem0 = main.initial_memory_state;
+            let v = main.new_var(dummy_meta("v"));
+            let res = main.new_var(dummy_meta("res"));
+            let jwt = main.new_var(dummy_meta("jwt"));
+            let m1 = main.new_var(mem_meta("m1"));
+            main.push_instruction(
+                b,
+                Instruction::CallStatic {
+                    dest: Some(v),
+                    mem_out: m1,
+                    mem_in: mem0,
+                    func: "getSource".into(),
+                    args: vec![],
+                },
+            );
+            let m2 = main.new_var(mem_meta("m2"));
+            main.push_instruction(
+                b,
+                Instruction::CallVirtual {
+                    dest: None,
+                    mem_out: m2,
+                    mem_in: m1,
+                    method: "json".into(),
+                    receiver: Operand::Var(res),
+                    args: vec![Operand::Var(v)],
+                },
+            );
+            let m3 = main.new_var(mem_meta("m3"));
+            main.push_instruction(
+                b,
+                Instruction::CallVirtual {
+                    dest: None,
+                    mem_out: m3,
+                    mem_in: m2,
+                    method: "decode".into(),
+                    receiver: Operand::Var(jwt),
+                    args: vec![Operand::Var(v)],
+                },
+            );
+            let m4 = main.new_var(mem_meta("m4"));
+            main.push_instruction(
+                b,
+                Instruction::CallStatic {
+                    dest: None,
+                    mem_out: m4,
+                    mem_in: m3,
+                    func: "db.execute".into(),
+                    args: vec![Operand::Var(v)],
+                },
+            );
+            main.set_terminator(b, Terminator::Return { src: None });
+        }
+
+        let cfg = config();
+        let prog = build_program(vec![main]);
+        let mut facts = FactTable::from_config(&cfg);
+        for (name, role) in [
+            ("json", SinkRole::Response),
+            ("decode", SinkRole::Validation),
+        ] {
+            let mut sig = SinkSignature::all_args(name);
+            sig.role = role;
+            facts.sink_signatures.insert(name.to_string(), sig);
+        }
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg).with_fact_table(&facts);
+        engine.run();
+
+        let reported: Vec<_> = engine.findings.iter().collect();
+        for (sink, role) in [
+            ("json", SinkRole::Response),
+            ("decode", SinkRole::Validation),
+            ("db.execute", SinkRole::Other),
+        ] {
+            let f = reported
+                .iter()
+                .find(|f| f.sink == sink && f.verdict == BackwardVerdict::Vulnerable)
+                .unwrap_or_else(|| {
+                    panic!("{sink} must yield a Vulnerable finding; got {reported:?}")
+                });
+            assert_eq!(f.role, role, "role must survive into the finding: {f:?}");
+        }
+        // Every slot of every fact-declared sink is explored: json (receiver
+        // + arg) + decode (receiver + arg) + db.execute (arg).
+        assert_eq!(
+            engine.stats.sink_args_explored, 5,
+            "role must never gate exploration: {:?}",
+            engine.stats
         );
     }
 }

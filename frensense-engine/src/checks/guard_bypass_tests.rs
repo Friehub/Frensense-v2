@@ -8,8 +8,16 @@
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub mod guard_bypass_tests {
     use crate::analysis::taint::facts::FactTable;
+    use crate::checks::Provenance;
     use crate::checks::guard_bypass;
     use crate::harness::lower_source;
+
+    /// Production-seeded table (spec seed -> default pack -> pack language
+    /// sections): the checks read `FactTable` only, so test fixtures must
+    /// seed the vocabulary exactly like a production scan.
+    fn ts_facts() -> FactTable {
+        crate::analysis::taint::facts::seeded_tables(["ts"]).1
+    }
 
     /// The redirectChallenge shape: allowlist validation by substring
     /// containment over attacker-controlled URL input.
@@ -25,7 +33,7 @@ export const isRedirectAllowed = (url: string) => {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| guard_bypass::check(ir, &facts))
@@ -44,12 +52,61 @@ export function hasItem (items: string[], needle: string) {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| guard_bypass::check(ir, &facts))
             .collect();
         assert!(hits.is_empty(), "non-URL includes must stay silent");
+    }
+
+    /// The containment result must FEED a predicate: a value that gates
+    /// nothing (only logged, then discarded) is not a guard even on
+    /// URL-shaped input with a URL parameter present.
+    #[test]
+    fn containment_result_must_feed_predicate() {
+        let src = r#"
+export const auditUrl = (url: string) => {
+  const ok = url.includes("https://allowed.com")
+  audit.record(ok)
+  return true
+}
+"#;
+        let fns = lower_source("t.ts", src, "ts").unwrap();
+        let facts = ts_facts();
+        let hits: Vec<_> = fns
+            .values()
+            .flat_map(|ir| guard_bypass::check(ir, &facts))
+            .collect();
+        assert!(
+            hits.is_empty(),
+            "containment gating nothing must stay silent: {:?}",
+            hits
+        );
+    }
+
+    /// A containment result feeding a branch condition is a guard: fires.
+    #[test]
+    fn containment_result_feeding_branch_fires() {
+        let src = r#"
+export const isRedirectAllowed = (url: string) => {
+  if (url.includes("https://allowed.com")) {
+    return url
+  }
+  return null
+}
+"#;
+        let fns = lower_source("t.ts", src, "ts").unwrap();
+        let facts = ts_facts();
+        let hits: Vec<_> = fns
+            .values()
+            .flat_map(|ir| guard_bypass::check(ir, &facts))
+            .collect();
+        assert!(
+            !hits.is_empty(),
+            "branch-fed containment must fire as a guard"
+        );
+        assert_eq!(hits[0].rule, "substring_allowlist_guard");
     }
 
     /// The weakPasswordChallenge shape: a plaintext password parameter fed
@@ -62,13 +119,38 @@ export function storePassword (clearTextPassword: string) {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| guard_bypass::check_credentials(ir, &facts))
             .collect();
         assert!(!hits.is_empty(), "credential KDF policy must fire");
         assert_eq!(hits[0].rule, "credential_kdf_policy");
+    }
+
+    /// Verification shape: the digest result is only *compared* against a
+    /// stored value (`security.hash(pw) !== stored`), never persisted -
+    /// checking a password against the stored hash is not a KDF-storage
+    /// violation. No finding.
+    #[test]
+    fn credential_kdf_comparison_is_silent() {
+        let src = r#"
+export function verifyLogin (password: string, stored: string) {
+  if (security.hash(password) !== stored) {
+    throw new Error('bad password')
+  }
+}
+"#;
+        let fns = lower_source("t.ts", src, "ts").unwrap();
+        let facts = ts_facts();
+        let hits: Vec<_> = fns
+            .values()
+            .flat_map(|ir| guard_bypass::check_credentials(ir, &facts))
+            .collect();
+        assert!(
+            hits.is_empty(),
+            "comparison-only digest must not fire the KDF policy, got {hits:?}"
+        );
     }
 
     /// Hashing a non-credential value must not fire.
@@ -80,7 +162,7 @@ export function cacheKey (userId: string) {
 }
 "#;
         let fns = lower_source("t.ts", src, "ts").unwrap();
-        let facts = FactTable::default();
+        let facts = ts_facts();
         let hits: Vec<_> = fns
             .values()
             .flat_map(|ir| guard_bypass::check_credentials(ir, &facts))
@@ -91,8 +173,10 @@ export function cacheKey (userId: string) {
     /// Learned containment callee positive & negative test.
     #[test]
     fn learned_containment_callee_positive_and_negative() {
-        let mut facts = FactTable::default();
-        facts.containment_callees.insert("customSubstrMatch".into());
+        let mut facts = ts_facts();
+        facts
+            .containment_callees
+            .insert("customSubstrMatch".into(), Provenance::Learned);
 
         // Positive sample: uses customSubstrMatch for allowlist validation on URL
         let pos_src = r#"
@@ -111,7 +195,7 @@ export const isRedirectAllowed = (url: string) => {
         );
         assert_eq!(pos_hits[0].rule, "substring_allowlist_guard");
         assert!(
-            pos_hits.iter().any(|h| h.learned),
+            pos_hits.iter().any(|h| h.provenance == Provenance::Learned),
             "finding must be marked learned"
         );
 
@@ -135,9 +219,13 @@ export const isRedirectAllowed = (url: string) => {
     /// Learned credential sink & param positive & negative test.
     #[test]
     fn learned_credential_sink_and_param_positive_and_negative() {
-        let mut facts = FactTable::default();
-        facts.credential_sinks.insert("customFastDigest".into());
-        facts.credential_params.insert("clientSecretToken".into());
+        let mut facts = ts_facts();
+        facts
+            .credential_sinks
+            .insert("customFastDigest".into(), Provenance::Learned);
+        facts
+            .credential_params
+            .insert("clientSecretToken".into(), Provenance::Learned);
 
         // Positive sample 1: learned sink with standard password param
         let pos_src1 = r#"
@@ -151,7 +239,7 @@ export function savePwd (password: string) {
             .flat_map(|ir| guard_bypass::check_credentials(ir, &facts))
             .collect();
         assert_eq!(hits1.len(), 1, "learned sink must fire on password param");
-        assert!(hits1[0].learned);
+        assert_eq!(hits1[0].provenance, Provenance::Learned);
 
         // Positive sample 2: standard sink with learned credential param
         let pos_src2 = r#"
@@ -165,7 +253,7 @@ export function saveToken (clientSecretToken: string) {
             .flat_map(|ir| guard_bypass::check_credentials(ir, &facts))
             .collect();
         assert_eq!(hits2.len(), 1, "learned param must fire on credential sink");
-        assert!(hits2[0].learned);
+        assert_eq!(hits2[0].provenance, Provenance::Learned);
 
         // Negative sample: secure memory-hard KDF or non-credential hash
         let neg_src = r#"

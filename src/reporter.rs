@@ -3,6 +3,7 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use crate::Advisory;
+use frensense_engine::analysis::taint::path::{PathStep, TaintPath};
 use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::Path;
@@ -162,7 +163,7 @@ impl Reporter {
                 crate::Severity::Info => "notice",
             };
             // One-line message: title plus the observation. Taint steps go
-            // into the annotation body as a compact flow summary — GitHub
+            // into the annotation body as a compact flow summary - GitHub
             // renders the body after the `::` separator.
             let mut message = format!("{}: {}", adv.title, adv.observation);
             // The text observation usually embeds the full taint path
@@ -208,6 +209,63 @@ fn escape_workflow_message(value: &str) -> String {
     value.replace('%', "%25").replace(['\r', '\n'], " ")
 }
 
+/// Deterministic one-line description of one taint-path step.
+///
+/// Presentation of the engine's structured [`PathStep`] data: the engine
+/// records steps, this renders them for text, SARIF codeFlows, and LSP
+/// clients.
+#[must_use]
+pub fn describe_path_step(step: &PathStep) -> String {
+    match step {
+        PathStep::Source { description } => {
+            format!("source: `{description}`")
+        }
+        PathStep::Phi { function, variable } => {
+            format!("`{function}`: merge of incoming values (v{variable})")
+        }
+        PathStep::FieldLoad {
+            function,
+            base,
+            field,
+        } => format!("`{function}`: reads `{base}.{field}`"),
+        PathStep::CallReturn {
+            function,
+            callee,
+            external,
+        } => {
+            if *external {
+                format!("`{function}`: value from unresolvable call `{callee}`")
+            } else {
+                format!("`{function}`: value returned by `{callee}`")
+            }
+        }
+        PathStep::CallArgument {
+            function,
+            callee,
+            slot,
+        } => format!("`{function}`: passes value to `{callee}` (arg {slot})"),
+        PathStep::FormalParam { function, param } => {
+            format!("`{function}`: enters as parameter `{param}`")
+        }
+        PathStep::ReturnToCaller { caller } => {
+            format!("returns into `{caller}`")
+        }
+        PathStep::Assignment { function, variable } => {
+            format!("`{function}`: flows through v{variable}")
+        }
+    }
+}
+
+/// Render a taint path as an indented multi-line text block (CLI output).
+#[must_use]
+pub fn render_taint_path(path: &TaintPath) -> String {
+    let mut out = String::new();
+    for (i, step) in path.steps.iter().enumerate() {
+        let _ = writeln!(out, "  {:>2}. {}", i + 1, describe_path_step(step));
+    }
+    out
+}
+
 /// Byte offset → 1-based (line, column) within a file, reading the source
 /// from disk. Results are memoized per file for one SARIF render (advisory
 /// counts are small; this keeps multi-finding scans from re-reading the
@@ -239,6 +297,79 @@ fn line_col_for(file: &str, byte_offset: usize) -> Option<(usize, usize)> {
         }
     }
     Some((line, col))
+}
+
+#[cfg(test)]
+mod taint_render_tests {
+    use frensense_engine::analysis::taint::path::{PathStep, TaintPath};
+
+    use super::{describe_path_step, render_taint_path};
+
+    #[test]
+    fn render_text_is_numbered_source_first() {
+        let p = TaintPath {
+            steps: vec![
+                PathStep::Source {
+                    description: "req.body".into(),
+                },
+                PathStep::Assignment {
+                    function: "f".into(),
+                    variable: 1,
+                },
+            ],
+            spans: vec![None, None],
+        };
+        let text = render_taint_path(&p);
+        assert!(text.contains("1. source:"));
+        assert!(text.contains("2. `f`"));
+    }
+
+    #[test]
+    fn describe_covers_every_step_variant() {
+        let steps = [
+            PathStep::Source {
+                description: "req.body".into(),
+            },
+            PathStep::Phi {
+                function: "f".into(),
+                variable: 1,
+            },
+            PathStep::FieldLoad {
+                function: "f".into(),
+                base: "obj".into(),
+                field: "a".into(),
+            },
+            PathStep::CallReturn {
+                function: "f".into(),
+                callee: "g".into(),
+                external: false,
+            },
+            PathStep::CallReturn {
+                function: "f".into(),
+                callee: "ext".into(),
+                external: true,
+            },
+            PathStep::CallArgument {
+                function: "f".into(),
+                callee: "g".into(),
+                slot: 2,
+            },
+            PathStep::FormalParam {
+                function: "f".into(),
+                param: "x".into(),
+            },
+            PathStep::ReturnToCaller {
+                caller: "caller".into(),
+            },
+            PathStep::Assignment {
+                function: "f".into(),
+                variable: 7,
+            },
+        ];
+        for step in &steps {
+            assert!(!describe_path_step(step).is_empty());
+        }
+    }
 }
 #[cfg(test)]
 mod sarif_line_mapping_tests {

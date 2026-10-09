@@ -19,6 +19,11 @@ use rustc_hash::FxHashMap;
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct VarId(pub usize);
 
+/// Source name of the hidden memory-state parameter every [`FunctionIR`]
+/// allocates as its `VarId(0)`. Shared by the IR builder (which names the
+/// variable) and path reconstruction (which strips the artifact).
+pub const INITIAL_HEAP_STATE: &str = "InitialHeapState";
+
 /// A unique identifier for a Basic Block in the CFG.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
@@ -47,6 +52,14 @@ pub struct VarMetadata {
     /// this to classify the *shape* of the tainted argument (IDOR-style
     /// object payload vs raw injection string).
     pub object_keys: Vec<String>,
+    /// Bound by a declaration visited while lowering this function's body
+    /// (`char *p;`, `let x;`, `x = v` in Python, destructuring patterns) -
+    /// provably function-scoped. Vars created at first *expression* use are
+    /// left `false`: those are file/module/header globals (or undeclared
+    /// names), whose values are initialized elsewhere. Uninitialized-free
+    /// analysis fires only on `declared` vars.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub declared: bool,
 }
 
 /// Operands are the inputs to instructions.
@@ -238,7 +251,6 @@ pub enum Terminator {
     Throw {
         src: Operand,
     },
-    Unreachable,
     None,
 }
 
@@ -251,7 +263,6 @@ pub struct BasicBlock {
     pub terminator: Terminator,
     pub predecessors: Vec<BlockId>,
     pub successors: Vec<BlockId>,
-    pub unwind_to: Option<BlockId>,
 }
 
 impl BasicBlock {
@@ -263,7 +274,6 @@ impl BasicBlock {
             terminator: Terminator::None,
             predecessors: Vec::new(),
             successors: Vec::new(),
-            unwind_to: None,
         }
     }
 }
@@ -278,6 +288,11 @@ pub struct FunctionIR {
     pub blocks: FxHashMap<BlockId, BasicBlock>,
     pub entry_block: BlockId,
     pub var_metadata: FxHashMap<VarId, VarMetadata>,
+    /// Program name of the innermost enclosing extracted function, when this
+    /// function was extracted from a nested position (None for module scope).
+    /// Closure edges resolve free variables through this lexical chain.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub enclosing_fn: Option<String>,
     #[cfg_attr(feature = "serialize", serde(default))]
     // legacy safety: recompute via max ids if absent
     next_var_id: usize,
@@ -298,17 +313,19 @@ impl FunctionIR {
             blocks,
             entry_block: entry_id,
             var_metadata: FxHashMap::default(),
+            enclosing_fn: None,
             next_var_id: 1,
             next_block_id: 1,
         };
 
         // Allocate the hidden Memory State parameter
         f.initial_memory_state = f.new_var(VarMetadata {
-            source_name: Some("InitialHeapState".into()),
+            source_name: Some(INITIAL_HEAP_STATE.into()),
             type_name: None,
             byte_range: None,
             is_memory_state: true,
             object_keys: Vec::new(),
+            declared: false,
         });
 
         f
@@ -357,5 +374,23 @@ impl FunctionIR {
         {
             t.predecessors.push(from);
         }
+    }
+
+    /// The `LoadField` instruction defining `var`, if any (first match - IR
+    /// is SSA-shaped): returns the base var and the loaded field. Shared
+    /// walk step for member-access path reconstruction.
+    pub(crate) fn loadfield_def(&self, var: VarId) -> Option<(VarId, String)> {
+        for b in self.blocks.values() {
+            for instr in &b.instructions {
+                if let Instruction::LoadField {
+                    dest, base, field, ..
+                } = instr
+                    && *dest == var
+                {
+                    return Some((*base, field.clone()));
+                }
+            }
+        }
+        None
     }
 }

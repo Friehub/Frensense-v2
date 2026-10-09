@@ -55,22 +55,21 @@ pub fn write_notification(params: &Value) {
     }
 }
 
+/// Severity + language filter. Severity comes from the one reporting
+/// policy ([`crate::reporting::apply`]); the language scope is this
+/// tool's own argument.
 pub fn filter_advisories(
     advisories: Vec<Advisory>,
     severity_threshold: &str,
     language: Option<&str>,
 ) -> Vec<Advisory> {
-    let threshold = match severity_threshold {
-        "critical" => Severity::Critical,
-        "warning" => Severity::Warning,
-        _ => Severity::Info,
-    };
+    let filtered =
+        crate::reporting::apply(advisories, 0.0, Some(Severity::parse(severity_threshold)));
 
     let extensions = language.and_then(crate::parser::extensions_for);
 
-    advisories
+    filtered
         .into_iter()
-        .filter(|a| severity_rank(a.severity) >= severity_rank(threshold))
         .filter(|a| {
             if let Some(exts) = extensions {
                 let ext = Path::new(&a.file_path)
@@ -179,12 +178,4 @@ pub fn run_audit(path: &str, severity_threshold: &str, language: Option<&str>) -
         "clean": filtered.is_empty(),
         "advisories": serde_json::to_value(&filtered).unwrap_or_default(),
     })
-}
-
-pub fn severity_rank(s: Severity) -> u8 {
-    match s {
-        Severity::Critical => 3,
-        Severity::Warning => 2,
-        Severity::Info => 1,
-    }
 }

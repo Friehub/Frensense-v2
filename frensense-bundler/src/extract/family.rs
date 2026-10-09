@@ -34,6 +34,15 @@ pub struct FamilyMetadata {
     pub cvss: Option<f32>,
     pub owasp: Option<String>,
     pub severity: Option<String>,
+    /// Declared prover rule id (`check-rule:`): the family teaches this
+    /// allocation-size integer-overflow rule; extraction proposes it as an
+    /// `IntegerOverflowRule` fact regardless of delta signal (the replay
+    /// gate still validates separation).
+    pub check_rule: Option<String>,
+    /// Declared wrap threshold (`wrap-max:`): products above this value
+    /// cannot be an allocation size on the family's target platform
+    /// (default u64::MAX == SIZE_MAX on LP64/LLP64).
+    pub wrap_max: Option<u128>,
 }
 
 impl FamilyMetadata {
@@ -76,7 +85,7 @@ impl FamilyMetadata {
                 continue;
             }
             let Some((key, value)) = body.split_once(':') else {
-                // Unknown line inside the block (e.g. `check-call:`) —
+                // Unknown line inside the block (e.g. `check-call:`) -
                 // other parsers consume it; skip here.
                 continue;
             };
@@ -96,6 +105,12 @@ impl FamilyMetadata {
                 }
                 "owasp" => meta.owasp = Some(value.to_string()),
                 "severity" => meta.severity = Some(value.to_string()),
+                "check-rule" => meta.check_rule = Some(value.to_string()),
+                "wrap-max" => {
+                    if let Ok(v) = value.parse::<u128>() {
+                        meta.wrap_max = Some(v);
+                    }
+                }
                 _ => {}
             }
         }
@@ -192,6 +207,14 @@ pub fn group_families(corpus_dir: &Path) -> Result<Vec<Family>, String> {
         } else {
             continue;
         };
+        // Held-out blind-verification variants never contribute to
+        // extraction: the bundle must be learned from the training pair
+        // alone so `test_bundles.sh` can scan these files afterward as
+        // proof of generalization. The `_heldout_` infix marks them
+        // (e.g. `<family>_heldout_positive.c`).
+        if family.ends_with("_heldout") {
+            continue;
+        }
         let source = std::fs::read_to_string(&path).unwrap_or_default();
         // Declared check trigger: `// check-call: <name>` inside the
         // `[frensense]` metadata block of a positive variant. The comment

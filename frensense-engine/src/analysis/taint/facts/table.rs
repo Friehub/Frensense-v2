@@ -1,0 +1,1301 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2024-2026 Friehub. All rights reserved.
+// Commercial use requires a separate license: https://friehub.com/licensing
+
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::BTreeSet;
+
+use super::*;
+use crate::analysis::taint::config::TaintConfig;
+use crate::checks::memory_summary::CapacitySpec;
+
+/// The merged fact table: built-in language tables + bundle-learned facts.
+///
+/// Built from a [`TaintConfig`] (name sets, backward compatible) plus
+/// optional signatures/sanitizer facts supplied by `frensense-lang` specs or
+/// a `.frc` bundle.
+#[derive(Debug, Clone, Default)]
+pub struct FactTable {
+    /// By call name. Absent = default "all args dangerous" for configured
+    /// sinks.
+    pub sink_signatures: FxHashMap<String, SinkSignature>,
+    pub sanitizer_facts: FxHashMap<String, SanitizerFact>,
+    /// Corpus-verified non-dataflow checks (order-preserving; dedup on
+    /// `(rule, call)` at merge time, provenance-ordered per entry).
+    pub learned_checks: Vec<(LearnedCheckFact, Provenance)>,
+    /// Corpus-verified co-occurrence policies (the generalized check fact).
+    /// Evaluated by `checks::policy`; legacy `learned_checks` entries ALSO
+    /// evaluate there after `PolicyFact::from_legacy` conversion, so bundles
+    /// never need to migrate to keep firing. Dedup on
+    /// `(rule, when_call)` at merge time, provenance-ordered per entry.
+    pub policy_facts: Vec<(PolicyFact, Provenance)>,
+    /// Corpus-verified interprocedural memory contracts (allocators / deallocators).
+    pub memory_contracts: Vec<MemoryContractFact>,
+    /// Corpus-verified weak cryptography rules.
+    pub weak_crypto_rules: Vec<WeakCryptoFact>,
+    /// Containment callees (for allowlist bypass checks) with per-entry
+    /// provenance: default-pack-seeded (Spec), bundle-applied (Learned).
+    pub containment_callees: FxHashMap<String, Provenance>,
+    /// Credential setter/hasher sinks with per-entry provenance (pack ->
+    /// Spec, bundle -> Learned).
+    pub credential_sinks: FxHashMap<String, Provenance>,
+    /// Parameter names identifying credentials with per-entry provenance
+    /// (pack -> Spec, bundle -> Learned).
+    pub credential_params: FxHashMap<String, Provenance>,
+    /// Schema builder methods with per-entry provenance (pack -> Spec,
+    /// bundle -> Learned).
+    pub schema_builders: FxHashMap<String, Provenance>,
+    /// Corpus-verified schema enforcer methods (default-pack-seeded).
+    pub schema_enforcers: FxHashSet<String>,
+    /// Bound keywords with per-entry provenance (pack -> Spec, bundle ->
+    /// Learned).
+    pub schema_keywords: FxHashMap<String, Provenance>,
+    /// URL/redirect parameter-name hints (default-pack-seeded).
+    pub url_param_hints: FxHashSet<String>,
+    /// URL-ish guard argument hints (default-pack-seeded).
+    pub url_arg_hints: FxHashSet<String>,
+    /// Absolute-URL literal hints (default-pack-seeded).
+    pub url_literal_hints: FxHashSet<String>,
+    /// Security-context name hints (default-pack-seeded).
+    pub security_context_hints: FxHashSet<String>,
+    /// Auth-guard call-path hints (default-pack-seeded); the idor emission
+    /// gate suppresses identity findings behind a guard branch over these
+    /// calls.
+    pub auth_guard_hints: FxHashSet<String>,
+    /// JWT algorithm-operation call-path hints (default-pack-seeded).
+    pub jwt_algorithm_hints: FxHashSet<String>,
+    /// Credential-context name hints (default-pack-seeded).
+    pub credential_context_hints: FxHashSet<String>,
+    /// Weak-hash policy rules (default-pack-seeded).
+    pub weak_hash_rules: Vec<WeakPrimitiveRule>,
+    /// Corpus-extendable allocation-size overflow rules (CWE-190 -> CWE-680;
+    /// default-pack-seeded, bundle extension via
+    /// `LearnedFactEntry::IntegerOverflowRule` from a family's
+    /// `[frensense] check-rule:` declaration).
+    pub integer_overflow_rules: Vec<(IntegerOverflowRule, Provenance)>,
+    /// Insecure config selectors (default-pack-seeded).
+    pub insecure_config_selectors: Vec<InsecureConfigRule>,
+    /// Key-size policy rules (default-pack-seeded).
+    pub key_size_rules: Vec<KeySizeRule>,
+    /// Suspicious hash-wrapper names (default-pack-seeded).
+    pub suspicious_hash_wrappers: FxHashSet<String>,
+    /// Last segments that come ONLY from dotted client sinks (`got.get`,
+    /// `axios.post`, ...). These verbs are ambiguous, `Map.get`, router
+    /// `app.post`, LRU `.put` all share the names, so they match
+    /// receiver-aware: the call only counts as a sink when the receiver's
+    /// root is a known client (see [`client_roots`]).
+    pub verb_sinks: FxHashSet<String>,
+    /// Receiver roots that make [`verb_sinks`] real client calls, derived
+    /// from the first segment of dotted verb sinks (`got`, `axios`, `http`).
+    pub client_roots: FxHashSet<String>,
+    /// Receiver-specific roles for dotted sinks that share their last
+    /// segment with a different-role bare entry:
+    /// `(receiver_root, method) -> role`.
+    ///
+    /// Example: `KVNamespace.put` is StorageWrite while bare `run` is
+    /// SqlInjection; `shell.run` is CommandInjection. When the engine sees
+    /// `kv.put(...)` and the receiver root resolves to `kv`'s declared
+    /// dotted root, THIS role wins over the bare entry's, the receiver is
+    /// the disambiguator, exactly like [`verb_sinks`] for match/no-match.
+    pub receiver_roles: FxHashMap<(String, String), crate::analysis::taint::role::SinkRole>,
+    /// Receiver-specific label slugs: (receiver_root, method) -> label slug.
+    pub receiver_labels: FxHashMap<(String, String), String>,
+    /// Receiver roots of trusted session stores (`authenticatedUsers`):
+    /// `store.get(token)` returns a server-issued session object or
+    /// undefined, values read off the result are not attacker-controlled
+    /// (the pack ships these with session-trust sanitizer facts).
+    pub session_roots: FxHashSet<String>,
+    /// Taint-source patterns learned from a `.frc` bundle: call names or
+    /// member-access paths whose results carry attacker-controlled data.
+    /// Merged into the scan's `TaintConfig::sources` before analysis so
+    /// bundles teach new frameworks without touching the built-in tables.
+    pub learned_sources: FxHashSet<String>,
+    /// Dynamic node role classifications learned from a `.frc` bundle:
+    /// `(language, node_kind) -> role`. Stored as the owned
+    /// [`TeachableNodeRole`] (bundle payload type) and converted to a
+    /// `frensense_lang::NodeRole` on lookup, so applying a fact never
+    /// allocates `'static` memory (the previous `Box::leak` intern leaked
+    /// per merge, growing unboundedly in long-lived MCP/LSP processes).
+    pub grammar_roles:
+        FxHashMap<(String, String), crate::analysis::taint::facts::TeachableNodeRole>,
+    /// Dynamic grammar features learned from a `.frc` bundle:
+    /// `(language, node_kind) -> Set<GrammarFeature>`.
+    pub grammar_features: FxHashMap<(String, String), FxHashSet<GrammarFeature>>,
+    /// Dynamic custom memory allocators learned from a bundle or specification.
+    pub custom_allocators: FxHashSet<String>,
+    /// Dynamic custom memory deallocators learned from a bundle or specification.
+    pub custom_deallocators: FxHashSet<String>,
+    /// Memory-function vocabulary (allocators/deallocators and their
+    /// capacity contracts), default-pack-seeded (Phase 6.1). Empty means
+    /// the caller built a bare table; the checks then see no memory
+    /// vocabulary at all.
+    pub memory_functions: Vec<MemoryFuncSpec>,
+    /// Buffer-manipulation vocabulary (copy/fill/read builtins with their
+    /// dst/src/len argument slots), default-pack-seeded (Phase 6.1).
+    /// Empty means the caller built a bare table; the OOB check then sees
+    /// no buffer vocabulary.
+    pub buffer_builtins: Vec<BufferBuiltinSpec>,
+    /// Stack-frame allocators (`alloca`, ...), default-pack-seeded
+    /// (Phase 6.5); leak-style checkers exclude them.
+    pub stack_allocators: Vec<String>,
+    /// Route-registration call patterns per language
+    /// (`(language or "*", patterns)`), default-pack-seeded (Phase 6.2);
+    /// the lowering harness unions these with the spec's route verbs.
+    pub route_patterns: FxHashMap<String, Vec<String>>,
+    /// Collection constructors (`Set`, `Map`), default-pack-seeded
+    /// (Phase 6.5); the allowlist-definition check reads their literal
+    /// elements.
+    pub collection_constructors: FxHashSet<String>,
+    /// Schema-describing methods (`describe`, `description`),
+    /// default-pack-seeded (Phase 6.5).
+    pub schema_describe_methods: FxHashSet<String>,
+    /// String literals that compare as the null pointer (`NULL`),
+    /// default-pack-seeded (Phase 6.5).
+    pub null_tokens: FxHashSet<String>,
+    /// Read-accessor method names of trusted session stores (`get`),
+    /// default-pack-seeded (Phase 6.5).
+    pub session_accessors: FxHashSet<String>,
+    /// Formal parameter names receiving the implicit receiver (`self`,
+    /// `this`), default-pack-seeded (Phase 6.5).
+    pub receiver_params: FxHashSet<String>,
+    /// Dynamic IDOR-class query keys learned from a bundle or specification.
+    pub idor_keys: FxHashSet<String>,
+    /// Dynamic IDOR-class finder sinks learned from a bundle or specification.
+    pub idor_finder_sinks: FxHashSet<String>,
+    /// Dynamic taint propagators: `call -> input_arg_slots`.
+    pub propagators: FxHashMap<String, Vec<usize>>,
+    /// Spec propagator rules that declare `tainted_receiver: false`: taint
+    /// on the receiver must NOT reach the return of such calls. A negative
+    /// set (only explicit declarations appear), so unknown calls and
+    /// bundle-learned propagators keep the default receiver pass-through.
+    pub propagator_blocks_receiver: FxHashSet<String>,
+    /// Guard denylist string patterns: default-pack-seeded
+    /// (`GuardDenylistPattern`, Phase 6.5) and bundle-learned
+    /// (`GuardDenylistPattern`).
+    pub guard_denylist_patterns: Vec<String>,
+}
+
+impl FactTable {
+    /// Build from a plain [`TaintConfig`]: every configured sink gets the
+    /// all-args signature; every configured sanitizer a default fact.
+    pub fn from_config(config: &TaintConfig) -> Self {
+        let mut t = Self::default();
+        for s in &config.sinks {
+            t.sink_signatures
+                .insert(s.clone(), SinkSignature::all_args(s));
+        }
+        for s in &config.sanitizers {
+            t.sanitizer_facts.insert(
+                s.clone(),
+                SanitizerFact {
+                    call: s.clone(),
+                    kind: DEFAULT_SANITIZER_KIND.into(),
+                    sanitizes_args: Default::default(),
+                    guard_style: false,
+                },
+            );
+        }
+        t
+    }
+
+    /// Merge bundle-learned facts over the current table (learned wins on
+    /// name collision, bundle facts are more specific than built-ins).
+    ///
+    /// All-args signatures never overwrite slot-restricted ones on collision:
+    /// a slot-restricted signature is strictly more specific knowledge, so an
+    /// all-args merge (e.g. another language spec declaring the same bare
+    /// call name) must not widen it back to "everything dangerous".
+    pub fn merge(&mut self, other: &FactTable) {
+        for (k, v) in &other.sink_signatures {
+            let widens = v.dangerous_args.is_empty()
+                && !v.binding_args_safe
+                && self
+                    .sink_signatures
+                    .get(k)
+                    .map(|cur| !cur.dangerous_args.is_empty() || cur.binding_args_safe)
+                    .unwrap_or(false);
+            if widens {
+                continue;
+            }
+            self.sink_signatures.insert(k.clone(), v.clone());
+        }
+        for (k, v) in &other.sanitizer_facts {
+            self.sanitizer_facts.insert(k.clone(), v.clone());
+        }
+        // Provenance-ordered (Phase 5.3): learned checks accumulate with
+        // dedup on (rule, call), but the higher-ranked provenance wins the
+        // collision (Spec < Authored < Learned) and ties keep the existing
+        // entry, so merge is order-independent across provenance tiers.
+        for (c, prov) in &other.learned_checks {
+            if let Some(existing) = self
+                .learned_checks
+                .iter_mut()
+                .find(|(e, _)| e.rule == c.rule && e.call == c.call)
+            {
+                if *prov > existing.1 {
+                    *existing = (c.clone(), *prov);
+                }
+            } else {
+                self.learned_checks.push((c.clone(), *prov));
+            }
+        }
+        // Policy facts order the same way, dedup on (rule, when_call).
+        for (p, prov) in &other.policy_facts {
+            if let Some(existing) = self
+                .policy_facts
+                .iter_mut()
+                .find(|(e, _)| e.rule == p.rule && e.when_call == p.when_call)
+            {
+                if *prov > existing.1 {
+                    *existing = (p.clone(), *prov);
+                }
+            } else {
+                self.policy_facts.push((p.clone(), *prov));
+            }
+        }
+        // Memory contracts accumulate, with newer/learned contracts replacing older ones on collision.
+        for mc in &other.memory_contracts {
+            if let Some(existing) = self.memory_contracts.iter_mut().find(|c| c.name == mc.name) {
+                *existing = mc.clone();
+            } else {
+                self.memory_contracts.push(mc.clone());
+            }
+        }
+        for wc in &other.weak_crypto_rules {
+            if let Some(existing) = self
+                .weak_crypto_rules
+                .iter_mut()
+                .find(|r| r.rule_id == wc.rule_id && r.call == wc.call)
+            {
+                *existing = wc.clone();
+            } else {
+                self.weak_crypto_rules.push(wc.clone());
+            }
+        }
+        // Merged entries keep their own provenance; on collision the
+        // higher-ranked provenance wins (Spec < Authored < Learned), ties
+        // keep the existing entry - order-independent across tiers.
+        for (k, v) in &other.containment_callees {
+            if self.containment_callees.get(k).is_none_or(|cur| *v > *cur) {
+                self.containment_callees.insert(k.clone(), *v);
+            }
+        }
+        for (k, v) in &other.credential_sinks {
+            if self.credential_sinks.get(k).is_none_or(|cur| *v > *cur) {
+                self.credential_sinks.insert(k.clone(), *v);
+            }
+        }
+        for (k, v) in &other.credential_params {
+            if self.credential_params.get(k).is_none_or(|cur| *v > *cur) {
+                self.credential_params.insert(k.clone(), *v);
+            }
+        }
+        for (k, v) in &other.schema_builders {
+            if self.schema_builders.get(k).is_none_or(|cur| *v > *cur) {
+                self.schema_builders.insert(k.clone(), *v);
+            }
+        }
+        self.schema_enforcers
+            .extend(other.schema_enforcers.iter().cloned());
+        for (k, v) in &other.schema_keywords {
+            if self.schema_keywords.get(k).is_none_or(|cur| *v > *cur) {
+                self.schema_keywords.insert(k.clone(), *v);
+            }
+        }
+        self.url_param_hints
+            .extend(other.url_param_hints.iter().cloned());
+        self.url_arg_hints
+            .extend(other.url_arg_hints.iter().cloned());
+        self.url_literal_hints
+            .extend(other.url_literal_hints.iter().cloned());
+        self.security_context_hints
+            .extend(other.security_context_hints.iter().cloned());
+        self.auth_guard_hints
+            .extend(other.auth_guard_hints.iter().cloned());
+        self.jwt_algorithm_hints
+            .extend(other.jwt_algorithm_hints.iter().cloned());
+        self.credential_context_hints
+            .extend(other.credential_context_hints.iter().cloned());
+        for r in &other.weak_hash_rules {
+            if !self.weak_hash_rules.contains(r) {
+                self.weak_hash_rules.push(r.clone());
+            }
+        }
+        // Provenance-ordered like the policy tables: a consumer bundle
+        // redefining a spec-seeded rule now overrides it (Learned >
+        // Spec), ties keep the existing entry.
+        for (r, p) in &other.integer_overflow_rules {
+            if let Some(existing) = self
+                .integer_overflow_rules
+                .iter_mut()
+                .find(|(e, _)| e.rule_id == r.rule_id && e.wrap_threshold == r.wrap_threshold)
+            {
+                if *p > existing.1 {
+                    *existing = (r.clone(), *p);
+                }
+            } else {
+                self.integer_overflow_rules.push((r.clone(), *p));
+            }
+        }
+        for s in &other.insecure_config_selectors {
+            if !self.insecure_config_selectors.contains(s) {
+                self.insecure_config_selectors.push(s.clone());
+            }
+        }
+        for r in &other.key_size_rules {
+            if !self.key_size_rules.contains(r) {
+                self.key_size_rules.push(r.clone());
+            }
+        }
+        self.suspicious_hash_wrappers
+            .extend(other.suspicious_hash_wrappers.iter().cloned());
+
+        // Verb-sink bookkeeping accumulates too: dotted client entries
+        // (`got.get`, `axios.post`) from any merged spec/bundle widen the
+        // receiver-aware sets.
+        self.verb_sinks.extend(other.verb_sinks.iter().cloned());
+        self.client_roots.extend(other.client_roots.iter().cloned());
+        // Receiver-specific roles accumulate like the other receiver-aware
+        // sets: two merged specs can declare different dotted roots for the
+        // same method, and both disambiguation rules must survive.
+        for (k, v) in &other.receiver_roles {
+            self.receiver_roles.entry(k.clone()).or_insert(*v);
+        }
+        for (k, v) in &other.receiver_labels {
+            self.receiver_labels
+                .entry(k.clone())
+                .or_insert_with(|| v.clone());
+        }
+        self.session_roots
+            .extend(other.session_roots.iter().cloned());
+        self.learned_sources
+            .extend(other.learned_sources.iter().cloned());
+        for (k, v) in &other.grammar_roles {
+            self.grammar_roles.insert(k.clone(), v.clone());
+        }
+        for (lang, pats) in &other.route_patterns {
+            let slot = self.route_patterns.entry(lang.clone()).or_default();
+            for p in pats {
+                if !slot.contains(p) {
+                    slot.push(p.clone());
+                }
+            }
+        }
+        for (k, v) in &other.grammar_features {
+            self.grammar_features
+                .entry(k.clone())
+                .or_default()
+                .extend(v.iter().copied());
+        }
+        self.custom_allocators
+            .extend(other.custom_allocators.iter().cloned());
+        self.custom_deallocators
+            .extend(other.custom_deallocators.iter().cloned());
+        if !other.memory_functions.is_empty() {
+            self.memory_functions = other.memory_functions.clone();
+        }
+        if !other.buffer_builtins.is_empty() {
+            self.buffer_builtins = other.buffer_builtins.clone();
+        }
+        if !other.stack_allocators.is_empty() {
+            self.stack_allocators = other.stack_allocators.clone();
+        }
+        self.collection_constructors
+            .extend(other.collection_constructors.iter().cloned());
+        self.schema_describe_methods
+            .extend(other.schema_describe_methods.iter().cloned());
+        self.null_tokens.extend(other.null_tokens.iter().cloned());
+        self.session_accessors
+            .extend(other.session_accessors.iter().cloned());
+        self.receiver_params
+            .extend(other.receiver_params.iter().cloned());
+        self.idor_keys.extend(other.idor_keys.iter().cloned());
+        self.idor_finder_sinks
+            .extend(other.idor_finder_sinks.iter().cloned());
+        for (k, v) in &other.propagators {
+            self.propagators.insert(k.clone(), v.clone());
+        }
+        self.propagator_blocks_receiver
+            .extend(other.propagator_blocks_receiver.iter().cloned());
+        for p in &other.guard_denylist_patterns {
+            if !self.guard_denylist_patterns.contains(p) {
+                self.guard_denylist_patterns.push(p.clone());
+            }
+        }
+    }
+
+    /// Look up a dynamic AST node classification role learned from a `.frc` bundle.
+    pub fn get_grammar_role(
+        &self,
+        language: &str,
+        node_kind: &str,
+    ) -> Option<frensense_lang::NodeRole> {
+        let lang = language.to_lowercase();
+        self.grammar_roles
+            .get(&(lang, node_kind.to_string()))
+            .or_else(|| {
+                self.grammar_roles
+                    .get(&("*".to_string(), node_kind.to_string()))
+            })
+            .map(|r| r.to_node_role())
+    }
+
+    /// Check if a dynamic AST grammar feature is learned from a `.frc` bundle.
+    pub fn has_grammar_feature(
+        &self,
+        language: &str,
+        node_kind: &str,
+        feature: GrammarFeature,
+    ) -> Option<bool> {
+        let lang = language.to_lowercase();
+        if let Some(set) = self.grammar_features.get(&(lang, node_kind.to_string()))
+            && set.contains(&feature)
+        {
+            return Some(true);
+        }
+        if let Some(set) = self
+            .grammar_features
+            .get(&("*".to_string(), node_kind.to_string()))
+            && set.contains(&feature)
+        {
+            return Some(true);
+        }
+        None
+    }
+
+    /// Check whether a key is an IDOR-class query parameter (spec/bundle
+    /// vocabulary - the engine ships no built-in key set).
+    pub fn is_idor_key(&self, key: &str) -> bool {
+        self.idor_keys.contains(key)
+    }
+
+    /// Check whether a call is an IDOR finder sink (spec/bundle vocabulary -
+    /// the engine ships no built-in sink set).
+    pub fn is_idor_finder_sink(&self, sink: &str) -> bool {
+        let last = sink.rsplit('.').next().unwrap_or(sink);
+        self.idor_finder_sinks.contains(sink) || self.idor_finder_sinks.contains(last)
+    }
+
+    /// Is `name` (bare, dotted, or `::`-qualified) a declared stack
+    /// allocator? Frame-local storage is never a leak candidate; the
+    /// vocabulary is default-pack-seeded (Phase 6.5).
+    pub fn is_stack_allocator(&self, name: &str) -> bool {
+        let s = name.rsplit('.').next().unwrap_or(name);
+        let s = s.rsplit("::").next().unwrap_or(s);
+        self.stack_allocators.iter().any(|a| a == s)
+    }
+
+    /// Is `name` a declared collection constructor (`Set`, `Map`)?
+    pub fn is_collection_ctor(&self, name: &str) -> bool {
+        self.collection_constructors.contains(name)
+    }
+
+    /// Is `name` a schema-describing method (`describe`, `description`)?
+    pub fn is_schema_describe_method(&self, name: &str) -> bool {
+        self.schema_describe_methods.contains(name)
+    }
+
+    /// Does the string literal `s` compare as the language's null pointer?
+    pub fn is_null_token(&self, s: &str) -> bool {
+        self.null_tokens.contains(s)
+    }
+
+    /// Is `last` a read accessor of a trusted session store
+    /// (`authenticatedUsers.get(...)`)? Receiver-aware callers combine
+    /// this with [`Self::session_roots`] via [`Self::is_session_path`].
+    pub fn is_session_accessor(&self, last: &str) -> bool {
+        self.session_accessors.contains(last)
+    }
+
+    /// Is `name` a formal parameter that receives the implicit receiver
+    /// (`self`, `this`)?
+    pub fn is_receiver_param(&self, name: &str) -> bool {
+        self.receiver_params.contains(name)
+    }
+
+    /// Provenance of the containment callee matching `seg`
+    /// (case-insensitive), or None when not declared.
+    pub fn containment_callee(&self, seg: &str) -> Option<Provenance> {
+        self.containment_callees
+            .iter()
+            .find(|(c, _)| c.eq_ignore_ascii_case(seg))
+            .map(|(_, p)| *p)
+    }
+
+    /// Provenance of the credential sink matching `seg`
+    /// (case-insensitive), or None when not declared.
+    pub fn credential_sink(&self, seg: &str) -> Option<Provenance> {
+        self.credential_sinks
+            .iter()
+            .find(|(s, _)| s.eq_ignore_ascii_case(seg))
+            .map(|(_, p)| *p)
+    }
+
+    /// Provenance of the credential parameter whose lowercased name equals
+    /// `lowered`, or None when not declared.
+    pub fn credential_param(&self, lowered: &str) -> Option<Provenance> {
+        self.credential_params
+            .iter()
+            .find(|(c, _)| lowered == c.to_ascii_lowercase())
+            .map(|(_, p)| *p)
+    }
+
+    /// Provenance of the schema builder matching `seg`
+    /// (case-insensitive), or None when not declared.
+    pub fn schema_builder(&self, seg: &str) -> Option<Provenance> {
+        self.schema_builders
+            .iter()
+            .find(|(b, _)| b.eq_ignore_ascii_case(seg))
+            .map(|(_, p)| *p)
+    }
+
+    /// Provenance of a bound keyword contained in the lowercased schema
+    /// description `lower`, or None when none matches.
+    pub fn schema_keyword(&self, lower: &str) -> Option<Provenance> {
+        self.schema_keywords
+            .iter()
+            .find(|(k, _)| lower.contains(&k.to_ascii_lowercase()))
+            .map(|(_, p)| *p)
+    }
+
+    /// Look up input argument slots that propagate taint through `call`.
+    pub fn propagator_input_args(&self, call: &str) -> Option<&[usize]> {
+        let last = call.rsplit('.').next().unwrap_or(call);
+        self.propagators
+            .get(call)
+            .or_else(|| self.propagators.get(last))
+            .map(|v| v.as_slice())
+    }
+
+    /// Does a spec rule declare that `call`'s receiver does not taint its
+    /// return (`tainted_receiver: false`)? Keyed like `propagators`: full
+    /// name first, then last segment.
+    pub fn propagator_blocks_receiver(&self, call: &str) -> bool {
+        if self.propagator_blocks_receiver.contains(call) {
+            return true;
+        }
+        let last = call.rsplit('.').next().unwrap_or(call);
+        last != call && self.propagator_blocks_receiver.contains(last)
+    }
+
+    /// Check whether a string literal matches a guard denylist pattern.
+    /// Patterns are pack/bundle vocabulary (the default pack's
+    /// `GuardDenylistPattern` entries, extended by learned
+    /// `GuardDenylistPattern` facts) - the engine ships no built-in list.
+    pub fn is_guard_denylist(&self, literal: &str) -> bool {
+        self.guard_denylist_patterns
+            .iter()
+            .any(|p| literal.contains(p.as_str()))
+    }
+
+    /// Source patterns to merge into the scan's `TaintConfig`: the union of
+    /// spec-derived names and bundle-learned ones. The engine matches both
+    /// by full name and, for dotted entries, by last segment.
+    pub fn source_patterns(&self) -> impl Iterator<Item = &str> {
+        self.learned_sources.iter().map(|s| s.as_str())
+    }
+}
+
+/// One learned fact as persisted in a `.frc` bundle. A tagged union over the
+/// three fact kinds, serde-friendly, decodable into a [`FactTable`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub enum LearnedFactEntry {
+    /// A taint source pattern: a call name or member-access path whose
+    /// result carries attacker-controlled data. Merged into the scan's
+    /// [`TaintConfig::sources`] so bundles teach new frameworks without
+    /// touching the built-in tables. Matches by full name or, for dotted
+    /// entries, by last segment (same convention as sinks).
+    Source { pattern: String },
+    Sink {
+        call: String,
+        /// Dangerous argument slots; empty = all slots dangerous.
+        dangerous_args: BTreeSet<usize>,
+        /// Whether non-dangerous slots are safe binding channels.
+        binding_args_safe: bool,
+    },
+    Sanitizer {
+        call: String,
+        kind: String,
+        guard_style: bool,
+    },
+    /// Install a corpus-verified co-occurrence policy (the generalized
+    /// check fact; see [`PolicyFact`]).
+    Policy {
+        rule: String,
+        when_call: String,
+        /// Requirements that must hold for the trigger to be compliant.
+        #[cfg_attr(feature = "serialize", serde(default))]
+        require: Vec<PolicyRequirement>,
+        #[cfg_attr(feature = "serialize", serde(default))]
+        scope: PolicyScope,
+        message: String,
+        severity: String,
+    },
+    /// Install a corpus-verified non-dataflow check.
+    Check {
+        rule: String,
+        call: String,
+        message: String,
+        severity: String,
+        /// Fire only when this guard call is absent from the function
+        /// ("trigger without enforcement"). `None` = presence-only.
+        #[cfg_attr(feature = "serialize", serde(default))]
+        unless_guard: Option<String>,
+        /// Fire only when the trigger's argument is NOT compared against a
+        /// literal bound with one of these operators (inline enforcement).
+        /// `None` = no range qualification.
+        #[cfg_attr(feature = "serialize", serde(default))]
+        unless_range_check: Option<Vec<String>>,
+    },
+    /// Install a corpus-verified memory allocation or deallocation contract.
+    MemoryContract {
+        name: String,
+        returns_fresh: bool,
+        return_capacity: CapacitySpec,
+        consumes_params: Vec<usize>,
+    },
+    /// A weak cryptographic primitive or selector rule.
+    WeakCrypto(WeakCryptoFact),
+    /// Guard bypass parameters (containment check helpers or credential sinks).
+    GuardBypass(GuardBypassFact),
+    /// Schema validation builders, enforcers, or keywords.
+    SchemaPolicy(SchemaPolicyFact),
+    /// Dynamic AST grammar role mapping taught by a bundle.
+    GrammarRole {
+        language: String,
+        node_kind: String,
+        role: TeachableNodeRole,
+    },
+    /// Dynamic AST grammar feature taught by a bundle.
+    GrammarFeature {
+        language: String,
+        node_kind: String,
+        feature: GrammarFeature,
+    },
+    /// Register a custom memory allocator function name.
+    Allocator { name: String },
+    /// Register a custom memory deallocator function name.
+    Deallocator { name: String },
+    /// Register an IDOR-class finder sink and optional custom IDOR query payload keys.
+    IdorFinderSink { call: String, keys: Vec<String> },
+    /// Register an IDOR-class query payload key (e.g. "tenant_id", "workspace_id").
+    IdorKey { key: String },
+    /// Register a taint propagator rule for a function/method.
+    Propagator {
+        call: String,
+        input_args: Vec<usize>,
+        preserves_taint: bool,
+    },
+    /// Register a string pattern indicating a denylist-style guard comparison.
+    GuardDenylistPattern { pattern: String },
+    /// Register/extend an allocation-size integer-overflow rule: the corpus
+    /// declares the prover rule id, wrap threshold, and advisory; the
+    /// engine's stable prover evaluates it (CWE-190 -> CWE-680).
+    IntegerOverflowRule {
+        rule: String,
+        wrap_threshold: u128,
+        severity: String,
+        message: String,
+    },
+    /// Substring-hint vocabulary for one hint table (Phase 6 format
+    /// extension): bundles extend the URL/security/auth/credential hint
+    /// sets the same way the spec seed provides them.
+    Hints { kind: HintKind, values: Vec<String> },
+    /// A weak-primitive policy rule (weak digest selectors), the bundle
+    /// form of the bootstrap weak-hash table.
+    WeakPrimitiveRule {
+        rule_id: String,
+        selector_calls: Vec<String>,
+        bare_calls: Vec<String>,
+        selector_slot: usize,
+        weak_selectors: Vec<String>,
+        requires_credential_context: bool,
+        severity: String,
+        message: String,
+    },
+    /// A string-literal insecure-configuration selector rule (the bundle
+    /// form of the bootstrap insecure-config table).
+    InsecureConfigRule {
+        prefix: String,
+        selectors: Vec<String>,
+        rule_id: String,
+        severity: String,
+        message: String,
+    },
+    /// A minimum-key-size rule for a key-generation call (the bundle form
+    /// of the bootstrap key-size table).
+    KeySizeRule {
+        rule_id: String,
+        call: String,
+        slot: usize,
+        min_bits: i64,
+        kind: String,
+        severity: String,
+        message: String,
+    },
+    /// Known wrapper calls whose entire purpose is hashing: the bundle
+    /// form of the bootstrap suspicious-hash-wrapper vocabulary.
+    SuspiciousHashWrappers { calls: Vec<String> },
+    /// A buffer-manipulation builtin with destination/source/length slots:
+    /// the bundle form of the bootstrap buffer vocabulary.
+    BufferBuiltin {
+        name: String,
+        dst_arg: Option<usize>,
+        src_arg: Option<usize>,
+        len_arg: usize,
+    },
+
+    // ── Phase 6.2: language-keyed default-pack knowledge ──────────────────
+    // These variants carry the per-language provider tables that used to
+    // seed through `LanguageSpec::known_*` methods. They are applied by
+    // `apply_language_entries` (config + facts together), filtered by the
+    // scan's languages; `"*"` matches every language. Family bundles keep
+    // using the language-agnostic variants above.
+    /// An all-arguments dangerous sink for one language, with the role the
+    /// pack generator derived from its vocabulary label (snake_case
+    /// [`SinkRole`] name).
+    LanguageSink {
+        language: String,
+        call: String,
+        role: String,
+    },
+    /// Per-slot sink rules for one language (the generator's per-language
+    /// sink signature vocabulary): which argument slots are
+    /// dangerous / binding-safe.
+    LanguageSinkSlots {
+        language: String,
+        call: String,
+        dangerous_args: BTreeSet<usize>,
+        binding_args_safe: bool,
+    },
+    /// An IDOR-class finder sink for one language (the generator's
+    /// per-language IDOR vocabulary).
+    LanguageIdorSink {
+        language: String,
+        call: String,
+        keys: Vec<String>,
+    },
+    /// A taint source pattern for one language (the generator's per-language
+    /// source vocabulary and the conventional request-parameter names).
+    LanguageSource { language: String, pattern: String },
+    /// A sanitizer call for one language (the generator's per-language
+    /// sanitizer vocabulary, with the predicate-guard
+    /// classification precomputed by the pack generator).
+    LanguageSanitizer {
+        language: String,
+        call: String,
+        kind: String,
+        guard_style: bool,
+    },
+    /// A taint propagator rule for one language (the generator's
+    /// per-language propagator vocabulary).
+    LanguagePropagator {
+        language: String,
+        call: String,
+        tainted_arg: Option<usize>,
+        tainted_receiver: bool,
+    },
+    /// A session-root accessor for one language (the generator's
+    /// per-language session-root vocabulary).
+    LanguageSessionRoot { language: String, root: String },
+    /// A route-registration call pattern for one language (the generator's
+    /// per-language route vocabulary, formerly read from the language
+    /// spec), keyed for the lowering
+    /// harness.
+    LanguageRoutePattern { language: String, pattern: String },
+    /// Stack-frame allocators (`alloca`, ...) - the leak checker's
+    /// frame-lifetime exclusion set (Phase 6.5: moved from the spec seed
+    /// into the pack; `GuardDenylistPattern` already carries the guard
+    /// denylist the same way).
+    StackAllocators { values: Vec<String> },
+    /// Collection constructors (`Set`, `Map`) whose literal elements the
+    /// allowlist-definition check reads (Phase 6.5, pack-seeded).
+    CollectionConstructors { values: Vec<String> },
+    /// Schema-describing methods (`describe`, `description`) for the
+    /// schema-policy check (Phase 6.5, pack-seeded).
+    SchemaDescribeMethods { values: Vec<String> },
+    /// String literals that compare as the language's null pointer
+    /// (`NULL`) for the leak checker (Phase 6.5, pack-seeded).
+    NullTokens { values: Vec<String> },
+    /// Read-accessor method names of trusted session stores (`get`)
+    /// (Phase 6.5, pack-seeded).
+    SessionAccessors { values: Vec<String> },
+    /// Formal parameter names receiving the implicit receiver (`self`,
+    /// `this`) (Phase 6.5, pack-seeded).
+    ReceiverParams { values: Vec<String> },
+    /// HTTP-method verbs that are ambiguous as bare last-segment call
+    /// names (routers `app.get`, maps `m.set`, http clients `got.post`,
+    /// caches `kv.put` all share them). A dotted sink entry with one of
+    /// these last segments arms receiver gating: the call only counts as
+    /// a sink when its receiver root is a declared client root (the
+    /// entry's first segment). Phase 6.6: moved from
+    /// `LanguageSpec::known_ambiguous_verbs` (a trait default no
+    /// provider ever overrode) into the pack, one entry per language.
+    LanguageAmbiguousVerbs {
+        language: String,
+        values: Vec<String>,
+    },
+}
+
+impl LearnedFactEntry {
+    /// Finding identities this fact's scanner output is keyed by: checker
+    /// rule ids and learned sink call names. The bundle-advisory join
+    /// (`BundlePattern::rules`) goes through this, so a family's
+    /// `[frensense]` metadata can attach to the findings its facts cause.
+    /// Entries whose findings use engine-internal rule ids (memory
+    /// contracts, guard vocabularies, grammar) contribute none.
+    pub fn finding_identities(&self) -> Vec<String> {
+        match self {
+            LearnedFactEntry::Sink { call, .. } | LearnedFactEntry::IdorFinderSink { call, .. } => {
+                vec![call.clone()]
+            }
+            LearnedFactEntry::Policy { rule, .. }
+            | LearnedFactEntry::Check { rule, .. }
+            | LearnedFactEntry::IntegerOverflowRule { rule, .. } => vec![rule.clone()],
+            LearnedFactEntry::WeakPrimitiveRule { rule_id, .. }
+            | LearnedFactEntry::InsecureConfigRule { rule_id, .. }
+            | LearnedFactEntry::KeySizeRule { rule_id, .. } => vec![rule_id.clone()],
+            LearnedFactEntry::WeakCrypto(fact) => vec![fact.rule_id.clone()],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Insert this fact into a [`FactTable`] as [`Provenance::Learned`]
+    /// (the bundle path: a corpus taught it).
+    pub fn apply(&self, table: &mut FactTable) {
+        self.apply_with(table, Provenance::Learned);
+    }
+
+    /// Insert this fact into a [`FactTable`] under an explicit
+    /// [`Provenance`]. The embedded default pack (Phase 5.2) re-ships
+    /// spec knowledge through the same entry type, so its provenance must
+    /// stay [`Provenance::Spec`] instead of flipping to Learned.
+    pub fn apply_with(&self, table: &mut FactTable, provenance: Provenance) {
+        match self {
+            LearnedFactEntry::Source { pattern } => {
+                table.learned_sources.insert(pattern.clone());
+            }
+            LearnedFactEntry::Sink {
+                call,
+                dangerous_args,
+                binding_args_safe,
+            } => {
+                // Preserve a spec-derived role (and IDOR keys) if the built-in
+                // table already classifies this call, learned facts refine
+                // *slots*, they don't reclassify *semantics*.
+                let prior = table.sink_signatures.get(call);
+                let role = prior.map(|s| s.role).unwrap_or_default();
+                let label = prior.and_then(|s| s.label.clone());
+                let idor_keys = prior.map(|s| s.idor_keys.clone()).unwrap_or_default();
+                table.sink_signatures.insert(
+                    call.clone(),
+                    SinkSignature {
+                        call: call.clone(),
+                        dangerous_args: dangerous_args.clone(),
+                        binding_args_safe: *binding_args_safe,
+                        idor_keys,
+                        role,
+                        label,
+                    },
+                );
+            }
+            LearnedFactEntry::Sanitizer {
+                call,
+                kind,
+                guard_style,
+            } => {
+                table.sanitizer_facts.insert(
+                    call.clone(),
+                    SanitizerFact {
+                        call: call.clone(),
+                        kind: kind.clone(),
+                        sanitizes_args: Default::default(),
+                        guard_style: *guard_style,
+                    },
+                );
+            }
+            LearnedFactEntry::Policy {
+                rule,
+                when_call,
+                require,
+                scope,
+                message,
+                severity,
+            } => {
+                let fact = PolicyFact {
+                    rule: rule.clone(),
+                    when_call: when_call.clone(),
+                    require: require.clone(),
+                    scope: *scope,
+                    message: message.clone(),
+                    severity: severity.clone(),
+                };
+                if let Some(existing) = table
+                    .policy_facts
+                    .iter_mut()
+                    .find(|(e, _)| e.rule == fact.rule && e.when_call == fact.when_call)
+                {
+                    if provenance > existing.1 {
+                        *existing = (fact, provenance);
+                    }
+                } else {
+                    table.policy_facts.push((fact, provenance));
+                }
+            }
+            LearnedFactEntry::Check {
+                rule,
+                call,
+                message,
+                severity,
+                unless_guard,
+                unless_range_check,
+            } => {
+                let fact = LearnedCheckFact {
+                    rule: rule.clone(),
+                    call: call.clone(),
+                    message: message.clone(),
+                    severity: severity.clone(),
+                    unless_guard: unless_guard.clone(),
+                    unless_range_check: unless_range_check.clone(),
+                };
+                if let Some(existing) = table
+                    .learned_checks
+                    .iter_mut()
+                    .find(|(e, _)| e.rule == fact.rule && e.call == fact.call)
+                {
+                    if provenance > existing.1 {
+                        *existing = (fact, provenance);
+                    }
+                } else {
+                    table.learned_checks.push((fact, provenance));
+                }
+            }
+            LearnedFactEntry::MemoryContract {
+                name,
+                returns_fresh,
+                return_capacity,
+                consumes_params,
+            } => {
+                let fact = MemoryContractFact {
+                    name: name.clone(),
+                    returns_fresh: *returns_fresh,
+                    return_capacity: return_capacity.clone(),
+                    consumes_params: consumes_params.clone(),
+                };
+                if let Some(existing) = table
+                    .memory_contracts
+                    .iter_mut()
+                    .find(|c| c.name == fact.name)
+                {
+                    *existing = fact;
+                } else {
+                    table.memory_contracts.push(fact);
+                }
+            }
+            LearnedFactEntry::WeakCrypto(fact) => {
+                if let Some(existing) = table
+                    .weak_crypto_rules
+                    .iter_mut()
+                    .find(|r| r.rule_id == fact.rule_id && r.call == fact.call)
+                {
+                    *existing = fact.clone();
+                } else {
+                    table.weak_crypto_rules.push(fact.clone());
+                }
+            }
+            LearnedFactEntry::GuardBypass(fact) => {
+                for c in &fact.containment_callees {
+                    table.containment_callees.insert(c.clone(), provenance);
+                }
+                for s in &fact.credential_sinks {
+                    table.credential_sinks.insert(s.clone(), provenance);
+                }
+                for p in &fact.credential_params {
+                    table.credential_params.insert(p.clone(), provenance);
+                }
+            }
+            LearnedFactEntry::SchemaPolicy(fact) => {
+                for b in &fact.builders {
+                    table.schema_builders.insert(b.clone(), provenance);
+                }
+                table
+                    .schema_enforcers
+                    .extend(fact.enforcers.iter().cloned());
+                for k in &fact.bound_keywords {
+                    table.schema_keywords.insert(k.clone(), provenance);
+                }
+            }
+            LearnedFactEntry::GrammarRole {
+                language,
+                node_kind,
+                role,
+            } => {
+                table
+                    .grammar_roles
+                    .insert((language.to_lowercase(), node_kind.clone()), role.clone());
+            }
+            LearnedFactEntry::GrammarFeature {
+                language,
+                node_kind,
+                feature,
+            } => {
+                table
+                    .grammar_features
+                    .entry((language.to_lowercase(), node_kind.clone()))
+                    .or_default()
+                    .insert(*feature);
+            }
+            LearnedFactEntry::Allocator { name } => {
+                let last = name.rsplit('.').next().unwrap_or(name).to_string();
+                table.custom_allocators.insert(name.clone());
+                table.custom_allocators.insert(last);
+            }
+            LearnedFactEntry::Deallocator { name } => {
+                let last = name.rsplit('.').next().unwrap_or(name).to_string();
+                table.custom_deallocators.insert(name.clone());
+                table.custom_deallocators.insert(last);
+            }
+            LearnedFactEntry::IdorFinderSink { call, keys } => {
+                let last = call.rsplit('.').next().unwrap_or(call).to_string();
+                table.idor_finder_sinks.insert(call.clone());
+                table.idor_finder_sinks.insert(last.clone());
+                for k in keys {
+                    table.idor_keys.insert(k.clone());
+                }
+                let sig = SinkSignature {
+                    call: call.clone(),
+                    dangerous_args: std::collections::BTreeSet::new(),
+                    binding_args_safe: false,
+                    // Per-call keys when taught; otherwise the learned global
+                    // identity keys (no engine built-in fallback - vocabulary
+                    // is spec/bundle-owned, empty disables the gate).
+                    idor_keys: if keys.is_empty() {
+                        table.idor_keys.iter().cloned().collect()
+                    } else {
+                        keys.clone()
+                    },
+                    role: crate::analysis::taint::role::SinkRole::Resource,
+                    label: None,
+                };
+                table.sink_signatures.insert(call.clone(), sig.clone());
+                table.sink_signatures.entry(last).or_insert(sig);
+            }
+            LearnedFactEntry::IdorKey { key } => {
+                table.idor_keys.insert(key.clone());
+            }
+            LearnedFactEntry::Propagator {
+                call,
+                input_args,
+                preserves_taint,
+            } => {
+                if *preserves_taint {
+                    let last = call.rsplit('.').next().unwrap_or(call).to_string();
+                    table.propagators.insert(call.clone(), input_args.clone());
+                    table.propagators.insert(last, input_args.clone());
+                }
+            }
+            LearnedFactEntry::GuardDenylistPattern { pattern } => {
+                if !table.guard_denylist_patterns.contains(pattern) {
+                    table.guard_denylist_patterns.push(pattern.clone());
+                }
+            }
+            LearnedFactEntry::IntegerOverflowRule {
+                rule,
+                wrap_threshold,
+                severity,
+                message,
+            } => {
+                let fact = IntegerOverflowRule {
+                    rule_id: rule.clone(),
+                    wrap_threshold: *wrap_threshold,
+                    severity: severity.clone(),
+                    message: message.clone(),
+                };
+                if let Some(existing) = table.integer_overflow_rules.iter_mut().find(|(r, _)| {
+                    r.rule_id == fact.rule_id && r.wrap_threshold == fact.wrap_threshold
+                }) {
+                    if provenance > existing.1 {
+                        *existing = (fact, provenance);
+                    }
+                } else {
+                    table.integer_overflow_rules.push((fact, provenance));
+                }
+            }
+            LearnedFactEntry::Hints { kind, values } => {
+                let set = match kind {
+                    HintKind::UrlParam => &mut table.url_param_hints,
+                    HintKind::UrlArg => &mut table.url_arg_hints,
+                    HintKind::UrlLiteral => &mut table.url_literal_hints,
+                    HintKind::SecurityContext => &mut table.security_context_hints,
+                    HintKind::AuthGuard => &mut table.auth_guard_hints,
+                    HintKind::JwtAlgorithm => &mut table.jwt_algorithm_hints,
+                    HintKind::CredentialContext => &mut table.credential_context_hints,
+                };
+                set.extend(values.iter().cloned());
+            }
+            LearnedFactEntry::WeakPrimitiveRule {
+                rule_id,
+                selector_calls,
+                bare_calls,
+                selector_slot,
+                weak_selectors,
+                requires_credential_context,
+                severity,
+                message,
+            } => {
+                let fact = WeakPrimitiveRule {
+                    rule_id: rule_id.clone(),
+                    selector_calls: selector_calls.clone(),
+                    bare_calls: bare_calls.clone(),
+                    selector_slot: *selector_slot,
+                    weak_selectors: weak_selectors.clone(),
+                    requires_credential_context: *requires_credential_context,
+                    severity: severity.clone(),
+                    message: message.clone(),
+                };
+                if !table.weak_hash_rules.contains(&fact) {
+                    table.weak_hash_rules.push(fact);
+                }
+            }
+            LearnedFactEntry::InsecureConfigRule {
+                prefix,
+                selectors,
+                rule_id,
+                severity,
+                message,
+            } => {
+                let fact = InsecureConfigRule {
+                    prefix: prefix.clone(),
+                    selectors: selectors.clone(),
+                    rule_id: rule_id.clone(),
+                    severity: severity.clone(),
+                    message: message.clone(),
+                };
+                if !table.insecure_config_selectors.contains(&fact) {
+                    table.insecure_config_selectors.push(fact);
+                }
+            }
+            LearnedFactEntry::KeySizeRule {
+                rule_id,
+                call,
+                slot,
+                min_bits,
+                kind,
+                severity,
+                message,
+            } => {
+                let fact = KeySizeRule {
+                    rule_id: rule_id.clone(),
+                    call: call.clone(),
+                    slot: *slot,
+                    min_bits: *min_bits,
+                    kind: kind.clone(),
+                    severity: severity.clone(),
+                    message: message.clone(),
+                };
+                if !table.key_size_rules.contains(&fact) {
+                    table.key_size_rules.push(fact);
+                }
+            }
+            LearnedFactEntry::SuspiciousHashWrappers { calls } => {
+                table.suspicious_hash_wrappers.extend(calls.iter().cloned());
+            }
+            // Phase 6.5: the seven structural vocabularies ship in the
+            // default pack (formerly the bare spec seed).
+            LearnedFactEntry::StackAllocators { values } => {
+                for v in values {
+                    if !table.stack_allocators.contains(v) {
+                        table.stack_allocators.push(v.clone());
+                    }
+                }
+            }
+            LearnedFactEntry::CollectionConstructors { values } => {
+                table.collection_constructors.extend(values.iter().cloned());
+            }
+            LearnedFactEntry::SchemaDescribeMethods { values } => {
+                table.schema_describe_methods.extend(values.iter().cloned());
+            }
+            LearnedFactEntry::NullTokens { values } => {
+                table.null_tokens.extend(values.iter().cloned());
+            }
+            LearnedFactEntry::SessionAccessors { values } => {
+                table.session_accessors.extend(values.iter().cloned());
+            }
+            LearnedFactEntry::ReceiverParams { values } => {
+                table.receiver_params.extend(values.iter().cloned());
+            }
+            LearnedFactEntry::BufferBuiltin {
+                name,
+                dst_arg,
+                src_arg,
+                len_arg,
+            } => {
+                let fact = BufferBuiltinSpec {
+                    name: name.clone(),
+                    dst_arg: *dst_arg,
+                    src_arg: *src_arg,
+                    len_arg: *len_arg,
+                };
+                if !table.buffer_builtins.iter().any(|b| b.name == fact.name) {
+                    table.buffer_builtins.push(fact);
+                }
+            }
+            // Language-keyed pack knowledge is installed by
+            // `apply_language_entries` (config + facts together, filtered
+            // by the scan's languages); the language-agnostic bundle path
+            // ignores it so a family bundle can never pollute another
+            // language's tables.
+            LearnedFactEntry::LanguageSink { .. }
+            | LearnedFactEntry::LanguageSinkSlots { .. }
+            | LearnedFactEntry::LanguageIdorSink { .. }
+            | LearnedFactEntry::LanguageSource { .. }
+            | LearnedFactEntry::LanguageSanitizer { .. }
+            | LearnedFactEntry::LanguagePropagator { .. }
+            | LearnedFactEntry::LanguageSessionRoot { .. }
+            | LearnedFactEntry::LanguageRoutePattern { .. }
+            | LearnedFactEntry::LanguageAmbiguousVerbs { .. } => {}
+        }
+    }
+}
+
+/// Build a [`FactTable`] from a list of learned bundle facts.
+pub fn fact_table_from_entries(entries: &[LearnedFactEntry]) -> FactTable {
+    fact_table_from_entries_with(entries, Provenance::Learned)
+}
+
+/// Build a [`FactTable`] from bundle entries under an explicit
+/// [`Provenance`]: the embedded default pack seeds its entries as
+/// [`Provenance::Spec`] (Phase 5.2), corpus bundle facts as Learned.
+pub fn fact_table_from_entries_with(
+    entries: &[LearnedFactEntry],
+    provenance: Provenance,
+) -> FactTable {
+    let mut t = FactTable::default();
+    for e in entries {
+        e.apply_with(&mut t, provenance);
+    }
+    t
+}
+
+/// One hand-authored rule as persisted in a bundle's `policy_pack` section
+/// (`.frc` v5). The section is reserved (D2 cancelled: corpus-only
+/// authoring); presence in the section is what marks an entry's
+/// provenance [`Provenance::Authored`], mirroring `learned_facts` ->
+/// [`Provenance::Learned`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+pub enum AuthoredPolicyEntry {
+    /// A generalized co-occurrence policy: same fields as [`PolicyFact`],
+    /// carried whole so the author's severity/message travel with it.
+    Policy(PolicyFact),
+    /// An allocation-size integer-overflow rule: same fields as
+    /// [`LearnedFactEntry::IntegerOverflowRule`] (the hand-authored
+    /// precedent: `[frensense] wrap-max:` corpus metadata).
+    IntegerOverflowRule {
+        rule: String,
+        wrap_threshold: u128,
+        severity: String,
+        message: String,
+    },
+}

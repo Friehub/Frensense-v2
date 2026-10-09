@@ -21,6 +21,7 @@ pub mod callgraph_tests {
             byte_range: None,
             is_memory_state: false,
             object_keys: Vec::new(),
+            declared: false,
         }
     }
 
@@ -45,6 +46,7 @@ pub mod callgraph_tests {
             byte_range: None,
             is_memory_state: false,
             object_keys: Vec::new(),
+            declared: false,
         }
     }
 
@@ -270,8 +272,14 @@ pub mod callgraph_tests {
 
         let irs = build_graph(vec![a, b]);
         let cg = CallGraphBuilder::new(&irs).build();
-        assert_eq!(cg.callees_of("a"), &["b".to_string()]);
-        assert_eq!(cg.callers_of("b"), &["a".to_string()]);
+        assert_eq!(
+            cg.edges.get("a").map(Vec::as_slice),
+            Some(&["b".to_string()][..])
+        );
+        assert_eq!(
+            cg.reverse_edges.get("b").map(Vec::as_slice),
+            Some(&["a".to_string()][..])
+        );
 
         // Full ProgramSvfg construction over the cycle must terminate.
         let irs2 = build_graph(vec![
@@ -312,7 +320,7 @@ pub mod callgraph_tests {
         );
         let has_ext = cg.unresolved.values().any(|n| n == "libraryFetch");
         assert!(has_ext, "external callee should be recorded in unresolved");
-        assert_eq!(cg.callees_of("caller"), &[] as &[String]);
+        assert!(cg.edges.get("caller").is_none_or(Vec::is_empty));
     }
 
     // -------------------------------------------------------------------

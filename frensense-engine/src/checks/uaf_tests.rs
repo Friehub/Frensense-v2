@@ -6,15 +6,57 @@
 //! points-to classes.
 
 #[cfg(test)]
+fn c_facts() -> crate::analysis::taint::facts::FactTable {
+    crate::analysis::taint::facts::seeded_tables(["c"]).1
+}
+
+#[cfg(test)]
 pub mod uaf_spec {
     use crate::checks::uaf;
     use crate::harness::lower_source;
 
     fn hits(src: &str) -> Vec<String> {
+        let facts = crate::analysis::taint::facts::seeded_tables(["c"]).1;
+        let summaries = crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&facts);
         let fns = lower_source("t.c", src, "c").unwrap();
-        let mut rules: Vec<String> = fns.values().flat_map(uaf::check).map(|f| f.rule).collect();
+        let mut rules: Vec<String> = fns
+            .values()
+            .flat_map(|ir| uaf::check_with_summaries(ir, &summaries))
+            .map(|f| f.rule)
+            .collect();
         rules.sort();
         rules
+    }
+
+    /// Phase 4 teachability: a hand-built bundle teaches the UAF checker a
+    /// deallocator. `my_free` is invisible to the spec-only table (no free,
+    /// no finding); the bundle's `custom_deallocators` recognises it and
+    /// the free-then-use pair fires.
+    #[test]
+    fn bundle_teaches_deallocator() {
+        let src = r#"
+#include <stdlib.h>
+void handler () {
+  char *p;
+  p = malloc(16);
+  my_free(p);
+  p[0] = 1;
+}
+"#;
+        let mut facts = crate::analysis::taint::facts::seeded_tables(["c"]).1;
+        let fns = lower_source("t.c", src, "c").unwrap();
+        let uaf_fires = |facts: &crate::analysis::taint::facts::FactTable| -> bool {
+            let summaries = crate::checks::memory_summary::MemorySummaryRegistry::from_facts(facts);
+            fns.values()
+                .flat_map(|ir| uaf::check_with_summaries(ir, &summaries))
+                .any(|f| f.rule == "use_after_free")
+        };
+        assert!(
+            !uaf_fires(&facts),
+            "unknown callee must not free: bundle not applied yet"
+        );
+        facts.custom_deallocators.insert("my_free".to_string());
+        assert!(uaf_fires(&facts), "bundle deallocator must teach the UAF");
     }
 
     /// The canonical UAF: malloc → free → use through the same pointer.
@@ -77,7 +119,7 @@ void handler () {
         );
     }
 
-    /// Aliasing: q = p; free(p); use(q) — the Steensgaard class links them.
+    /// Aliasing: q = p; free(p); use(q) - the Steensgaard class links them.
     #[test]
     fn uaf_through_alias_fires() {
         let src = r#"
@@ -120,7 +162,7 @@ void handler () {
     }
 
     /// Soundness: a pointer with no provable allocation in this function
-    /// (a parameter) must never produce findings — the checker can't know
+    /// (a parameter) must never produce findings - the checker can't know
     /// its provenance.
     #[test]
     fn parameter_pointer_stays_silent() {
@@ -333,5 +375,251 @@ export function handler () {
         // check must at minimum not crash and not fire (no free exists).
         let rules = hits(src);
         assert!(rules.is_empty(), "no free means no findings: {:?}", rules);
+    }
+
+    /// CVE-2026-56109 pattern: uninitialized pointer freed on unchecked EOF path.
+    #[test]
+    fn cve_2026_56109_uninit_free_vulnerable_flags() {
+        let src = r#"
+#include <stdlib.h>
+int get_nonwhite(void);
+void parse_def(int skip) {
+    char *n;
+    if (skip == 0) {
+        n = malloc(16);
+    }
+    int c = get_nonwhite();
+    if (c != 125) {
+        if (n) {
+            free(n);
+        }
+    }
+}
+"#;
+        let rules = hits(src);
+        assert!(
+            rules.iter().any(|r| r == "uninitialized_free"),
+            "uninitialized pointer free on error path must fire: {:?}",
+            rules
+        );
+    }
+
+    /// CVE-2026-56109 fix: error check (`c < 0`) diverts execution before the free.
+    #[test]
+    fn cve_2026_56109_uninit_free_fixed_stays_silent() {
+        let src = r#"
+#include <stdlib.h>
+int get_nonwhite(void);
+void parse_def(int skip) {
+    char *n;
+    if (skip == 0) {
+        n = malloc(16);
+    }
+    int c = get_nonwhite();
+    if (c < 0) {
+        goto __end;
+    }
+    if (c != 125) {
+        if (n) {
+            free(n);
+        }
+    }
+__end:
+    return;
+}
+"#;
+        let rules = hits(src);
+        assert!(
+            rules.is_empty(),
+            "guarded error exit must not trigger uninitialized free: {:?}",
+            rules
+        );
+    }
+
+    /// Never-assigned local freed directly: no phi exists for `p`, so the
+    /// phi-based uninitialized gate is blind to the canonical shape -
+    /// declare, error path, free garbage.
+    #[test]
+    fn never_initialized_free_fires() {
+        let src = r#"
+#include <stdlib.h>
+void handler(void) {
+    char *p;
+    free(p);
+}
+"#;
+        let rules = hits(src);
+        assert!(
+            rules.iter().any(|r| r == "uninitialized_free"),
+            "free of a never-initialized local must fire: {:?}",
+            rules
+        );
+    }
+
+    /// Held-out shape: the never-initialized local is freed through an
+    /// in-program wrapper on an unchecked error path (the CVE-2026-56109
+    /// class, different code shape).
+    #[test]
+    fn never_initialized_wrapper_free_fires() {
+        let src = r#"
+#include <stdlib.h>
+static void free_entry(char *e) {
+    if (e) free(e);
+}
+int read_marker(void);
+int apply_entry(void) {
+    char *node;
+    int c = read_marker();
+    if (c != 0) {
+        free_entry(node);
+        return -1;
+    }
+    return 0;
+}
+"#;
+        let fns = lower_source("t.c", src, "c").unwrap();
+        let irs: Vec<_> = fns.values().collect();
+        let summaries =
+            crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&super::c_facts())
+                .infer_program_summaries_into(&irs);
+        let rules: Vec<String> = fns
+            .values()
+            .flat_map(|ir| uaf::check_with_summaries(ir, &summaries))
+            .map(|f| f.rule)
+            .collect();
+        assert!(
+            rules.iter().any(|r| r == "uninitialized_free"),
+            "never-initialized local freed through an in-program wrapper must fire: {:?}",
+            rules
+        );
+    }
+
+    /// The only assignment sits on a branch that returns, so no def reaches
+    /// the free after the merge - still an uninitialized free.
+    #[test]
+    fn free_after_exiting_def_path_fires() {
+        let src = r#"
+#include <stdlib.h>
+int read_marker(void);
+void handler(void) {
+    char *p;
+    int c = read_marker();
+    if (c == '+') {
+        p = malloc(16);
+        free(p);
+        return;
+    }
+    free(p);
+}
+"#;
+        let rules = hits(src);
+        assert!(
+            rules.iter().any(|r| r == "uninitialized_free"),
+            "free reachable only from paths with no reaching def must fire: {:?}",
+            rules
+        );
+    }
+
+    /// FP pin: the local is written through its address by an out-parameter,
+    /// so "never assigned in this function" must stay silent - the
+    /// address-of guard defers to the phi-based analysis.
+    #[test]
+    fn address_of_out_param_stays_silent() {
+        let src = r#"
+#include <stdlib.h>
+void init(char **out);
+void handler(void) {
+    char *p;
+    init(&p);
+    free(p);
+}
+"#;
+        let rules = hits(src);
+        assert!(
+            rules.is_empty(),
+            "out-parameter-initialized local must stay silent: {:?}",
+            rules
+        );
+    }
+
+    /// FP pin: a file-scope global freed in a function - the global's value
+    /// is initialized outside the function, so "no reaching def here" must
+    /// not fire (declaration position distinguishes it from a local).
+    #[test]
+    fn global_pointer_free_stays_silent() {
+        let src = r#"
+#include <stdlib.h>
+static int *g;
+void end(void) {
+    if (g)
+        free(g);
+    g = 0;
+}
+"#;
+        let rules = hits(src);
+        assert!(
+            rules.is_empty(),
+            "free of a file-scope global must stay silent: {:?}",
+            rules
+        );
+    }
+
+    /// FP pin: same-block def before the free reaches it - ordering matters.
+    #[test]
+    fn def_before_free_same_block_stays_silent() {
+        let src = r#"
+#include <stdlib.h>
+void handler(void) {
+    char *p;
+    p = malloc(16);
+    free(p);
+}
+"#;
+        let rules = hits(src);
+        assert!(
+            rules.is_empty(),
+            "def before the free in the same block must stay silent: {:?}",
+            rules
+        );
+    }
+
+    /// Real alsa-lib conf.c corpora pair check: vulnerable must flag parse_def, fixed must produce 0 findings.
+    #[test]
+    fn alsa_lib_corpora_cve_2026_56109() {
+        if let (Ok(vuln), Ok(fixed)) = (
+            std::fs::read_to_string("/tmp/opencode/alsa-vuln/conf.c"),
+            std::fs::read_to_string("/tmp/opencode/alsa-fixed/conf.c"),
+        ) {
+            let vuln_fns = lower_source("conf.c", &vuln, "c").unwrap();
+            let vuln_vec: Vec<_> = vuln_fns.values().collect();
+            let vuln_summaries =
+                crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&super::c_facts())
+                    .infer_program_summaries_into(&vuln_vec);
+            let vuln_hits: Vec<_> = vuln_fns
+                .values()
+                .flat_map(|ir| uaf::check_with_summaries(ir, &vuln_summaries))
+                .collect();
+            assert_eq!(
+                vuln_hits.len(),
+                1,
+                "alsa-vuln must produce exactly 1 finding"
+            );
+            assert_eq!(vuln_hits[0].function, "parse_def");
+
+            let fixed_fns = lower_source("conf.c", &fixed, "c").unwrap();
+            let fixed_vec: Vec<_> = fixed_fns.values().collect();
+            let fixed_summaries =
+                crate::checks::memory_summary::MemorySummaryRegistry::from_facts(&super::c_facts())
+                    .infer_program_summaries_into(&fixed_vec);
+            let fixed_hits: Vec<_> = fixed_fns
+                .values()
+                .flat_map(|ir| uaf::check_with_summaries(ir, &fixed_summaries))
+                .collect();
+            assert!(
+                fixed_hits.is_empty(),
+                "alsa-fixed must produce 0 findings, got: {:?}",
+                fixed_hits
+            );
+        }
     }
 }

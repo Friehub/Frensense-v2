@@ -38,12 +38,11 @@ npx @friehub/frensense .
 # Scan a project
 frensense .
 
-# Teach the engine with a .frc knowledge bundle
-frensense . --corpus-bundle frensense-corpus.frc
+# Scan with a security rules bundle (.frc)
+frensense . -b ruleset.frc
 
-# JSON / SARIF output
-frensense . --json
-frensense . --sarif
+# Save report to file (text, json, sarif, or github)
+frensense . -o report.sarif --sarif
 
 # Diff-only (changed files since last commit)
 frensense . --diff-only --strict
@@ -62,7 +61,31 @@ frensense . --github
 ```
 
 The engine auto-discovers a `frensense-corpus.frc` in the project root, or you
-can point `--corpus-bundle` at any bundle file.
+can pass `-b, --bundle <path>` to use any rule bundle.
+
+## Security Rule Bundles (`.frc`) & Capability Datasheets
+
+Frensense uses compiled `.frc` rule bundles to expand analysis capabilities with framework-specific sources, sinks, sanitizers, and zero-day CVE reproductions.
+
+### Acquiring Rule Bundles
+Download pre-compiled rule bundles and their cryptographic verification datasheets at:  
+👉 **[https://frensense.friehub.cloud/bundles](https://frensense.friehub.cloud/bundles)**
+
+- **Free Community Starter Bundles**:
+  - Covers fundamental OWASP Top 10 vulnerabilities across TypeScript, JavaScript, Python, and C.
+  - Pre-packaged in release distributions and community downloads.
+- **Commercial & Enterprise Domain Bundles (Subscription / Paywall)**:
+  - Deep web framework modeling (Express, Next.js, Django, FastAPI, Spring).
+  - Advanced systems security & memory safety (C/C++ interprocedural ownership contracts, UAF, uninitialized pointer leaks).
+  - Specialized industry compliance (Fintech, Cloud Infrastructure, Healthcare).
+  - Rigorous Zero False-Positive guarantee (100% TPR / 0.0% FPR) verified against held-out blind test suites.
+
+### Auditable Capability Datasheets
+Every rule bundle ships with a signed **CWE Capability Datasheet** (`CWE_DATASHEET.md` and `cwe_datasheet.json`) detailing:
+- Exact CWE classifications and vulnerability descriptions.
+- Real-world ground-truth CVE reproductions.
+- Benchmark verification status (100.0% TPR, 0.00% FPR).
+- Execution latency and peak RSS memory requirements.
 
 ### One binary, every surface
 
@@ -89,6 +112,9 @@ same stable ID.
 - **Cryptographic Weaknesses**: weak hashes, ECB mode, hardcoded keys.
 - **Server-Side Issues**: SSRF, path traversal, XXE, unsafe deserialization.
 - **Client-Side**: Reflected/DOM XSS, prototype pollution, open redirects.
+- **Memory Safety**: Use-after-free on graph-validated paths (UAF),
+  allocation-lifetime leaks (CWE-401), integer-overflow heap overflows
+  (CWE-190/680).
 - **Misconfiguration**: Missing security headers, session mismanagement,
   insecure cookies, TLS verification disabled.
 
@@ -100,6 +126,7 @@ same stable ID.
 | Python | Tree-sitter |, |
 | Go | Tree-sitter |, |
 | Rust | Tree-sitter | rust-analyzer HIR (`--use-compiler`) |
+| C | Tree-sitter |, |
 
 ## MCP Integration (AI Agents)
 
@@ -192,22 +219,23 @@ stdio.
 Scored against the OWASP Benchmark for Python: 1,230 third-party test
 cases with an authoritative expected-results CSV. Zero overlap with any
 Frensense knowledge bundle. This run uses the engine alone, no `.frc`
-bundle (`v0.7.0-preview.2`):
+bundle (`v0.7.0-preview.5`):
 
 | metric | value |
 |---|---|
-| **Score (TPR - FPR)** | **23.1%** |
-| TPR | 26.1% |
-| **FPR** | **3.0%** |
-| TP / FP / FN / TN | 118 / 23 / 334 / 755 |
-| scan time | 9s |
+| **Score (TPR - FPR)** | **26.2%** |
+| TPR | 28.5% |
+| **FPR** | **2.3%** |
+| TP / FP / FN / TN | 129 / 18 / 323 / 760 |
+| scan time | 6s |
 
 For comparison, the OWASP project's published Benchmark scorecards
 (Java, v1.2): Veracode ~50%, Fortify SCA ~11-17%, Checkmarx ~0%,
-SonarQube ~0%. The standout number is the false-positive rate: 3.0% is
+SonarQube ~0%. The standout number is the false-positive rate: 2.3% is
 commercially competitive, and the recall gaps are concentrated in a few
 CWE classes where Python API coverage is still thin, not in engine
-logic. See the caveats and the full per-CWE table in
+logic. The weak-hash class (CWE-328) scores a perfect 100% (71/71, zero
+false positives). See the caveats and the full per-CWE table in
 [docs/BENCHMARKING.md](docs/BENCHMARKING.md).
 
 Run it yourself:

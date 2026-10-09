@@ -17,7 +17,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 pub struct LocId(pub usize);
 
 /// Computes and stores the Points-To graph for the function.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PointsToAnalysis {
     /// Maps a variable to the set of memory locations it could point to.
     /// Example: `v1 -> {Loc_1, Loc_2}`
@@ -32,6 +32,14 @@ pub struct PointsToAnalysis {
     pub var_locs: FxHashMap<VarId, LocId>,
 
     next_loc_id: usize,
+}
+
+impl Default for PointsToAnalysis {
+    /// Routes through [`Self::new`] so `next_loc_id` starts at 1
+    /// (`LocId(0)` is reserved for the global frame).
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PointsToAnalysis {

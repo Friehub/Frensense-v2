@@ -13,7 +13,7 @@ use rustc_hash::FxHashMap;
 
 use crate::analysis::forward::ProgramSvfg;
 use crate::analysis::taint::config::TaintConfig;
-use crate::analysis::taint::engine::{BackwardTaintEngine, BackwardVerdict, SinkFinding};
+use crate::analysis::taint::engine::{BackwardTaintEngine, SinkFinding};
 use crate::analysis::taint::facts::FactTable;
 use crate::checks::{self, CheckerFinding};
 use crate::harness::lower_source_with_facts;
@@ -47,11 +47,7 @@ pub struct PreparedProgram {
     irs: FxHashMap<String, FunctionIR>,
     fn_file: FxHashMap<String, String>,
     file_source: FxHashMap<String, String>,
-    /// Lazily built ONCE per program: `Box::leak` clones of the IRs that the
-    /// program graph borrows. Before this cache every [`scan_prepared`] call
-    /// leaked a full IR-set clone, so long-lived processes (MCP/LSP servers,
-    /// the bundler's replay gate) grew without bound across scans.
-    static_irs: std::sync::OnceLock<FxHashMap<String, &'static FunctionIR>>,
+    pub file_aliases: FxHashMap<String, FxHashMap<String, String>>,
 }
 
 /// Lower every file once, remembering which file each function came from
@@ -71,33 +67,52 @@ pub fn prepare_with_facts(
     let mut irs: FxHashMap<String, FunctionIR> = FxHashMap::default();
     let mut fn_file: FxHashMap<String, String> = FxHashMap::default();
     let mut file_source: FxHashMap<String, String> = FxHashMap::default();
-    for (path, source, ext) in files {
+    // Deterministic merge order (path-sorted): which twin of a colliding
+    // name keeps the bare key must not depend on directory walk order.
+    let mut ordered: Vec<&(String, String, String)> = files.iter().collect();
+    ordered.sort_by(|a, b| a.0.cmp(&b.0));
+    for (path, source, ext) in ordered {
         let fns = lower_source_with_facts(path, source, ext, facts)?;
-        for (name, ir) in fns {
-            fn_file.entry(name.clone()).or_insert_with(|| path.clone());
+        for (name, mut ir) in fns {
             file_source
                 .entry(path.clone())
                 .or_insert_with(|| source.clone());
-            irs.entry(name).or_insert(ir);
+            // Function keys are only unique per file: byte-offset names
+            // (`<fn@505>`) and common method names (`set`) collide across
+            // files. First-wins dropped the other file's whole function
+            // silently (the forgedReview/noSqlReviews miss); rekey the
+            // incoming twin under its file instead. `ir.name` tracks the
+            // key so findings, `fn_file`, and checker locations stay in
+            // lockstep.
+            let key = if irs.contains_key(&name) {
+                format!("{path}::{name}")
+            } else {
+                name
+            };
+            ir.name = key.clone();
+            fn_file.entry(key.clone()).or_insert_with(|| path.clone());
+            irs.insert(key, ir);
         }
     }
+
+    let ir_names: rustc_hash::FxHashSet<String> = irs.keys().cloned().collect();
+    let file_aliases = crate::graph::module::ModuleAliasResolver::build(files, &ir_names, &fn_file);
+
     Ok(PreparedProgram {
         irs,
         fn_file,
         file_source,
-        static_irs: std::sync::OnceLock::new(),
+        file_aliases,
     })
 }
 
 impl PreparedProgram {
-    /// The leaked IR views for [`ProgramSvfg::new`], built on first use.
-    fn static_irs(&self) -> &FxHashMap<String, &'static FunctionIR> {
-        self.static_irs.get_or_init(|| {
-            self.irs
-                .iter()
-                .map(|(name, ir)| (name.clone(), Box::leak(Box::new(ir.clone())) as &FunctionIR))
-                .collect()
-        })
+    /// Borrow the IRs for the program graph's lifetime.
+    fn ir_views(&self) -> FxHashMap<String, &FunctionIR> {
+        self.irs
+            .iter()
+            .map(|(name, ir)| (name.clone(), ir))
+            .collect()
     }
 }
 
@@ -115,19 +130,34 @@ pub fn scan_prepared(
     config.sources.extend(facts.learned_sources.iter().cloned());
     let config = &config;
 
-    // The program graph borrows IRs for its lifetime; the leaked clones are
-    // cached on the program (built once), not re-leaked per scan call.
-    let statics = prepared.static_irs();
+    // The program graph borrows the program's own IRs for the duration of
+    // this scan. No `Box::leak`: a leaked IR set accumulated per program in
+    // every long-lived consumer (MCP/LSP servers build one `PreparedProgram`
+    // per scan; the bundler's replay gate holds one per family, re-scanned
+    // per candidate fact), so resident memory grew without bound across
+    // scans. Borrowing is scoped to the call instead.
+    let statics = prepared.ir_views();
+    let statics = &statics;
 
-    let fn_file = &prepared.fn_file;
-    let file_source = &prepared.file_source;
+    // The program graph is built first: non-dataflow checks that walk
+    // interprocedural value flow (UAF free/use pairs) reuse it, and the
+    // taint engine below gets the same instance.
+    let prog = ProgramSvfg::new_with_module_aliases(
+        statics,
+        config,
+        facts,
+        Some(&prepared.file_aliases),
+        Some(&prepared.fn_file),
+    );
 
     // Non-dataflow policy checks run on the same lowered IR, no taint
     // needed, so weak-crypto/config bugs surface even with zero taint paths.
     // `facts` also carries corpus-learned checks installed by the bundle.
-    let checker_findings = checks::check_all(statics.values().copied(), facts);
+    let checker_findings =
+        checks::check_all_with_graph(statics.values().copied(), facts, Some(&prog));
 
-    let prog = ProgramSvfg::new_with_facts(statics, config, facts);
+    let fn_file = &prepared.fn_file;
+    let file_source = &prepared.file_source;
     let mut engine = BackwardTaintEngine::new(&prog, config)
         .with_fact_table(facts)
         .with_fn_file(fn_file);
@@ -247,22 +277,78 @@ pub struct LocatedFinding {
     pub column: u32,
 }
 
-impl ScanResult {
-    /// Findings with verdict [`BackwardVerdict::Vulnerable`], the alerts.
-    pub fn vulnerable(&self) -> impl Iterator<Item = &SinkFinding> {
-        self.findings
-            .iter()
-            .filter(|f| f.verdict == BackwardVerdict::Vulnerable && f.alert.is_some())
+#[cfg(test)]
+mod collision_tests {
+    use super::scan;
+    use crate::analysis::taint::facts::seeded_tables;
+
+    fn ts_tables() -> (
+        crate::analysis::taint::config::TaintConfig,
+        crate::analysis::taint::facts::FactTable,
+    ) {
+        seeded_tables(["ts"])
     }
 
-    /// True if any sink argument was reached by a source in a dangerous
-    /// slot (sink-signature aware).
-    pub fn has_alert(&self) -> bool {
-        self.vulnerable().next().is_some()
-            // Learned/built-in policy checks are alerts too: a corpus family
-            // whose positive violates a learned check must separate exactly
-            // like a taint family. Without this, Check facts could never be
-            // validated by the replay gate.
-            || !self.checker.is_empty()
+    /// Same prefix in both files => the nameless nested arrows start at the
+    /// same byte offset => both lower to the identical `<fn@N>` key.
+    /// Whole-program merge must keep BOTH functions (first-wins dropped the
+    /// second file's entire handler: forgedReview/noSqlReviews miss).
+    #[test]
+    fn cross_file_closure_offset_collision_keeps_both_functions() {
+        const PREFIX: &str = "export function wrap () {\n  return";
+        let a = format!("{PREFIX} (req) => {{\n    noop(1)\n  }}\n}}\n");
+        let b = format!("{PREFIX} (req) => {{\n    exec(req)\n  }}\n}}\n");
+        let (config, facts) = ts_tables();
+        let result = scan(
+            &[
+                ("app/a.ts".to_string(), a, "ts".to_string()),
+                ("app/b.ts".to_string(), b, "ts".to_string()),
+            ],
+            &config,
+            &facts,
+        );
+        assert!(result.errors.is_empty(), "scan errors: {:?}", result.errors);
+        let b_hits: Vec<_> = result
+            .located
+            .iter()
+            .filter(|l| l.file == "app/b.ts")
+            .collect();
+        assert!(
+            b_hits.iter().any(|l| l.finding.sink == "exec"),
+            "second file's `<fn@N>` twin was dropped by the name-keyed merge; \
+             located: {:?}",
+            result
+                .located
+                .iter()
+                .map(|l| (&l.file, &l.finding.sink))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// Four object-literal setters share the name `set`; the password setter
+    /// holds the `hash(clearTextPassword)` call. Same-name collapse within
+    /// one file dropped it (weakPassword miss). Every setter must survive.
+    #[test]
+    fn within_file_method_name_collision_keeps_all_setters() {
+        let src = "export const init = () => {\n  const attrs = {\n    first: {\n      set (v: string) {\n        keep(v)\n      }\n    },\n    second: {\n      set (v: string) {\n        keep(v)\n      }\n    },\n    password: {\n      set (clearTextPassword: string) {\n        hash(clearTextPassword)\n      }\n    }\n  }\n  return attrs\n}\n";
+        let (config, facts) = ts_tables();
+        let result = scan(
+            &[("app/user.ts".to_string(), src.to_string(), "ts".to_string())],
+            &config,
+            &facts,
+        );
+        assert!(result.errors.is_empty(), "scan errors: {:?}", result.errors);
+        assert!(
+            result
+                .located_checker
+                .iter()
+                .any(|c| c.finding.rule == "credential_kdf_policy"),
+            "password setter dropped by same-name collapse; checker findings: {:?}",
+            result
+                .located_checker
+                .iter()
+                .map(|c| (&c.finding.rule, &c.finding.function, c.line))
+                .collect::<Vec<_>>()
+        );
     }
 }

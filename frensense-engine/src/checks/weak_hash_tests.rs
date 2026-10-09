@@ -10,9 +10,17 @@ pub mod checker_tests {
     use crate::checks::check_all;
     use crate::harness::lower_source;
 
+    /// Production-seeded table (spec seed -> default pack -> pack language
+    /// sections): the checks read `FactTable` only, so test fixtures must
+    /// seed the vocabulary exactly like a production scan
+    /// (`seeded_tables`) does.
+    fn ts_facts() -> FactTable {
+        crate::analysis::taint::facts::seeded_tables(["ts"]).1
+    }
+
     fn check(src: &str) -> Vec<(String, String)> {
         let fns = lower_source("test.ts", src, "ts").expect("lowering failed");
-        check_all(fns.values(), &FactTable::default())
+        check_all(fns.values(), &ts_facts())
             .into_iter()
             .map(|f| (f.function, f.rule))
             .collect()
@@ -72,6 +80,59 @@ export function legacy (d: string) { return md5(d) }
         );
     }
 
+    /// Insecure algorithm selector accepted by a *verifier*:
+    /// `jwt.verify(token, secret, 'none')` - verification-context fires.
+    #[test]
+    fn jwt_verifier_with_insecure_algorithm_fires() {
+        let src = r#"
+import * as jwt from 'jsonwebtoken'
+export function checkToken (token: string, secret: string) {
+  return jwt.verify(token, secret, 'none')
+}
+"#;
+        let findings = check(src);
+        assert!(
+            findings.iter().any(|(_, r)| *r == "insecure_jwt_algorithm"),
+            "jwt.verify with 'none' must fire, got {findings:?}"
+        );
+    }
+
+    /// Challenge/test harness wrappers that *issue* a token under an
+    /// insecure algorithm (`jwtChallenge(id, req, 'none', ...)`) are not
+    /// verifiers accepting `none` - no finding.
+    #[test]
+    fn jwt_issuing_wrapper_is_silent() {
+        let src = r#"
+export function jwtChallenges (req: any) {
+  jwtChallenge('jwtUnsignedChallenge', req, 'none', /x/)
+}
+"#;
+        let findings = check(src);
+        assert!(
+            !findings.iter().any(|(_, r)| *r == "insecure_jwt_algorithm"),
+            "token-issuing wrapper must not fire, got {findings:?}"
+        );
+    }
+
+    /// A generic digest utility (`const digest = (data) => createHash('md5')`)
+    /// with no credential context is not a password-KDF shape - the
+    /// selector rule fires only when the enclosing function/parameters name
+    /// a credential context (password/secret/token/...). Credential-named
+    /// wrappers (`hashPassword`) keep firing (covered by
+    /// `weak_hash_createhash_md5_fires`).
+    #[test]
+    fn createhash_md5_without_credential_context_is_silent() {
+        let src = r#"
+import * as crypto from 'crypto'
+export const digest = (data: string) => crypto.createHash('md5').update(data).digest('hex')
+"#;
+        let findings = check(src);
+        assert!(
+            !findings.iter().any(|(_, r)| *r == "weak_hash"),
+            "non-credential digest utility must be silent, got {findings:?}"
+        );
+    }
+
     /// Clean code produces zero checker findings.
     #[test]
     fn clean_code_is_silent() {
@@ -102,16 +163,21 @@ export function process (data: string) {
 
     // ── Composite-literal / spread value-flow regressions ────────────────
 
-    use crate::analysis::taint::facts::{config_from_spec, fact_table_from_spec};
+    use crate::analysis::taint::facts::seeded_tables;
     use crate::scan::scan;
 
     fn scan_count(src: &str) -> usize {
-        let spec = frensense_lang::spec_for_ext("ts").unwrap();
-        let config = config_from_spec(spec);
-        let facts = fact_table_from_spec(spec);
+        let (config, facts) = seeded_tables(["ts"]);
         let files = vec![("test.ts".to_string(), src.to_string(), "ts".to_string())];
         let result = scan(&files, &config, &facts);
-        result.vulnerable().count()
+        result
+            .findings
+            .iter()
+            .filter(|f| {
+                f.verdict == crate::analysis::taint::engine::BackwardVerdict::Vulnerable
+                    && f.alert.is_some()
+            })
+            .count()
     }
 
     /// `{ ...req.body, sql: "SELECT 1" }` as a call argument: the spread's
@@ -133,7 +199,7 @@ export function spreadFirst (req: any, pool: any) {
     fn object_literal_via_variable_propagates() {
         let src = r#"
 export function varFind (req: any, db: any) {
-    const f = { name: req.body.name };
+    const f = { _id: req.body.name };
     db.collection.findOne(f);
 }
 "#;
@@ -152,12 +218,13 @@ export function spreadTaintedVar (req: any, pool: any) {
     }
 
     /// `find` (mongoose/mongo shell) must be a known sink, it was only in
-    /// the semantic-categories table, which the engine never reads.
+    /// the semantic-categories table, which the engine never reads. Uses an
+    /// identity payload: finder sinks only report identity-keyed objects.
     #[test]
     fn find_is_a_sink() {
         let src = r#"
 export function directFind (req: any, db: any) {
-    db.collection.find(req.body.name);
+    db.collection.find({ _id: req.body.name });
 }
 "#;
         assert_eq!(scan_count(src), 1, "find missing from sink table");
@@ -325,8 +392,7 @@ export function caller (x: any) {
     /// End-to-end: scan applies learned checks alongside taint.
     #[test]
     fn learned_check_via_scan() {
-        let spec = frensense_lang::spec_for_ext("ts").unwrap();
-        let config = crate::analysis::taint::facts::config_from_spec(spec);
+        let config = crate::analysis::taint::facts::seeded_tables(["ts"]).0;
         let facts = learned_table("insecureRedirect", "policy_open_redirect");
         let files = vec![(
             "t.ts".to_string(),
@@ -359,6 +425,8 @@ export function hop (req: any, res: any) {
             call: "createCipher".into(),
             selector_slot: Some(0),
             weak_selectors: vec!["des".into(), "rc4".into()],
+            severity: "warning".into(),
+            message: String::new(),
         });
 
         // Positive sample: 'des' selected
@@ -399,6 +467,8 @@ export function encryptData (data: string, key: string) {
             call: "brokenCustomHash".into(),
             selector_slot: None,
             weak_selectors: vec![],
+            severity: "warning".into(),
+            message: String::new(),
         });
 
         // Positive sample: calls brokenCustomHash
@@ -425,6 +495,57 @@ export function hashToken (token: string) {
         assert!(
             neg_findings.is_empty(),
             "negative sample must stay silent, got: {neg_findings:?}"
+        );
+    }
+
+    /// Phase 2.2: a finding carries the severity declared by the rule that
+    /// fired - the spec bootstrap's declared level for spec rules, the
+    /// bundle-authored level for learned facts.
+    #[test]
+    fn findings_carry_rule_declared_severity() {
+        use crate::analysis::taint::facts::WeakCryptoFact;
+        let src = r#"
+import * as crypto from 'crypto'
+export function hashPassword (clearTextPassword: string): string {
+  return crypto.createHash('md5').update(clearTextPassword).digest('hex')
+}
+"#;
+        let fns = lower_source("test.ts", src, "ts").expect("lowering failed");
+        let spec_findings = check_all(fns.values(), &ts_facts());
+        let weak = spec_findings
+            .iter()
+            .find(|f| f.rule == "weak_hash")
+            .expect("weak_hash finding expected");
+        assert_eq!(
+            weak.severity, "warning",
+            "spec rule must report its declared severity, got {:?}",
+            weak
+        );
+
+        let mut facts = ts_facts();
+        facts.weak_crypto_rules.push(WeakCryptoFact {
+            rule_id: "learned_broken_hash_func".into(),
+            call: "brokenCustomHash".into(),
+            selector_slot: None,
+            weak_selectors: vec![],
+            severity: "critical".into(),
+            message: "authored observation".into(),
+        });
+        let pos_src = r#"
+export function hashToken (token: string) {
+  return brokenCustomHash(token);
+}
+"#;
+        let fns = lower_source("test.ts", pos_src, "ts").expect("lowering failed");
+        let learned_findings = check_all(fns.values(), &facts);
+        let learned = learned_findings
+            .iter()
+            .find(|f| f.rule == "learned_broken_hash_func")
+            .expect("learned finding expected");
+        assert_eq!(
+            learned.severity, "critical",
+            "learned fact must report its authored severity, got {:?}",
+            learned
         );
     }
 }

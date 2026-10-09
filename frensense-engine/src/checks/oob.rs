@@ -18,85 +18,14 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::analysis::taint::facts::{BufferBuiltinSpec, FactTable};
 use crate::analysis::value::{self, ValueInfo};
 use crate::checks::CheckerFinding;
+use crate::checks::Provenance;
+use crate::checks::last_segment;
 use crate::checks::memory_summary::{CapacitySpec, MemorySummaryRegistry};
 use crate::graph::steensgaard::{ClassId, Steensgaard};
 use crate::ir::function::{BasicBlock, BlockId, FunctionIR, Instruction, Operand, VarId};
-
-/// Callee last segments that allocate memory with a known capacity.
-const ALLOC_CALLS: &[&str] = &[
-    "malloc",
-    "calloc",
-    "realloc",
-    "aligned_alloc",
-    "valloc",
-    "alloca",
-];
-
-/// Known memory manipulation builtins that copy, write, or fill buffers.
-struct BuiltinSpec {
-    name: &'static str,
-    dst_arg: Option<usize>,
-    src_arg: Option<usize>,
-    len_arg: usize,
-}
-
-const BUILTINS: &[BuiltinSpec] = &[
-    BuiltinSpec {
-        name: "memset",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 2,
-    },
-    BuiltinSpec {
-        name: "bzero",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 1,
-    },
-    BuiltinSpec {
-        name: "memcpy",
-        dst_arg: Some(0),
-        src_arg: Some(1),
-        len_arg: 2,
-    },
-    BuiltinSpec {
-        name: "memmove",
-        dst_arg: Some(0),
-        src_arg: Some(1),
-        len_arg: 2,
-    },
-    BuiltinSpec {
-        name: "strncpy",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 2,
-    },
-    BuiltinSpec {
-        name: "snprintf",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 1,
-    },
-    BuiltinSpec {
-        name: "fgets",
-        dst_arg: Some(0),
-        src_arg: None,
-        len_arg: 1,
-    },
-    BuiltinSpec {
-        name: "read",
-        dst_arg: Some(1),
-        src_arg: None,
-        len_arg: 2,
-    },
-];
-
-fn last_segment(call: &str) -> &str {
-    let s = call.rsplit('.').next().unwrap_or(call);
-    s.rsplit("::").next().unwrap_or(s)
-}
 
 /// A spatial memory safety violation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,48 +103,25 @@ fn eval_alloc_capacity(
     val_info: &ValueInfo,
     summaries: &MemorySummaryRegistry,
 ) -> Option<(i64, i64)> {
-    let seg = last_segment(func);
-    match seg {
-        "malloc" | "valloc" | "alloca" => {
-            let (lo, hi) = eval_range(args.first()?, block, val_info)?;
+    // Capacity contracts come from the memory-function vocabulary in the
+    // registry (the default pack seeds it per language; `get`
+    // resolves full names and last segments alike).
+    match summaries.return_capacity(func) {
+        Some(CapacitySpec::Exact(k)) => Some((*k, *k)),
+        Some(CapacitySpec::Param(p_idx)) => {
+            let (lo, hi) = eval_range(args.get(*p_idx)?, block, val_info)?;
             if lo >= 0 { Some((lo, hi)) } else { None }
         }
-        "calloc" => {
-            let (n_lo, n_hi) = eval_range(args.first()?, block, val_info)?;
-            let (sz_lo, sz_hi) = eval_range(args.get(1)?, block, val_info)?;
+        Some(CapacitySpec::ParamProduct(p1, p2)) => {
+            let (n_lo, n_hi) = eval_range(args.get(*p1)?, block, val_info)?;
+            let (sz_lo, sz_hi) = eval_range(args.get(*p2)?, block, val_info)?;
             if n_lo >= 0 && sz_lo >= 0 {
                 Some((n_lo.saturating_mul(sz_lo), n_hi.saturating_mul(sz_hi)))
             } else {
                 None
             }
         }
-        "realloc" | "aligned_alloc" => {
-            let (lo, hi) = eval_range(args.get(1)?, block, val_info)?;
-            if lo >= 0 { Some((lo, hi)) } else { None }
-        }
-        _ => {
-            if let Some(spec) = summaries.return_capacity(func) {
-                match spec {
-                    CapacitySpec::Exact(k) => Some((*k, *k)),
-                    CapacitySpec::Param(p_idx) => {
-                        let (lo, hi) = eval_range(args.get(*p_idx)?, block, val_info)?;
-                        if lo >= 0 { Some((lo, hi)) } else { None }
-                    }
-                    CapacitySpec::ParamProduct(p1, p2) => {
-                        let (n_lo, n_hi) = eval_range(args.get(*p1)?, block, val_info)?;
-                        let (sz_lo, sz_hi) = eval_range(args.get(*p2)?, block, val_info)?;
-                        if n_lo >= 0 && sz_lo >= 0 {
-                            Some((n_lo.saturating_mul(sz_lo), n_hi.saturating_mul(sz_hi)))
-                        } else {
-                            None
-                        }
-                    }
-                    CapacitySpec::Unknown => None,
-                }
-            } else {
-                None
-            }
-        }
+        Some(CapacitySpec::Unknown) | None => None,
     }
 }
 
@@ -248,33 +154,36 @@ fn format_range(lo: i64, hi: i64) -> String {
 fn finding(
     ir: &FunctionIR,
     violation: Violation,
-    message: String,
+    params: Vec<(&'static str, String)>,
     span: Option<(usize, usize)>,
 ) -> CheckerFinding {
     let rule = match violation {
-        Violation::BufferOverflow => "buffer_overflow",
-        Violation::OutOfBoundsRead => "out_of_bounds_read",
-        Violation::OutOfBoundsAccess => "out_of_bounds_access",
+        Violation::BufferOverflow => frensense_lang::rules::BUFFER_OVERFLOW,
+        Violation::OutOfBoundsRead => frensense_lang::rules::OUT_OF_BOUNDS_READ,
+        Violation::OutOfBoundsAccess => frensense_lang::rules::OUT_OF_BOUNDS_ACCESS,
     };
     CheckerFinding {
         function: ir.name.clone(),
         rule: rule.to_string(),
-        message,
+        message: String::new(),
+        params,
         span,
-        learned: false,
+        severity: String::new(),
+        provenance: Provenance::Spec,
     }
 }
 
-/// Run spatial memory safety checks over one function with default summaries.
-pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
-    check_with_summaries(ir, &MemorySummaryRegistry::default())
-}
-
-/// Run spatial memory safety checks over one function with an interprocedural memory summary registry.
+/// Run spatial memory safety checks over one function with an
+/// interprocedural memory summary registry and the spec/bundle vocabulary
+/// (memory contracts, buffer builtins) resolved from `facts`.
 pub fn check_with_summaries(
     ir: &FunctionIR,
     summaries: &MemorySummaryRegistry,
+    facts: &FactTable,
 ) -> Vec<CheckerFinding> {
+    // Buffer vocabulary: seeded via the default pack into
+    // `facts.buffer_builtins` (empty table = no vocabulary = no findings).
+    let buffer_builtins: &[BufferBuiltinSpec] = &facts.buffer_builtins;
     let pts = Steensgaard::analyze(ir);
     let val_info = value::analyze(ir);
     let mut findings: Vec<CheckerFinding> = Vec::new();
@@ -295,29 +204,23 @@ pub fn check_with_summaries(
             findings.push(finding(
                 ir,
                 Violation::OutOfBoundsAccess,
-                format!(
-                    "Out-of-bounds access: index {} for buffer `{}` is negative",
-                    format_range(idx_lo, idx_hi),
-                    name
-                ),
+                vec![("index", format_range(idx_lo, idx_hi)), ("buffer", name)],
                 span,
             ));
         } else if idx_hi >= buf.capacity_lo {
-            let (violation, prefix) = if is_write {
-                (Violation::BufferOverflow, "Buffer overflow")
+            let violation = if is_write {
+                Violation::BufferOverflow
             } else {
-                (Violation::OutOfBoundsRead, "Out-of-bounds read")
+                Violation::OutOfBoundsRead
             };
             findings.push(finding(
                 ir,
                 violation,
-                format!(
-                    "{}: index {} exceeds buffer `{}` capacity {}",
-                    prefix,
-                    format_range(idx_lo, idx_hi),
-                    name,
-                    format_range(buf.capacity_lo, buf.capacity_hi)
-                ),
+                vec![
+                    ("index", format_range(idx_lo, idx_hi)),
+                    ("buffer", name),
+                    ("capacity", format_range(buf.capacity_lo, buf.capacity_hi)),
+                ],
                 span,
             ));
         }
@@ -329,6 +232,7 @@ pub fn check_with_summaries(
         pts: &Steensgaard,
         val_info: &ValueInfo,
         summaries: &MemorySummaryRegistry,
+        buffer_builtins: &[BufferBuiltinSpec],
         findings: &mut Vec<CheckerFinding>,
         mut ps: PathState,
         block_id: BlockId,
@@ -342,7 +246,7 @@ pub fn check_with_summaries(
                     dest: Some(d),
                     args,
                     ..
-                } if ALLOC_CALLS.contains(&last_segment(func)) || summaries.returns_fresh(func) => {
+                } if summaries.returns_fresh(func) => {
                     let fresh = ClassId(pts.members.len() + ps.generation.len() + d.0 + 1000);
                     if let Some((cap_lo, cap_hi)) =
                         eval_alloc_capacity(func, args, block_id, val_info, summaries)
@@ -362,11 +266,7 @@ pub fn check_with_summaries(
 
                 // --- Freeing a buffer / Consumed parameters ---
                 Instruction::CallStatic { func, args, .. } => {
-                    let consumed_slots = if last_segment(func) == "free" {
-                        vec![0]
-                    } else {
-                        summaries.consumes_params(func)
-                    };
+                    let consumed_slots = summaries.consumes_params(func);
                     for slot in consumed_slots {
                         if let Some(Operand::Var(v)) = args.get(slot)
                             && let Some(c) = ps.class_for(pts, *v)
@@ -376,7 +276,7 @@ pub fn check_with_summaries(
                         }
                     }
                     let seg = last_segment(func);
-                    if let Some(spec) = BUILTINS.iter().find(|b| b.name == seg) {
+                    if let Some(spec) = buffer_builtins.iter().find(|b| b.name == seg) {
                         // Check destination write bounds
                         if let Some(dst_idx) = spec.dst_arg
                             && let Some(Operand::Var(dst_var)) = args.get(dst_idx)
@@ -391,14 +291,15 @@ pub fn check_with_summaries(
                             let cap_desc = format_range(buf.capacity_lo, buf.capacity_hi);
                             let span = var_span(ir, *dst_var).or_else(|| operand_span(ir, len_op));
                             findings.push(finding(
-                                                        ir,
-                                                        Violation::BufferOverflow,
-                                                        format!(
-                                                            "Buffer overflow: write size {} exceeds destination buffer `{}` capacity {}",
-                                                            size_desc, name, cap_desc
-                                                        ),
-                                                        span,
-                                                    ));
+                                ir,
+                                Violation::BufferOverflow,
+                                vec![
+                                    ("size", size_desc),
+                                    ("buffer", name),
+                                    ("capacity", cap_desc),
+                                ],
+                                span,
+                            ));
                         }
 
                         // Check source read bounds
@@ -415,14 +316,15 @@ pub fn check_with_summaries(
                             let cap_desc = format_range(buf.capacity_lo, buf.capacity_hi);
                             let span = var_span(ir, *src_var).or_else(|| operand_span(ir, len_op));
                             findings.push(finding(
-                                                        ir,
-                                                        Violation::OutOfBoundsRead,
-                                                        format!(
-                                                            "Out-of-bounds read: read size {} exceeds source buffer `{}` capacity {}",
-                                                            size_desc, name, cap_desc
-                                                        ),
-                                                        span,
-                                                    ));
+                                ir,
+                                Violation::OutOfBoundsRead,
+                                vec![
+                                    ("size", size_desc),
+                                    ("buffer", name),
+                                    ("capacity", cap_desc),
+                                ],
+                                span,
+                            ));
                         }
                     }
                 }
@@ -574,6 +476,7 @@ pub fn check_with_summaries(
             &pts,
             &val_info,
             summaries,
+            buffer_builtins,
             &mut findings,
             PathState::default(),
             ir.entry_block,
@@ -602,6 +505,7 @@ pub fn check_with_summaries(
             &pts,
             &val_info,
             summaries,
+            buffer_builtins,
             &mut findings,
             joined,
             b,
@@ -613,7 +517,8 @@ pub fn check_with_summaries(
         }
     }
 
+    // Sorted for deterministic standalone output; dedup happens once, in
+    // `checks::check_all`, on the shared finding key.
     findings.sort_by_key(|f| f.span.map(|s| s.0).unwrap_or(usize::MAX));
-    findings.dedup_by(|a, b| a.span == b.span && a.rule == b.rule && a.message == b.message);
     findings
 }

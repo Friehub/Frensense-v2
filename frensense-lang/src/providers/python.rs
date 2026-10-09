@@ -17,8 +17,7 @@
 use tree_sitter::Node;
 
 use crate::spec::{
-    call_last_segment, node_text, Import, LanguageSpec, NodeRole, PackageCategory, PropagatorRule,
-    SanitizerKind, TaintOrigin,
+    call_last_segment, node_text, Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin,
 };
 
 // ── AST classification ────────────────────────────────────────────────────────
@@ -29,9 +28,9 @@ fn classify_python(kind: &str) -> NodeRole {
         // Both were missing from the engine's hardcoded match before this crate.
         "function_definition" | "async_function_definition" => NodeRole::Function {
             is_method: false, // determined by parent (class_definition body)
-            name_field: Some("name"),
-            params_field: "parameters",
-            body_field: "body",
+            name_field: Some("name".into()),
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
         // `decorated_definition` wraps a `function_definition` with decorators.
         // Fingerprint extraction must descend into it to find the real function.
@@ -39,47 +38,47 @@ fn classify_python(kind: &str) -> NodeRole {
         "decorated_definition" => NodeRole::Function {
             is_method: false,
             name_field: None, // name is on the inner function_definition
-            params_field: "parameters",
-            body_field: "body",
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
         "lambda" => NodeRole::Function {
             is_method: false,
             name_field: None,
-            params_field: "parameters",
-            body_field: "body",
+            params_field: "parameters".into(),
+            body_field: "body".into(),
         },
 
         // ── Assignments ──────────────────────────────────────────────────
         // Python has no separate "declaration" concept - `x = expr` is both.
         "assignment" | "annotated_assignment" => NodeRole::Declaration {
-            name_field: "left",
-            value_field: "right",
+            name_field: "left".into(),
+            value_field: "right".into(),
         },
         "augmented_assignment" => NodeRole::Assignment {
-            lhs_field: "left",
-            rhs_field: "right",
+            lhs_field: "left".into(),
+            rhs_field: "right".into(),
         },
         // Walrus operator `:=` - e.g. `if (m := re.match(...))`
         "named_expression" => NodeRole::Declaration {
-            name_field: "name",
-            value_field: "value",
+            name_field: "name".into(),
+            value_field: "value".into(),
         },
 
         // ── Calls ────────────────────────────────────────────────────────
         // Python uses `call`, NOT `call_expression`
         "call" => NodeRole::Call {
-            callee_field: "function",
-            args_field: "arguments",
+            callee_field: "function".into(),
+            args_field: "arguments".into(),
         },
         // Python member access is `attribute`, NOT `member_expression`
         "attribute" => NodeRole::MemberAccess {
-            object_field: "object",
-            property_field: "attribute",
+            object_field: "object".into(),
+            property_field: "attribute".into(),
         },
         "conditional_expression" => NodeRole::Conditional,
         "subscript" => NodeRole::MemberAccess {
-            object_field: "value",
-            property_field: "subscript",
+            object_field: "value".into(),
+            property_field: "subscript".into(),
         },
 
         // ── Control flow ─────────────────────────────────────────────────
@@ -366,199 +365,6 @@ fn python_classify_param(name: Option<&str>, ann: Option<&str>) -> Option<TaintO
     }
 }
 
-// ── Sanitizers ────────────────────────────────────────────────────────────────
-
-fn python_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
-    match call_last_segment(call) {
-        // Numeric coercion
-        "int" | "float" | "bool" | "abs" | "round" => Some(SanitizerKind::Full),
-        // HTML escaping (stdlib)
-        "escape" | "html_escape" | "cgi_escape" => Some(SanitizerKind::HtmlEscape),
-        // Bleach, MarkupSafe
-        "clean" | "linkify" | "Markup" => Some(SanitizerKind::HtmlEscape),
-        // Project-local escaping wrappers: `escape_*` is the near-universal
-        // naming convention for output-encoding helpers (OWASP Benchmark's
-        // helpers.escape_for_html, Django's escape, in-house wrappers).
-        name if name.starts_with("escape_") => Some(SanitizerKind::HtmlEscape),
-        // URL encoding
-        "quote" | "quote_plus" | "urlencode" => Some(SanitizerKind::UrlEncode),
-        // Path normalization
-        "realpath" | "abspath" | "normpath" | "normcase" => Some(SanitizerKind::PathNormalize),
-        // SQL parameterization (SQLAlchemy `text()` with bound params)
-        "text" | "literal" | "bindparam" => Some(SanitizerKind::SqlParameterize),
-        _ => None,
-    }
-}
-
-// ── Sink signatures (per-slot danger) ──────────────────────────────────────────
-
-/// Per-slot sink knowledge for Python. Mirrors JS_SINK_SIGNATURES: restrict
-/// alerts to the argument positions whose taint is actually exploitable.
-///
-/// Python's dominant false-positive class without this: parameterized DB
-/// access, `cursor.execute(sql, (user_id,))` taints only slot 0 (the SQL
-/// string); slot 1 is the binding channel that *neutralizes* injection.
-static PY_SINK_SIGNATURES: &[(&str, &[usize], bool)] = &[
-    // ── DB-API / sqlite3 / psycopg / mysql-connector: execute(sql, params) ──
-    ("execute", &[0], true),
-    ("executemany", &[0], true), // executemany(sql, seq_of_params)
-    // ── Django raw SQL: raw(sql, params) / extra(select, params) ──
-    ("raw", &[0], true),
-    // Django extra(): kwargs are interpolated into SQL, only the first
-    // positional (select) is the query; params still bind. Conservative:
-    // restrict to slot 0 (extra's where/tables kwargs flow by keyword, not
-    // position, so positional slots 1+ are the params tuple).
-    ("extra", &[0], true),
-    // ── SQLAlchemy: query / prepare / raw_sql ──
-    ("query", &[0], true),
-    ("prepare", &[0], true),
-    // ── Jinja2: render is the sink; render_template(sql_string, ctx), slot
-    // 0 is the template, ctx is a binding namespace ──
-    ("render_template", &[0], true),
-];
-
-// ── Propagators ───────────────────────────────────────────────────────────────
-
-static PYTHON_PROPAGATORS: &[PropagatorRule] = &[
-    // str methods - receiver taints return
-    PropagatorRule {
-        call: "format",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "format_map",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "replace",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "join",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "split",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "strip",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "lstrip",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "rstrip",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "lower",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "upper",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "title",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "encode",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "decode",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    // Type coercions that propagate (not sanitize) taint
-    PropagatorRule {
-        call: "str",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "bytes",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "list",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "tuple",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "dict",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    // json
-    PropagatorRule {
-        call: "loads",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "dumps",
-        tainted_arg: Some(0),
-        tainted_receiver: false,
-    },
-    // re / regex
-    PropagatorRule {
-        call: "sub",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "subn",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
-    PropagatorRule {
-        call: "group",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
-        call: "groups",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    // path building
-    PropagatorRule {
-        call: "join",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
-    // f-string interpolation: `f"SELECT {user}"` is handled by the
-    // flow_fingerprint's is_interpolation_node check, not propagator rules.
-    // Listed here for documentation completeness.
-
-    // % formatting: `"SELECT %s" % user` - treated as format propagation
-    // This is a BinaryOp in the AST, not a call. The flow fingerprinter
-    // checks for `binary_operator` with operator `%` and a tainted RHS.
-];
-
 // ── Tree-sitter queries ───────────────────────────────────────────────────────
 
 const PYTHON_SYMBOL_QUERY: &str = r#"
@@ -691,368 +497,9 @@ impl LanguageSpec for PythonSpec {
         )
     }
 
-    fn request_param_names(&self) -> &'static [&'static str] {
-        // Flask: `request` is a global import, not a parameter.
-        // Django: view functions receive a `request` parameter.
-        // FastAPI: `request: Request` is an explicit parameter.
-        &["request", "req", "r"]
-    }
-
-    fn known_sink_signatures(&self) -> &'static [(&'static str, &'static [usize], bool)] {
-        PY_SINK_SIGNATURES
-    }
-
-    fn known_sink_names(&self) -> &'static [(&'static str, crate::spec::SinkLabel)] {
-        &[
-            // Code Execution
-            ("eval", crate::spec::SinkLabel::CodeExecution),
-            ("exec", crate::spec::SinkLabel::CodeExecution),
-            ("compile", crate::spec::SinkLabel::CodeExecution),
-            // Command Injection
-            ("system", crate::spec::SinkLabel::CommandInjection),
-            ("popen", crate::spec::SinkLabel::CommandInjection),
-            ("call", crate::spec::SinkLabel::CommandInjection),
-            ("run", crate::spec::SinkLabel::CommandInjection),
-            ("check_output", crate::spec::SinkLabel::CommandInjection),
-            ("Popen", crate::spec::SinkLabel::CommandInjection),
-            ("execfile", crate::spec::SinkLabel::CommandInjection),
-            ("spawn", crate::spec::SinkLabel::CommandInjection),
-            ("spawnSync", crate::spec::SinkLabel::CommandInjection),
-            // SQL Injection
-            ("execute", crate::spec::SinkLabel::SqlInjection),
-            ("executemany", crate::spec::SinkLabel::SqlInjection),
-            ("raw", crate::spec::SinkLabel::SqlInjection),
-            ("raw_sql", crate::spec::SinkLabel::SqlInjection),
-            ("query", crate::spec::SinkLabel::SqlInjection),
-            ("executeRaw", crate::spec::SinkLabel::SqlInjection),
-            ("queryRaw", crate::spec::SinkLabel::SqlInjection),
-            ("filter", crate::spec::SinkLabel::SqlInjection), // Django ORM raw filter
-            ("extra", crate::spec::SinkLabel::SqlInjection),  // Django ORM .extra()
-            ("prepare", crate::spec::SinkLabel::SqlInjection),
-            // Path Traversal
-            ("open", crate::spec::SinkLabel::PathTraversal),
-            ("read", crate::spec::SinkLabel::PathTraversal),
-            ("write", crate::spec::SinkLabel::PathTraversal),
-            ("readFile", crate::spec::SinkLabel::PathTraversal),
-            ("writeFile", crate::spec::SinkLabel::PathTraversal),
-            ("readFileSync", crate::spec::SinkLabel::PathTraversal),
-            ("join", crate::spec::SinkLabel::PathTraversal),
-            ("unlink", crate::spec::SinkLabel::PathTraversal),
-            ("stat", crate::spec::SinkLabel::PathTraversal),
-            ("access", crate::spec::SinkLabel::PathTraversal),
-            // SSRF
-            ("get", crate::spec::SinkLabel::Ssrf),
-            ("post", crate::spec::SinkLabel::Ssrf),
-            ("request", crate::spec::SinkLabel::Ssrf),
-            ("send", crate::spec::SinkLabel::Ssrf),
-            ("fetch", crate::spec::SinkLabel::Ssrf),
-            ("http.get", crate::spec::SinkLabel::Ssrf),
-            ("https.get", crate::spec::SinkLabel::Ssrf),
-            ("got", crate::spec::SinkLabel::Ssrf),
-            // Open Redirect
-            ("redirect", crate::spec::SinkLabel::OpenRedirect),
-            // XSS
-            ("innerHTML", crate::spec::SinkLabel::XssDom),
-            ("outerHTML", crate::spec::SinkLabel::XssDom),
-            ("dangerouslySetInnerHTML", crate::spec::SinkLabel::XssDom),
-            // SSTI - Template engine renders
-            ("render_template", crate::spec::SinkLabel::TemplateSsti),
-            (
-                "render_template_string",
-                crate::spec::SinkLabel::TemplateSsti,
-            ),
-            ("from_string", crate::spec::SinkLabel::TemplateSsti),
-            ("render", crate::spec::SinkLabel::TemplateSsti),
-            ("ejs.render", crate::spec::SinkLabel::TemplateSsti),
-            ("nunjucks.render", crate::spec::SinkLabel::TemplateSsti),
-            ("marko.render", crate::spec::SinkLabel::TemplateSsti),
-            ("eta.render", crate::spec::SinkLabel::TemplateSsti),
-            ("swig.render", crate::spec::SinkLabel::TemplateSsti),
-            ("liquid.render", crate::spec::SinkLabel::TemplateSsti),
-            ("mustache.render", crate::spec::SinkLabel::TemplateSsti),
-            // Response
-            ("make_response", crate::spec::SinkLabel::XssReflected),
-            ("res.send", crate::spec::SinkLabel::ResponseLeak),
-            ("res.json", crate::spec::SinkLabel::ResponseLeak),
-            // Unsafe Deserialization
-            // (yaml.safe_load is deliberately NOT a sink: it resolves only
-            // basic YAML types, which is what makes it the *safe* API.)
-            ("pickle.loads", crate::spec::SinkLabel::UnsafeDeserialize),
-            ("pickle.load", crate::spec::SinkLabel::UnsafeDeserialize),
-            ("yaml.load", crate::spec::SinkLabel::UnsafeDeserialize),
-            ("marshal.loads", crate::spec::SinkLabel::UnsafeDeserialize),
-            ("shelve.open", crate::spec::SinkLabel::UnsafeDeserialize),
-            ("loads", crate::spec::SinkLabel::UnsafeDeserialize),
-            ("load", crate::spec::SinkLabel::UnsafeDeserialize),
-            (
-                "bincode::deserialize",
-                crate::spec::SinkLabel::UnsafeDeserialize,
-            ),
-            // Log Leak
-            ("log", crate::spec::SinkLabel::LogLeak),
-            ("error", crate::spec::SinkLabel::LogLeak),
-            ("info", crate::spec::SinkLabel::LogLeak),
-            ("debug", crate::spec::SinkLabel::LogLeak),
-            // Prototype Pollution
-            // NOTE: JS-only prototype-pollution sinks (_.set, $.extend,
-            // setPrototypeOf, Object.assign) are deliberately NOT in the
-            // Python table. The engine matches sinks by last segment, so a
-            // bare "_.set" entry would make every `.set(` call (e.g.
-            // Flask's response.set_cookie lowering, ConfigParser.set) a
-            // prototype-pollution sink. Python has no prototype chains.
-            // XXE
-            ("DOMParser", crate::spec::SinkLabel::Xxe),
-            // JWT
-            ("jwt.sign", crate::spec::SinkLabel::Jwt),
-            // MongoDB / ORM operators
-            ("$where", crate::spec::SinkLabel::NoSqlInjection),
-            ("$regex", crate::spec::SinkLabel::NoSqlInjection),
-            ("$gt", crate::spec::SinkLabel::NoSqlInjection),
-            ("$lt", crate::spec::SinkLabel::NoSqlInjection),
-            ("$ne", crate::spec::SinkLabel::NoSqlInjection),
-            ("$in", crate::spec::SinkLabel::NoSqlInjection),
-            ("$nin", crate::spec::SinkLabel::NoSqlInjection),
-            ("$exists", crate::spec::SinkLabel::NoSqlInjection),
-            ("$expr", crate::spec::SinkLabel::NoSqlInjection),
-            ("$function", crate::spec::SinkLabel::NoSqlInjection),
-            ("$accumulator", crate::spec::SinkLabel::NoSqlInjection),
-        ]
-    }
-
     fn ternary_cond_index(&self) -> usize {
-        // Python: `then if cond else else_arm` — the condition is the
+        // Python: `then if cond else else_arm` - the condition is the
         // middle named child, unlike JS/C where it comes first.
         1
-    }
-
-    fn known_source_patterns(&self) -> &'static [&'static str] {
-        &[
-            // Flask
-            "request.args",
-            "request.args.get",
-            "request.args.getlist",
-            "request.form",
-            "request.form.get",
-            "request.json",
-            "request.data",
-            "request.values",
-            "request.files",
-            "request.cookies",
-            "request.headers",
-            "request.get_json()",
-            "request.get_data()",
-            // Django
-            "request.GET",
-            "request.POST",
-            "request.body",
-            "request.META",
-            "request.FILES",
-            "request.COOKIES",
-            // FastAPI - these are parameter names, recognised via classify_param_taint
-            // but listed here for motif matching
-            "Query",
-            "Path",
-            "Body",
-            "Form",
-            "Header",
-            "Cookie",
-            // aiohttp
-            "request.match_info",
-            "request.rel_url.query",
-            "await request.json()",
-            "await request.text()",
-            "await request.read()",
-            "await request.post()",
-        ]
-    }
-
-    fn propagator_rules(&self) -> &'static [PropagatorRule] {
-        PYTHON_PROPAGATORS
-    }
-
-    fn classify_sanitizer(&self, call: &str) -> Option<SanitizerKind> {
-        python_classify_sanitizer(call)
-    }
-    fn known_sanitizer_names(&self) -> &'static [&'static str] {
-        &[
-            "escape",
-            "html_escape",
-            "escape_html",
-            "escape_for_html",
-            "escape_url",
-            "escape_js",
-            "escape_xml",
-            "quote",
-            "quote_plus",
-            "sanitize",
-            "validate_email",
-            "bleach",
-            "clean",
-            "quoteattr",
-            "markupsafe.escape",
-            "bleach.clean",
-            "int",
-            "float",
-            "bool",
-            "shlex.quote",
-            "urllib.parse.quote",
-            "html.escape",
-            "paramstyle",
-        ]
-    }
-
-    fn route_context_hints(&self) -> &'static [&'static str] {
-        &[
-            "@app.route",
-            "@router.get",
-            "@router.post",
-            "@bp.route",
-            "@blueprint.route",
-            "from flask import",
-            "from fastapi import",
-            "from django.http import",
-            "from aiohttp import",
-            "request.args",
-            "request.form",
-            "request.json",
-            "request.GET",
-            "request.POST",
-            "return jsonify",
-            "return Response",
-            "return render_template",
-            "return render(",
-            "HttpResponse",
-            "JsonResponse",
-        ]
-    }
-
-    fn test_context_hints(&self) -> &'static [&'static str] {
-        &[
-            "import pytest",
-            "def test_",
-            "unittest.TestCase",
-            "self.assert",
-            "self.assertEqual",
-            "pytest.raises",
-            "from unittest",
-            "@pytest.fixture",
-            "@pytest.mark",
-        ]
-    }
-
-    fn response_method_names(&self) -> &'static [&'static str] {
-        &[
-            "jsonify",
-            "make_response",
-            "render_template",
-            "redirect",
-            "Response",
-        ]
-    }
-
-    fn db_api_method_names(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    fn shell_api_method_names(&self) -> &'static [&'static str] {
-        &[]
-    }
-
-    fn known_semantic_categories(&self) -> &'static [(&'static str, &'static [&'static str])] {
-        &[
-            (
-                "db_query",
-                &[
-                    "execute", "query", "raw", "fetchone", "fetchall", "get", "find", "find_one",
-                    "filter", "all",
-                ],
-            ),
-            (
-                "db_write",
-                &[
-                    "insert",
-                    "update",
-                    "upsert",
-                    "create",
-                    "delete",
-                    "remove",
-                    "save",
-                    "bulk_create",
-                ],
-            ),
-            (
-                "cmd_exec",
-                &[
-                    "system",
-                    "popen",
-                    "subprocess.run",
-                    "subprocess.call",
-                    "subprocess.Popen",
-                    "os.system",
-                    "os.popen",
-                ],
-            ),
-            (
-                "file_read",
-                &[
-                    "open",
-                    "read",
-                    "readlines",
-                    "read_text",
-                    "Path.read_text",
-                    "io.open",
-                ],
-            ),
-            (
-                "file_write",
-                &["write", "writelines", "write_text", "Path.write_text"],
-            ),
-            (
-                "http_request",
-                &[
-                    "requests.get",
-                    "requests.post",
-                    "requests.put",
-                    "requests.delete",
-                    "requests.patch",
-                    "requests.Session",
-                    "httpx.get",
-                    "httpx.post",
-                    "aiohttp",
-                    "urllib.request",
-                    "urlopen",
-                ],
-            ),
-            ("url_redirect", &["redirect", "HttpResponseRedirect"]),
-            (
-                "crypto_weak",
-                &["md5", "sha1", "hashlib.md5", "hashlib.sha1"],
-            ),
-            (
-                "crypto_strong",
-                &[
-                    "sha256",
-                    "sha512",
-                    "hashlib.sha256",
-                    "hashlib.sha512",
-                    "bcrypt",
-                ],
-            ),
-            (
-                "deserialize",
-                &["loads", "load", "json.loads", "pickle.loads"],
-            ),
-            ("sanitize", &["escape", "bleach.clean", "markupsafe.escape"]),
-            ("regex", &["re.compile", "re.match", "re.search", "re.sub"]),
-            ("process", &["os.system", "os.popen", "subprocess"]),
-            (
-                "auth_middleware",
-                &["login_required", "permission_required", "authenticate"],
-            ),
-            (
-                "financial_calc",
-                &["price", "total", "amount", "balance", "Decimal"],
-            ),
-        ]
     }
 }

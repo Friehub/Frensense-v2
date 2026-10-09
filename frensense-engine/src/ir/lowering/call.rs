@@ -12,8 +12,8 @@ impl<'a> LoweringContext<'a> {
     pub fn visit_call(
         &mut self,
         node: Node,
-        callee_field: &'static str,
-        args_field: &'static str,
+        callee_field: &str,
+        args_field: &str,
     ) -> Option<Operand> {
         let callee_node = node.child_by_field_name(callee_field)?;
         // Some grammars don't give the args child a field name
@@ -46,6 +46,7 @@ impl<'a> LoweringContext<'a> {
             byte_range: Some((node.start_byte(), node.end_byte())),
             is_memory_state: false,
             object_keys: Vec::new(),
+            declared: false,
         });
 
         let callee_role = self.classify_node(callee_node.kind());
@@ -74,6 +75,61 @@ impl<'a> LoweringContext<'a> {
                     args,
                 },
             );
+        } else if let NodeRole::MemberAccess {
+            object_field,
+            property_field,
+        } = callee_role
+        {
+            let obj_node = callee_node.child_by_field_name(&*object_field);
+            let prop_node = callee_node.child_by_field_name(&*property_field);
+            if let (Some(obj), Some(prop)) = (obj_node, prop_node) {
+                let method = self.source[prop.start_byte()..prop.end_byte()].to_string();
+                let obj_op = self.visit_node(obj).unwrap_or(Operand::Unknown);
+                let recv_var = match obj_op {
+                    Operand::Var(v) => v,
+                    other => {
+                        let temp = self.ir.new_var(VarMetadata {
+                            source_name: None,
+                            type_name: None,
+                            byte_range: Some((obj.start_byte(), obj.end_byte())),
+                            is_memory_state: false,
+                            object_keys: Vec::new(),
+                            declared: false,
+                        });
+                        self.ir.push_instruction(
+                            self.current_block,
+                            Instruction::Assign {
+                                dest: temp,
+                                src: other,
+                            },
+                        );
+                        temp
+                    }
+                };
+                self.ir.push_instruction(
+                    self.current_block,
+                    Instruction::CallVirtual {
+                        dest: Some(dest),
+                        mem_out: self.memory_var,
+                        mem_in: self.memory_var,
+                        method,
+                        receiver: Operand::Var(recv_var),
+                        args,
+                    },
+                );
+            } else {
+                let func_op = self.visit_node(callee_node).unwrap_or(Operand::Unknown);
+                self.ir.push_instruction(
+                    self.current_block,
+                    Instruction::CallPointer {
+                        dest: Some(dest),
+                        mem_out: self.memory_var,
+                        mem_in: self.memory_var,
+                        func_ptr: func_op,
+                        args,
+                    },
+                );
+            }
         } else {
             let func_op = self.visit_node(callee_node).unwrap_or(Operand::Unknown);
             self.ir.push_instruction(

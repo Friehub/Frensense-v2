@@ -10,6 +10,15 @@ hero:
       text: Get started
       link: /guide/
     - theme: alt
+      text: Download
+      link: /guide/installation
+    - theme: alt
+      text: crates.io
+      link: https://crates.io/crates/frensense
+    - theme: alt
+      text: npm
+      link: https://www.npmjs.com/package/@friehub/frensense
+    - theme: alt
       text: Read the v1 archive
       link: /v1/
     - theme: alt
@@ -30,3 +39,5 @@ features:
   - title: Open core
     details: The engine is GPL-3.0 free software; .frc knowledge bundles carry the detection knowledge. Commercial licences available.
 ---
+
+<DownloadStrip />

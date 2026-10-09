@@ -25,4 +25,5 @@ mod sibling_path_tests;
 mod context_tests;
 #[cfg(test)]
 mod engine_tests;
+#[cfg(test)]
 mod session_trust_tests;

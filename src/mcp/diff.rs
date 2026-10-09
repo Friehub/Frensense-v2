@@ -2,11 +2,11 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-//! `frensense_diff` — scan a patch/diff and report only findings whose
+//! `frensense_diff` - scan a patch/diff and report only findings whose
 //! reported line falls inside the patch's added-line ranges.
 //!
 //! Why the range intersection rather than re-parsing the patch into code:
-//! the engine's source of truth is the file *on disk* — the working tree
+//! the engine's source of truth is the file *on disk* - the working tree
 //! already contains the change. Feeding synthetic patch content into the
 //! parser would fork the analysis path (patch context, hunk offsets,
 //! partial functions). Instead this module observes the patch, computes
@@ -19,7 +19,7 @@
 //! only patch observation and line-range filtering. Language knowledge
 //! stays in `frensense-lang`, analysis stays in the engine.
 
-use super::scan_file::{is_supported, severity_rank};
+use super::scan_file::is_supported;
 use crate::{Advisory, Severity};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -83,7 +83,7 @@ impl AddedRange {
 
 /// Extract the `+++ b/<path>` target paths from a unified diff, in order
 /// of appearance, deduplicated. Handles `a/`/`b/` prefixes and `/dev/null`
-/// (new files whose target we still want — `+++ b/path` form always
+/// (new files whose target we still want - `+++ b/path` form always
 /// carries the path). Quoted paths (`"\b/path with spaces"`) are
 /// unquoted.
 #[must_use]
@@ -258,23 +258,20 @@ fn path_matches(advisory_path: &str, diff_path: &str) -> bool {
     adv.ends_with(&format!("/{d}")) || d.ends_with(&format!("/{adv}"))
 }
 
-/// Severity/confidence filter, shared semantics with `scan_file`.
+/// Severity/confidence filter. Thin wrapper over
+/// [`crate::reporting::apply`], the one reporting policy every surface
+/// shares.
 #[must_use]
 pub fn filter_advisories(
     advisories: Vec<Advisory>,
     severity_threshold: &str,
     min_confidence: f64,
 ) -> Vec<Advisory> {
-    let floor = severity_rank(match severity_threshold {
-        "critical" => Severity::Critical,
-        "warning" => Severity::Warning,
-        _ => Severity::Info,
-    });
-    advisories
-        .into_iter()
-        .filter(|a| severity_rank(a.severity) >= floor)
-        .filter(|a| a.confidence >= min_confidence)
-        .collect()
+    crate::reporting::apply(
+        advisories,
+        min_confidence,
+        Some(Severity::parse(severity_threshold)),
+    )
 }
 
 /// Run `git diff HEAD` in `repo` and append synthetic added-file hunks
@@ -313,7 +310,7 @@ fn git_diff_head(repo: &Path) -> Result<String, String> {
                     diff.push('\n');
                 }
             }
-            // Unreadable/unusual untracked file: skip it silently —
+            // Unreadable/unusual untracked file: skip it silently -
             // the engine would skip it too.
             Err(_) => continue,
         }

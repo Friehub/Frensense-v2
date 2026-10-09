@@ -14,7 +14,7 @@ function getWorkspaceVersion(): string {
       return match[1]
     }
   } catch {}
-  return '0.7.0-preview.4'
+  return '0.7.0-preview'
 }
 
 async function getPublishedVersion(): Promise<string> {
@@ -55,6 +55,57 @@ async function getPublishedVersion(): Promise<string> {
 }
 
 const currentVersion = await getPublishedVersion()
+
+// Weekly download counts for the homepage (npm + crates.io), fetched at
+// build time. DownloadStrip refreshes them client-side too, so the numbers
+// stay fresh between deploys; both APIs send `Access-Control-Allow-Origin: *`.
+type DownloadStats = { npmWeekly?: number; cratesWeekly?: number }
+
+async function getDownloadStats(): Promise<DownloadStats> {
+  const stats: DownloadStats = {}
+
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 2000)
+    const res = await fetch(
+      'https://api.npmjs.org/downloads/point/last-week/@friehub/frensense',
+      { signal: controller.signal }
+    )
+    clearTimeout(timer)
+    if (res.ok) {
+      const data = (await res.json()) as { downloads?: number }
+      if (typeof data?.downloads === 'number') stats.npmWeekly = data.downloads
+    }
+  } catch {}
+
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 2000)
+    const res = await fetch('https://crates.io/api/v1/crates/frensense/downloads', {
+      headers: { 'User-Agent': 'frensense-docs-builder', Accept: 'application/json' },
+      signal: controller.signal
+    })
+    clearTimeout(timer)
+    if (res.ok) {
+      const data = (await res.json()) as {
+        version_downloads?: Array<{ date: string; downloads: number }>
+      }
+      // crates.io has no official weekly metric; sum the 7 most recent days.
+      const byDate = new Map<string, number>()
+      for (const d of data?.version_downloads ?? []) {
+        byDate.set(d.date, (byDate.get(d.date) ?? 0) + (d.downloads || 0))
+      }
+      stats.cratesWeekly = [...byDate.entries()]
+        .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+        .slice(0, 7)
+        .reduce((sum, [, n]) => sum + n, 0)
+    }
+  } catch {}
+
+  return stats
+}
+
+const downloadStats = await getDownloadStats()
 
 // frensense v2 documentation site.
 // Deployed at the domain root; the legacy v1 site is served under /v1/.
@@ -116,10 +167,13 @@ export default defineConfig({
   themeConfig: {
     siteTitle: 'Frensense',
 
+    downloadStats,
+
     nav: [
       { text: 'Docs', link: '/guide/', activeMatch: '/guide/' },
       { text: 'Architecture', link: '/architecture/', activeMatch: '/architecture/' },
       { text: 'Corpus', link: '/corpus/', activeMatch: '/corpus/' },
+      { text: 'Bundles', link: '/bundles', activeMatch: '/bundles' },
       { text: 'Blog', link: '/blog/', activeMatch: '/blog/' },
       {
         text: 'v1 (legacy)',
@@ -133,6 +187,7 @@ export default defineConfig({
         items: [
           { text: 'Changelog', link: 'https://github.com/Friehub/frensense-v2/blob/main/CHANGELOG.md' },
           { text: 'crates.io', link: 'https://crates.io/crates/frensense' },
+          { text: 'npm', link: 'https://www.npmjs.com/package/@friehub/frensense' },
           { text: 'GitHub Releases', link: 'https://github.com/Friehub/frensense-v2/releases' }
         ]
       }
