@@ -79,7 +79,7 @@ onMounted(refresh)
         <span v-if="cratesWeekly !== null" class="dl-card__stat">
           {{ fmt(cratesWeekly) }}<em>downloads / week</em>
         </span>
-        <code class="dl-card__cmd">cargo install frensense</code>
+        <code class="dl-card__cmd">cargo install frensense --version 0.7.0-preview.5</code>
         <span class="dl-card__cta">View on crates.io &rarr;</span>
       </a>
 
@@ -93,7 +93,7 @@ onMounted(refresh)
         <span v-if="npmWeekly !== null" class="dl-card__stat">
           {{ fmt(npmWeekly) }}<em>downloads / week</em>
         </span>
-        <code class="dl-card__cmd">npm install -g @friehub/frensense</code>
+        <code class="dl-card__cmd">npm i -g @friehub/frensense@preview</code>
         <span class="dl-card__cta">View on npm &rarr;</span>
       </a>
 
@@ -107,13 +107,13 @@ onMounted(refresh)
         <span class="dl-card__stat dl-card__stat--muted"
           >SLSA L3 provenance<em>Linux, macOS, Windows</em></span
         >
-        <code class="dl-card__cmd">npx @friehub/frensense .</code>
+        <code class="dl-card__cmd">npx @friehub/frensense@preview .</code>
         <span class="dl-card__cta">All releases &rarr;</span>
       </a>
     </div>
 
     <p class="download-strip__foot">
-      No install needed &mdash; run <code>npx @friehub/frensense .</code>.
+      No install needed - run <code>npx @friehub/frensense@preview .</code>.
       Every surface shares one engine and one finding-ID scheme. Full options
       in the <a href="/guide/installation">installation guide</a>.
     </p>
