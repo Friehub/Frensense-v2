@@ -115,8 +115,15 @@ export default defineConfig({
   description:
     'Frensense v2, a compiler-mode static analysis engine that lowers every file to a program graph and reports exact source-to-sink taint paths.',
   ignoreDeadLinks: true, // v1 archive pages are copied in after the build, not known to VitePress.
+  sitemap: {
+    hostname: 'https://frensense.friehub.cloud'
+  },
   head: [
     ['link', { rel: 'icon', type: 'image/png', href: '/favicon.png' }],
+    ['meta', { property: 'og:site_name', content: 'Frensense' }],
+    ['meta', { property: 'og:type', content: 'website' }],
+    ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+    ['meta', { name: 'twitter:site', content: '@friehub' }],
     [
       'script',
       {},
