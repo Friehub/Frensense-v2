@@ -1,6 +1,7 @@
 ---
 title: "Static Analysis in the Era of Frontier AI: Why LLMs Need Deterministic Oracles"
 date: 2026-10-09
+image: /covers/frontier-ai-sast.svg
 description: A deep technical examination of where static application security testing stands against models like Claude Opus 5.5 and Gemini 3.8 Flash, and why autonomous AI coding agents require compiler-mode deterministic verifiers like Frensense.
 head:
   - - meta
@@ -9,6 +10,12 @@ head:
   - - meta
     - property: og:description
       content: "A deep technical examination of where static application security testing stands against models like Claude Opus 5.5 and Gemini 3.8 Flash, and why autonomous AI coding agents require compiler-mode deterministic verifiers like Frensense."
+  - - meta
+    - property: og:image
+      content: "https://frensense.friehub.cloud/covers/frontier-ai-sast.svg"
+  - - meta
+    - name: twitter:image
+      content: "https://frensense.friehub.cloud/covers/frontier-ai-sast.svg"
   - - meta
     - property: og:type
       content: article
