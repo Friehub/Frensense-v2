@@ -11,5 +11,5 @@ publish = false
 frensense-engine = { path = "../frensense-engine", version = "0.7.0-preview.5", features = ["serialize"] }
 frensense-lang = { path = "../frensense-lang", version = "0.7.0-preview.5" }
 rustc-hash = "1.1"
-tree-sitter = "0.23"
+tree-sitter = "0.27"
 tree-sitter-typescript = "0.23"
