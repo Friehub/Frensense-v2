@@ -173,6 +173,7 @@ export default defineConfig({
       { text: 'Docs', link: '/guide/', activeMatch: '/guide/' },
       { text: 'Architecture', link: '/architecture/', activeMatch: '/architecture/' },
       { text: 'Corpus', link: '/corpus/', activeMatch: '/corpus/' },
+      { text: 'Bundles', link: '/bundles', activeMatch: '/bundles' },
       { text: 'Blog', link: '/blog/', activeMatch: '/blog/' },
       {
         text: 'v1 (legacy)',
