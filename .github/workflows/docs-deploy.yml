@@ -33,7 +33,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout v2 code
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.3.0
 
       - name: Setup Node
         uses: actions/setup-node@f1f314fca9dfce2769ece7d933488f076716723e # v4.4.0
