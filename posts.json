@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "generatedAt": "2026-10-09T23:44:50.825Z",
+  "posts": [
+    {
+      "source": "frensense",
+      "slug": "2026-10-09-static-analysis-in-the-age-of-frontier-ai",
+      "url": "https://frensense.friehub.cloud/blog/2026-10-09-static-analysis-in-the-age-of-frontier-ai",
+      "title": "Static Analysis in the Era of Frontier AI: Why LLMs Need Deterministic Oracles",
+      "date": "2026-10-09",
+      "description": "A deep technical examination of where static application security testing stands against models like Claude Opus 5.5 and Gemini 3.8 Flash, and why autonomous AI coding agents require compiler-mode deterministic verifiers like Frensense.",
+      "image": "https://frensense.friehub.cloud/covers/frontier-ai-sast.svg"
+    },
+    {
+      "source": "frensense",
+      "slug": "2026-09-29-teachable-static-analysis",
+      "url": "https://frensense.friehub.cloud/blog/2026-09-29-teachable-static-analysis",
+      "title": "Teaching a Static Analyzer Like a Human: How We Made Frensense 100% Teachable",
+      "date": "2026-09-29",
+      "description": "How Frensense replaced fragile pattern rules and hardcoded engine updates with a compiler that learns security vulnerabilities directly from positive and negative examples.",
+      "image": "https://frensense.friehub.cloud/default-blog-cover.svg"
+    },
+    {
+      "source": "frensense",
+      "slug": "2026-09-28-v2-preview",
+      "url": "https://frensense.friehub.cloud/blog/2026-09-28-v2-preview",
+      "title": "Frensense v2: the first preview",
+      "date": "2026-09-28",
+      "description": "Why we rebuilt the engine as a compiler, and what 0.7.1-preview.1 ships, memory-safety checkers, value-aware guards, and a corpus that teaches the engine.",
+      "image": "https://frensense.friehub.cloud/default-blog-cover.svg"
+    },
+    {
+      "source": "frensense",
+      "slug": "2026-09-21-value-aware-guards",
+      "url": "https://frensense.friehub.cloud/blog/2026-09-21-value-aware-guards",
+      "title": "Proving guards, not guessing them",
+      "date": "2026-09-21",
+      "description": "Guard validation used to be textual, a call with the right name near the sink. The value lattice changed that.",
+      "image": "https://frensense.friehub.cloud/default-blog-cover.svg"
+    }
+  ]
+}
