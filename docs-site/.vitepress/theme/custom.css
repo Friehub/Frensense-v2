@@ -1,4 +1,4 @@
-/* frensense v2 docs — v1-matched theme (green brand, Urbanist/Inter, glow bg) */
+/* frensense v2 docs - v1-matched theme (green brand, Urbanist/Inter, glow bg) */
 
 @import url('https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700;800&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -149,7 +149,7 @@
 }
 .download-strip__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 16px;
 }
 .dl-card {
@@ -162,6 +162,8 @@
   background-color: var(--vp-c-bg-soft);
   text-decoration: none;
   color: inherit;
+  overflow: hidden;
+  max-width: 100%;
   transition: border-color 0.25s, background-color 0.25s;
 }
 .dl-card:hover {
@@ -192,14 +194,19 @@
 }
 .dl-card__cmd {
   font-family: var(--vp-font-family-mono, monospace);
-  font-size: 0.82rem;
-  padding: 8px 10px;
+  font-size: 0.76rem;
+  padding: 7px 9px;
   border-radius: 8px;
   background-color: var(--vp-c-bg);
   border: 1px solid var(--vp-c-divider);
   color: var(--vp-c-text-1);
   overflow-x: auto;
   white-space: nowrap;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.dl-card__cmd::-webkit-scrollbar {
+  display: none;
 }
 .dl-card__cta {
   font-size: 0.9rem;

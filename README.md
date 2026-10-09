@@ -1,7 +1,19 @@
 <div align="left">
   <h1>Frensense</h1>
   <p><strong>A deterministic, dataflow-driven security scanner for TypeScript, JavaScript, Python, Go, and Rust.</strong></p>
-  <p><a href="https://frensense.friehub.cloud">Documentation</a> | <a href="https://github.com/Friehub/Frensense-v2/releases">Releases</a></p>
+  <p>
+    <a href="https://crates.io/crates/frensense"><img src="https://img.shields.io/crates/v/frensense.svg" alt="crates.io" /></a>
+    <a href="https://www.npmjs.com/package/@friehub/frensense"><img src="https://img.shields.io/npm/v/@friehub/frensense.svg" alt="npm" /></a>
+    <a href="https://frensense.friehub.cloud"><img src="https://img.shields.io/badge/docs-frensense.friehub.cloud-blue.svg" alt="Documentation" /></a>
+    <a href="https://github.com/Friehub/Frensense-v2/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License" /></a>
+  </p>
+  <p>
+    <a href="https://frensense.friehub.cloud">Documentation</a> &bull;
+    <a href="https://frensense.friehub.cloud/bundles">Security Bundles (.frc)</a> &bull;
+    <a href="https://crates.io/crates/frensense">crates.io</a> &bull;
+    <a href="https://www.npmjs.com/package/@friehub/frensense">npm</a> &bull;
+    <a href="https://github.com/Friehub/Frensense-v2/releases">Releases</a>
+  </p>
 </div>
 
 <br />
@@ -26,6 +38,8 @@ dangerous sink.
    structural evidence agree, keeping the false-positive rate low.
 
 ## Quick Start
+
+Install via [crates.io](https://crates.io/crates/frensense) or [npm](https://www.npmjs.com/package/@friehub/frensense):
 
 ```bash
 # Install (Cargo or npm)
