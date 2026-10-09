@@ -120,10 +120,37 @@ export default defineConfig({
   },
   head: [
     ['link', { rel: 'icon', type: 'image/png', href: '/favicon.png' }],
+    ['link', { rel: 'shortcut icon', href: '/favicon.ico' }],
+    ['meta', { name: 'author', content: 'Friehub' }],
+    ['meta', { name: 'robots', content: 'index, follow' }],
+    ['meta', { name: 'keywords', content: 'frensense, static analysis, SAST, deterministic dataflow, security scanner, vulnerability scanner, taint analysis, MCP, Model Context Protocol, Rust, AST, compiler' }],
     ['meta', { property: 'og:site_name', content: 'Frensense' }],
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:site', content: '@friehub' }],
+    [
+      'script',
+      { type: 'application/ld+json' },
+      JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareApplication',
+        name: 'Frensense',
+        applicationCategory: 'DeveloperApplication',
+        operatingSystem: 'Linux, macOS, Windows',
+        offers: {
+          '@type': 'Offer',
+          price: '0',
+          priceCurrency: 'USD'
+        },
+        description: 'Deterministic compiler-mode static application security testing engine with zero false positives.',
+        url: 'https://frensense.friehub.cloud',
+        publisher: {
+          '@type': 'Organization',
+          name: 'Friehub',
+          url: 'https://friehub.cloud'
+        }
+      })
+    ],
     [
       'script',
       {},

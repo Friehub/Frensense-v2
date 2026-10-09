@@ -21,6 +21,56 @@ head:
   - - meta
     - name: twitter:description
       content: "A deep technical examination of where static application security testing stands against models like Claude Opus 5.5 and Gemini 3.8 Flash."
+  - - meta
+    - name: keywords
+      content: "static application security testing, SAST, LLM code security, Claude Opus 5.5, Gemini 3.8 Flash, Semgrep, CodeQL, Model Context Protocol, MCP, deterministic taint analysis, compiler security, Rust"
+  - - meta
+    - property: article:published_time
+      content: "2026-10-09T00:00:00Z"
+  - - meta
+    - property: article:author
+      content: "Friehub"
+  - - meta
+    - property: article:section
+      content: "Security Research"
+  - - meta
+    - property: article:tag
+      content: "SAST"
+  - - meta
+    - property: article:tag
+      content: "AI Security"
+  - - meta
+    - property: article:tag
+      content: "Compilers"
+  - - meta
+    - property: article:tag
+      content: "Rust"
+  - - script
+    - type: application/ld+json
+    - |
+      {
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "headline": "Static Analysis in the Era of Frontier AI: Why LLMs Need Deterministic Oracles",
+        "description": "A deep technical examination of where static application security testing stands against models like Claude Opus 5.5 and Gemini 3.8 Flash, and why autonomous AI coding agents require compiler-mode deterministic verifiers like Frensense.",
+        "datePublished": "2026-10-09T00:00:00Z",
+        "dateModified": "2026-10-09T00:00:00Z",
+        "author": {
+          "@type": "Organization",
+          "name": "Friehub",
+          "url": "https://friehub.cloud"
+        },
+        "publisher": {
+          "@type": "Organization",
+          "name": "Friehub",
+          "url": "https://friehub.cloud"
+        },
+        "mainEntityOfPage": {
+          "@type": "WebPage",
+          "@id": "https://frensense.friehub.cloud/blog/2026-10-09-static-analysis-in-the-age-of-frontier-ai"
+        },
+        "keywords": ["static analysis", "SAST", "AI security", "Claude Opus 5.5", "Gemini 3.8 Flash", "MCP", "Rust"]
+      }
   - - link
     - rel: canonical
       href: "https://frensense.friehub.cloud/blog/2026-10-09-static-analysis-in-the-age-of-frontier-ai"
