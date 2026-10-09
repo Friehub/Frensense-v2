@@ -23,9 +23,9 @@ The community bundles provide verified detection for common vulnerabilities acro
 | **`frensense-master.frc`** | Universal Unified Bundle (All Supported Languages) | ~16 KB | 82/82 Tests Passed (100% TPR / 0% FPR) | <a href="https://bundles.friehub.cloud/community/latest/frensense-master.frc" download="frensense-master.frc">Download .frc</a> &bull; <a href="https://github.com/Friehub/frensense-v2/releases/download/v0.7.0-preview.5/frensense-master.frc" download="frensense-master.frc">GitHub Mirror</a> |
 
 ### Integrity & Audit Artifacts
-- **Capability Datasheet (JSON)**: [`cwe_datasheet.json`](https://bundles.friehub.cloud/community/latest/cwe_datasheet.json)
-- **Capability Datasheet (Markdown)**: [`CWE_DATASHEET.md`](https://bundles.friehub.cloud/community/latest/CWE_DATASHEET.md)
-- **SHA-256 Checksums**: [`SHA256SUMS`](https://bundles.friehub.cloud/community/latest/SHA256SUMS)
+- **Capability Datasheet (JSON)**: <a href="https://bundles.friehub.cloud/community/latest/cwe_datasheet.json" download="cwe_datasheet.json"><code>cwe_datasheet.json</code></a>
+- **Capability Datasheet (Markdown)**: <a href="https://bundles.friehub.cloud/community/latest/CWE_DATASHEET.md" download="CWE_DATASHEET.md"><code>CWE_DATASHEET.md</code></a>
+- **SHA-256 Checksums**: <a href="https://bundles.friehub.cloud/community/latest/SHA256SUMS" download="SHA256SUMS"><code>SHA256SUMS</code></a>
 
 ---
 
