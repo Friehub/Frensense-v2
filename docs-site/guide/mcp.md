@@ -4,6 +4,10 @@ Frensense ships an MCP server **inside the same `frensense` binary**. There is
 no separate `frensense-mcp` package to install; if you have the CLI, you have
 the server. Run it as a subcommand:
 
+::: tip Research & Architecture
+For an architectural deep-dive into why autonomous AI coding agents require deterministic compiler-mode verifiers to prevent hallucinations, read our research essay: [Static Analysis in the Era of Frontier AI](/blog/2026-10-09-static-analysis-in-the-age-of-frontier-ai).
+:::
+
 ```bash
 frensense mcp
 ```

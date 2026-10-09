@@ -22,6 +22,9 @@ hero:
       text: Read the v1 archive
       link: /v1/
     - theme: alt
+      text: "Research: SAST & Frontier AI"
+      link: /blog/2026-10-09-static-analysis-in-the-age-of-frontier-ai
+    - theme: alt
       text: GitHub
       link: https://github.com/Friehub/frensense-v2
 
@@ -35,7 +38,8 @@ features:
   - title: Memory safety
     details: Use-after-free, double-free, and out-of-bounds checkers built on interprocedural allocation summaries and an abstract value lattice.
   - title: Built for agents
-    details: MCP and LSP servers built into the frensense CLI, stable finding IDs, and GitHub Actions annotations.
+    details: MCP and LSP servers built into the frensense CLI. Read why frontier AI needs deterministic oracles in our research essay.
+    link: /blog/2026-10-09-static-analysis-in-the-age-of-frontier-ai
   - title: Open core
     details: The engine is GPL-3.0 free software; .frc knowledge bundles carry the detection knowledge. Commercial licences available.
 ---
