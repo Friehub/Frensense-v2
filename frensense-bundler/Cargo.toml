@@ -10,7 +10,7 @@ homepage = "https://frensense.friehub.cloud"
 documentation = "https://frensense.friehub.cloud"
 
 [dependencies]
-bincode = "1.3"
+bincode = "3.0"
 blake3 = "1.5"
 tracing = "0.1"
 
