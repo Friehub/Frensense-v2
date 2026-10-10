@@ -1,0 +1,47 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-07/server.schema.json",
+  "name": "io.github.friehub/frensense",
+  "description": "Deterministic static analysis and code scanning MCP server. Directory audit, single-file scan for agent edit loops, and diff-scoped scan of only added lines. Taint paths from source to sink for TypeScript, JavaScript, Python, Go, Rust and C.",
+  "version": "0.7.0-preview.5",
+  "websiteUrl": "https://frensense.friehub.cloud",
+  "repository": {
+    "url": "https://github.com/Friehub/frensense-v2",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registry_type": "npm",
+      "identifier": "@friehub/frensense",
+      "transport": { "type": "stdio" },
+      "runtime_hint": "node",
+      "environmentVariables": [
+        {
+          "name": "FRENSENSE_CORPUS_BUNDLE",
+          "description": "Optional path to a .frc knowledge bundle so learned facts participate in agent scans",
+          "isRequired": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "registry_type": "crates",
+      "identifier": "frensense",
+      "transport": { "type": "stdio" },
+      "runtime_hint": "rust"
+    }
+  ],
+  "tools": [
+    {
+      "name": "frensense_audit",
+      "description": "Audit a directory for vulnerabilities with full source-to-sink taint paths"
+    },
+    {
+      "name": "frensense_scan_file",
+      "description": "Scan a single file, designed for agent edit loops"
+    },
+    {
+      "name": "frensense_diff",
+      "description": "Scan a unified diff and report only findings on added lines"
+    }
+  ]
+}

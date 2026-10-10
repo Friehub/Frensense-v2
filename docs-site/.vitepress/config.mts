@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig, createContentLoader } from 'vitepress'
+import llmstxt from 'vitepress-plugin-llms'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -253,6 +254,12 @@ export default defineConfig({
   ],
 
   cleanUrls: true,
+
+  // llmstxt.org v2: emits llms.txt, llms-full.txt, and per-page .md versions
+  // so coding agents and chat assistants can consume the docs without HTML noise
+  vite: {
+    plugins: [llmstxt({ domain: SITE_ORIGIN })],
+  },
 
   buildEnd: writePostsManifest,
 
