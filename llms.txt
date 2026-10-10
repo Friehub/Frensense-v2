@@ -1,0 +1,37 @@
+# Frensense
+
+> Deterministic security engine
+
+Static analysis without the rules. Frensense lowers every file to a program graph and reports exact source-to-sink taint paths. Findings are reachability queries, not guesses.
+
+## Table of Contents
+
+### Getting started
+
+- [Frensense v2](https://frensense.friehub.cloud/guide.md)
+- [Installation](https://frensense.friehub.cloud/guide/installation.md)
+- [Your first scan](https://frensense.friehub.cloud/guide/first-scan.md)
+- [Teachable Static Analysis Guide](https://frensense.friehub.cloud/guide/teachability.md): A practical, user-readable guide to understanding and using Frensense's teachable static analysis system.
+- [CLI reference](https://frensense.friehub.cloud/guide/cli.md)
+
+### Integrations
+
+- [GitHub Actions](https://frensense.friehub.cloud/guide/github-actions.md)
+- [MCP server (AI agents)](https://frensense.friehub.cloud/guide/mcp.md)
+- [LSP server (editors)](https://frensense.friehub.cloud/guide/lsp.md)
+
+### Architecture
+
+- [Architecture overview](https://frensense.friehub.cloud/architecture.md)
+- [The program graph](https://frensense.friehub.cloud/architecture/program-graph.md)
+- [Checkers](https://frensense.friehub.cloud/architecture/checkers.md)
+- [Knowledge bundles (.frc)](https://frensense.friehub.cloud/architecture/bundles.md)
+
+### Corpus
+
+- [Corpus & .frc bundles](https://frensense.friehub.cloud/corpus.md)
+- [Corpus authoring guide](https://frensense.friehub.cloud/corpus/authoring.md)
+
+### Other
+
+- [Security Rule Bundles (.frc)](https://frensense.friehub.cloud/bundles.md): Verified knowledge bundles and auditable capability datasheets for Frensense

@@ -1,0 +1,1068 @@
+---
+url: https://frensense.friehub.cloud/guide.md
+---
+# Frensense v2
+
+Frensense is a **compiler-mode static analysis engine**. Instead of pattern
+matching on source text, it lowers every file into a lightweight IR and builds
+a full program graph:
+
+* def-use chains and a call graph,
+* Steensgaard points-to with two-phase constraint solving,
+* heap modelling and a memory SSA backend,
+* an SVFG (Sparse Value-Flow Graph).
+
+Findings come from **exact reachability queries** on this graph, and every
+report includes the concrete source-to-sink path with file positions, not a
+confidence score.
+
+## What it detects out of the box
+
+Command injection, SQL/NoSQL injection, SSRF, path traversal, IDOR, weak
+cryptography, XSS, session-trust and guard-bypass violations,
+use-after-free / double-free, and out-of-bounds accesses.
+
+`.frc` knowledge bundles extend and sharpen detection, see
+[Corpus & bundles](/corpus/).
+
+## Status
+
+v2 is a **preview** (v0.7.0-preview). The knowledge-bundle format and CLI
+surface may still change before the stable release.
+
+> **Coming from v1?** The legacy v1 documentation is preserved at
+> [/v1/](/v1/) and its sources live in the
+> [Friehub/Frensense](https://github.com/Friehub/Frensense) repository. v2 is
+> a ground-up rebuild of the engine; see the [architecture overview](/architecture/)
+> for what changed.
+
+---
+
+---
+url: https://frensense.friehub.cloud/guide/installation.md
+---
+# Installation
+
+Frensense ships as **one binary** that does everything: scanning, watch mode,
+the MCP server (`frensense mcp`), and the LSP server (`frensense lsp`). Pick
+whichever install path matches your setup.
+
+## Install from crates.io
+
+The quickest path if you have Rust installed:
+
+```bash
+cargo install frensense
+```
+
+This compiles and installs the `frensense` binary into `~/.cargo/bin`.
+
+## Install from npm
+
+If you are a Node.js user, the npm package packages prebuilt binaries for
+your platform (no Rust compiler needed):
+
+```bash
+# Global install
+npm install -g @friehub/frensense
+
+# Or run instantly without installing
+npx @friehub/frensense .
+```
+
+The npm launcher (`frensense`) wraps the native binary, so all commands and
+subcommands (`mcp`, `lsp`, `watch`) work identically to the direct binary.
+
+## Prebuilt binaries
+
+Release binaries for Linux x64, macOS (x64/arm64), and Windows x64 are
+published on the
+[GitHub releases](https://github.com/Friehub/frensense-v2/releases) page,
+each with SLSA L3 provenance:
+
+```bash
+# example: linux x64
+curl -LO https://github.com/Friehub/frensense-v2/releases/latest/download/frensense-linux-x64
+chmod +x frensense-linux-x64
+sudo mv frensense-linux-x64 /usr/local/bin/frensense
+```
+
+## Verify
+
+```bash
+frensense --version
+frensense --help
+```
+
+`--help` lists every subcommand, including `watch`, `mcp`, and `lsp`.
+
+## Build from source (contributors)
+
+You only need this if you want to hack on the engine. A recent Rust
+toolchain (1.95+) is required:
+
+```bash
+git clone https://github.com/Friehub/frensense-v2.git
+cd frensense-v2
+cargo build --release
+```
+
+The binary lands in `target/release/frensense`.
+
+---
+
+---
+url: https://frensense.friehub.cloud/guide/first-scan.md
+---
+# Your first scan
+
+Scan a directory and print findings to the terminal:
+
+```bash
+frensense ./src
+```
+
+## GitHub Actions annotations
+
+In CI, emit one workflow command per finding so results render directly on
+the PR's Files Changed tab:
+
+```bash
+frensense . --github
+```
+
+## Watch mode
+
+Re-scan changed files on every save and print only *new* findings:
+
+```bash
+frensense watch ./src
+```
+
+Findings are compared through stable semantic fingerprints, a finding that
+merely shifts lines after an unrelated edit is not reported again, and fixed
+findings age out of the baseline automatically.
+
+## Using a corpus bundle
+
+Teach the engine extra facts at scan time:
+
+```bash
+frensense ./src --corpus-bundle ./frensense-corpus.frc
+```
+
+If a `frensense-corpus.frc` file exists in the scanned root it is discovered
+automatically. See [Corpus & bundles](/corpus/).
+
+---
+
+---
+url: https://frensense.friehub.cloud/guide/teachability.md
+description: >-
+  A practical, user-readable guide to understanding and using Frensense's
+  teachable static analysis system.
+---
+
+# Teachable Static Analysis
+
+Traditional static analysis tools are built like rigid factories: to detect a new vulnerability pattern, someone has to rewrite the machine's internal gears or learn a specialized, obscure query language.
+
+Frensense works differently. It was built with a clear separation between **how code is analyzed** and **what vulnerabilities look like**:
+
+1. **The Engine** (`frensense-engine`): A compiler that parses code into an Intermediate Representation (IR), tracks how values move between variables, inspects branch conditions, and determines data reachability.
+2. **The Knowledge Bundles** (`.frc` files): Portable, compiled bundles of security facts that tell the engine which functions are dangerous, which are safe, and what policies must be followed.
+
+Because of this separation, **you do not need to write Rust, understand compiler theory, or recompile the engine** to teach Frensense new vulnerabilities.
+
+```mermaid
+flowchart LR
+    A["Vulnerable Example\n(*_positive)"] --> C["Frensense Bundler\n(Fact Extraction)"]
+    B["Remediated Example\n(*_negative)"] --> C
+    C --> D["Replay Verification\n(Gate: 0 False Positives)"]
+    D --> E["Compiled Knowledge Bundle\n(*.frc)"]
+    E --> F["Frensense Scanner\n(--corpus-bundle)"]
+    G["Target Codebase"] --> F
+    F --> H["Accurate Findings\n(Exact Source-to-Sink Path)"]
+```
+
+***
+
+## The Twin-Example Method: How Frensense Learns
+
+To teach Frensense, you create a **family** consisting of two files:
+
+* **`[name]_positive.[ext]`**: The vulnerable code containing the dangerous pattern.
+* **`[name]_negative.[ext]`**: The safe version showing how the vulnerability was remediated.
+
+### Why Twin Examples Work
+
+When a security vulnerability occurs in production, an engineer writes a pull request to fix it. That pull request contains the exact difference between "dangerous" and "safe":
+
+* Did they add an input validation check?
+* Did they switch from raw string concatenation to a parameterized query?
+* Did they invoke an authorization check before deleting a record?
+
+The Frensense bundler automatically compares the positive and negative files, identifies what made the difference, and distills it into a **Learned Fact**.
+
+***
+
+## The 13 Teachable Subsystems
+
+Under the hood, Frensense's knowledge system is categorized into 13 distinct security dimensions. Every dimension corresponds to an entry in the engine's `LearnedFactEntry` table:
+
+### 1. Dangerous Sinks (`LearnedFactEntry::Sink`)
+
+A "sink" is a function where untrusted data causes harm (such as executing a system command or running a database query).
+
+* **What is taught**: Which argument slot is dangerous.
+* **Real-world benefit**: In `cursor.execute(sql, params)`, slot 0 (`sql`) is dangerous, but slot 1 (`params`) is a safe parameterized binding channel. The engine learns not to flag parameterized queries.
+
+### 2. Untrusted Sources (`LearnedFactEntry::Source`)
+
+A "source" is any place where untrusted user data enters your application.
+
+* **What is taught**: Function calls or object properties that deliver user data (e.g., `request.cookies.get`, `request.body.json`, or custom RPC gateways).
+
+### 3. Sanitizers (`LearnedFactEntry::Sanitizer`)
+
+A "sanitizer" is a function that cleanses data or renders it harmless.
+
+* **What is taught**: Escaping helpers (e.g. `html.escape()`, `quote_plus()`) or type coercions (`int()`, `float()`) that remove risk.
+
+### 4. Data Propagators (`LearnedFactEntry::Propagator`)
+
+A "propagator" transforms data while preserving its untrusted nature.
+
+* **What is taught**: Encoding/decoding helpers like `base64.b64decode`, string formatters, or array manipulation functions.
+
+### 5. Security Policies (`LearnedFactEntry::Policy`)
+
+Policies enforce that certain security checks must happen in the same function or module as a sensitive operation.
+
+* **What is taught**: "Whenever function `delete_user()` is called, function `verify_admin_role()` must precede it."
+
+### 6. Non-Dataflow Checks (`LearnedFactEntry::Check`)
+
+Direct code structure inspection that does not require tracking variable flows.
+
+* **What is taught**: Detecting calls to deprecated APIs or configuration functions missing mandatory flags.
+
+### 7. Memory Contracts (`LearnedFactEntry::MemoryContract`)
+
+Tracks heap allocation and deallocation across boundaries in systems languages (C, C++, Rust).
+
+* **What is taught**: Which functions allocate new memory and which functions consume/free pointers, preventing use-after-free bugs.
+
+### 8. Cryptographic Standards (`LearnedFactEntry::WeakCrypto`)
+
+Enforces corporate cryptography standards.
+
+* **What is taught**: Flagging weak hash algorithms (`md5`, `sha1`, `des`) while allowing secure algorithms (`sha256`, `argon2id`).
+
+### 9. Authorization Guards (`LearnedFactEntry::GuardBypass`)
+
+Recognizes authorization and containment checks.
+
+* **What is taught**: Helper functions that validate whether a requested resource belongs to the current user or tenant.
+
+### 10. Schema Validation (`LearnedFactEntry::SchemaPolicy`)
+
+Recognizes input validation frameworks (such as Zod, Yup, or Pydantic).
+
+* **What is taught**: Acknowledging that data passing through schema validator methods is validated.
+
+### 11. Syntax Roles (`LearnedFactEntry::GrammarRole`)
+
+Teaches the parser how new or unusual language syntax functions without modifying the engine.
+
+* **What is taught**: Mapping language AST nodes to functions, variables, or call expressions dynamically.
+
+### 12. Syntax Features (`LearnedFactEntry::GrammarFeature`)
+
+Teaches language idioms like object destructuring, template literals, and ternary operators.
+
+* **What is taught**: Enabling accurate variable tracking through modern JavaScript or Python language features.
+
+### 13. Access Control & Multi-Tenancy (`LearnedFactEntry::IdorFinderSink`)
+
+Detects Insecure Direct Object References (IDOR).
+
+* **What is taught**: Database query methods and required multi-tenant ownership keys (e.g., `account_id`, `tenant_id`).
+
+***
+
+## Step-by-Step: How to Teach Frensense in Practice
+
+### Step 1: Create a Corpus Folder
+
+Create a directory with positive and negative code snippets:
+
+```bash
+mkdir -p my_corpus/custom_auth
+```
+
+Create `custom_auth_positive.py` (the bug):
+
+```python
+# VULNERABLE: Direct lookup without tenant scoping
+def get_invoice(req):
+    invoice_id = req.args.get("id")
+    return db.query_invoice(invoice_id)
+```
+
+Create `custom_auth_negative.py` (the fix):
+
+```python
+# SAFE: Scoped lookup requiring active organization ID
+def get_invoice(req):
+    invoice_id = req.args.get("id")
+    org_id = req.session.get("org_id")
+    return db.query_invoice(invoice_id, org_id=org_id)
+```
+
+### Step 2: Build the Bundle
+
+Run the Frensense bundler tool:
+
+```bash
+frensense-bundler my_corpus my_company.frc
+```
+
+The bundler extracts the fact, executes the **replay verification gate** across both files, and outputs a binary `my_company.frc` knowledge bundle.
+
+### Step 3: Scan with Your Knowledge Bundle
+
+Provide the bundle to the scanner:
+
+```bash
+frensense src/ --corpus-bundle my_company.frc
+```
+
+Or drop `frensense-corpus.frc` directly into the root directory of your project; Frensense will discover and load it automatically.
+
+***
+
+## Frequently Asked Questions
+
+### Do I need to know Rust to teach Frensense?
+
+**No.** All training examples are written in the target language of your application (Python, TypeScript, JavaScript, Go, C, Rust). The bundler handles all analysis and translation into binary knowledge bundles.
+
+### What happens if a learned rule conflicts with built-in rules?
+
+Knowledge bundles are designed with safe precedence:
+
+* **Learned facts win on specific knowledge**: If a bundle teaches that a specific parameter is safe, that precision overrides generic defaults.
+* **Narrow facts cannot be widened**: A generic rule cannot overwrite a precise, slot-restricted signature.
+
+### How does Frensense prevent false alarms from learned rules?
+
+Before any rule is written into an `.frc` bundle, it must pass the **Replay Gate**. The candidate rule is tested against all negative examples in the corpus. If it causes even a single false positive on safe code, the bundler rejects it.
+
+---
+
+---
+url: https://frensense.friehub.cloud/guide/cli.md
+---
+# CLI reference
+
+The `frensense` binary is the single entry point for the engine.
+
+## Commands
+
+| Command | Description |
+| --- | --- |
+| `frensense [path]` | Scan a file or directory and print findings. |
+| `frensense watch [path]` | Watch mode: re-scan changed files, print only new findings. |
+| `frensense mcp` | Run the MCP server (stdio, newline-delimited JSON-RPC) for AI agents. |
+| `frensense lsp` | Run the LSP server (stdio, Content-Length framing) for editors. |
+
+One binary carries all of this; there is no separate MCP or LSP package.
+
+## Options
+
+| Flag | Description |
+| --- | --- |
+| `--github` | Emit GitHub Actions workflow commands (`::error`/`::warning`) per finding. |
+| `--corpus-bundle <file>` | Load a `.frc` knowledge bundle into the engine for this scan. |
+| `--emit-baseline <file>` | Write the current finding fingerprints as a baseline. |
+| `--compare-baseline <file>` | Only report findings that are new relative to the baseline. |
+| `--language <lang>` | Restrict scanning to one language (`rust`, `typescript`, `javascript`, `python`). |
+| severity / confidence filters | Limit output to findings above a threshold. |
+
+## Environment variables
+
+| Variable | Description |
+| --- | --- |
+| `FRENSENSE_CORPUS_BUNDLE` | Default `.frc` bundle for MCP/LSP scans. |
+
+---
+
+---
+url: https://frensense.friehub.cloud/guide/github-actions.md
+---
+# GitHub Actions
+
+## Inline annotations
+
+`frensense . --github` emits one workflow command per finding:
+
+```yaml
+- name: Frensense scan
+  run: frensense . --github
+```
+
+Each finding becomes a spec-compliant
+`::error|warning|notice file=…,line=…,col=…::message` command, so findings
+render directly on the PR's Files Changed tab, no SARIF upload step.
+
+## Baseline gating
+
+Only fail on *new* findings by committing a baseline and comparing against it:
+
+```bash
+frensense . --emit-baseline frensense-baseline.json   # once
+frensense . --compare-baseline frensense-baseline.json # in CI
+```
+
+Because fingerprints are computed over semantic coordinates only
+(file, rule/sink, enclosing function, source), moving code around does not
+create false regressions.
+
+## Release integrity
+
+Release binaries ship with SLSA L3 provenance; every third-party GitHub
+Action used in the project's own workflows is pinned to an immutable commit
+SHA.
+
+---
+
+---
+url: https://frensense.friehub.cloud/guide/mcp.md
+---
+# MCP server (AI agents)
+
+Frensense ships an MCP server **inside the same `frensense` binary**. There is
+no separate `frensense-mcp` package to install; if you have the CLI, you have
+the server. Run it as a subcommand:
+
+::: tip Research & Architecture
+For an architectural deep-dive into why autonomous AI coding agents require deterministic compiler-mode verifiers to prevent hallucinations, read our research essay: [Static Analysis in the Era of Frontier AI](/blog/2026-10-09-static-analysis-in-the-age-of-frontier-ai).
+:::
+
+```bash
+frensense mcp
+```
+
+The server speaks newline-delimited JSON-RPC over stdio, so it plugs straight
+into any MCP client (Claude Desktop, Cursor, Cline, Windsurf, Claude Code):
+
+### Option A: Using the installed binary (Cargo, npm, or GitHub release)
+
+```json
+{
+  "mcpServers": {
+    "frensense": {
+      "command": "frensense",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Option B: Zero-install via npx (Node.js users)
+
+No manual install or PATH setup required:
+
+```json
+{
+  "mcpServers": {
+    "frensense": {
+      "command": "npx",
+      "args": ["-y", "@friehub/frensense", "mcp"]
+    }
+  }
+}
+```
+
+## Tools
+
+### `frensense_audit`
+
+Directory audit. Supports the `FRENSENSE_CORPUS_BUNDLE` environment variable
+so learned facts participate in agent scans.
+
+### `frensense_scan_file`
+
+Single-file scan designed for agent edit loops. Scan a file right after
+writing it. Supports a `corpus_bundle` argument and reports tool-level
+`unsupported_file` outcomes for file types the engine does not lower.
+
+### `frensense_diff`
+
+Scan a unified diff (patch text, or `git diff HEAD` plus untracked files) and
+report only findings on added-line ranges. The result answers "does **my**
+change introduce findings?" without re-auditing the whole tree.
+
+All three tools accept `.frc` corpus bundles so learned facts participate in
+MCP scans exactly as in CLI scans.
+
+---
+
+---
+url: https://frensense.friehub.cloud/guide/lsp.md
+---
+# LSP server (editors)
+
+Frensense ships an LSP server **inside the same `frensense` binary**. There is
+no separate `frensense-lsp` package to install. Run it as a subcommand:
+
+```bash
+frensense lsp
+```
+
+It publishes diagnostics on `textDocument/didOpen` and `textDocument/didSave`
+for Python, JavaScript/TypeScript, Rust, and Go files.
+
+* Diagnostics carry **0-based ranges**, the stable finding ID in `code`, and
+  the taint observation in `message`.
+* Zero extra dependencies: the server hand-rolls `Content-Length` framing.
+* The engine stays the single source of truth: the server scans the saved
+  file on disk through the same per-file path as watch mode and MCP.
+
+Set `FRENSENSE_CORPUS_BUNDLE` to make learned `.frc` facts participate in
+editor diagnostics.
+
+## Editor setup
+
+Most editors let you register a custom language server. The command is
+always `frensense lsp`:
+
+```json
+{
+  "languageserver": {
+    "frensense": {
+      "command": "frensense",
+      "args": ["lsp"],
+      "filetypes": ["python", "javascript", "typescript", "go", "rust"]
+    }
+  }
+}
+```
+
+Or zero-install via `npx` (Node.js users):
+
+```json
+{
+  "languageserver": {
+    "frensense": {
+      "command": "npx",
+      "args": ["-y", "@friehub/frensense", "lsp"],
+      "filetypes": ["python", "javascript", "typescript", "go", "rust"]
+    }
+  }
+}
+```
+
+For Neovim (nvim-lspconfig):
+
+```lua
+require'lspconfig'.configure('frensense', {
+  cmd = { 'frensense', 'lsp' },
+  filetypes = { 'python', 'javascript', 'typescript', 'go', 'rust' },
+})
+```
+
+---
+
+---
+url: https://frensense.friehub.cloud/architecture.md
+---
+# Architecture overview
+
+Frensense v2 is a **compiler first, checker second**. Every source file is
+lowered to a lightweight IR, and all analysis happens on the resulting
+program graph, never on source text.
+
+## The pipeline
+
+1. **Lowering**, per-language providers (Oxc for JS/TS, rust-analyzer HIR
+   for Rust, tree-sitter-style parsing for Python/Go) reduce each file to the
+   engine IR.
+2. **Program graph**, def-use chains, call graph, Steensgaard points-to
+   with two-phase constraint solving, heap modelling, memory SSA, and an
+   SVFG (Sparse Value-Flow Graph) are built from the IR.
+3. **Value analysis**, an abstract-interpretation value lattice tracks
+   constants and string/number ranges, with branch sharpening: each `if`/
+   `match` arm is analysed under the constraints its guard implies.
+4. **Checkers**, taint reachability, memory safety, policy, and learned
+   checks query the graph. Each finding is an exact source-to-sink path.
+
+## Chapters
+
+* [The program graph](/architecture/program-graph)
+* [Checkers](/architecture/checkers)
+* [Knowledge bundles (.frc)](/architecture/bundles)
+
+---
+
+---
+url: https://frensense.friehub.cloud/architecture/program-graph.md
+---
+# The program graph
+
+The program graph is the union of several analyses over one IR:
+
+* **Def-use chains** resolve where every value is produced and consumed.
+* **Call graph** drives interprocedural reachability and summaries.
+* **Points-to** is Steensgaard-based with two-phase constraint solving; the
+  second phase adds call-site-sensitive flow for sharper alias answers.
+* **Heap model + memory SSA** model stores and loads so field-sensitive and
+  index-sensitive flows (e.g. `$row[$col]`) participate in analysis.
+* **SVFG** (Sparse Value-Flow Graph) connects value definitions to their
+  uses across procedures, the substrate taint queries walk.
+
+## Branch sharpening
+
+Guards are not just cut-edges. Inside `if x < 10 { ... }` the value lattice
+knows `x ∈ [.., 9]`; inside the else-branch it knows the negation. This makes
+range guards (`if i < arr.len()`) *provably* dominate sinks instead of being
+matched textually.
+
+---
+
+---
+url: https://frensense.friehub.cloud/architecture/checkers.md
+---
+# Checkers
+
+Checkers are queries over the program graph. The current set:
+
+| Checker | What it reports |
+| --- | --- |
+| Taint reachability | Source-to-sink flows for XSS, SQLi, command injection, SSRF, path traversal, IDOR. |
+| Session-trust / guard bypass | Authentication guards that a flow escapes. |
+| Use-after-free / double-free | Dangling use or repeated deallocation, including through wrapper functions (interprocedural allocation summaries). |
+| Out-of-bounds | Indexed accesses that escape every bounding guard, judged against the value lattice. |
+| Policy | Program-level rules: required calls (e.g. an authorization helper) and forbidden calls, at function or module scope. |
+| Learned checks | Facts learned from the corpus: sources, sinks, sanitisers, policies, merged from `.frc` bundles. |
+
+## Learned facts
+
+Bundles can contribute five kinds of facts: **Source**, **Sink**,
+**Sanitizer**, **Policy**, and **Check**. Learned `unless_range_check`
+requirements are satisfied by guards the value lattice proves, not by the
+mere textual presence of a call.
+
+---
+
+---
+url: https://frensense.friehub.cloud/architecture/bundles.md
+---
+# Knowledge bundles (.frc)
+
+`.frc` files are checksummed, versioned archives carrying two things:
+
+1. **Patterns**, vulnerability examples with metadata (observation, impact,
+   CWE, CVSS, OWASP, severity).
+2. **Learned facts**, replay-verified Source / Sink / Sanitizer / Policy /
+   Check facts the engine merges into its fact table at scan time.
+
+## Loading order
+
+At scan time the engine loads spec tables, then seed facts, then merges the
+bundle. A bundle is discovered from (in order):
+
+* the `--corpus-bundle` / `--bundle` CLI flag,
+* the `FRENSENSE_CORPUS_BUNDLE` environment variable (MCP / LSP),
+* auto-discovery of `frensense-corpus.frc` in the scanned root.
+
+## Why facts, not rules
+
+Facts are lower-level than "regex rules": a learned sink participates in the
+same graph analysis as a builtin one, so taint paths, guard recognition, and
+value reasoning all apply to it. The bundler only publishes a fact after it
+replays against labelled positive *and* negative examples (support ≥ 2).
+
+---
+
+---
+url: https://frensense.friehub.cloud/corpus.md
+---
+# Corpus & .frc bundles
+
+The corpus is a set of **labelled example families**. Each family contains
+at least one *positive* (vulnerable) example and one *negative* (fixed)
+example. The bundler replays each family through the engine, diffs the two
+variants, and learns facts that distinguish them, then verifies those facts
+against every other family before publishing them into a `.frc` bundle.
+
+```
+corpus/
+├── ts_sqli_01/
+│   ├── positive.ts     # vulnerable
+│   └── negative.ts     # fixed  (starts with "SAFE:")
+├── py_cmd_03/
+│   ├── positive.py     # [frensense] metadata block at the top
+│   └── negative.py
+└── ...
+```
+
+## Building a bundle
+
+```bash
+frensense-bundler ./corpus ./frensense-corpus.frc
+```
+
+Place the output at the root of the scanned project as
+`frensense-corpus.frc` (auto-discovered), pass it with `--corpus-bundle`, or
+set `FRENSENSE_CORPUS_BUNDLE` for MCP/LSP.
+
+## Next
+
+* [Authoring guide](/corpus/authoring), naming, metadata blocks, policy
+  families, verification workflow, and common mistakes.
+
+---
+
+---
+url: https://frensense.friehub.cloud/corpus/authoring.md
+---
+
+# Corpus authoring guide
+
+> How to teach Frensense new vulnerabilities. Frensense is **corpus-based, not
+> rule-based**: there is no rule language to learn and no YAML to write. You
+> provide a vulnerable example and its remediated counterpart, and the
+> bundler verifies and distills the difference into a portable `.frc` bundle.
+
+## 1. The mental model
+
+A Frensense **family** represents one vulnerability concept, expressed as a pair of files:
+
+* `<family>_positive.<ext>`: the vulnerable version
+* `<family>_negative.<ext>`: the fixed / safe version
+
+The bundler lowers both through the same engine that the scanner uses, computes the semantic delta (e.g., what call the negative avoids, what guard or sanitizing transform it adds), and proposes a *fact*. Every proposed fact then passes a **replay gate**: the fact is only published if, after installing it, the positive alerts, the negative stays silent, and no other family that already separated at baseline regresses. If a fact cannot prove itself against your corpus, it is never published. That provides built-in quality control without manual rule linting.
+
+Facts ship inside an `.frc` bundle (binary, versioned, checksummed). The engine merges bundle facts **over** its built-in tables, bundle knowledge always wins on collision, and coarse all-args facts never widen precise slot-restricted ones.
+
+Supported languages: `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `rs`, `c`.
+
+## 2. Quick start (5 minutes)
+
+Build a family, compile the bundle, and scan with it:
+
+```bash
+mkdir -p mycorpus/ts_sqli
+cat > mycorpus/ts_sqli/ts_sqli_positive.ts <<'EOF'
+// [frensense]
+// observation: User id concatenated into SQL query string
+// impact: Attacker can read or modify arbitrary database rows
+// improvement: Use parameterized query binding ($1)
+// cwe: CWE-89
+// severity: Critical
+
+import { Pool } from "pg";
+const pool = new Pool();
+export async function getUser(req: any) {
+  const id = req.body.id;
+  return pool.query("SELECT * FROM users WHERE id = " + id);
+}
+EOF
+
+cat > mycorpus/ts_sqli/ts_sqli_negative.ts <<'EOF'
+// SAFE: parameterized query keeps user data out of the SQL string.
+import { Pool } from "pg";
+const pool = new Pool();
+export async function getUser(req: any) {
+  const id = req.body.id;
+  return pool.query("SELECT * FROM users WHERE id = $1", [id]);
+}
+EOF
+
+# Build the bundle (using the frensense CLI or frensense-bundler)
+frensense bundle mycorpus my.frc
+# [facts] 1 families grouped from mycorpus
+# [facts] round-trip OK: 1 learned facts in bundle
+#   [provisional] sanitizer:... <- ts_sqli
+
+# Scan a target project with the learned bundle
+frensense path/to/target --corpus-bundle my.frc
+```
+
+You can also drop the bundle into your project root as `frensense-corpus.frc`; it is picked up automatically. The MCP server and LSP pick it up via the `FRENSENSE_CORPUS_BUNDLE` environment variable.
+
+## 3. Naming and layout rules
+
+* **Family ID**: Filename stem before `_positive` / `_negative`.\
+  `ts_sqli_positive.ts` -> family `ts_sqli`.
+* **Language Prefixes**: Always prefix stems with the language (`c_`, `py_`, `ts_`, `rs_`, `go_`). Mixing languages under the same stem collides during grouping.
+* **Multiple Variants**: You can add multiple positive and negative variants to strengthen the gate (`ts_sqli_negative.ts`, `ts_sqli_negative2.ts`).
+* **Held-Out Blinding Variants (`_heldout_`)**:\
+  To verify generalization without training memorization, add blind check pairs:
+  ```text
+  ts_sqli_heldout_positive.ts
+  ts_sqli_heldout_negative.ts
+  ```
+  The bundler explicitly skips any file with `_heldout` during fact extraction, allowing your test runner to verify detection against unseen variants.
+* **Directory Layout**: Directories are free-form metadata (`<lang>/<cwe>/<family>/`). Moving a family between directories does not alter its learned facts.
+
+## 4. The `[frensense]` metadata block
+
+The positive file may open with a structured comment block in the first 30 lines. This text is baked directly into the `.frc` bundle and displayed across all scanner interfaces (CLI, MCP, LSP):
+
+```typescript
+// [frensense]
+// observation: User id concatenated into SQL query string
+// impact: Attacker can read or modify arbitrary database rows
+// improvement: Use parameterized query binding ($1)
+// cwe: CWE-89
+// cvss: 9.1
+// owasp: A03:2021
+// severity: Critical
+```
+
+* **Comment Prefixes**: Python uses `#`; C, TypeScript, Rust, and Go use `//`.
+* **Fields**:
+  * `observation`: Specific description of the vulnerability pattern.
+  * `impact`: Technical consequence if exploited.
+  * `improvement`: Recommended remediation guidance.
+  * `cwe`: Standard identifier (e.g. `CWE-89`, `CWE-918`).
+  * `cvss`: Float score (0.0 to 10.0).
+  * `owasp`: OWASP Top 10 category (e.g. `A03:2021`).
+  * `severity`: `Critical`, `High`, `Warning`, or `Info`.
+* **Negative Files**: Negative files must **not** carry the `[frensense]` block. Open negative files with:
+  ```typescript
+  // SAFE: <explanation of why this variant is secure>
+  ```
+
+## 5. What each family shape teaches
+
+### 5.1 Dataflow taint families (sinks & sanitizers)
+
+Default shape: no special annotation needed.
+
+* **Sanitizers**: If the negative contains a function that sanitizes or validates input before the sink, the bundler extracts a sanitizer fact:
+  * *Predicate guards (`allowlist`)*: Functions returning booleans feeding branch conditions (`if (!isValid(x)) return`).
+  * *Transforms (`encode`)*: Functions that encode or transform values (`x = sanitize(x)`).
+* **Sinks**: If the positive calls an un-modeled sensitive function that does not alert under built-in tables, the bundler proposes the call as a new sink.
+
+#### Avoid reserved collection & utility names
+
+The bundler filters common utility and accessor calls to avoid noise. The following names are **never** proposed as sanitizers or sinks:
+
+```text
+get, set, has, then, catch, finally, toString, valueOf, push,
+pop, map, filter, reduce, forEach, join, split, len, length,
+keys, values, entries, stringify, parse
+```
+
+Always use descriptive names like `isValid()`, `isAllowed()`, or `cleanInput()`.
+
+### 5.2 Policy families (`check-call:`)
+
+Used when the flaw is not data flowing into a sink, but rather an unmitigated action executed without required authorization or checks:
+
+1. Add `// check-call: <trigger>` (or `# check-call:`) in the first 30 lines of the positive variant.
+2. In the positive variant, invoke the trigger without protection.
+3. In the negative variant, invoke the trigger guarded by a validation helper (`if (isAuthorized())`) or numeric range comparison.
+
+```typescript
+// ts_priv_positive.ts
+// check-call: deleteAccount
+export function handle(req: any) {
+  deleteAccount(req.body.userId); // Unguarded call -> alerts
+}
+
+// ts_priv_negative.ts
+// SAFE: guarded by permission check
+function hasAdminRole(): boolean { return true; }
+export function handle(req: any) {
+  if (hasAdminRole()) {
+    deleteAccount(req.body.userId); // Guarded -> clean
+  }
+}
+```
+
+The resulting bundle learns `check:policy_deleteAccount(deleteAccount, guard=Some("hasAdminRole"))`.
+
+### 5.3 Integer overflow rules (`check-rule:`)
+
+For systems languages (C/C++), integer overflow prover rules can be declared via metadata:
+
+```c
+// [frensense]
+// check-rule: integer_overflow_alloc
+// wrap-max: 18446744073709551615
+// observation: Integer multiplication in allocation size wraps on 64-bit platforms
+// severity: Critical
+```
+
+This registers an allocation size overflow check in the prover table.
+
+## 6. Statuses: `provisional` vs `confirmed`
+
+When compiling a bundle, the bundler outputs a status for each learned fact:
+
+* `provisional`: Supported by 1 corpus family (support = 1). Fully active and installed.
+* `confirmed`: Independently supported by 2 or more distinct corpus families (support >= 2).
+
+To upgrade a fact to `confirmed`, author a second independent family demonstrating the same defense pattern in a different context.
+
+## 7. Verification workflow
+
+```bash
+# 1. Compile bundle and review published facts
+frensense bundle mycorpus my.frc
+
+# 2. Run with debug trace if a fact failed to appear
+FXDBG=1 frensense bundle mycorpus my.frc
+
+# 3. Verify on target test files
+frensense test_targets/ --corpus-bundle my.frc --json
+
+# 4. Verify against clean code to ensure zero false positives
+frensense clean_codebase/ --corpus-bundle my.frc
+```
+
+## 8. Common pitfalls
+
+| Symptom | Cause | Remedy |
+|---|---|---|
+| Expected fact missing | Family did not separate: positive stayed silent or negative still alerted. | Run with `FXDBG=1` to inspect baseline alert flags. |
+| Sanitizer not proposed | Name matches the built-in noise list (`has`, `get`, `map`). | Rename helper to a domain-specific guard (e.g. `isValidDomain`). |
+| Exception treated as guard | Guard name ends with `Error` or `Exception`. | Guard names ending in `Error` are filtered out; name the function `validate()` or `check()`. |
+| Cross-family regression | Proposed fact suppresses an existing positive or causes another negative to alert. | Ensure the negative variant does not use overly broad sanitizers. |
+
+## 9. Authoring checklist
+
+* \[ ] Language-prefixed filename stem (`ts_`, `py_`, `c_`).
+* \[ ] Positive file contains complete `[frensense]` block with observation, impact, and improvement.
+* \[ ] Negative file contains `// SAFE:` comment.
+* \[ ] Negative differs from positive strictly in the remediation logic.
+* \[ ] Guard and sanitizer functions avoid reserved accessor names.
+* \[ ] `frensense bundle` succeeds with `round-trip OK`.
+* \[ ] Positive alerts, negative stays silent, clean code produces zero findings.
+
+---
+
+---
+url: https://frensense.friehub.cloud/bundles.md
+description: Verified knowledge bundles and auditable capability datasheets for Frensense
+---
+
+# Security Rule Bundles (`.frc`)
+
+Frensense separates its deterministic static-analysis engine from learned vulnerability specifications. Security rules are compiled into immutable, serialized **`.frc` (Frensense Rule Corpus)** bundles that load in milliseconds with zero runtime compilation overhead.
+
+Every rule bundle is verified against a differential test matrix and held-out test suites, guaranteeing **100.0% True Positive Rate (TPR)** and **0.0% False Positive Rate (FPR)** across all certified CWE families.
+
+***
+
+## Community Rule Bundles
+
+The community bundles provide verified detection for common vulnerabilities across supported languages. Download the bundle for your stack or use the unified master bundle.
+
+| Bundle | Target Stack | Size | Verification Status | Artifacts |
+| :--- | :--- | :--- | :--- | :--- |
+| **`frensense-typescript.frc`** | TypeScript & JavaScript (Node.js, Express, Next.js) | ~10 KB | 44/44 Tests Passed (100% TPR / 0% FPR) | Download .frc • GitHub Mirror |
+| **`frensense-python.frc`** | Python (Flask, Django, CLI scripts) | ~2 KB | 10/10 Tests Passed (100% TPR / 0% FPR) | Download .frc • GitHub Mirror |
+| **`frensense-c.frc`** | C & Systems (Memory safety, UAF, Leaks, Buffer Bounds) | ~4 KB | 28/28 Tests Passed (100% TPR / 0% FPR) | Download .frc • GitHub Mirror |
+| **`frensense-master.frc`** | Universal Unified Bundle (All Supported Languages) | ~16 KB | 82/82 Tests Passed (100% TPR / 0% FPR) | Download .frc • GitHub Mirror |
+
+### Integrity & Audit Artifacts
+
+* **Capability Datasheet (JSON)**: cwe_datasheet.json
+* **Capability Datasheet (Markdown)**: CWE_DATASHEET.md
+* **SHA-256 Checksums**: SHA256SUMS
+
+***
+
+## Quickstart: Using a Bundle
+
+### 1. Download
+
+Download the relevant bundle for your environment:
+
+```bash
+# TypeScript / Node.js
+curl -fsSL https://bundles.friehub.cloud/community/latest/frensense-typescript.frc -o frensense-typescript.frc
+```
+
+### 2. Inspect Metadata & Provenance
+
+Verify the facts count, rule hashes, and compiler version:
+
+```bash
+frensense bundle info frensense-typescript.frc
+```
+
+Output:
+
+```text
+============================= Bundle Details =============================
+Path:               frensense-typescript.frc
+Bundle Magic:       FRC1 (Valid)
+Compiled Version:   0.7.0-preview.5
+Total Facts:        42
+Taint Signatures:   18
+Guards & Sanitizers: 12
+Rules / Policies:   12
+==========================================================================
+```
+
+### 3. Run Analysis
+
+Run the scanner passing the bundle via the `-b, --bundle` flag:
+
+```bash
+frensense ./src --bundle frensense-typescript.frc
+```
+
+Or set the environment variable in your CI/CD runner:
+
+```bash
+export FRENSENSE_CORPUS_BUNDLE="./frensense-typescript.frc"
+frensense ./src
+```
+
+***
+
+## CWE Capability Matrix & Verification Datasheet
+
+Every release is tested against real-world vulnerability reproductions and held-out blind variations.
+
+| Language | CWE | Vulnerability Description | Replay TPR | Replay FPR | Held-Out Generalization | Status |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: |
+| **C** | `CWE-078` | OS Command Injection | 100.0% | 0.00% | PASS | Verified |
+| **C** | `CWE-401` | Missing Release of Memory (Memory Leak) | 100.0% | 0.00% | PASS | Verified |
+| **C** | `CWE-416` | Use-After-Free (UAF) | 100.0% | 0.00% | PASS | Verified |
+| **C** | `CWE-680` | Integer Overflow or Wraparound | 100.0% | 0.00% | PASS | Verified |
+| **C** | `CWE-787` | Out-of-bounds Write | 100.0% | 0.00% | PASS | Verified |
+| **Python** | `CWE-022` | Path Traversal / Arbitrary File Read | 100.0% | 0.00% | PASS | Verified |
+| **Python** | `CWE-078` | OS Command Injection (Subprocess / Shell) | 100.0% | 0.00% | PASS | Verified |
+| **TypeScript** | `CWE-020` | Input Validation & Idempotency Key Handling | 100.0% | 0.00% | PASS | Verified |
+| **TypeScript** | `CWE-022` | Path Traversal (`express.sendFile`, `fs.readFile`) | 100.0% | 0.00% | PASS | Verified |
+| **TypeScript** | `CWE-078` | OS Command Injection (`child_process.exec`) | 100.0% | 0.00% | PASS | Verified |
+| **TypeScript** | `CWE-079` | Reflected & DOM Cross-Site Scripting (XSS) | 100.0% | 0.00% | PASS | Verified |
+| **TypeScript** | `CWE-089` | SQL Injection (PostgreSQL, SQLite, Dynamic Identifiers) | 100.0% | 0.00% | PASS | Verified |
+| **TypeScript** | `CWE-094` | Code Injection (`vm.runInContext`, Handlebars AST) | 100.0% | 0.00% | PASS | Verified |
+| **TypeScript** | `CWE-1321` | Prototype Pollution (Lodash `unset`, Deep Merge) | 100.0% | 0.00% | PASS | Verified |
+| **TypeScript** | `CWE-1333` | Regular Expression Denial of Service (ReDoS) | 100.0% | 0.00% | PASS | Verified |
+| **TypeScript** | `CWE-327` | Use of Weak Cryptographic Primitives (HMAC Keys) | 100.0% | 0.00% | PASS | Verified |
+| **TypeScript** | `CWE-601` | URL Redirection to Untrusted Site (Open Redirect) | 100.0% | 0.00% | PASS | Verified |
+| **TypeScript** | `CWE-674` | Uncontrolled Recursion (Stack Exhaustion) | 100.0% | 0.00% | PASS | Verified |
+| **TypeScript** | `CWE-918` | Server-Side Request Forgery (SSRF, Axios / Fetch) | 100.0% | 0.00% | PASS | Verified |
+
+***
+
+## Enterprise & Commercial Bundles
+
+For mission-critical deployments and regulatory compliance, Frensense provides specialized domain rule packs:
+
+* **Enterprise Cloud & Microservices**: Deep heuristics for AWS SDK, Google Cloud Client Libraries, Azure Blob, Kubernetes operator handlers, and distributed tracing metadata.
+* **Enterprise Systems & Low-Level**: Advanced pointer alias tracking, hardware driver register mutations, custom ring-buffer allocators, and kernel subsystem taint.
+* **Enterprise Fintech & Compliance**: Monadic transactional flows, double-entry ledger range checks, state-machine transitions, and PCI-DSS / SOC2 audit compliance.
+
+Enterprise packs include cryptographically signed capability datasheets, automated quarterly updates, and SLA-backed zero-day rule additions. Commercial subscriptions will be available via the Friehub Portal powered by Dodo Payments.
