@@ -1,0 +1,10 @@
+# Smithery configuration: https://smithery.ai/docs
+# Local stdio server distributed as the npm package; no hosted runtime.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties: {}
+    additionalProperties: false
+  commandFunction: |-
+    (config) => ({ command: 'npx', args: ['-y', '@friehub/frensense', 'mcp'] })

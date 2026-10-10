@@ -1,6 +1,6 @@
 <div align="left">
   <h1>Frensense</h1>
-  <p><strong>A deterministic, dataflow-driven security scanner for TypeScript, JavaScript, Python, Go, and Rust.</strong></p>
+  <p><strong>Deterministic static analysis and code scanning for TypeScript, JavaScript, Python, Go, Rust, and C. Taint analysis that proves every flaw from source to sink.</strong></p>
   <p>
     <a href="https://crates.io/crates/frensense"><img src="https://img.shields.io/crates/v/frensense.svg" alt="crates.io" /></a>
     <a href="https://www.npmjs.com/package/@friehub/frensense"><img src="https://img.shields.io/npm/v/@friehub/frensense.svg" alt="npm" /></a>
@@ -18,11 +18,17 @@
 
 <br />
 
-Frensense detects security vulnerabilities by combining compiler-grade dataflow
-analysis with a learned knowledge base. No brittle YAML rule packs, no regex
-heuristics, the engine builds an AST, def-use chains, and a program dependence
-graph for your code, then verifies whether untrusted data can actually reach a
-dangerous sink.
+Frensense is a static application security testing (SAST) engine that detects
+vulnerabilities by combining compiler-grade dataflow analysis with a learned
+knowledge base. No brittle YAML rule packs, no regex heuristics: the engine
+builds an AST, def-use chains, and a program dependence graph for your code,
+then runs taint analysis to verify whether untrusted data can actually reach a
+dangerous sink. Every finding carries the concrete source-to-sink path with
+file positions, so code scanning output points at the exact line to fix.
+
+**AI agents:** a machine-readable documentation index is published at
+[llms.txt](https://frensense.friehub.cloud/llms.txt); the full docs in one
+file are at [llms-full.txt](https://frensense.friehub.cloud/llms-full.txt).
 
 ## How It Works
 
@@ -137,10 +143,10 @@ same stable ID.
 | Language | Parser | Compiler Mode |
 |----------|--------|---------------|
 | TypeScript / JavaScript / TSX | Tree-sitter | Oxc (`--use-compiler`) |
-| Python | Tree-sitter |, |
-| Go | Tree-sitter |, |
+| Python | Tree-sitter | - |
+| Go | Tree-sitter | - |
 | Rust | Tree-sitter | rust-analyzer HIR (`--use-compiler`) |
-| C | Tree-sitter |, |
+| C | Tree-sitter | - |
 
 ## MCP Integration (AI Agents)
 
@@ -304,4 +310,4 @@ pull request.
 ## License
 
 GPL-3.0, see [LICENSE](LICENSE). Commercial licensing available at
-https://friehub.com/licensing.
+https://www.friehub.cloud/contact.
