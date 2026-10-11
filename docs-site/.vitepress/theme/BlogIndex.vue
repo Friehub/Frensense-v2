@@ -8,7 +8,7 @@ const sorted = [...posts]
 </script>
 
 <template>
-  <div class="blog-list">
+  <main class="blog-list" id="main-content">
     <header class="blog-header">
       <h1>Blog</h1>
       <p class="lead">Research, release notes, and architecture essays from the Frensense engineering team.</p>
@@ -37,7 +37,7 @@ const sorted = [...posts]
         </div>
       </article>
     </div>
-  </div>
+  </main>
 </template>
 
 <style scoped>

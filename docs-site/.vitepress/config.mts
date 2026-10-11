@@ -185,6 +185,32 @@ export default defineConfig({
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
     ['meta', { name: 'twitter:site', content: '@friehub' }],
+    // Preconnect to Google Fonts CDN early (resolves Lighthouse missing preconnects)
+    ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
+    ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
+    // Non-render-blocking font loading with preload and print media swap
+    [
+      'link',
+      {
+        rel: 'preload',
+        as: 'style',
+        href: 'https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap'
+      }
+    ],
+    [
+      'link',
+      {
+        rel: 'stylesheet',
+        href: 'https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap',
+        media: 'print',
+        onload: "this.media='all'"
+      }
+    ],
+    [
+      'noscript',
+      {},
+      '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap">'
+    ],
     [
       'script',
       { type: 'application/ld+json' },
@@ -230,7 +256,8 @@ export default defineConfig({
           if (cached) applyVersion(cached);
         } catch (_) {}
 
-        if (window.fetch) {
+        function syncLatestVersion() {
+          if (!window.fetch) return;
           fetch('https://api.github.com/repos/Friehub/frensense-v2/releases/latest')
             .then(function(res) { return res.ok ? res.json() : null; })
             .then(function(data) {
@@ -242,12 +269,14 @@ export default defineConfig({
             })
             .catch(function() {});
         }
-        window.addEventListener('DOMContentLoaded', function() {
-          try {
-            var cached = sessionStorage.getItem(STORAGE_KEY);
-            if (cached) applyVersion(cached);
-          } catch (_) {}
-        });
+
+        if ('requestIdleCallback' in window) {
+          window.requestIdleCallback(syncLatestVersion);
+        } else {
+          window.addEventListener('load', function() {
+            setTimeout(syncLatestVersion, 1500);
+          });
+        }
       })();
       `
     ]
@@ -352,8 +381,20 @@ export default defineConfig({
     }
   },
 
-  async transformHead(context) {
-    // no-op; kept for future font/meta injection
+  transformHtml(code) {
+    if (!code.includes('<main')) {
+      if (code.includes('<div class="VPHome"')) {
+        return code
+          .replace('<div class="VPHome"', '<main class="VPHome" id="main-content"')
+          .replace('</div></div><footer class="VPFooter"', '</div></main><footer class="VPFooter"')
+      }
+      if (code.includes('<div class="VPPage"')) {
+        return code
+          .replace('<div class="VPPage"', '<main class="VPPage" id="main-content"')
+          .replace('</div></div><footer class="VPFooter"', '</div></main><footer class="VPFooter"')
+      }
+    }
+    return code
   }
 })
 
