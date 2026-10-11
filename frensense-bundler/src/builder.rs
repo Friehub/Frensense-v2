@@ -5,7 +5,7 @@
 //! Bundle construction: corpus pairs → replay-verified facts → `.frc` bytes.
 
 use crate::fact_extract::{extract_facts, group_families};
-use crate::format::{write_bundle, BundlePattern, BundlePayloadV5};
+use crate::format::{write_bundle, BundlePattern, BundlePayloadV6};
 
 /// §9 pipeline: corpus pairs → replay-verified learned facts → bundle bytes.
 ///
@@ -60,8 +60,8 @@ pub fn build_facts_bundle(
     }
 
     let count = entries.len().max(patterns.len()) as u32;
-    // v5 payload; `policy_pack` fills once `--policy` ingestion lands (5.1).
-    let payload = BundlePayloadV5 {
+    // v6 payload; package-qualified provenance facts for LTS 0.7.0.
+    let payload = BundlePayloadV6 {
         patterns,
         learned_facts: entries,
         policy_pack: Vec::new(),

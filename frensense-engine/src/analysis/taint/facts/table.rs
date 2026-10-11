@@ -20,6 +20,12 @@ pub struct FactTable {
     /// sinks.
     pub sink_signatures: FxHashMap<String, SinkSignature>,
     pub sanitizer_facts: FxHashMap<String, SanitizerFact>,
+    /// Scoped sink signatures: (package, call_name) -> SinkSignature.
+    pub scoped_sink_signatures: FxHashMap<(String, String), SinkSignature>,
+    /// Scoped sanitizers: (package, call_name) -> SanitizerFact.
+    pub scoped_sanitizer_facts: FxHashMap<(String, String), SanitizerFact>,
+    /// Scoped taint sources: (package, pattern).
+    pub scoped_sources: FxHashSet<(String, String)>,
     /// Corpus-verified non-dataflow checks (order-preserving; dedup on
     /// `(rule, call)` at merge time, provenance-ordered per entry).
     pub learned_checks: Vec<(LearnedCheckFact, Provenance)>,
@@ -189,6 +195,7 @@ impl FactTable {
                 s.clone(),
                 SanitizerFact {
                     call: s.clone(),
+                    package: None,
                     kind: DEFAULT_SANITIZER_KIND.into(),
                     sanitizes_args: Default::default(),
                     guard_style: false,
@@ -222,6 +229,22 @@ impl FactTable {
         for (k, v) in &other.sanitizer_facts {
             self.sanitizer_facts.insert(k.clone(), v.clone());
         }
+        for (k, v) in &other.scoped_sink_signatures {
+            let widens = self
+                .scoped_sink_signatures
+                .get(k)
+                .map(|cur| !cur.dangerous_args.is_empty() || cur.binding_args_safe)
+                .unwrap_or(false);
+            if widens {
+                continue;
+            }
+            self.scoped_sink_signatures.insert(k.clone(), v.clone());
+        }
+        for (k, v) in &other.scoped_sanitizer_facts {
+            self.scoped_sanitizer_facts.insert(k.clone(), v.clone());
+        }
+        self.scoped_sources
+            .extend(other.scoped_sources.iter().cloned());
         // Provenance-ordered (Phase 5.3): learned checks accumulate with
         // dedup on (rule, call), but the higher-ranked provenance wins the
         // collision (Spec < Authored < Learned) and ties keep the existing
@@ -606,9 +629,15 @@ pub enum LearnedFactEntry {
     /// [`TaintConfig::sources`] so bundles teach new frameworks without
     /// touching the built-in tables. Matches by full name or, for dotted
     /// entries, by last segment (same convention as sinks).
-    Source { pattern: String },
+    Source {
+        pattern: String,
+        #[cfg_attr(feature = "serialize", serde(default))]
+        package: Option<String>,
+    },
     Sink {
         call: String,
+        #[cfg_attr(feature = "serialize", serde(default))]
+        package: Option<String>,
         /// Dangerous argument slots; empty = all slots dangerous.
         dangerous_args: BTreeSet<usize>,
         /// Whether non-dangerous slots are safe binding channels.
@@ -616,6 +645,8 @@ pub enum LearnedFactEntry {
     },
     Sanitizer {
         call: String,
+        #[cfg_attr(feature = "serialize", serde(default))]
+        package: Option<String>,
         kind: String,
         guard_style: bool,
     },
@@ -766,6 +797,8 @@ pub enum LearnedFactEntry {
     LanguageSinkSlots {
         language: String,
         call: String,
+        #[cfg_attr(feature = "serialize", serde(default))]
+        package: Option<String>,
         dangerous_args: BTreeSet<usize>,
         binding_args_safe: bool,
     },
@@ -778,13 +811,20 @@ pub enum LearnedFactEntry {
     },
     /// A taint source pattern for one language (the generator's per-language
     /// source vocabulary and the conventional request-parameter names).
-    LanguageSource { language: String, pattern: String },
+    LanguageSource {
+        language: String,
+        pattern: String,
+        #[cfg_attr(feature = "serialize", serde(default))]
+        package: Option<String>,
+    },
     /// A sanitizer call for one language (the generator's per-language
     /// sanitizer vocabulary, with the predicate-guard
     /// classification precomputed by the pack generator).
     LanguageSanitizer {
         language: String,
         call: String,
+        #[cfg_attr(feature = "serialize", serde(default))]
+        package: Option<String>,
         kind: String,
         guard_style: bool,
     },
@@ -847,7 +887,11 @@ impl LearnedFactEntry {
     /// contracts, guard vocabularies, grammar) contribute none.
     pub fn finding_identities(&self) -> Vec<String> {
         match self {
-            LearnedFactEntry::Sink { call, .. } | LearnedFactEntry::IdorFinderSink { call, .. } => {
+            LearnedFactEntry::Sink { call, .. }
+            | LearnedFactEntry::LanguageSink { call, .. }
+            | LearnedFactEntry::LanguageSinkSlots { call, .. }
+            | LearnedFactEntry::IdorFinderSink { call, .. }
+            | LearnedFactEntry::LanguageIdorSink { call, .. } => {
                 vec![call.clone()]
             }
             LearnedFactEntry::Policy { rule, .. }
@@ -873,47 +917,69 @@ impl LearnedFactEntry {
     /// stay [`Provenance::Spec`] instead of flipping to Learned.
     pub fn apply_with(&self, table: &mut FactTable, provenance: Provenance) {
         match self {
-            LearnedFactEntry::Source { pattern } => {
-                table.learned_sources.insert(pattern.clone());
+            LearnedFactEntry::Source { pattern, package } => {
+                if let Some(pkg) = package {
+                    table.scoped_sources.insert((pkg.clone(), pattern.clone()));
+                } else {
+                    table.learned_sources.insert(pattern.clone());
+                }
             }
             LearnedFactEntry::Sink {
                 call,
+                package,
                 dangerous_args,
                 binding_args_safe,
             } => {
                 // Preserve a spec-derived role (and IDOR keys) if the built-in
                 // table already classifies this call, learned facts refine
                 // *slots*, they don't reclassify *semantics*.
-                let prior = table.sink_signatures.get(call);
+                let prior = if let Some(pkg) = package {
+                    table
+                        .scoped_sink_signatures
+                        .get(&(pkg.clone(), call.clone()))
+                } else {
+                    table.sink_signatures.get(call)
+                };
                 let role = prior.map(|s| s.role).unwrap_or_default();
                 let label = prior.and_then(|s| s.label.clone());
                 let idor_keys = prior.map(|s| s.idor_keys.clone()).unwrap_or_default();
-                table.sink_signatures.insert(
-                    call.clone(),
-                    SinkSignature {
-                        call: call.clone(),
-                        dangerous_args: dangerous_args.clone(),
-                        binding_args_safe: *binding_args_safe,
-                        idor_keys,
-                        role,
-                        label,
-                    },
-                );
+                let sig = SinkSignature {
+                    call: call.clone(),
+                    package: package.clone(),
+                    dangerous_args: dangerous_args.clone(),
+                    binding_args_safe: *binding_args_safe,
+                    idor_keys,
+                    role,
+                    label,
+                };
+                if let Some(pkg) = package {
+                    table
+                        .scoped_sink_signatures
+                        .insert((pkg.clone(), call.clone()), sig);
+                } else {
+                    table.sink_signatures.insert(call.clone(), sig);
+                }
             }
             LearnedFactEntry::Sanitizer {
                 call,
+                package,
                 kind,
                 guard_style,
             } => {
-                table.sanitizer_facts.insert(
-                    call.clone(),
-                    SanitizerFact {
-                        call: call.clone(),
-                        kind: kind.clone(),
-                        sanitizes_args: Default::default(),
-                        guard_style: *guard_style,
-                    },
-                );
+                let fact = SanitizerFact {
+                    call: call.clone(),
+                    package: package.clone(),
+                    kind: kind.clone(),
+                    sanitizes_args: Default::default(),
+                    guard_style: *guard_style,
+                };
+                if let Some(pkg) = package {
+                    table
+                        .scoped_sanitizer_facts
+                        .insert((pkg.clone(), call.clone()), fact);
+                } else {
+                    table.sanitizer_facts.insert(call.clone(), fact);
+                }
             }
             LearnedFactEntry::Policy {
                 rule,
@@ -1065,6 +1131,7 @@ impl LearnedFactEntry {
                 }
                 let sig = SinkSignature {
                     call: call.clone(),
+                    package: None,
                     dangerous_args: std::collections::BTreeSet::new(),
                     binding_args_safe: false,
                     // Per-call keys when taught; otherwise the learned global

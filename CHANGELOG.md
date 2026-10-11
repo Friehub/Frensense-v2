@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-10
+
+### Added
+
+#### Bundle Format v6 & Serialization
+- **Package-Scoped Learned Facts**: Extended `LearnedFactEntry` in `frensense-bundler` with optional framework package provenance (`package: Option<String>`) for Sinks, Sanitizers, and Sources.
+- **Embedded Default Pack Asset**: Regenerated `frensense-bundler/assets/frensense-default.frc` using Format v6 payload serialization.
+- **Corpus Metadata Compiler Extraction**: Added parser support in `frensense-bundler` and `frensense-packgen` for `// package: <framework>` metadata headers during bundle compilation.
+
+#### Engine Dataflow Scoping & Precision
+- **Package-Aware Dataflow Resolution**: In `frensense-engine`, member calls and imported sinks/sanitizers are evaluated against module-level import bindings and receiver-root symbols to enforce package isolation.
+- **Cross-Framework Blast-Radius Quarantine**: Ensured package-scoped facts fire only when the target file imports or instantiates the declaring package, preventing cross-framework false positives.
+
+### Changed
+- **Backward Compatibility**: Preserved reading and deserialization compatibility for legacy Format v4 and v5 `.frc` bundles.
+
 ## [0.7.0-preview.5] - 2026-10-09
 
 ### Added

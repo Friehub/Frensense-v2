@@ -353,6 +353,18 @@ fn finding_identities_cover_joinable_entries() {
     assert_eq!(
         LearnedFactEntry::Sink {
             call: "query".to_string(),
+            package: None,
+            dangerous_args: Default::default(),
+            binding_args_safe: false,
+        }
+        .finding_identities(),
+        vec!["query"]
+    );
+    assert_eq!(
+        LearnedFactEntry::LanguageSinkSlots {
+            language: "typescript".to_string(),
+            call: "query".to_string(),
+            package: None,
             dangerous_args: Default::default(),
             binding_args_safe: false,
         }

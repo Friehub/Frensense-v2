@@ -348,6 +348,55 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ),
     ("DurableObjectStub.fetch", crate::role_map::SinkLabel::Ssrf),
     ("Queue.send", crate::role_map::SinkLabel::Ssrf),
+    // ── Verb-gating client roots (ambiguous-verb vocabulary) ──
+    // Dotted entries arm receiver gating for their last segment when that
+    // segment is in BOOTSTRAP_AMBIGUOUS_VERBS (currently only aggregate;
+    // exec/query/del entries kept ungated per the probe suite + benchmark
+    // vuln-case evidence - they still add exact-key sinks for
+    // qualified/static forms).
+    // Roots come from the true-positive shapes: corpus SQLi positives
+    // (db/pool/sequelize/AppDataSource/dataSource), juice-shop TPs
+    // (models.sequelize), sqlite (db.exec). Non-client receivers (pipeline,
+    // re, redis, trpc, prisma, env, service helpers) fall outside the armed
+    // roots and stop firing for the armed verbs.
+    (
+        "child_process.exec",
+        crate::role_map::SinkLabel::CommandInjection,
+    ),
+    ("db.query", crate::role_map::SinkLabel::SqlInjection),
+    ("db.exec", crate::role_map::SinkLabel::CommandInjection),
+    ("pool.query", crate::role_map::SinkLabel::SqlInjection),
+    ("connection.query", crate::role_map::SinkLabel::SqlInjection),
+    ("conn.query", crate::role_map::SinkLabel::SqlInjection),
+    ("tx.query", crate::role_map::SinkLabel::SqlInjection),
+    ("sequelize.query", crate::role_map::SinkLabel::SqlInjection),
+    (
+        "models.sequelize.query",
+        crate::role_map::SinkLabel::SqlInjection,
+    ),
+    (
+        "AppDataSource.query",
+        crate::role_map::SinkLabel::SqlInjection,
+    ),
+    ("dataSource.query", crate::role_map::SinkLabel::SqlInjection),
+    ("pg.query", crate::role_map::SinkLabel::SqlInjection),
+    ("mysql.query", crate::role_map::SinkLabel::SqlInjection),
+    ("mysql2.query", crate::role_map::SinkLabel::SqlInjection),
+    ("sqlite.query", crate::role_map::SinkLabel::SqlInjection),
+    ("sqlite3.query", crate::role_map::SinkLabel::SqlInjection),
+    (
+        "better-sqlite3.query",
+        crate::role_map::SinkLabel::SqlInjection,
+    ),
+    ("client.query", crate::role_map::SinkLabel::SqlInjection),
+    ("knex.query", crate::role_map::SinkLabel::SqlInjection),
+    ("sqlite.exec", crate::role_map::SinkLabel::SqlInjection),
+    ("sqlite3.exec", crate::role_map::SinkLabel::SqlInjection),
+    ("client.exec", crate::role_map::SinkLabel::CommandInjection),
+    (
+        "Model.aggregate",
+        crate::role_map::SinkLabel::NoSqlInjection,
+    ),
 ];
 
 /// Per-slot danger facts for sinks whose argument positions carry different
@@ -401,13 +450,24 @@ pub(super) static JS_SINK_SIGNATURES: &[(&str, &[usize], bool)] = &[
     ("del", &[0], false),
     ("set", &[0, 1], false),
     ("append", &[0, 1], false),
-    // ── HTTP fetch: slot 1 is the request-options/init object ──
-    // (fetch(url, init): taint in init.method/body IS dangerous, but the
-    //  options object is also where SSRF host overrides live; leave all-args
-    //  dangerous, SSRF via options is real. Only restrict clear cases.)
-    ("createHmac", &[1], false),     // createHmac(algo, key)
+    // ── HTTP client sinks: slot 0 is the destination URL/target ──
+    // Data, options and config slots (body/headers/method) carry user
+    // content by design and are not an injection channel for an SSRF-class
+    // sink, and a tainted RECEIVER under a slot-restricted sink is the
+    // client handle, not data (engine: receiver-taint rule). The earlier
+    // "SSRF via options.host" concern stays covered by the qualified
+    // dotted entries (undici.fetch, axios.request, ...), whose full-name
+    // keys keep all-args signatures. Measured on 11 local repos: 192 of
+    // 263 HTTP-callee findings taint arg1/arg2 or the receiver of a
+    // constant-URL call; the destination-URL findings (slot 0) still fire.
+    ("fetch", &[0], false),   // fetch(url, init) - init = method/headers/body
+    ("post", &[0], false),    // client.post(url, data, config)
+    ("patch", &[0], false),   // client.patch(url, data, config)
+    ("request", &[0], false), // client.request(url, options)
+    ("send", &[0], false),    // client.send(dest, payload) - dest/target slot 0
+    ("createHmac", &[1], false), // createHmac(algo, key)
     ("createCipheriv", &[2], false), // createCipheriv(algo, key, iv)
-    ("scrypt", &[0], false),         // scrypt(password, salt), slot 0 is the credential
+    ("scrypt", &[0], false),  // scrypt(password, salt), slot 0 is the credential
     ("pbkdf2", &[0], false),
     // ── IDOR-class finders: identity-payload only (see JS_IDOR_SINKS) ──
     // (`findOne({ _id: taint })` answers "which record" - an access-control

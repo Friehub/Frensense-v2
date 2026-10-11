@@ -735,6 +735,7 @@ pub mod demand_tests {
         // With the dotted learned Source fact, the flow is Vulnerable.
         let facts = fact_table_from_entries(&[LearnedFactEntry::Source {
             pattern: "random.randint".into(),
+            package: None,
         }]);
         let mut cfg2 = cfg.clone();
         cfg2.sources.extend(facts.learned_sources.iter().cloned());

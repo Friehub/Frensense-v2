@@ -17,10 +17,15 @@ pub enum Candidate {
     /// Call is a dangerous sink at these arg slots.
     Sink {
         call: String,
+        package: Option<String>,
         dangerous: BTreeSet<usize>,
     },
     /// Call sanitizes (guard-style or transform).
-    Sanitizer { call: String, guard: bool },
+    Sanitizer {
+        call: String,
+        package: Option<String>,
+        guard: bool,
+    },
     /// Call is a policy violation per a corpus-verified non-dataflow rule
     /// (positive contains the call and alerts-or-should; negative lacks it,
     /// or enforces it with a guard the positive lacks).
@@ -70,14 +75,64 @@ pub enum Candidate {
 
 impl Candidate {
     pub fn to_learned_entry(&self) -> LearnedFactEntry {
+        self.to_learned_entry_scoped(None)
+    }
+
+    pub fn to_learned_entry_scoped(&self, language: Option<&str>) -> LearnedFactEntry {
+        if let Some(lang) = language {
+            match self {
+                Candidate::Sink {
+                    call,
+                    package,
+                    dangerous,
+                } => LearnedFactEntry::LanguageSinkSlots {
+                    language: lang.to_string(),
+                    call: call.clone(),
+                    package: package.clone(),
+                    dangerous_args: dangerous.clone(),
+                    binding_args_safe: false,
+                },
+                Candidate::Sanitizer {
+                    call,
+                    package,
+                    guard,
+                } => LearnedFactEntry::LanguageSanitizer {
+                    language: lang.to_string(),
+                    call: call.clone(),
+                    package: package.clone(),
+                    kind: if *guard {
+                        "allowlist".into()
+                    } else {
+                        "encode".into()
+                    },
+                    guard_style: *guard,
+                },
+                _ => self.to_learned_entry_unscoped(),
+            }
+        } else {
+            self.to_learned_entry_unscoped()
+        }
+    }
+
+    fn to_learned_entry_unscoped(&self) -> LearnedFactEntry {
         match self {
-            Candidate::Sink { call, dangerous } => LearnedFactEntry::Sink {
+            Candidate::Sink {
+                call,
+                package,
+                dangerous,
+            } => LearnedFactEntry::Sink {
                 call: call.clone(),
+                package: package.clone(),
                 dangerous_args: dangerous.clone(),
                 binding_args_safe: false,
             },
-            Candidate::Sanitizer { call, guard } => LearnedFactEntry::Sanitizer {
+            Candidate::Sanitizer {
+                call,
+                package,
+                guard,
+            } => LearnedFactEntry::Sanitizer {
                 call: call.clone(),
+                package: package.clone(),
                 kind: if *guard {
                     "allowlist".into()
                 } else {
@@ -145,28 +200,46 @@ impl Candidate {
 /// Apply a candidate to a fact table (for replay).
 pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
     match c {
-        Candidate::Sink { call, dangerous } => {
-            let sig = if dangerous.is_empty() {
+        Candidate::Sink {
+            call,
+            package,
+            dangerous,
+        } => {
+            let mut sig = if dangerous.is_empty() {
                 SinkSignature::all_args(call)
             } else {
                 SinkSignature::with_args(call, &dangerous.iter().copied().collect::<Vec<_>>())
             };
+            sig.package = package.clone();
+            if let Some(pkg) = package {
+                table
+                    .scoped_sink_signatures
+                    .insert((pkg.clone(), call.clone()), sig.clone());
+            }
             table.sink_signatures.insert(call.clone(), sig);
         }
-        Candidate::Sanitizer { call, guard } => {
-            table.sanitizer_facts.insert(
-                call.clone(),
-                SanitizerFact {
-                    call: call.clone(),
-                    kind: if *guard {
-                        "allowlist".into()
-                    } else {
-                        "encode".into()
-                    },
-                    sanitizes_args: Default::default(),
-                    guard_style: *guard,
+        Candidate::Sanitizer {
+            call,
+            package,
+            guard,
+        } => {
+            let fact = SanitizerFact {
+                call: call.clone(),
+                package: package.clone(),
+                kind: if *guard {
+                    "allowlist".into()
+                } else {
+                    "encode".into()
                 },
-            );
+                sanitizes_args: Default::default(),
+                guard_style: *guard,
+            };
+            if let Some(pkg) = package {
+                table
+                    .scoped_sanitizer_facts
+                    .insert((pkg.clone(), call.clone()), fact.clone());
+            }
+            table.sanitizer_facts.insert(call.clone(), fact);
         }
         Candidate::Check {
             rule,
@@ -296,7 +369,7 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
 
 pub fn fact_key(e: &LearnedFactEntry) -> (String, String) {
     match e {
-        LearnedFactEntry::Source { pattern } => ("source".into(), pattern.clone()),
+        LearnedFactEntry::Source { pattern, .. } => ("source".into(), pattern.clone()),
         LearnedFactEntry::Sink { call, .. } => ("sink".into(), call.clone()),
         LearnedFactEntry::Sanitizer { call, .. } => ("san".into(), call.clone()),
         LearnedFactEntry::Check { rule, call, .. } => ("check".into(), format!("{rule}:{call}")),
@@ -363,9 +436,9 @@ pub fn fact_key(e: &LearnedFactEntry) -> (String, String) {
         LearnedFactEntry::LanguageIdorSink { language, call, .. } => {
             ("language_idor_sink".into(), format!("{language}:{call}"))
         }
-        LearnedFactEntry::LanguageSource { language, pattern } => {
-            ("language_source".into(), format!("{language}:{pattern}"))
-        }
+        LearnedFactEntry::LanguageSource {
+            language, pattern, ..
+        } => ("language_source".into(), format!("{language}:{pattern}")),
         LearnedFactEntry::LanguageSanitizer { language, call, .. } => {
             ("language_sanitizer".into(), format!("{language}:{call}"))
         }

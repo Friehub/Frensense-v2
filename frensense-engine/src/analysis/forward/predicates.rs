@@ -37,7 +37,7 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
             func,
             dest: Some(d),
             ..
-        } => config.sources.contains(func) && *d == var,
+        } => config.sources.contains(func) && !config.sinks.contains(func) && *d == var,
         Instruction::CallVirtual {
             method,
             dest: Some(d),

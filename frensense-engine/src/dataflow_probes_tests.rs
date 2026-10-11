@@ -1153,4 +1153,18 @@ def view_handler(request):
         ]);
         assert_detected(&res, "83_cross_file_3hop_diamond", "eval");
     }
+
+    #[test]
+    fn probe_debug_tp2() {
+        let src = r#"
+            import { query } from "pg";
+            import type { Request, Response } from "express";
+            export async function lookup(req: Request, res: Response): Promise<void> {
+                const rows = await query("SELECT * FROM users WHERE name = '" + req.query.q + "'");
+                res.json(rows);
+            }
+        "#;
+        let res = scan_ts(src);
+        assert_detected(&res, "probe_tp2", "query");
+    }
 }

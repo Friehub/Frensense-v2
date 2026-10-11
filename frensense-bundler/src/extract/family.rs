@@ -43,6 +43,8 @@ pub struct FamilyMetadata {
     /// cannot be an allocation size on the family's target platform
     /// (default u64::MAX == SIZE_MAX on LP64/LLP64).
     pub wrap_max: Option<u128>,
+    /// Declared framework package provenance (`package: name`).
+    pub package: Option<String>,
 }
 
 impl FamilyMetadata {
@@ -111,6 +113,7 @@ impl FamilyMetadata {
                         meta.wrap_max = Some(v);
                     }
                 }
+                "package" => meta.package = Some(value.to_string()),
                 _ => {}
             }
         }
@@ -132,6 +135,17 @@ pub struct Family {
     /// Advisory text from the positive's `[frensense]` block, baked into
     /// the bundle as a `BundlePattern`.
     pub metadata: FamilyMetadata,
+}
+
+impl Family {
+    /// The language name of this family, derived from its variant extensions.
+    pub fn language(&self) -> Option<&'static str> {
+        self.positives
+            .first()
+            .or_else(|| self.negatives.first())
+            .and_then(|(_, _, ext)| frensense_lang::spec_for_ext(ext))
+            .map(|s| s.name())
+    }
 }
 
 /// Group a corpus directory into families by filename convention

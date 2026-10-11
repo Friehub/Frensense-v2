@@ -52,14 +52,7 @@ pub(super) fn extract_js_imports<'tree>(root: Node<'tree>, source: &str) -> Vec<
                             let pkg = node_text(str_node, source)
                                 .trim_matches(['"', '\''])
                                 .to_owned();
-                            // The binding name comes from the outer variable_declarator
-                            // We push a placeholder; the fingerprinter resolves it
-                            // from the parent `variable_declarator.name` field.
-                            imports.push(Import {
-                                local_name: pkg.rsplit('/').next().unwrap_or(&pkg).to_owned(),
-                                package: pkg,
-                                symbol: None,
-                            });
+                            extract_require_imports(node, source, pkg, &mut imports);
                         }
                     }
                 }
@@ -221,4 +214,88 @@ fn find_string_child<'s>(node: Node<'_>, source: &'s str) -> Option<&'s str> {
         }
     }
     None
+}
+
+fn extract_require_imports(call_node: Node<'_>, source: &str, pkg: String, out: &mut Vec<Import>) {
+    if let Some(parent) = call_node.parent() {
+        if parent.kind() == "variable_declarator" {
+            if let Some(name_node) = parent.child_by_field_name("name") {
+                match name_node.kind() {
+                    "identifier" => {
+                        out.push(Import {
+                            local_name: node_text(name_node, source).to_owned(),
+                            package: pkg,
+                            symbol: None,
+                        });
+                        return;
+                    }
+                    "object_pattern" => {
+                        let mut extracted = false;
+                        for i in 0..name_node.named_child_count() {
+                            if let Some(child) = name_node.named_child(i) {
+                                match child.kind() {
+                                    "shorthand_property_identifier_pattern" => {
+                                        let sym = node_text(child, source).to_owned();
+                                        out.push(Import {
+                                            local_name: sym.clone(),
+                                            package: pkg.clone(),
+                                            symbol: Some(sym),
+                                        });
+                                        extracted = true;
+                                    }
+                                    "pair_pattern" => {
+                                        let key = child
+                                            .child_by_field_name("key")
+                                            .map(|k| node_text(k, source));
+                                        let val = child
+                                            .child_by_field_name("value")
+                                            .map(|v| node_text(v, source));
+                                        if let (Some(k), Some(v)) = (key, val) {
+                                            out.push(Import {
+                                                local_name: v.to_owned(),
+                                                package: pkg.clone(),
+                                                symbol: Some(k.to_owned()),
+                                            });
+                                            extracted = true;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        if extracted {
+                            return;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        } else if parent.kind() == "member_expression" {
+            let prop = parent
+                .child_by_field_name("property")
+                .map(|p| node_text(p, source));
+            if let Some(p_name) = prop {
+                if let Some(grandparent) = parent.parent() {
+                    if grandparent.kind() == "variable_declarator" {
+                        if let Some(name_node) = grandparent.child_by_field_name("name") {
+                            if name_node.kind() == "identifier" {
+                                out.push(Import {
+                                    local_name: node_text(name_node, source).to_owned(),
+                                    package: pkg,
+                                    symbol: Some(p_name.to_owned()),
+                                });
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Fallback: push placeholder using package stem
+    out.push(Import {
+        local_name: pkg.rsplit('/').next().unwrap_or(&pkg).to_owned(),
+        package: pkg,
+        symbol: None,
+    });
 }

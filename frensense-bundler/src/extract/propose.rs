@@ -147,6 +147,7 @@ pub fn propose_with_trace(
             ));
             continue;
         }
+        let package = package_for_call(family, call, true);
         notes.push(format!(
             "sanitizer candidate: `{call}` ({}), present only in negatives",
             if *shape == CallShape::Predicate {
@@ -157,6 +158,7 @@ pub fn propose_with_trace(
         ));
         candidates.push(Candidate::Sanitizer {
             call: call.clone(),
+            package,
             guard: *shape == CallShape::Predicate,
         });
     }
@@ -193,11 +195,13 @@ pub fn propose_with_trace(
                 ));
                 continue;
             }
+            let package = package_for_call(family, call, false);
             notes.push(format!(
                 "sink candidate: `{call}` (unknown to every built-in table)"
             ));
             candidates.push(Candidate::Sink {
                 call: call.clone(),
+                package,
                 dangerous: BTreeSet::new(), // all args; replay validates
             });
         }
@@ -771,9 +775,20 @@ fn candidate_keys(candidates: &[Candidate]) -> String {
     candidates
         .iter()
         .map(|c| match c {
-            Candidate::Sink { call, .. } => format!("sink:{call}"),
-            Candidate::Sanitizer { call, guard } => {
-                format!("san:{call}:{}", if *guard { "guard" } else { "fn" })
+            Candidate::Sink { call, package, .. } => match package {
+                Some(p) => format!("sink:{p}:{call}"),
+                None => format!("sink:{call}"),
+            },
+            Candidate::Sanitizer {
+                call,
+                package,
+                guard,
+            } => {
+                let g = if *guard { "guard" } else { "fn" };
+                match package {
+                    Some(p) => format!("san:{p}:{call}:{g}"),
+                    None => format!("san:{call}:{g}"),
+                }
             }
             Candidate::Check { rule, call, .. } => format!("check:{rule}:{call}"),
             Candidate::Policy { rule, call, .. } => format!("policy:{rule}:{call}"),
@@ -783,4 +798,34 @@ fn candidate_keys(candidates: &[Candidate]) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn package_for_call(family: &Family, call: &str, is_negative: bool) -> Option<String> {
+    if let Some(pkg) = &family.metadata.package {
+        return Some(pkg.clone());
+    }
+    let files = if is_negative {
+        &family.negatives
+    } else {
+        &family.positives
+    };
+    let receiver = call.split('.').next().unwrap_or(call);
+    for (_path, source, ext) in files {
+        if let Some(spec) = frensense_lang::spec_for_ext(ext) {
+            let mut parser = tree_sitter::Parser::new();
+            if parser.set_language(&spec.tree_sitter_language()).is_ok() {
+                if let Some(tree) = parser.parse(source, None) {
+                    let imports = spec.extract_imports(tree.root_node(), source);
+                    if let Some(imp) = imports.iter().find(|i| {
+                        i.local_name == call
+                            || i.local_name == receiver
+                            || i.symbol.as_deref() == Some(call)
+                    }) {
+                        return Some(imp.package.clone());
+                    }
+                }
+            }
+        }
+    }
+    None
 }

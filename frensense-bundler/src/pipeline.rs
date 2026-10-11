@@ -10,9 +10,15 @@ use std::path::Path;
 
 fn format_entry_tag(entry: &LearnedFactEntry) -> String {
     match entry {
-        LearnedFactEntry::Source { pattern } => format!("source:{pattern}"),
-        LearnedFactEntry::Sink { call, .. } => format!("sink:{call}"),
-        LearnedFactEntry::Sanitizer { call, kind, .. } => format!("sanitizer:{call}({kind})"),
+        LearnedFactEntry::Source { pattern, .. }
+        | LearnedFactEntry::LanguageSource { pattern, .. } => format!("source:{pattern}"),
+        LearnedFactEntry::Sink { call, .. }
+        | LearnedFactEntry::LanguageSink { call, .. }
+        | LearnedFactEntry::LanguageSinkSlots { call, .. } => format!("sink:{call}"),
+        LearnedFactEntry::Sanitizer { call, kind, .. }
+        | LearnedFactEntry::LanguageSanitizer { call, kind, .. } => {
+            format!("sanitizer:{call}({kind})")
+        }
         LearnedFactEntry::Check {
             rule,
             call,
