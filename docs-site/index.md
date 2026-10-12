@@ -13,18 +13,6 @@ hero:
       text: Download
       link: /guide/installation
     - theme: alt
-      text: crates.io
-      link: https://crates.io/crates/frensense
-    - theme: alt
-      text: npm
-      link: https://www.npmjs.com/package/@friehub/frensense
-    - theme: alt
-      text: Read the v1 archive
-      link: /v1/
-    - theme: alt
-      text: "Research: SAST & Frontier AI"
-      link: /blog/2026-10-09-static-analysis-in-the-age-of-frontier-ai
-    - theme: alt
       text: GitHub
       link: https://github.com/Friehub/frensense-v2
 

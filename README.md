@@ -239,7 +239,7 @@ stdio.
 Scored against the OWASP Benchmark for Python: 1,230 third-party test
 cases with an authoritative expected-results CSV. Zero overlap with any
 Frensense knowledge bundle. This run uses the engine alone, no `.frc`
-bundle (`v0.7.0-preview.5`):
+bundle (`v0.7.0`):
 
 | metric | value |
 |---|---|
@@ -261,12 +261,11 @@ false positives). See the caveats and the full per-CWE table in
 Run it yourself:
 
 ```bash
-cargo build --release
-git clone --depth 1 https://github.com/OWASP-Benchmark/BenchmarkPython /tmp/BenchmarkPython
-python3 scripts/owasp_benchmark.py \
-  --owasp-csv /tmp/BenchmarkPython/expectedresults-0.1.csv \
-  --owasp-testcode /tmp/BenchmarkPython/testcode
+# Automated benchmark reproduction runner (auto-caches OWASP suite, generates markdown/JSON scorecards)
+./scripts/reproduce_benchmark.sh
 ```
+
+See [docs/BENCHMARKING.md](docs/BENCHMARKING.md) for full reproduction methodology and GitHub Gist sharing instructions.
 
 ## Detailed Guides
 

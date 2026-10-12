@@ -1,7 +1,5 @@
 /* frensense v2 docs - v1-matched theme (green brand, Urbanist/Inter, glow bg) */
-
-@import url('https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700;800&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* Fonts are loaded asynchronously via non-blocking <link rel="preload"> in config.mts */
 
 :root {
   --vp-font-family-base: "Urbanist", "Inter", "Geist", "SF Pro Display",
@@ -53,20 +51,42 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
 }
 
-/* hero: centered, tight tracking like v1 */
+/* hero: compact, space-efficient, centered */
+.VPHomeHero {
+  padding-top: 32px !important;
+  padding-bottom: 20px !important;
+}
 .VPHomeHero .name,
 .VPHomeHero .text {
   letter-spacing: -0.4px;
+}
+.VPHomeHero .name {
+  font-size: 3rem !important;
+  line-height: 1.1 !important;
+  margin-bottom: 6px !important;
+}
+.VPHomeHero .text {
+  font-size: 2rem !important;
+  line-height: 1.15 !important;
+  margin-bottom: 12px !important;
+}
+.VPHomeHero .tagline {
+  font-size: 1.05rem !important;
+  line-height: 1.5 !important;
+  max-width: 620px;
+  margin: 0 auto 16px auto !important;
 }
 .VPHomeHero .container {
   text-align: center;
 }
 .VPHomeHero .main {
-  max-width: 592px;
+  max-width: 640px;
   margin: 0 auto;
 }
 .VPHomeHero .actions {
   justify-content: center;
+  margin-top: 14px !important;
+  gap: 10px !important;
 }
 
 /* doc headings tracking */
@@ -241,3 +261,48 @@
 .VPHome > .VPFeatures {
   order: 3;
 }
+
+/* High contrast, legible typography across docs and tables (no faint mint green text) */
+.vp-doc {
+  color: var(--vp-c-text-1);
+}
+
+.vp-doc a {
+  color: #0969da;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 500;
+}
+
+.vp-doc a:hover {
+  color: #0550ae;
+}
+
+.dark .vp-doc a {
+  color: #58a6ff;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 500;
+}
+
+.dark .vp-doc a:hover {
+  color: #79c0ff;
+}
+
+/* Accessible tables with distinct borders and headers */
+.vp-doc table {
+  width: 100%;
+  margin: 1.5rem 0;
+  border-collapse: collapse;
+}
+
+.vp-doc th {
+  background-color: var(--vp-c-bg-soft);
+  font-weight: 600;
+  color: var(--vp-c-text-1) !important;
+}
+
+.vp-doc td {
+  color: var(--vp-c-text-1) !important;
+}
+

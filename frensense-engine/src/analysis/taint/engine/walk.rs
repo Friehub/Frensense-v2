@@ -204,7 +204,26 @@ impl<'a> BackwardTaintEngine<'a> {
             _ => return,
         };
         let ir = self.prog.functions[fi].ir;
-        if receiver.is_none() {
+        let pkg_import = if receiver.is_none() {
+            self.fn_file
+                .get(&self.prog.functions[fi].name)
+                .and_then(|file| self.file_package_imports.get(file))
+                .and_then(|imports| imports.get(name))
+                .or_else(|| {
+                    if self.file_package_imports.len() == 1 {
+                        self.file_package_imports
+                            .values()
+                            .next()
+                            .and_then(|m| m.get(name))
+                    } else {
+                        None
+                    }
+                })
+        } else {
+            None
+        };
+
+        if receiver.is_none() && pkg_import.is_none() {
             // A static call to a local variable/closure defined in this function
             // is not an external sink.
             if ir
@@ -214,9 +233,9 @@ impl<'a> BackwardTaintEngine<'a> {
             {
                 return;
             }
-            // Verb sinks (get, post, render, etc.) require a receiver object;
-            // a bare static call is not a client method invocation.
-            if self.facts.verb_sinks.contains(name) {
+            // Verb sinks that strictly require a receiver object (get, post, render, etc.);
+            // a bare static call without package import is not a client method invocation.
+            if is_receiver_only_verb(name) {
                 return;
             }
         }
@@ -230,80 +249,133 @@ impl<'a> BackwardTaintEngine<'a> {
                     if self.facts.client_roots.contains(d) {
                         direct
                     } else {
-                        // Check if r is defined locally by a factory call
-                        let mut resolved = None;
-                        for b in ir.blocks.values() {
-                            for instr in &b.instructions {
-                                match instr {
-                                    Instruction::CallVirtual {
-                                        dest: Some(d_var),
-                                        method,
-                                        receiver: Operand::Var(cr),
-                                        ..
-                                    } if *d_var == *r
-                                        && (method == "create" || method == "extend") =>
-                                    {
-                                        if let Some(cr_root) = FactTable::receiver_root(ir, *cr)
-                                            && self.facts.client_roots.contains(&cr_root)
-                                        {
-                                            resolved = Some(cr_root);
-                                        }
-                                    }
-                                    Instruction::CallStatic {
-                                        dest: Some(d_var),
-                                        func,
-                                        ..
-                                    } if *d_var == *r
-                                        && (func.ends_with(".create")
-                                            || func.ends_with(".extend")) =>
-                                    {
-                                        if let Some(prefix) = func.split('.').next()
-                                            && self.facts.client_roots.contains(prefix)
-                                        {
-                                            resolved = Some(prefix.to_string());
-                                        }
-                                    }
-                                    _ => {}
+                        // Check if d was imported as a package namespace (e.g. import cp from "child_process")
+                        let pkg_root = self
+                            .fn_file
+                            .get(&self.prog.functions[fi].name)
+                            .and_then(|file| self.file_package_imports.get(file))
+                            .and_then(|imports| imports.get(d))
+                            .or_else(|| {
+                                if self.file_package_imports.len() == 1 {
+                                    self.file_package_imports
+                                        .values()
+                                        .next()
+                                        .and_then(|m| m.get(d))
+                                } else {
+                                    None
                                 }
-                            }
-                        }
-                        if resolved.is_none() {
-                            // Check if d matches a module-level function / binding in prog
-                            for f in &self.prog.functions {
-                                if f.name == *d
-                                    || f.name
-                                        .strip_suffix(d.as_str())
-                                        .is_some_and(|p| p.ends_with(':'))
-                                {
-                                    for b in f.ir.blocks.values() {
-                                        for instr in &b.instructions {
-                                            if let Instruction::CallVirtual {
-                                                method,
-                                                receiver: Operand::Var(cr),
-                                                ..
-                                            } = instr
-                                                && (method == "create" || method == "extend")
-                                                && let Some(cr_root) =
-                                                    FactTable::receiver_root(f.ir, *cr)
+                            })
+                            .and_then(|pkg| {
+                                if self.facts.client_roots.contains(&pkg.package) {
+                                    Some(pkg.package.clone())
+                                } else {
+                                    None
+                                }
+                            });
+                        if pkg_root.is_some() {
+                            pkg_root
+                        } else {
+                            // Check if r is defined locally by a factory call
+                            let mut resolved = None;
+                            for b in ir.blocks.values() {
+                                for instr in &b.instructions {
+                                    match instr {
+                                        Instruction::CallVirtual {
+                                            dest: Some(d_var),
+                                            method,
+                                            receiver: Operand::Var(cr),
+                                            ..
+                                        } if *d_var == *r
+                                            && (method == "create" || method == "extend") =>
+                                        {
+                                            if let Some(cr_root) = FactTable::receiver_root(ir, *cr)
                                                 && self.facts.client_roots.contains(&cr_root)
                                             {
                                                 resolved = Some(cr_root);
-                                                break;
+                                            }
+                                        }
+                                        Instruction::CallStatic {
+                                            dest: Some(d_var),
+                                            func,
+                                            ..
+                                        } if *d_var == *r
+                                            && (func.ends_with(".create")
+                                                || func.ends_with(".extend")) =>
+                                        {
+                                            if let Some(prefix) = func.split('.').next()
+                                                && self.facts.client_roots.contains(prefix)
+                                            {
+                                                resolved = Some(prefix.to_string());
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            if resolved.is_none() {
+                                // Check if d matches a module-level function / binding in prog
+                                for f in &self.prog.functions {
+                                    if f.name == *d
+                                        || f.name
+                                            .strip_suffix(d.as_str())
+                                            .is_some_and(|p| p.ends_with(':'))
+                                    {
+                                        for b in f.ir.blocks.values() {
+                                            for instr in &b.instructions {
+                                                if let Instruction::CallVirtual {
+                                                    method,
+                                                    receiver: Operand::Var(cr),
+                                                    ..
+                                                } = instr
+                                                    && (method == "create" || method == "extend")
+                                                    && let Some(cr_root) =
+                                                        FactTable::receiver_root(f.ir, *cr)
+                                                    && self.facts.client_roots.contains(&cr_root)
+                                                {
+                                                    resolved = Some(cr_root);
+                                                    break;
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
+                            resolved.or(direct)
                         }
-                        resolved.or(direct)
                     }
                 } else {
                     None
                 }
             }
-            _ => None,
+            _ => pkg_import.map(|pkg| pkg.package.clone()),
         };
-        if !self.facts.is_sink_call(name, receiver_root.as_deref()) {
+        let effective_name = pkg_import.and_then(|p| p.symbol.as_deref()).unwrap_or(name);
+        let origin_package = pkg_import
+            .map(|pkg| pkg.package.as_str())
+            .or_else(|| {
+                receiver_root.as_deref().and_then(|root| {
+                    self.fn_file
+                        .get(&self.prog.functions[fi].name)
+                        .and_then(|file| self.file_package_imports.get(file))
+                        .and_then(|imports| imports.get(root))
+                        .map(|pkg| pkg.package.as_str())
+                })
+            })
+            .or_else(|| {
+                receiver_root.as_deref().filter(|root| {
+                    self.facts
+                        .scoped_sink_signatures
+                        .keys()
+                        .any(|(pkg, _)| pkg == *root)
+                })
+            });
+        if !self
+            .facts
+            .is_sink_call_scoped(effective_name, receiver_root.as_deref(), origin_package)
+            && !self
+                .facts
+                .is_sink_call_scoped(name, receiver_root.as_deref(), origin_package)
+        {
             return;
         }
         // Receiver-aware role: `kv.put(t)` resolves Storage (dotted
@@ -312,9 +384,13 @@ impl<'a> BackwardTaintEngine<'a> {
         // matching above.
         let role = self
             .facts
-            .role_for_call(name, receiver_root.as_deref())
+            .role_for_call(effective_name, receiver_root.as_deref())
+            .or_else(|| self.facts.role_for_call(name, receiver_root.as_deref()))
             .unwrap_or_default();
-        let label = self.facts.label_for_call(name, receiver_root.as_deref());
+        let label = self
+            .facts
+            .label_for_call(effective_name, receiver_root.as_deref())
+            .or_else(|| self.facts.label_for_call(name, receiver_root.as_deref()));
         // Engine purity: every fact-declared sink is explored and reported
         // when tainted data reaches it, regardless of role. Severity policy
         // (Response/Validation rank at `info`) is lang-declared ranking
@@ -794,4 +870,22 @@ impl<'a> BackwardTaintEngine<'a> {
         }
         false
     }
+}
+
+#[inline]
+fn is_receiver_only_verb(name: &str) -> bool {
+    matches!(
+        name,
+        "get"
+            | "post"
+            | "put"
+            | "delete"
+            | "patch"
+            | "head"
+            | "options"
+            | "request"
+            | "set"
+            | "render"
+            | "aggregate"
+    )
 }

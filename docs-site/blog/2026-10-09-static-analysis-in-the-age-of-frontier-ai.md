@@ -85,7 +85,7 @@ head:
 
 # Static Analysis in the Era of Frontier AI: Why LLMs Need Deterministic Oracles
 
-With the arrival of frontier reasoning models such as Claude Opus 5.5, Gemini 3.8 Flash, Claude Fable, and GLM 5.3, the software engineering discipline is experiencing an unprecedented shift. Autonomous coding agents—integrated across environments like Claude Code, Cursor, Devin, and Antigravity—now generate thousands of lines of complex application code per hour.
+With the arrival of frontier reasoning models such as Claude Opus 5.5, Gemini 3.8 Flash, Claude Fable, and GLM 5.3, the software engineering discipline is experiencing an unprecedented shift. Autonomous coding agents-integrated across environments like Claude Code, Cursor, Devin, and Antigravity-now generate thousands of lines of complex application code per hour.
 
 Inevitably, this wave of AI capability prompted a recurring question across application security teams:
 
@@ -124,7 +124,7 @@ Despite remarkable reasoning leaps, deploying LLMs as standalone security scanne
 
 1. **The Determinism Requirement**: CI/CD security gates must be mathematically deterministic. If commit `SHA-A` passes a security audit at 9:00 AM, it must pass at 9:00 PM. Frontier LLMs remain probabilistic; identical prompts on identical files can produce divergent vulnerability classifications or severity scores across runs.
 2. **The "Inner Loop" Latency Barrier**: A developer writing code in their editor, or committing via a pre-commit hook, requires sub-100 millisecond feedback. Querying a cloud frontier model entails multi-second Time-to-First-Token (TTFT) and token generation latency. Compilers and SSA dataflow traversals execute locally in single-digit milliseconds.
-3. **The Hallucination of Reachability**: Frontier models routinely hallucinate taint unreachability. An LLM may inspect five nested functions, observe a sanitization method, and conclude the path is neutralized—overlooking subtle pointer aliasing, closure capture, or branch-infeasible conditions that a formal Control Flow Graph (CFG) evaluates with certainty.
+3. **The Hallucination of Reachability**: Frontier models routinely hallucinate taint unreachability. An LLM may inspect five nested functions, observe a sanitization method, and conclude the path is neutralized-overlooking subtle pointer aliasing, closure capture, or branch-infeasible conditions that a formal Control Flow Graph (CFG) evaluates with certainty.
 4. **Token Economics at Monorepo Scale**: Full-repo security scans on 2-million-line monorepos via frontier reasoning APIs cost significant token expenditure per run and encounter strict enterprise rate limits.
 
 ---
@@ -137,7 +137,7 @@ To see where Frensense stands, we must inspect how incumbent static analysis too
 | :--- | :--- | :--- | :--- |
 | **Analysis Paradigm** | AST pattern matching + lightweight taint | Relational Datalog database queries | SSA-lowered CFG & Dataflow graphs |
 | **Build Requirement** | Zero (raw source) | Heavy (compiler build interception) | **Zero (raw source parsing & lowering)** |
-| **Execution Speed** | Moderate (1–10s) | Slow (minutes to hours) | **Sub-second (single-digit ms per module)** |
+| **Execution Speed** | Moderate (1-10s) | Slow (minutes to hours) | **Sub-second (single-digit ms per module)** |
 | **Baseline Noise (FPR)** | High (80%+ on complex frameworks) | Moderate to Low (when tuned) | **0.0% False Positive Rate on certified corpus** |
 | **Rule Distribution** | Plaintext YAML rule files | QL query packages | **Compiled binary bundles (`.frc`)** |
 | **AI Integration** | Cloud AI add-on to triage own noise | Copilot autofix + Taskflow triage | **Native Model Context Protocol (`frensense mcp`)** |
@@ -145,7 +145,7 @@ To see where Frensense stands, we must inspect how incumbent static analysis too
 ### The Semgrep Dilemma: AI as a Noise Filter
 Semgrep achieved wide adoption because it does not require a compiler build step. However, because its core engine relies on syntactic AST patterns and shallow taint analysis, it produces massive alert fatigue on modern asynchronous frameworks (Express, Next.js, FastAPI). 
 
-In response, the ecosystem introduced AI-driven triage (such as Semgrep Multimodal and Memories)—essentially employing an LLM after the fact to filter out false alerts produced by the scanner's own rules.
+In response, the ecosystem introduced AI-driven triage (such as Semgrep Multimodal and Memories)-essentially employing an LLM after the fact to filter out false alerts produced by the scanner's own rules.
 
 ### The CodeQL Dilemma: Depth with Heavy Overhead
 GitHub CodeQL represents the gold standard of formal relational analysis. By compiling source code into a queryable relational database, it executes sound inter-procedural taint analysis. 
@@ -203,10 +203,10 @@ When an AI agent modifies code, it invokes `frensense_diff` via MCP. Within 15 m
 
 The software security industry is converging on a tiered model that pairs deterministic speed with frontier reasoning:
 
-1. **Tier 1 — Deterministic Verification (Frensense)**:
+1. **Tier 1 - Deterministic Verification (Frensense)**:
    - Runs locally in editor LSPs (<50ms), pre-commit hooks, CI gates, and AI agent loops via MCP.
    - Eliminates standard injection vulnerabilities (SQLi, SSRF, Command Injection, Memory Safety, Path Traversal) with 0.0% false positives.
-2. **Tier 2 — Semantic & Business Logic Triage (Frontier AI)**:
+2. **Tier 2 - Semantic & Business Logic Triage (Frontier AI)**:
    - Operates on pull requests and release candidates.
    - Evaluates domain-level authorization logic (IDOR, role boundaries, business workflows).
    - Ingests Frensense's deterministic findings and automatically drafts contextual pull requests to remediate flaws.

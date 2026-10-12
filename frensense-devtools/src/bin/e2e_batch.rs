@@ -206,6 +206,7 @@ fn ts_fact_table() -> FactTable {
             call.into(),
             frensense_engine::analysis::taint::facts::SanitizerFact {
                 call: call.into(),
+                package: None,
                 kind: kind.into(),
                 sanitizes_args: Default::default(),
                 guard_style: guard,

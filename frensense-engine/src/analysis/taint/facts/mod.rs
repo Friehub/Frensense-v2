@@ -35,7 +35,9 @@ pub enum Provenance {
     Learned,
 }
 
+pub mod authored;
 pub mod config;
+pub mod entries;
 pub mod kinds;
 pub mod signatures;
 pub mod table;
@@ -46,7 +48,9 @@ mod tests;
 #[cfg(test)]
 mod teachable_subsystem_tests;
 
+pub use authored::*;
 pub use config::*;
+pub use entries::*;
 pub use kinds::*;
 pub use table::*;
 

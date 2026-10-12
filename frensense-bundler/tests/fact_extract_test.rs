@@ -90,7 +90,7 @@ export default router;
 
     let (learned, published) = extract_facts_with_tables(&fams, &cfg, &builtin);
     let has_test = published.iter().any(
-        |f| matches!(&f.entry, LearnedFactEntry::Sanitizer { call, guard_style: true, .. } if call == "test"),
+        |f| matches!(&f.entry, LearnedFactEntry::Sanitizer { call, guard_style: true, .. } | LearnedFactEntry::LanguageSanitizer { call, guard_style: true, .. } if call == "test"),
     );
     assert!(
         has_test,

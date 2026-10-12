@@ -48,6 +48,8 @@ pub struct PreparedProgram {
     fn_file: FxHashMap<String, String>,
     file_source: FxHashMap<String, String>,
     pub file_aliases: FxHashMap<String, FxHashMap<String, String>>,
+    pub file_package_imports:
+        FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
 }
 
 /// Lower every file once, remembering which file each function came from
@@ -96,13 +98,14 @@ pub fn prepare_with_facts(
     }
 
     let ir_names: rustc_hash::FxHashSet<String> = irs.keys().cloned().collect();
-    let file_aliases = crate::graph::module::ModuleAliasResolver::build(files, &ir_names, &fn_file);
+    let res = crate::graph::module::ModuleAliasResolver::build(files, &ir_names, &fn_file);
 
     Ok(PreparedProgram {
         irs,
         fn_file,
         file_source,
-        file_aliases,
+        file_aliases: res.file_aliases,
+        file_package_imports: res.file_package_imports,
     })
 }
 
@@ -153,14 +156,25 @@ pub fn scan_prepared(
     // Non-dataflow policy checks run on the same lowered IR, no taint
     // needed, so weak-crypto/config bugs surface even with zero taint paths.
     // `facts` also carries corpus-learned checks installed by the bundle.
-    let checker_findings =
-        checks::check_all_with_graph(statics.values().copied(), facts, Some(&prog));
+    // Package-scope context: policies carrying `package: Some(pkg)` only
+    // fire in functions whose file imports `pkg`.
+    let pkg_scope = checks::policy::PackageScope {
+        fn_file: &prepared.fn_file,
+        file_package_imports: &prepared.file_package_imports,
+    };
+    let checker_findings = checks::check_all_with_graph_scoped(
+        statics.values().copied(),
+        facts,
+        Some(&prog),
+        Some(&pkg_scope),
+    );
 
     let fn_file = &prepared.fn_file;
     let file_source = &prepared.file_source;
     let mut engine = BackwardTaintEngine::new(&prog, config)
         .with_fact_table(facts)
-        .with_fn_file(fn_file);
+        .with_fn_file(fn_file)
+        .with_file_package_imports(&prepared.file_package_imports);
     engine.run();
 
     // Resolve each finding to a file + line/column from the sink's byte span.

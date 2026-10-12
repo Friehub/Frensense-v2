@@ -9,7 +9,7 @@ competitor-comparable.
 
 ## Published record
 
-Scored on 2026-10-02 with frensense v0.7.0-preview.5, no `.frc` bundle
+Scored on 2026-10-02 with frensense v0.7.0, no `.frc` bundle
 (built-in language specs only), single-file scans, 8 parallel workers:
 
 | metric | value |
@@ -70,28 +70,45 @@ prioritizes.
 
 ## Reproduce it yourself
 
-Requirements: a C compiler toolchain, Python 3.10+, and ~10 seconds of
-scan time.
+Requirements: Python 3.10+, git, and a built `frensense` binary (or Rust toolchain to auto-build).
+
+### Quick reproduction (one-command runner)
+
+From the root of the repository:
 
 ```bash
-# 1. build the engine
-cargo build --release
-
-# 2. get the benchmark
-git clone --depth 1 https://github.com/OWASP-Benchmark/BenchmarkPython /tmp/BenchmarkPython
-
-# 3. run
-python3 scripts/owasp_benchmark.py \
-  --owasp-csv /tmp/BenchmarkPython/expectedresults-0.1.csv \
-  --owasp-testcode /tmp/BenchmarkPython/testcode \
-  --workers 8 \
-  --json-out owasp_scorecard.json
+# Automated run: auto-locates binary, caches OWASP suite, generates markdown & JSON reports
+./scripts/reproduce_benchmark.sh
 ```
 
-You should see the summary table (TPR/FPR/score plus a per-CWE
-breakdown). `owasp_scorecard.json` contains the machine-readable
-scorecard: totals, per-CWE rates, and a per-case verdict list
-(`TP`/`FP`/`FN`/`TN`) you can diff against expectations.
+This generates:
+- `benchmark_report.md`: formatted Markdown scorecard ready to share on GitHub Discussions or Gist.
+- `benchmark_scorecard.json`: complete machine-readable scorecard with per-case verdicts (`TP`/`FP`/`FN`/`TN`).
+
+### Sharing via GitHub Gist
+
+You can upload the scorecard directly to a GitHub Gist to share with the community:
+
+```bash
+# If GITHUB_TOKEN is exported in your environment:
+./scripts/reproduce_benchmark.sh --publish-gist
+
+# Or manually upload the generated report:
+# Visit https://gist.github.com and paste the contents of benchmark_report.md
+```
+
+### Advanced runner flags
+
+You can also run the underlying Python runner directly with custom parameters:
+
+```bash
+python3 scripts/owasp_benchmark.py \
+  --bin ./target/release/frensense \
+  --workers 8 \
+  --md-out benchmark_report.md \
+  --json-out benchmark_scorecard.json \
+  --bundle dist/frensense-default.frc   # optional: measure bundle uplift
+```
 
 ## Scoring model
 

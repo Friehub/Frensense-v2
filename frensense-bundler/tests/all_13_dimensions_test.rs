@@ -22,7 +22,7 @@
 use std::collections::BTreeSet;
 
 use frensense_bundler::extract::alerts;
-use frensense_bundler::format::{load_bundle, write_bundle, BundlePayloadV5};
+use frensense_bundler::format::{load_bundle, write_bundle, BundlePayloadV6};
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::engine::FindingClass;
 use frensense_engine::analysis::taint::facts::{
@@ -50,7 +50,7 @@ fn make_bundle(facts: Vec<LearnedFactEntry>) -> FactTable {
             .as_slice(),
     )
     .1;
-    let payload = BundlePayloadV5 {
+    let payload = BundlePayloadV6 {
         patterns: vec![],
         learned_facts: facts,
         policy_pack: vec![],
@@ -69,6 +69,7 @@ fn test_dim_01_dangerous_sinks_per_slot_safety() {
 
     let facts = make_bundle(vec![LearnedFactEntry::Sink {
         call: "execute_db".into(),
+        package: None,
         dangerous_args,
         binding_args_safe: true,
     }]);
@@ -110,6 +111,7 @@ fn test_dim_01_dangerous_sinks_per_slot_safety() {
 fn test_dim_02_taint_sources_custom_rpc() {
     let facts = make_bundle(vec![LearnedFactEntry::Source {
         pattern: "fetch_untrusted_event".into(),
+        package: None,
     }]);
 
     let cfg = TaintConfig {
@@ -149,6 +151,7 @@ fn test_dim_02_taint_sources_custom_rpc() {
 fn test_dim_03_sanitizers_custom_cleanse() {
     let facts = make_bundle(vec![LearnedFactEntry::Sanitizer {
         call: "cleanse_input".into(),
+        package: None,
         kind: "generic".into(),
         guard_style: false,
     }]);

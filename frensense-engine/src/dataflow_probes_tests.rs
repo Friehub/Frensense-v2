@@ -187,7 +187,6 @@ mod tier1_syntactic_probes {
     }
 
     #[test]
-    #[ignore = "Blind spot: Promise await target variable taint transfer"]
     fn probe_11_promise_await() {
         let src = r#"
             export async function test(req: any) {
@@ -1152,5 +1151,19 @@ def view_handler(request):
             ("app/entry.ts", file_entry, "ts"),
         ]);
         assert_detected(&res, "83_cross_file_3hop_diamond", "eval");
+    }
+
+    #[test]
+    fn probe_debug_tp2() {
+        let src = r#"
+            import { query } from "pg";
+            import type { Request, Response } from "express";
+            export async function lookup(req: Request, res: Response): Promise<void> {
+                const rows = await query("SELECT * FROM users WHERE name = '" + req.query.q + "'");
+                res.json(rows);
+            }
+        "#;
+        let res = scan_ts(src);
+        assert_detected(&res, "probe_tp2", "query");
     }
 }

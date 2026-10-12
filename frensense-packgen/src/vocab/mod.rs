@@ -80,6 +80,7 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
         entries.push(LearnedFactEntry::LanguageSinkSlots {
             language: language.clone(),
             call: (*call).to_string(),
+            package: None,
             dangerous_args: slots.iter().copied().collect(),
             binding_args_safe: *binding_safe,
         });
@@ -97,12 +98,14 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
         entries.push(LearnedFactEntry::LanguageSource {
             language: language.clone(),
             pattern: (*p).to_string(),
+            package: None,
         });
     }
     for p in v.request_param_names {
         entries.push(LearnedFactEntry::LanguageSource {
             language: language.clone(),
             pattern: (*p).to_string(),
+            package: None,
         });
     }
     for name in v.sanitizer_names {
@@ -118,6 +121,7 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
         entries.push(LearnedFactEntry::LanguageSanitizer {
             language: language.clone(),
             call: (*name).to_string(),
+            package: None,
             kind,
             guard_style,
         });

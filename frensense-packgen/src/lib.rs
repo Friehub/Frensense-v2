@@ -28,7 +28,7 @@ mod data;
 mod role_map;
 mod vocab;
 
-use frensense_bundler::format::{write_bundle, BundlePayloadV5};
+use frensense_bundler::format::{write_bundle, BundlePayloadV6};
 use frensense_engine::analysis::taint::facts::{
     AllocCapacity, GuardBypassFact, HintKind, LearnedFactEntry, SchemaPolicyFact,
 };
@@ -181,11 +181,11 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
     entries
 }
 
-/// Serialize [`default_pack_entries`] into the `.frc` envelope (v5, zero
+/// Serialize [`default_pack_entries`] into the `.frc` envelope (v6, zero
 /// patterns, empty `policy_pack`). Used by the drift/regeneration tests;
 /// production reads the committed asset via [`default_bundle_bytes`].
 pub fn build_default_bundle() -> Vec<u8> {
-    let payload = BundlePayloadV5 {
+    let payload = BundlePayloadV6 {
         patterns: Vec::new(),
         learned_facts: default_pack_entries(),
         policy_pack: Vec::new(),

@@ -32,7 +32,6 @@ fn probe_cve_02_axios_ssrf() {
 }
 
 #[test]
-#[ignore = "Blind spot: Zip slip path traversal join propagation"]
 fn probe_cve_03_zip_slip_path_traversal() {
     let src = r#"
         const fs = require("fs");

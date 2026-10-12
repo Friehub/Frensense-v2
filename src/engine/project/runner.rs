@@ -70,12 +70,8 @@ impl Engine {
         // same pack layer. Since Phase 6.2d the spec seed carries none of
         // this provider knowledge, so this install is its sole source. Must
         // run before the consumer bundle merge so Learned facts still win.
-        apply_language_entries(
-            &mut config,
-            &mut facts,
-            pack_entries,
-            &languages_for_exts(files.iter().map(|(_, _, ext)| ext.as_str())),
-        );
+        let scanned_langs = languages_for_exts(files.iter().map(|(_, _, ext)| ext.as_str()));
+        apply_language_entries(&mut config, &mut facts, pack_entries, &scanned_langs);
 
         // Merge learned facts from the .frc bundle, if any, and index the
         // bundle's per-family advisory patterns by the finding identities
@@ -87,6 +83,16 @@ impl Engine {
         if let Some(bundle_bytes) = self.load_bundle_bytes(root)? {
             match frensense_bundler::format::load_bundle(bundle_bytes) {
                 Ok(loaded) => {
+                    // Consumer-bundle language sections install through
+                    // apply_language_entries filtered to scanned languages
+                    // before bare merge so Learned facts still win over Spec
+                    // and foreign-language bundle facts do not leak.
+                    apply_language_entries(
+                        &mut config,
+                        &mut facts,
+                        &loaded.learned_facts,
+                        &scanned_langs,
+                    );
                     facts.merge(&fact_table_from_entries(&loaded.learned_facts));
                     for pattern in &loaded.patterns {
                         for rule in &pattern.rules {
@@ -670,7 +676,7 @@ mod bundle_pattern_tests {
     use super::{advisory_from_checker, apply_bundle_pattern, corpus_severity};
     use crate::Severity;
     use crate::engine::Engine;
-    use frensense_bundler::format::{BundlePattern, BundlePayloadV5, write_bundle};
+    use frensense_bundler::format::{BundlePattern, BundlePayloadV6, write_bundle};
     use frensense_engine::analysis::taint::facts::Provenance;
     use frensense_engine::checks::CheckerFinding;
 
@@ -802,7 +808,7 @@ mod bundle_pattern_tests {
     /// the load -> index -> advisory path.
     #[test]
     fn bundle_loaded_pattern_reaches_scan_advisories() {
-        let payload = BundlePayloadV5 {
+        let payload = BundlePayloadV6 {
             patterns: vec![pattern(&["weak_hash"])],
             learned_facts: vec![],
             policy_pack: vec![],

@@ -189,6 +189,9 @@ pub struct BackwardTaintEngine<'a> {
     /// Function-name → source-file mapping for path step locations
     /// (populated via [`with_fn_file`]; empty in tests without files).
     pub(crate) fn_file: FxHashMap<String, String>,
+    /// Per-file external package imports: `file_path -> local_name -> PackageImport`.
+    pub(crate) file_package_imports:
+        FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
     /// When `true`, reconstruct the walked source→sink chain per vulnerable
     /// finding (small extra bookkeeping; path reporting needs it).
     capture_paths: bool,
@@ -320,6 +323,7 @@ impl<'a> BackwardTaintEngine<'a> {
             capture_paths: true,
             current_parents: FxHashMap::default(),
             fn_file: FxHashMap::default(),
+            file_package_imports: FxHashMap::default(),
             findings: Vec::new(),
             stats: BackwardStats::default(),
         }
@@ -339,6 +343,15 @@ impl<'a> BackwardTaintEngine<'a> {
     /// cross-file flows otherwise report the function name as the file).
     pub fn with_fn_file(mut self, fn_file: &FxHashMap<String, String>) -> Self {
         self.fn_file = fn_file.clone();
+        self
+    }
+
+    /// Provide external package imports per file: `file_path -> local_name -> PackageImport`.
+    pub fn with_file_package_imports(
+        mut self,
+        imports: &FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
+    ) -> Self {
+        self.file_package_imports = imports.clone();
         self
     }
 

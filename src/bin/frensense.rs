@@ -131,10 +131,18 @@ fn print_bundle_info(bundle_path: &std::path::Path) -> std::result::Result<(), S
 
     for fact in &loaded.learned_facts {
         match fact {
-            LearnedFactEntry::Source { .. } => sources += 1,
-            LearnedFactEntry::Sink { .. } => sinks += 1,
-            LearnedFactEntry::Sanitizer { .. } => sanitizers += 1,
-            LearnedFactEntry::Policy { .. } => policies += 1,
+            LearnedFactEntry::Source { .. } | LearnedFactEntry::LanguageSource { .. } => {
+                sources += 1
+            }
+            LearnedFactEntry::Sink { .. }
+            | LearnedFactEntry::LanguageSink { .. }
+            | LearnedFactEntry::LanguageSinkSlots { .. } => sinks += 1,
+            LearnedFactEntry::Sanitizer { .. } | LearnedFactEntry::LanguageSanitizer { .. } => {
+                sanitizers += 1
+            }
+            LearnedFactEntry::Policy { .. } | LearnedFactEntry::PolicyScoped { .. } => {
+                policies += 1
+            }
             LearnedFactEntry::Check { .. } => checks += 1,
             LearnedFactEntry::MemoryContract { .. }
             | LearnedFactEntry::Allocator { .. }

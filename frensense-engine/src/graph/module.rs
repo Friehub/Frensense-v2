@@ -143,7 +143,21 @@ enum ExportTarget {
     Barrel(String),
 }
 
-/// Computes module aliases per file: `file_path -> (local_name -> canonical_function_key)`.
+/// An imported package symbol: package name and optional imported symbol.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackageImport {
+    pub package: String,
+    pub symbol: Option<String>,
+}
+
+/// Result of whole-program module resolution.
+#[derive(Debug, Clone, Default)]
+pub struct ModuleResolution {
+    pub file_aliases: FxHashMap<String, FxHashMap<String, String>>,
+    pub file_package_imports: FxHashMap<String, FxHashMap<String, PackageImport>>,
+}
+
+/// Computes module aliases and external package imports per file.
 pub struct ModuleAliasResolver;
 
 impl ModuleAliasResolver {
@@ -151,7 +165,7 @@ impl ModuleAliasResolver {
         files: &[(String, String, String)], // (path, source, ext)
         ir_names: &FxHashSet<String>,
         fn_file: &FxHashMap<String, String>,
-    ) -> FxHashMap<String, FxHashMap<String, String>> {
+    ) -> ModuleResolution {
         let known_files: Vec<String> = files.iter().map(|(p, _, _)| p.clone()).collect();
         let mut file_imports: FxHashMap<String, Vec<Import>> = FxHashMap::default();
         let mut file_exports: FxHashMap<String, Vec<Export>> = FxHashMap::default();
@@ -216,6 +230,8 @@ impl ModuleAliasResolver {
 
         // Resolve imports for each file
         let mut file_aliases: FxHashMap<String, FxHashMap<String, String>> = FxHashMap::default();
+        let mut file_package_imports: FxHashMap<String, FxHashMap<String, PackageImport>> =
+            FxHashMap::default();
 
         for (importer_path, imps) in &file_imports {
             for imp in imps {
@@ -225,6 +241,20 @@ impl ModuleAliasResolver {
 
                 let Some(target_file) = resolve_module_path(importer_path, package, &known_files)
                 else {
+                    let normalized_pkg = package
+                        .strip_prefix("node:")
+                        .unwrap_or(package.as_str())
+                        .to_string();
+                    file_package_imports
+                        .entry(importer_path.clone())
+                        .or_default()
+                        .insert(
+                            local_name.clone(),
+                            PackageImport {
+                                package: normalized_pkg,
+                                symbol: imp.symbol.clone(),
+                            },
+                        );
                     continue;
                 };
 
@@ -239,7 +269,10 @@ impl ModuleAliasResolver {
             }
         }
 
-        file_aliases
+        ModuleResolution {
+            file_aliases,
+            file_package_imports,
+        }
     }
 
     fn resolve_symbol(

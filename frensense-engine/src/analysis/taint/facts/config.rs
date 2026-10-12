@@ -213,6 +213,7 @@ fn install_language_group(
             }
             LearnedFactEntry::LanguageSinkSlots {
                 call,
+                package,
                 dangerous_args,
                 binding_args_safe,
                 ..
@@ -224,12 +225,23 @@ fn install_language_group(
                     .unwrap_or_default();
                 let entry = SinkSignature {
                     call: call.clone(),
+                    package: package.clone(),
                     dangerous_args: dangerous_args.clone(),
                     binding_args_safe: *binding_args_safe,
                     idor_keys: Vec::new(),
                     role,
                     label,
                 };
+                if let Some(pkg) = package {
+                    facts
+                        .scoped_sink_signatures
+                        .insert((pkg.clone(), call.clone()), entry.clone());
+                } else if let Some((root, _)) = call.split_once('.') {
+                    let last = call.rsplit('.').next().unwrap_or(call);
+                    facts
+                        .scoped_sink_signatures
+                        .insert((root.to_string(), last.to_string()), entry.clone());
+                }
                 facts.sink_signatures.insert(call.clone(), entry.clone());
                 let last = call.rsplit('.').next().unwrap_or(call);
                 if last != call {
@@ -268,25 +280,35 @@ fn install_language_group(
                     sig.idor_keys = owned;
                 }
             }
-            LearnedFactEntry::LanguageSource { pattern, .. } => {
+            LearnedFactEntry::LanguageSource {
+                pattern, package, ..
+            } => {
+                if let Some(pkg) = package {
+                    facts.scoped_sources.insert((pkg.clone(), pattern.clone()));
+                }
                 config.sources.insert(pattern.clone());
             }
             LearnedFactEntry::LanguageSanitizer {
                 call,
+                package,
                 kind,
                 guard_style,
                 ..
             } => {
                 config.sanitizers.insert(call.clone());
-                facts
-                    .sanitizer_facts
-                    .entry(call.clone())
-                    .or_insert_with(|| SanitizerFact {
-                        call: call.clone(),
-                        kind: kind.clone(),
-                        sanitizes_args: Default::default(),
-                        guard_style: *guard_style,
-                    });
+                let fact = SanitizerFact {
+                    call: call.clone(),
+                    package: package.clone(),
+                    kind: kind.clone(),
+                    sanitizes_args: Default::default(),
+                    guard_style: *guard_style,
+                };
+                if let Some(pkg) = package {
+                    facts
+                        .scoped_sanitizer_facts
+                        .insert((pkg.clone(), call.clone()), fact.clone());
+                }
+                facts.sanitizer_facts.entry(call.clone()).or_insert(fact);
             }
             LearnedFactEntry::LanguagePropagator {
                 call,

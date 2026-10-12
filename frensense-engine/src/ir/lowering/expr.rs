@@ -306,32 +306,41 @@ impl<'a> LoweringContext<'a> {
                 object_keys: Vec::new(),
                 declared: false,
             });
-            match self.visit_node(prop_node) {
-                Some(Operand::Var(index_var)) if !self.is_property_kind(prop_node.kind()) => {
-                    // Subscript with a computed index.
-                    self.ir.push_instruction(
-                        self.current_block,
-                        Instruction::LoadElement {
-                            dest,
-                            mem_in: self.memory_var,
-                            base: base_var,
-                            index: Operand::Var(index_var),
-                        },
-                    );
-                }
-                _ => {
-                    let field_name =
-                        self.source[prop_node.start_byte()..prop_node.end_byte()].to_string();
-                    self.ir.push_instruction(
-                        self.current_block,
-                        Instruction::LoadField {
-                            dest,
-                            mem_in: self.memory_var,
-                            base: base_var,
-                            field: field_name,
-                        },
-                    );
-                }
+            if self.is_property_kind(prop_node.kind()) {
+                let field_name =
+                    self.source[prop_node.start_byte()..prop_node.end_byte()].to_string();
+                self.ir.push_instruction(
+                    self.current_block,
+                    Instruction::LoadField {
+                        dest,
+                        mem_in: self.memory_var,
+                        base: base_var,
+                        field: field_name,
+                    },
+                );
+            } else if let Some(Operand::Var(index_var)) = self.visit_node(prop_node) {
+                // Subscript with a computed index.
+                self.ir.push_instruction(
+                    self.current_block,
+                    Instruction::LoadElement {
+                        dest,
+                        mem_in: self.memory_var,
+                        base: base_var,
+                        index: Operand::Var(index_var),
+                    },
+                );
+            } else {
+                let field_name =
+                    self.source[prop_node.start_byte()..prop_node.end_byte()].to_string();
+                self.ir.push_instruction(
+                    self.current_block,
+                    Instruction::LoadField {
+                        dest,
+                        mem_in: self.memory_var,
+                        base: base_var,
+                        field: field_name,
+                    },
+                );
             }
             Some(Operand::Var(dest))
         } else {

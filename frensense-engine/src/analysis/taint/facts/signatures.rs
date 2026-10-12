@@ -101,9 +101,109 @@ impl FactTable {
         self.sink_signature(last).and_then(|s| s.label.clone())
     }
 
+    /// Sink signature for a call, package-aware.
+    pub fn sink_signature_scoped(
+        &self,
+        call: &str,
+        origin_package: Option<&str>,
+    ) -> Option<&SinkSignature> {
+        if let Some(pkg) = origin_package {
+            if let Some(sig) = self
+                .scoped_sink_signatures
+                .get(&(pkg.to_string(), call.to_string()))
+            {
+                return Some(sig);
+            }
+            let is_package_scoped = self.scoped_sink_signatures.keys().any(|(_, c)| c == call);
+            if is_package_scoped {
+                // Known package origin mismatch: do not fall back to other packages' scoped sinks
+                return self.sink_signatures.get(call);
+            }
+        } else {
+            // Origin unknown (dynamic require, unresolvable receiver):
+            // Fall back to checking universal first, then any package-scoped signature.
+            if let Some(sig) = self.sink_signatures.get(call) {
+                return Some(sig);
+            }
+            if let Some(sig) = self
+                .scoped_sink_signatures
+                .iter()
+                .find(|((_, c), _)| c == call)
+                .map(|(_, s)| s)
+            {
+                return Some(sig);
+            }
+        }
+        self.sink_signatures.get(call)
+    }
+
+    /// Sanitizer fact for a call, package-aware.
+    pub fn sanitizer_fact_scoped(
+        &self,
+        call: &str,
+        origin_package: Option<&str>,
+    ) -> Option<&SanitizerFact> {
+        if let Some(pkg) = origin_package {
+            if let Some(f) = self
+                .scoped_sanitizer_facts
+                .get(&(pkg.to_string(), call.to_string()))
+            {
+                return Some(f);
+            }
+            let is_package_scoped = self.scoped_sanitizer_facts.keys().any(|(_, c)| c == call);
+            if is_package_scoped {
+                return self.sanitizer_facts.get(call);
+            }
+        } else {
+            if let Some(f) = self.sanitizer_facts.get(call) {
+                return Some(f);
+            }
+            if let Some(f) = self
+                .scoped_sanitizer_facts
+                .iter()
+                .find(|((_, c), _)| c == call)
+                .map(|(_, f)| f)
+            {
+                return Some(f);
+            }
+        }
+        self.sanitizer_facts.get(call)
+    }
+
     /// Sanitizer fact for a call; `None` if not a sanitizer.
     pub fn sanitizer_fact(&self, call: &str) -> Option<&SanitizerFact> {
-        self.sanitizer_facts.get(call)
+        self.sanitizer_fact_scoped(call, None)
+    }
+
+    /// Receiver-aware and package-aware sink check.
+    pub fn is_sink_call_scoped(
+        &self,
+        last: &str,
+        receiver_root: Option<&str>,
+        origin_package: Option<&str>,
+    ) -> bool {
+        if !self.verb_sinks.contains(last) {
+            // Ordinary sink: presence in the signature table decides.
+            return self.sink_signature_scoped(last, origin_package).is_some();
+        }
+        match receiver_root {
+            Some(root) => {
+                if self.client_roots.contains(root) {
+                    true
+                } else if let Some(pkg) = origin_package {
+                    self.client_roots.contains(pkg)
+                } else {
+                    false
+                }
+            }
+            None => {
+                if let Some(pkg) = origin_package {
+                    self.client_roots.contains(pkg)
+                } else {
+                    true
+                }
+            }
+        }
     }
 
     /// Receiver-aware sink check for virtual calls. `last` is the method
@@ -116,15 +216,7 @@ impl FactTable {
     ///   client, `m.get(t)` on an arbitrary Map is never a sink, while
     ///   `got.get(taint)` is.
     pub fn is_sink_call(&self, last: &str, receiver_root: Option<&str>) -> bool {
-        if !self.verb_sinks.contains(last) {
-            // Ordinary sink: presence in the signature table decides.
-            return self.sink_signature(last).is_some();
-        }
-        match receiver_root {
-            Some(root) => self.client_roots.contains(root),
-            // Unresolvable receiver: over-approximate (sound, noisier).
-            None => true,
-        }
+        self.is_sink_call_scoped(last, receiver_root, None)
     }
 
     /// Walk a receiver var to the root of its member-access chain via the

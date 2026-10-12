@@ -4,6 +4,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-12
+
+### Added
+
+#### Corpus Authoring & Framework Provenance Scoping (`package:`)
+- **Framework Package Declaration**: Added support in corpus metadata blocks for `// package: <framework>`:
+  ```typescript
+  // [frensense]
+  // observation: User-controlled file parameter passed to res.sendFile without directory boundary check
+  // package: express
+  ```
+- **Format v6+ Feature**: Qualified facts carry `package: Option<String>` in `.frc` bundles.
+- **Engine Scoping**: The engine binds sinks, sanitizers, and policies to files that explicitly import or declare the specified package. Calls to matching method names in other frameworks (e.g. Next.js, Electron, Hono) remain unaffected.
+- **Blast-Radius Quarantine**: The bundler compiler quarantines candidate facts: a candidate carrying a package may only be published if the voting family actually imports or declares that package.
+
+#### Engine Architecture & Fact Table Modularization
+- **Fact Table Architecture**: Decomposed monolithic `FactTable` in `frensense-engine` into dedicated submodules (`entries.rs`, `authored.rs`, `table.rs`) for extensible fact storage and clean separation of authored policies from learned entries.
+- **Policy Checker Decoupling**: Refactored policy checking in `checks/policy.rs` to evaluate authored policy entries with explicit rule definitions and pattern bindings.
+- **Forward Predicate Evaluation**: Refined path-sensitive branch condition evaluation in `analysis/forward/predicates.rs`.
+
+#### Bundle Format v6 & Serialization
+- **Package-Scoped Learned Facts**: Extended `LearnedFactEntry` in `frensense-bundler` with optional framework package provenance (`package: Option<String>`) for Sinks, Sanitizers, and Sources.
+- **Embedded Default Pack Asset**: Regenerated `frensense-bundler/assets/frensense-default.frc` using Format v6 payload serialization.
+- **Corpus Metadata Compiler Extraction**: Added parser support in `frensense-bundler` and `frensense-packgen` for `// package: <framework>` metadata headers during bundle compilation.
+
+#### Engine Dataflow Scoping & Precision
+- **Package-Aware Dataflow Resolution**: In `frensense-engine`, member calls and imported sinks/sanitizers are evaluated against module-level import bindings and receiver-root symbols to enforce package isolation.
+- **Cross-Framework Blast-Radius Quarantine**: Ensured package-scoped facts fire only when the target file imports or instantiates the declaring package, preventing cross-framework false positives.
+
+### Changed
+- **Backward Compatibility**: Preserved reading and deserialization compatibility for legacy Format v4 and v5 `.frc` bundles.
+
 ## [0.7.0-preview.5] - 2026-10-09
 
 ### Added

@@ -16,4 +16,6 @@ pub use default_pack::{default_bundle_bytes, default_pack, is_pack_memory_builti
 pub use frc::{
     read_bundle, read_bundle_parts, write_bundle, BundleHeader, BUNDLE_MAGIC, BUNDLE_VERSION,
 };
-pub use types::{load_bundle, BundlePattern, BundlePayloadV5, LoadedBundle};
+pub use types::{
+    load_bundle, BundlePattern, BundlePayload, BundlePayloadV5, BundlePayloadV6, LoadedBundle,
+};

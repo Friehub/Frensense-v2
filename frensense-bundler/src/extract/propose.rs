@@ -147,6 +147,7 @@ pub fn propose_with_trace(
             ));
             continue;
         }
+        let package = package_for_call(family, call, true);
         notes.push(format!(
             "sanitizer candidate: `{call}` ({}), present only in negatives",
             if *shape == CallShape::Predicate {
@@ -157,6 +158,7 @@ pub fn propose_with_trace(
         ));
         candidates.push(Candidate::Sanitizer {
             call: call.clone(),
+            package,
             guard: *shape == CallShape::Predicate,
         });
     }
@@ -193,11 +195,13 @@ pub fn propose_with_trace(
                 ));
                 continue;
             }
+            let package = package_for_call(family, call, false);
             notes.push(format!(
                 "sink candidate: `{call}` (unknown to every built-in table)"
             ));
             candidates.push(Candidate::Sink {
                 call: call.clone(),
+                package,
                 dangerous: BTreeSet::new(), // all args; replay validates
             });
         }
@@ -353,6 +357,7 @@ pub fn propose_with_trace(
                 )
             });
             if let Some(guard) = eligible_guards.last() {
+                let pkg = package_for_call(family, &trigger, false);
                 candidates.push(Candidate::Policy {
                     rule: format!("policy_{trigger}"),
                     call: trigger.clone(),
@@ -363,6 +368,7 @@ pub fn propose_with_trace(
                         call: (*guard).clone(),
                     }],
                     scope: PolicyScope::Function,
+                    package: pkg,
                 });
             }
             // Shape (c): banned-call co-occurrence. Calls the POSITIVES make
@@ -382,6 +388,7 @@ pub fn propose_with_trace(
             // chosen name is baked into the learned fact's bytes.
             banned.sort();
             if let Some(banned_call) = banned.first() {
+                let pkg = package_for_call(family, &trigger, false);
                 candidates.push(Candidate::Policy {
                     rule: format!("policy_{trigger}_no_{banned_call}"),
                     call: trigger.clone(),
@@ -394,6 +401,7 @@ pub fn propose_with_trace(
                         call: banned_call.clone(),
                     }],
                     scope: PolicyScope::Function,
+                    package: pkg,
                 });
             }
 
@@ -406,6 +414,7 @@ pub fn propose_with_trace(
                 cross_function_helper(family, &pos_calls, &neg_calls, Some(builtin))
             {
                 if builtin.sanitizer_fact(&helper).is_none() {
+                    let pkg = package_for_call(family, &trigger, false);
                     candidates.push(Candidate::Policy {
                         rule: format!("policy_{trigger}_with_{helper}"),
                         call: trigger.clone(),
@@ -416,6 +425,7 @@ pub fn propose_with_trace(
                             any_of: vec![helper.clone()],
                         }],
                         scope: PolicyScope::Module,
+                        package: pkg,
                     });
                 }
             }
@@ -453,6 +463,7 @@ pub fn propose_with_trace(
                 .map(|s| s.contains(pos_val))
                 .unwrap_or(false);
             if !neg_has {
+                let pkg = package_for_call(family, call, false);
                 candidates.push(Candidate::Policy {
                     rule: format!("policy_{call}_banned_arg_{slot}_{pos_val}"),
                     call: call.clone(),
@@ -466,10 +477,12 @@ pub fn propose_with_trace(
                         values: vec![pos_val.clone()],
                     }],
                     scope: PolicyScope::Function,
+                    package: pkg,
                 });
                 if let Some(neg_vals) = neg_arg_literals.get(&(call.clone(), *slot)) {
                     for neg_val in neg_vals {
                         if neg_val != pos_val {
+                            let pkg = package_for_call(family, call, false);
                             candidates.push(Candidate::Policy {
                                 rule: format!("policy_{call}_required_arg_{slot}_{neg_val}"),
                                 call: call.clone(),
@@ -481,6 +494,7 @@ pub fn propose_with_trace(
                                     values: vec![neg_val.clone()],
                                 }],
                                 scope: PolicyScope::Function,
+                                package: pkg,
                             });
                         }
                     }
@@ -771,9 +785,20 @@ fn candidate_keys(candidates: &[Candidate]) -> String {
     candidates
         .iter()
         .map(|c| match c {
-            Candidate::Sink { call, .. } => format!("sink:{call}"),
-            Candidate::Sanitizer { call, guard } => {
-                format!("san:{call}:{}", if *guard { "guard" } else { "fn" })
+            Candidate::Sink { call, package, .. } => match package {
+                Some(p) => format!("sink:{p}:{call}"),
+                None => format!("sink:{call}"),
+            },
+            Candidate::Sanitizer {
+                call,
+                package,
+                guard,
+            } => {
+                let g = if *guard { "guard" } else { "fn" };
+                match package {
+                    Some(p) => format!("san:{p}:{call}:{g}"),
+                    None => format!("san:{call}:{g}"),
+                }
             }
             Candidate::Check { rule, call, .. } => format!("check:{rule}:{call}"),
             Candidate::Policy { rule, call, .. } => format!("policy:{rule}:{call}"),
@@ -783,4 +808,34 @@ fn candidate_keys(candidates: &[Candidate]) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn package_for_call(family: &Family, call: &str, is_negative: bool) -> Option<String> {
+    if let Some(pkg) = &family.metadata.package {
+        return Some(pkg.clone());
+    }
+    let files = if is_negative {
+        &family.negatives
+    } else {
+        &family.positives
+    };
+    let receiver = call.split('.').next().unwrap_or(call);
+    for (_path, source, ext) in files {
+        if let Some(spec) = frensense_lang::spec_for_ext(ext) {
+            let mut parser = tree_sitter::Parser::new();
+            if parser.set_language(&spec.tree_sitter_language()).is_ok() {
+                if let Some(tree) = parser.parse(source, None) {
+                    let imports = spec.extract_imports(tree.root_node(), source);
+                    if let Some(imp) = imports.iter().find(|i| {
+                        i.local_name == call
+                            || i.local_name == receiver
+                            || i.symbol.as_deref() == Some(call)
+                    }) {
+                        return Some(imp.package.clone());
+                    }
+                }
+            }
+        }
+    }
+    None
 }

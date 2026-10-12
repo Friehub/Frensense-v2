@@ -38,24 +38,19 @@ jobs:
       - name: Build Frensense
         run: cargo build --release
 
-      - name: Checkout OWASP BenchmarkPython
-        run: git clone --depth 1 https://github.com/OWASP-Benchmark/BenchmarkPython.git /tmp/BenchmarkPython
-
-      - name: Run OWASP Python Benchmark
+      - name: Run Reproducible Benchmark
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIST_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          python3 scripts/owasp_benchmark.py \
-            --owasp-csv /tmp/BenchmarkPython/expectedresults-0.1.csv \
-            --owasp-testcode /tmp/BenchmarkPython/testcode \
-            --json-out /tmp/owasp_scorecard.json | tee /tmp/owasp_summary.txt
+          ./scripts/reproduce_benchmark.sh --workers 8 --publish-gist
 
-          echo "## OWASP Benchmark for Python Results" >> $GITHUB_STEP_SUMMARY
-          echo '```text' >> $GITHUB_STEP_SUMMARY
-          cat /tmp/owasp_summary.txt >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          # Append Markdown report directly to GitHub Actions summary
+          cat benchmark_report.md >> $GITHUB_STEP_SUMMARY
 
+          # Convert scorecard into benchmark-action custom format
           python3 -c "
           import json
-          with open('/tmp/owasp_scorecard.json') as f:
+          with open('benchmark_scorecard.json') as f:
               scorecard = json.load(f)
           total = scorecard['total']
           data = [
@@ -70,6 +65,14 @@ jobs:
           "
 
           cat benchmark-results.json
+
+      - name: Upload Benchmark Scorecard Artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frensense-benchmark-scorecard
+          path: |
+            benchmark_report.md
+            benchmark_scorecard.json
 
       - name: Store and Publish Benchmark Results
         uses: benchmark-action/github-action-benchmark@315072f079db10e96004ffb95b9b7263bf3a547e # v1.19.2

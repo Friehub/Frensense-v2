@@ -123,8 +123,18 @@ fn extract_facts_with(
         family_notes.insert(f.id.clone(), notes);
         for c in cands {
             let key = match &c {
-                Candidate::Sink { call, .. } => format!("sink:{call}"),
-                Candidate::Sanitizer { call, guard } => format!("san:{call}:{guard}"),
+                Candidate::Sink { call, package, .. } => match package {
+                    Some(p) => format!("sink:{p}:{call}"),
+                    None => format!("sink:{call}"),
+                },
+                Candidate::Sanitizer {
+                    call,
+                    package,
+                    guard,
+                } => match package {
+                    Some(p) => format!("san:{p}:{call}:{guard}"),
+                    None => format!("san:{call}:{guard}"),
+                },
                 Candidate::Check { rule, call, .. } => format!("check:{rule}:{call}"),
                 Candidate::Policy { rule, call, .. } => format!("policy:{rule}:{call}"),
                 Candidate::MemoryContract { name, .. } => format!("mem:{name}"),
@@ -341,6 +351,49 @@ fn extract_facts_with(
                 None => "no voting family could validate this fact".to_string(),
             });
         }
+        // Blast-radius quarantine: a candidate carrying a package may only be
+        // published if the voting family actually imports or declares that package.
+        if reject.is_none() {
+            let cand_pkg = match &cand {
+                Candidate::Sink { package, .. } => package.as_deref(),
+                Candidate::Sanitizer { package, .. } => package.as_deref(),
+                Candidate::Policy { package, .. } => package.as_deref(),
+                _ => None,
+            };
+            if let Some(pkg) = cand_pkg {
+                let pkg_supported = fams.iter().any(|fam_id| {
+                    families
+                        .iter()
+                        .find(|f| &f.id == fam_id)
+                        .map_or(false, |f| {
+                            f.metadata.package.as_deref() == Some(pkg) || {
+                                let is_san = matches!(&cand, Candidate::Sanitizer { .. });
+                                let files = if is_san { &f.negatives } else { &f.positives };
+                                files.iter().any(|(_, src, ext)| {
+                                    if let Some(spec) = frensense_lang::spec_for_ext(ext) {
+                                        let mut parser = tree_sitter::Parser::new();
+                                        if parser.set_language(&spec.tree_sitter_language()).is_ok()
+                                        {
+                                            if let Some(tree) = parser.parse(src, None) {
+                                                return spec
+                                                    .extract_imports(tree.root_node(), src)
+                                                    .iter()
+                                                    .any(|i| i.package == pkg);
+                                            }
+                                        }
+                                    }
+                                    false
+                                })
+                            }
+                        })
+                });
+                if !pkg_supported {
+                    reject = Some(format!(
+                        "blast-radius quarantine: candidate package '{pkg}' not imported by voting family"
+                    ));
+                }
+            }
+        }
         if let Some(reason) = reject {
             if std::env::var("FXDBG").is_ok() {
                 eprintln!("[gate] REJECT key={key} support={support} reason={reason}");
@@ -366,7 +419,13 @@ fn extract_facts_with(
         });
 
         apply_candidate(&mut learned, &cand);
-        let entry = cand.to_learned_entry();
+        let lang = fams.first().and_then(|id| {
+            families
+                .iter()
+                .find(|f| &f.id == id)
+                .and_then(|f| f.language())
+        });
+        let entry = cand.to_learned_entry_scoped(lang);
 
         published.push(LearnedFact {
             entry,

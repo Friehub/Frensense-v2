@@ -14,6 +14,10 @@ pub struct SinkSignature {
     /// Call name matched against `CallStatic.func` / `CallVirtual.method`
     /// (last segment of a member chain).
     pub call: String,
+    /// Optional package qualification (e.g. "pg", "mysql", "child_process").
+    /// `None` indicates a universal built-in or unscoped sink.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub package: Option<String>,
     /// Argument slots that are dangerous when tainted. Empty = every slot.
     pub dangerous_args: BTreeSet<usize>,
     /// When `true`, a tainted argument in a *non-dangerous* slot (e.g. the
@@ -39,6 +43,7 @@ impl SinkSignature {
     pub fn all_args(call: &str) -> Self {
         Self {
             call: call.to_string(),
+            package: None,
             dangerous_args: BTreeSet::new(),
             binding_args_safe: false,
             idor_keys: Vec::new(),
@@ -51,6 +56,7 @@ impl SinkSignature {
     pub fn with_args(call: &str, slots: &[usize]) -> Self {
         Self {
             call: call.to_string(),
+            package: None,
             dangerous_args: slots.iter().copied().collect(),
             binding_args_safe: false,
             idor_keys: Vec::new(),
@@ -84,6 +90,10 @@ pub const ALLOWLIST_SANITIZER_KIND: &str = "allowlist";
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct SanitizerFact {
     pub call: String,
+    /// Optional package qualification (e.g. "pg", "validator").
+    /// `None` indicates a universal sanitizer.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub package: Option<String>,
     /// Strength/style label (advisory; the engine cuts on every kind and
     /// branches on `guard_style`). One dialect across every producer:
     /// [`DEFAULT_SANITIZER_KIND`] / [`ALLOWLIST_SANITIZER_KIND`].
@@ -238,6 +248,11 @@ pub struct PolicyFact {
     pub message: String,
     /// Advisory severity hint: "warning" or "critical".
     pub severity: String,
+    /// Optional package qualification: when `Some(pkg)`, the policy only
+    /// fires in files that import `pkg` (mirrors the sink/source
+    /// package-scoping model). `None` = fires globally.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub package: Option<String>,
 }
 
 impl PolicyFact {
@@ -259,6 +274,7 @@ impl PolicyFact {
             scope: PolicyScope::Function,
             message: f.message.clone(),
             severity: f.severity.clone(),
+            package: None,
         }
     }
 }

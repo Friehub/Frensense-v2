@@ -384,5 +384,27 @@ pub static BOOTSTRAP_RECEIVER_PARAMS: &[&str] = &["self", "this"];
 /// `LanguageSpec::known_ambiguous_verbs` (a trait default no provider
 /// ever overrode), shed into the pack in Phase 6.6.
 pub static BOOTSTRAP_AMBIGUOUS_VERBS: &[&str] = &[
-    "get", "post", "put", "delete", "patch", "head", "options", "request", "set", "render",
+    "get",
+    "post",
+    "put",
+    "delete",
+    "patch",
+    "head",
+    "options",
+    "request",
+    "set",
+    "render",
+    // Verb gating (bare-name FP class): a call with one of these last
+    // segments only counts as a sink when its receiver root is a declared
+    // client root (roots come from the dotted sink entries). Added alongside
+    // the dotted entries in vocab/javascript/tables.rs; guarded by the
+    // probe suite in frensense-corpus reports/verb_gate_probes.
+    //
+    // Armed with import-origin resolution: static calls imported from
+    // client packages (child_process, pg) resolve to their package root;
+    // receiver calls (pipeline.exec, re.exec, trpc.query, phaser.query)
+    // outside client roots are safely suppressed.
+    "aggregate",
+    "exec",
+    "query",
 ];
