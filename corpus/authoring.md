@@ -105,10 +105,25 @@ The positive file may open with a structured comment block in the first 30 lines
   * `cvss`: Float score (0.0 to 10.0).
   * `owasp`: OWASP Top 10 category (e.g. `A03:2021`).
   * `severity`: `Critical`, `High`, `Warning`, or `Info`.
+  * `package`: Target framework or package provenance name (e.g. `express`, `next`, `hono`, `jspdf`, `sequelize`, `typeorm`). In Format v6+ (`.frc`), this qualifies learned sinks, sanitizers, and facts with package-level provenance, preventing rules from over-firing on neutral codebases or bleeding across frameworks.
 * **Negative Files**: Negative files must **not** carry the `[frensense]` block. Open negative files with:
   ```typescript
   // SAFE: <explanation of why this variant is secure>
   ```
+
+### 4.1 Framework Provenance Scoping (`package:`)
+
+For framework-specific or third-party library rules, declare the framework package:
+
+```typescript
+// [frensense]
+// observation: User-controlled file parameter passed to res.sendFile without directory boundary check
+// package: express
+```
+
+* **Format v6+ Feature**: Qualified facts carry `package: Option<String>` in `.frc` bundles.
+* **Engine Scoping**: The engine binds sinks, sanitizers, and policies to files that explicitly import or declare the specified package. Calls to matching method names in other frameworks (e.g. Next.js, Electron, Hono) remain unaffected.
+* **Blast-Radius Quarantine**: The bundler compiler quarantines candidate facts: a candidate carrying a package may only be published if the voting family actually imports or declares that package.
 
 ## 5. What each family shape teaches
 
@@ -173,6 +188,18 @@ For systems languages (C/C++), integer overflow prover rules can be declared via
 ```
 
 This registers an allocation size overflow check in the prover table.
+
+### 5.4 Framework-scoped knowledge (`package: <name>`)
+
+When authoring families specific to frameworks or ecosystem libraries (e.g. Express, Next.js, Hono, jsPDF, Sequelize, TypeORM), declare the package provenance:
+
+```typescript
+// [frensense]
+// observation: User-controlled file parameter passed to res.sendFile
+// package: express
+```
+
+In `.frc` Format v6+, this binds learned sinks and policies strictly to files that import or reference the declared package. If another project (such as a Next.js App Router app, an Electron app, or an FTP utility) uses a call with the same method name (e.g. `sendFile`, `loadFile`), the rule remains inactive. This prevents cross-framework false positives without diminishing detection precision on target applications.
 
 ## 6. Statuses: `provisional` vs `confirmed`
 

@@ -1,7 +1,16 @@
 {
   "version": 1,
-  "generatedAt": "2026-10-10T12:52:31.632Z",
+  "generatedAt": "2026-10-12T19:06:54.234Z",
   "posts": [
+    {
+      "source": "frensense",
+      "slug": "2026-10-11-frensense-0-7-0-compiler-purity-and-package-scoping",
+      "url": "https://frensense.friehub.cloud/blog/2026-10-11-frensense-0-7-0-compiler-purity-and-package-scoping",
+      "title": "Inside Frensense 0.7.0: Package-Aware Dataflow, Compiler Purity, and Zero-Bleed Static Analysis",
+      "date": "2026-10-11",
+      "description": "A deep technical dive into Frensense 0.7.0 - solving cross-framework false positives with package-scoped facts, decoupling AST vocabularies into pure compiler IR, and enforcing held-out replay verification.",
+      "image": "https://frensense.friehub.cloud/default-blog-cover.svg"
+    },
     {
       "source": "frensense",
       "slug": "2026-10-09-static-analysis-in-the-age-of-frontier-ai",
