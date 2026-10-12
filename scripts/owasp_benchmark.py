@@ -7,8 +7,8 @@
 Scores the engine against the OWASP Benchmark for Python (v0.1): 1,230
 test cases authored by the OWASP project with an authoritative
 expected-results CSV. Third-party ground truth, zero overlap with any
-Frensense knowledge bundle. This is the engine's independent,
-competitor-comparable number.
+Frensense knowledge bundle. Use it as a diagnostic: the per-CWE misses
+are the engine's work queue.
 
 Scoring follows the OWASP Benchmark accuracy metric:
 
@@ -16,6 +16,31 @@ Scoring follows the OWASP Benchmark accuracy metric:
   vulnerable case + no find  -> FN     safe case + finding     -> FP
 
   score = TPR - FPR
+
+What counts as "a finding" is set by --match:
+
+  conservative (default)  A vulnerable case is a TP only if a finding is
+                          attributed to the case's CWE. A safe case is a FP
+                          if a finding is attributed to its CWE OR a finding
+                          could not be attributed to any CWE. Gives a lower
+                          bound on TPR and an upper bound on FPR.
+  cwe                     Strict: findings with no resolvable CWE are
+                          ignored on both sides.
+  any                     Legacy: any finding in the file counts, whatever
+                          its class. Overstates TPR; shown as an upper bound.
+
+A finding's CWE comes from a "CWE-n" tag (bundle-backed findings carry one)
+or from --tag-cwe-map / the small built-in map for tags whose meaning is
+unambiguous. Built-in checker findings do not carry CWE tags today, so
+bare-engine runs report an "unattributed" count; the real fix is for the
+engine to tag them.
+
+A scan that crashes, times out, exits with a code other than 0 or 1, or
+prints invalid JSON is class ERR: reported separately, excluded from the
+rates, and fails the run (exit 3) unless --allow-errors is given.
+
+Exit codes: 0 ok, 1 setup error, 3 scan errors, 4 regression vs --baseline
+(only with --fail-on-regression).
 
 Usage:
 
@@ -31,6 +56,9 @@ Usage:
     --owasp-testcode /tmp/BenchmarkPython/testcode \
     --json-out owasp_scorecard.json
 
+  # 4. track progress: compare against a committed baseline in CI
+  python3 scripts/owasp_benchmark.py --baseline owasp_baseline.json --fail-on-regression
+
 Results are printed as a summary table and, with --json-out, written as
 a machine-readable scorecard with per-CWE breakdowns and per-case
 verdicts.
@@ -39,15 +67,65 @@ verdicts.
 import argparse
 import concurrent.futures
 import csv
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 DEFAULT_BIN = Path(__file__).resolve().parent.parent / "target" / "release" / "frensense"
+
+# Tags whose CWE is unambiguous. Sink-role tags such as "execution" or
+# "resource" span several CWEs and are deliberately absent; extend with
+# --tag-cwe-map (JSON object: {"tag": "CWE-n"}).
+DEFAULT_TAG_CWE = {
+    "weak_hash": "CWE-328",
+    "xss": "CWE-79",
+}
+
+# Tags present on every advisory of a kind; no information for attribution.
+GENERIC_TAGS = {"checker", "taint", "policy"}
+
+CWE_RE = re.compile(r"^CWE-0*(\d+)$", re.IGNORECASE)
+
+CWE_NAMES = {
+    "CWE-22": "Path Traversal",
+    "CWE-78": "Command Injection",
+    "CWE-79": "Cross-Site Scripting (XSS)",
+    "CWE-89": "SQL Injection",
+    "CWE-90": "LDAP Injection",
+    "CWE-94": "Code Injection",
+    "CWE-328": "Weak Cryptographic Hash",
+    "CWE-330": "Insufficient Randomness",
+    "CWE-501": "Trust Boundary Violation",
+    "CWE-502": "Deserialization of Untrusted Data",
+    "CWE-601": "Open Redirect",
+    "CWE-611": "XML External Entity (XXE)",
+    "CWE-614": "Sensitive Cookie Insecure Transport",
+    "CWE-643": "XPath Injection",
+}
+
+
+def norm_cwe(value: str) -> str | None:
+    """'CWE-022' / 'cwe-22' -> 'CWE-22'; None if not a CWE id."""
+    m = CWE_RE.match(value.strip())
+    return f"CWE-{int(m.group(1))}" if m else None
+
+
+def load_tag_cwe_map(path: str | None) -> dict[str, str]:
+    mapping = dict(DEFAULT_TAG_CWE)
+    if path:
+        with open(path) as fh:
+            for tag, cwe in json.load(fh).items():
+                n = norm_cwe(str(cwe))
+                if n is None:
+                    raise ValueError(f"--tag-cwe-map: {tag!r} -> {cwe!r} is not a CWE id")
+                mapping[tag] = n
+    return mapping
 
 
 def load_cases(csv_path: Path, testcode: Path) -> list[dict]:
@@ -60,15 +138,18 @@ def load_cases(csv_path: Path, testcode: Path) -> list[dict]:
                 continue
             name = row[0]
             vul = row[2].strip().lower() == "true"
-            cwe = row[3]
+            raw = f"CWE-{row[3].strip()}"
+            cwe = norm_cwe(raw) or raw
             f = testcode / f"{name}.py"
             if f.exists():
-                cases.append({"file": f, "vul": vul, "cwe": f"CWE-{cwe}"})
+                cases.append({"file": f, "vul": vul, "cwe": cwe})
     return cases
 
 
-def scan_case(binary: Path, case: dict, bundle: Path | None = None) -> dict:
+def scan_case(binary: Path, case: dict, bundle: Path | None = None,
+              env: dict | None = None) -> dict:
     """Scan one case file in isolation (own process: no cross-case state)."""
+    cid = case["file"].stem
     try:
         cmd = [str(binary), str(case["file"])]
         if bundle is not None:
@@ -76,160 +157,285 @@ def scan_case(binary: Path, case: dict, bundle: Path | None = None) -> dict:
         cmd += ["--json"]
         proc = subprocess.run(
             cmd,
-            capture_output=True, text=True, timeout=120,
+            capture_output=True, text=True, timeout=120, env=env,
         )
-        data = json.loads(proc.stdout) if proc.stdout.strip() else {"advisories": []}
+        # 0 = clean run; 1 = findings under --strict / baseline regression.
+        # Anything else (2 = engine error, negative = killed by signal) is a
+        # failed scan, not a clean file.
+        if proc.returncode not in (0, 1):
+            raise RuntimeError(f"exit code {proc.returncode}: {proc.stderr.strip()[-200:]}")
+        data = json.loads(proc.stdout) if proc.stdout.strip() else []
         advisories = data if isinstance(data, list) else data.get("advisories", [])
-        return {"id": case["file"].stem, "findings": len(advisories)}
-    except (subprocess.TimeoutExpired, json.JSONDecodeError) as e:
-        return {"id": case["file"].stem, "findings": 0, "error": str(e)}
+        if not isinstance(advisories, list):
+            raise ValueError("unexpected JSON shape")
+        tag_sets = [list(a.get("tags", [])) if isinstance(a, dict) else [] for a in advisories]
+        return {"id": cid, "findings": len(advisories), "tag_sets": tag_sets}
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, RuntimeError,
+            ValueError, OSError) as e:
+        return {"id": cid, "findings": 0, "tag_sets": [], "error": str(e)}
 
 
-def score(results: list[dict], cases: dict[str, dict]) -> dict:
+def advisory_cwes(tags: list[str], tag_cwe: dict[str, str]) -> set[str]:
+    """CWE ids an advisory can be attributed to (empty set = unattributed)."""
+    out = set()
+    for t in tags:
+        c = norm_cwe(t) or tag_cwe.get(t)
+        if c:
+            out.add(c)
+    return out
+
+
+def classify(vul: bool, mode: str, case_cwe: str, adv_cwes: list[set[str]]) -> str:
+    n = len(adv_cwes)
+    attributed_hit = any(case_cwe in s for s in adv_cwes)
+    unattributed = sum(1 for s in adv_cwes if not s)
+    if mode == "any":
+        hit = n > 0
+    elif mode == "cwe":
+        hit = attributed_hit
+    else:  # conservative: unattributed findings never earn a TP, always cost a FP
+        hit = attributed_hit or (not vul and unattributed > 0)
+    if vul:
+        return "TP" if hit else "FN"
+    return "FP" if hit else "TN"
+
+
+def rates(d) -> dict:
+    out = {}
+    for k, v in d.items():
+        tp, fp, fn, tn = (v.get(c, 0) for c in ("TP", "FP", "FN", "TN"))
+        tpr = tp / (tp + fn) if tp + fn else 0.0
+        fpr = fp / (fp + tn) if fp + tn else 0.0
+        out[k] = {
+            "TP": tp, "FP": fp, "FN": fn, "TN": tn, "ERR": v.get("ERR", 0),
+            "tpr": round(tpr, 3),
+            "fpr": round(fpr, 3),
+            "score": round(tpr - fpr, 3),
+        }
+    return out
+
+
+def tally(per_case: list[dict], field: str) -> dict:
+    by_cwe = defaultdict(lambda: defaultdict(int))
+    total = defaultdict(lambda: defaultdict(int))
+    for c in per_case:
+        by_cwe[c["cwe"]][c[field]] += 1
+        total["all"][c[field]] += 1
+    return {"total": rates(total)["all"], "by_cwe": dict(sorted(rates(by_cwe).items()))}
+
+
+def score(results: list[dict], cases: dict[str, dict], mode: str,
+          tag_cwe: dict[str, str]) -> dict:
     per_case = []
+    unattributed_tags = Counter()
+    advisories_total = unattributed_total = 0
     for r in results:
         meta = cases[r["id"]]
-        has_finding = r["findings"] > 0
-        if meta["vul"] and has_finding:
-            cls = "TP"
-        elif meta["vul"]:
-            cls = "FN"
-        elif has_finding:
-            cls = "FP"
+        adv_cwes = [advisory_cwes(t, tag_cwe) for t in r.get("tag_sets", [])]
+        for tags, cwes in zip(r.get("tag_sets", []), adv_cwes):
+            advisories_total += 1
+            if not cwes:
+                unattributed_total += 1
+                unattributed_tags.update(t for t in tags if t not in GENERIC_TAGS)
+        if "error" in r:
+            cls = cls_any = "ERR"
         else:
-            cls = "TN"
+            cls = classify(meta["vul"], mode, meta["cwe"], adv_cwes)
+            cls_any = classify(meta["vul"], "any", meta["cwe"], adv_cwes)
         per_case.append({
             "id": r["id"],
             "cwe": meta["cwe"],
             "lang": "py",
             "expected": "vulnerable" if meta["vul"] else "safe",
             "findings": r["findings"],
+            "cwes_found": sorted(set().union(*adv_cwes)),
+            "unattributed": sum(1 for s in adv_cwes if not s),
             "class": cls,
+            "class_any": cls_any,
             **({"error": r["error"]} if "error" in r else {}),
         })
 
-    by_cwe = defaultdict(lambda: defaultdict(int))
-    total = defaultdict(lambda: defaultdict(int))
-    for c in per_case:
-        for bucket, key in ((by_cwe, c["cwe"]), (total, "all")):
-            bucket[key][c["class"]] += 1
-
-    def rates(d):
-        out = {}
-        for k, v in d.items():
-            tp, fp = v.get("TP", 0), v.get("FP", 0)
-            fn, tn = v.get("FN", 0), v.get("TN", 0)
-            tpr = tp / (tp + fn) if tp + fn else 0.0
-            fpr = fp / (fp + tn) if fp + tn else 0.0
-            out[k] = {
-                **{c: v.get(c, 0) for c in ("TP", "FP", "FN", "TN")},
-                "tpr": round(tpr, 3),
-                "fpr": round(fpr, 3),
-                "score": round(tpr - fpr, 3),
-            }
-        return out
-
+    main = tally(per_case, "class")
     return {
-        "total": rates(total)["all"],
-        "by_cwe": dict(sorted(rates(by_cwe).items())),
+        "meta": {"match": mode, "tag_cwe_entries": len(tag_cwe)},
+        "total": main["total"],
+        "by_cwe": main["by_cwe"],
+        "legacy_any": tally(per_case, "class_any"),
+        "attribution": {
+            "advisories": advisories_total,
+            "unattributed": unattributed_total,
+            "unattributed_tags": dict(unattributed_tags.most_common(20)),
+        },
         "cases": per_case,
     }
 
 
-def print_scorecard(s: dict, elapsed: float) -> None:
+def compare_to_baseline(cur: dict, base: dict, tpr_tol: float, fpr_tol: float) -> dict:
+    """Deltas vs a previous scorecard plus a list of regressions."""
+    diff = {"total": {}, "by_cwe": {}, "regressions": []}
+    for k in ("tpr", "fpr", "score"):
+        diff["total"][k] = round(cur["total"][k] - base["total"].get(k, 0.0), 3)
+    if diff["total"]["fpr"] > fpr_tol + 1e-9:
+        diff["regressions"].append(
+            f"overall FPR rose {diff['total']['fpr']*100:+.1f} pp "
+            f"({base['total'].get('fpr', 0)*100:.1f}% -> {cur['total']['fpr']*100:.1f}%)")
+    for cwe, v in cur["by_cwe"].items():
+        b = base.get("by_cwe", {}).get(cwe)
+        if not b:
+            continue
+        dt = round(v["tpr"] - b["tpr"], 3)
+        diff["by_cwe"][cwe] = dt
+        if dt < -tpr_tol - 1e-9:
+            diff["regressions"].append(
+                f"{cwe} TPR fell {dt*100:+.1f} pp ({b['tpr']*100:.1f}% -> {v['tpr']*100:.1f}%)")
+    if cur["total"]["ERR"] > base["total"].get("ERR", 0):
+        diff["regressions"].append(
+            f"scan errors rose ({base['total'].get('ERR', 0)} -> {cur['total']['ERR']})")
+    return diff
+
+
+def _pp(x: float | None) -> str:
+    return "n/a" if x is None else f"{x*100:+.1f} pp"
+
+
+def print_scorecard(s: dict, elapsed: float, diff: dict | None) -> None:
     t = s["total"]
-    n = t["TP"] + t["FP"] + t["FN"] + t["TN"]
+    n = t["TP"] + t["FP"] + t["FN"] + t["TN"] + t["ERR"]
+    mode = s["meta"]["match"]
     print(f"\n{'=' * 62}")
     print(f"FRENSENSE on OWASP BenchmarkPython  ({n} cases, {elapsed:.0f}s)")
     print(f"{'=' * 62}")
+    print(f"match mode: {mode}")
     print(f"TPR {t['tpr']*100:5.1f}%   FPR {t['fpr']*100:5.1f}%   SCORE (TPR-FPR) {t['score']*100:5.1f}%")
-    print(f"   TP {t['TP']:4d}   FP {t['FP']:4d}   FN {t['FN']:4d}   TN {t['TN']:4d}")
+    print(f"   TP {t['TP']:4d}   FP {t['FP']:4d}   FN {t['FN']:4d}   TN {t['TN']:4d}   ERR {t['ERR']:4d}")
+    if mode != "any":
+        lt = s["legacy_any"]["total"]
+        print(f"any-finding (legacy, upper bound): TPR {lt['tpr']*100:5.1f}%   FPR {lt['fpr']*100:5.1f}%")
+    a = s["attribution"]
+    print(f"advisories: {a['advisories']} total, {a['unattributed']} with no resolvable CWE")
+    if diff is not None:
+        print(f"vs baseline: TPR {_pp(diff['total']['tpr'])}  FPR {_pp(diff['total']['fpr'])}  "
+              f"score {_pp(diff['total']['score'])}")
     rows = [(cwe, v) for cwe, v in s["by_cwe"].items() if v["TP"] + v["FN"] >= 5]
     rows.sort(key=lambda kv: kv[1]["score"])
-    print(f"\nPer CWE (lowest score first, min 5 vulnerable cases):")
+    print("\nPer CWE (lowest score first, min 5 vulnerable cases):")
     print(f"{'CWE':<12}{'TPR':>7}{'FPR':>7}{'score':>8}{'cases':>7}")
-def generate_markdown_report(s: dict, elapsed: float, binary_version: str, repo_commit: str) -> str:
+    for cwe, v in rows:
+        cases_n = v["TP"] + v["FP"] + v["FN"] + v["TN"] + v["ERR"]
+        print(f"{cwe:<12}{v['tpr']*100:6.1f}%{v['fpr']*100:6.1f}%{v['score']*100:7.1f}%{cases_n:7d}")
+    if diff is not None and diff["regressions"]:
+        print("\nREGRESSIONS vs baseline:")
+        for line in diff["regressions"]:
+            print(f"  - {line}")
+
+
+def generate_markdown_report(s: dict, elapsed: float, binary_version: str,
+                             repo_commit: str, ctx: dict, diff: dict | None) -> str:
     t = s["total"]
-    n = t["TP"] + t["FP"] + t["FN"] + t["TN"]
+    n = t["TP"] + t["FP"] + t["FN"] + t["TN"] + t["ERR"]
+    mode = s["meta"]["match"]
     date_str = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
-    
+    d_tot = diff["total"] if diff else {}
+
+    def delta(key):
+        return _pp(d_tot.get(key)) if diff else "n/a"
+
+    mode_note = {
+        "conservative": "findings count toward TP only when attributed to the case's CWE; "
+                        "unattributed findings on safe cases count as FP (lower bound on TPR, "
+                        "upper bound on FPR)",
+        "cwe": "findings count only when attributed to the case's CWE; unattributed findings "
+               "are ignored on both sides",
+        "any": "any finding in the file counts, whatever its class (overstates TPR)",
+    }[mode]
+
     lines = [
-        "# Frensense Benchmark Reproduction Report",
+        "# Frensense Benchmark Report",
         "",
-        "> Autonomous verification scorecard on **OWASP Benchmark for Python (v0.1)**.",
-        "> Generated independently with zero bundle modifications.",
+        "> Scorecard on **OWASP Benchmark for Python (v0.1)**, produced by `scripts/owasp_benchmark.py`.",
+        "> Run by the Frensense maintainers; not independently audited. Reproduce with the command below.",
         "",
         "## Benchmark Environment",
         "",
         f"- **Date**: `{date_str}`",
         f"- **Engine Version**: `{binary_version}`",
         f"- **Frensense Commit**: `{repo_commit}`",
-        "- **Suite**: OWASP Benchmark for Python (v0.1, 1,230 test cases)",
-        f"- **Scan Time**: `{elapsed:.1f}s` ({elapsed/max(n,1)*1000:.1f} ms/case across 8 workers)",
+        f"- **Suite**: OWASP Benchmark for Python (v0.1, {n} test cases)",
+        f"- **Knowledge bundle**: {ctx['bundle']}",
+        f"- **Matching**: `{mode}`: {mode_note}",
+        f"- **Scan Time**: `{elapsed:.1f}s` wall-clock, {ctx['workers']} workers "
+        f"({elapsed/max(n,1)*1000:.1f} ms/case throughput)",
         "",
-        "## Executive Scorecard",
+        "## Scorecard",
         "",
-        "| Metric | Value | Industry Average / Context | Status |",
-        "| :--- | :--- | :--- | :--- |",
-        f"| **Score (TPR - FPR)** | **{t['score']*100:.1f}%** | 0.0% – 20.0% (typical out-of-box SAST) | **Pass** |",
-        f"| **False Positive Rate (FPR)** | **{t['fpr']*100:.1f}%** | 20.0% – 70.0% (traditional SAST noise floor) | **Best-in-Class (< 2%)** |",
-        f"| **True Positive Rate (TPR)** | **{t['tpr']*100:.1f}%** | Recall on modeled sink/source families | Verified |",
-        f"| **Total Cases Evaluated** | **{n}** | 1,230 ground-truth files | Complete |",
-        f"| **True Positives (TP)** | `{t['TP']}` | Correctly identified vulnerabilities | - |",
-        f"| **False Positives (FP)** | `{t['FP']}` | Clean control code flagged (Noise) | **Only {t['FP']} cases** |",
-        f"| **False Negatives (FN)** | `{t['FN']}` | Vulnerabilities not yet modeled | Roadmap target |",
-        f"| **True Negatives (TN)** | `{t['TN']}` | Safely ignored clean control code | - |",
+        "| Metric | Value | Δ vs baseline |",
+        "| :--- | :--- | :--- |",
+        f"| **Score (TPR - FPR)** | **{t['score']*100:.1f}%** | {delta('score')} |",
+        f"| **False Positive Rate (FPR)** | **{t['fpr']*100:.1f}%** | {delta('fpr')} |",
+        f"| **True Positive Rate (TPR)** | **{t['tpr']*100:.1f}%** | {delta('tpr')} |",
+        f"| **Cases Evaluated** | {n} | |",
+        f"| **True Positives (TP)** | `{t['TP']}` | |",
+        f"| **False Positives (FP)** | `{t['FP']}` | |",
+        f"| **False Negatives (FN)** | `{t['FN']}` | |",
+        f"| **True Negatives (TN)** | `{t['TN']}` | |",
+        f"| **Scan errors (excluded from rates)** | `{t['ERR']}` | |",
         "",
-        "## Per-CWE Capability Matrix",
-        "",
-        "| CWE Class | Description | TPR | FPR | Score | Cases Evaluated |",
-        "| :--- | :--- | :---: | :---: | :---: | :---: |",
     ]
 
-    cwe_names = {
-        "CWE-22": "Path Traversal",
-        "CWE-022": "Path Traversal",
-        "CWE-78": "Command Injection",
-        "CWE-078": "Command Injection",
-        "CWE-79": "Cross-Site Scripting (XSS)",
-        "CWE-079": "Cross-Site Scripting (XSS)",
-        "CWE-89": "SQL Injection",
-        "CWE-089": "SQL Injection",
-        "CWE-90": "LDAP Injection",
-        "CWE-090": "LDAP Injection",
-        "CWE-94": "Code Injection",
-        "CWE-094": "Code Injection",
-        "CWE-328": "Weak Cryptographic Hash",
-        "CWE-330": "Insufficient Randomness",
-        "CWE-501": "Trust Boundary Violation",
-        "CWE-502": "Deserialization of Untrusted Data",
-        "CWE-601": "Open Redirect",
-        "CWE-611": "XML External Entity (XXE)",
-        "CWE-614": "Sensitive Cookie Insecure Transport",
-        "CWE-643": "XPath Injection",
-    }
+    if mode != "any":
+        lt = s["legacy_any"]["total"]
+        lines += [
+            "Any-finding scoring (legacy, upper bound on TPR): "
+            f"TPR {lt['tpr']*100:.1f}%, FPR {lt['fpr']*100:.1f}%. "
+            f"The gap to the figures above is findings the scorer cannot attribute to the case's CWE.",
+            "",
+        ]
 
-    rows = [(cwe, v) for cwe, v in s["by_cwe"].items()]
-    rows.sort(key=lambda kv: kv[0])
-    for cwe, v in rows:
-        n_cwe = v["TP"] + v["FP"] + v["FN"] + v["TN"]
-        desc = cwe_names.get(cwe, "Vulnerability Class")
+    a = s["attribution"]
+    lines += [
+        "## Finding attribution",
+        "",
+        f"{a['advisories']} advisories in total; {a['unattributed']} carry no CWE the scorer can resolve. "
+        "Built-in checker findings do not tag a CWE today, so these cannot be credited to a category "
+        "until the engine tags them or a `--tag-cwe-map` is supplied.",
+        "",
+    ]
+    if a["unattributed_tags"]:
+        lines += ["| Tag on unattributed advisories | Count |", "| :--- | ---: |"]
+        lines += [f"| `{tag}` | {cnt} |" for tag, cnt in a["unattributed_tags"].items()]
+        lines.append("")
+
+    lines += [
+        "## Per-CWE Capability Matrix",
+        "",
+        "| CWE Class | Description | TPR | FPR | Score | Cases Evaluated | Δ TPR |",
+        "| :--- | :--- | :---: | :---: | :---: | :---: | :---: |",
+    ]
+    for cwe, v in sorted(s["by_cwe"].items()):
+        n_cwe = v["TP"] + v["FP"] + v["FN"] + v["TN"] + v["ERR"]
+        desc = CWE_NAMES.get(cwe, "Vulnerability Class")
+        d = _pp(diff["by_cwe"].get(cwe)) if diff else "n/a"
         lines.append(
-            f"| `{cwe}` | {desc} | {v['tpr']*100:.1f}% | {v['fpr']*100:.1f}% | **{v['score']*100:.1f}%** | {n_cwe} |"
+            f"| `{cwe}` | {desc} | {v['tpr']*100:.1f}% | {v['fpr']*100:.1f}% | "
+            f"**{v['score']*100:.1f}%** | {n_cwe} | {d} |"
         )
+
+    if diff is not None and diff["regressions"]:
+        lines += ["", "## Regressions vs baseline", ""]
+        lines += [f"- {r}" for r in diff["regressions"]]
 
     lines.extend([
         "",
         "## Reproduction Command",
         "",
-        "To independently reproduce this scorecard on any machine:",
+        "To reproduce this scorecard on any machine:",
         "",
         "```bash",
         "# 1. Clone frensense and build release binary",
         "git clone https://github.com/Friehub/frensense-v2.git",
         "cd frensense-v2 && cargo build --release",
         "",
-        "# 2. Run the automated reproduction runner",
+        "# 2. Run the reproduction runner",
         "./scripts/reproduce_benchmark.sh",
         "```",
         "",
@@ -302,6 +508,30 @@ def resolve_binary(bin_arg: str | None) -> Path | None:
     return None
 
 
+def describe_bundle(bundle: Path | None, testcode: Path) -> tuple[str, dict | None]:
+    """Human description of the knowledge bundle in effect, plus the
+    subprocess environment that makes a 'bare' run actually bare.
+
+    The engine auto-discovers `frensense-corpus.frc` in the scanned root and
+    honours FRENSENSE_CORPUS_BUNDLE, so a run without --bundle is only bare if
+    neither is present."""
+    if bundle is not None:
+        digest = hashlib.sha256(bundle.read_bytes()).hexdigest()[:12]
+        return f"`{bundle.name}` (sha256 `{digest}`)", None
+    env = {k: v for k, v in os.environ.items() if k != "FRENSENSE_CORPUS_BUNDLE"}
+    ambient = [
+        p for p in (testcode / "frensense-corpus.frc",
+                    testcode.parent / "frensense-corpus.frc",
+                    Path.cwd() / "frensense-corpus.frc")
+        if p.exists()
+    ]
+    if ambient:
+        print(f"[WARN] auto-discoverable bundle found: {ambient[0]}. "
+              "This run may not be bare; remove it or pass --bundle explicitly.", file=sys.stderr)
+        return f"**none passed, but `{ambient[0]}` is auto-discoverable; run may not be bare**", env
+    return "none (bare engine; `FRENSENSE_CORPUS_BUNDLE` cleared)", env
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="Score Frensense against the OWASP Benchmark for Python.")
@@ -316,6 +546,20 @@ def main() -> None:
                     help="testcode dir with the .py cases (default: CSV dir / testcode)")
     ap.add_argument("--bundle", default=None,
                     help=".frc corpus bundle passed to every scan via --corpus-bundle")
+    ap.add_argument("--match", choices=("conservative", "cwe", "any"), default="conservative",
+                    help="how findings are matched to a case's CWE (default: conservative)")
+    ap.add_argument("--tag-cwe-map", default=None,
+                    help="JSON object mapping advisory tags to CWE ids, e.g. {\"crypto\": \"CWE-328\"}")
+    ap.add_argument("--baseline", default=None,
+                    help="previous scorecard JSON (from --json-out) to diff against")
+    ap.add_argument("--fail-on-regression", action="store_true",
+                    help="exit 4 if FPR rises or any per-CWE TPR drops vs --baseline")
+    ap.add_argument("--tpr-tolerance", type=float, default=0.0,
+                    help="allowed per-CWE TPR drop before it counts as a regression (0.01 = 1 pp)")
+    ap.add_argument("--fpr-tolerance", type=float, default=0.0,
+                    help="allowed overall FPR rise before it counts as a regression")
+    ap.add_argument("--allow-errors", action="store_true",
+                    help="do not fail the run when some scans errored")
     args = ap.parse_args()
 
     binary = resolve_binary(args.bin)
@@ -329,6 +573,25 @@ def main() -> None:
     if bundle is not None and not bundle.exists():
         print(f"[ERROR] bundle not found at {bundle}", file=sys.stderr)
         sys.exit(1)
+
+    try:
+        tag_cwe = load_tag_cwe_map(args.tag_cwe_map)
+    except (OSError, ValueError, json.JSONDecodeError) as e:
+        print(f"[ERROR] cannot load --tag-cwe-map: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    baseline = None
+    if args.baseline:
+        try:
+            baseline = json.loads(Path(args.baseline).read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"[ERROR] cannot read --baseline: {e}", file=sys.stderr)
+            sys.exit(1)
+        base_mode = baseline.get("meta", {}).get("match", "any")  # pre-patch scorecards were any-finding
+        if base_mode != args.match:
+            print(f"[ERROR] baseline was scored with --match {base_mode}, this run uses "
+                  f"--match {args.match}; regenerate the baseline with the same mode.", file=sys.stderr)
+            sys.exit(1)
 
     # Auto-resolve OWASP CSV
     csv_candidates = [
@@ -357,6 +620,8 @@ def main() -> None:
         sys.exit(1)
     cases = {c["file"].stem: c for c in cases_list}
 
+    bundle_desc, scan_env = describe_bundle(bundle, testcode)
+
     # Query binary version and commit
     try:
         ver_proc = subprocess.run([str(binary), "--version"], capture_output=True, text=True, check=True)
@@ -375,22 +640,25 @@ def main() -> None:
     print(f"[INFO] Scanning with {args.workers} workers...")
     t0 = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
-        results = list(ex.map(lambda c: scan_case(binary, c, bundle), cases_list))
+        results = list(ex.map(lambda c: scan_case(binary, c, bundle, scan_env), cases_list))
     elapsed = time.time() - t0
 
-    errors = sum(1 for r in results if "error" in r)
+    errors = [r for r in results if "error" in r]
     if errors:
-        print(f"[WARN] {errors} scan errors", file=sys.stderr)
+        print(f"[WARN] {len(errors)} scan errors (excluded from rates); first: "
+              f"{errors[0]['id']}: {errors[0]['error']}", file=sys.stderr)
 
-    scorecard = score(results, cases)
-    print_scorecard(scorecard, elapsed)
+    scorecard = score(results, cases, args.match, tag_cwe)
+    diff = compare_to_baseline(scorecard, baseline, args.tpr_tolerance, args.fpr_tolerance) if baseline else None
+    print_scorecard(scorecard, elapsed, diff)
 
     scorecard_json_str = json.dumps(scorecard, indent=1)
     if args.json_out:
         Path(args.json_out).write_text(scorecard_json_str)
         print(f"\n[INFO] full scorecard JSON -> {args.json_out}")
 
-    md_report = generate_markdown_report(scorecard, elapsed, binary_version, repo_commit)
+    ctx = {"bundle": bundle_desc, "workers": args.workers}
+    md_report = generate_markdown_report(scorecard, elapsed, binary_version, repo_commit, ctx, diff)
     if args.md_out:
         Path(args.md_out).write_text(md_report)
         print(f"[INFO] markdown report -> {args.md_out}")
@@ -414,7 +682,13 @@ def main() -> None:
         else:
             print("[INFO] You can manually paste 'benchmark_report.md' into https://gist.github.com")
 
+    if errors and not args.allow_errors:
+        print(f"[ERROR] {len(errors)} scans failed; scorecard is incomplete "
+              "(rerun with --allow-errors to accept).", file=sys.stderr)
+        sys.exit(3)
+    if diff is not None and diff["regressions"] and args.fail_on_regression:
+        sys.exit(4)
+
 
 if __name__ == "__main__":
     main()
-
