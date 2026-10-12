@@ -93,7 +93,7 @@ onMounted(refresh)
         <span v-if="npmWeekly !== null" class="dl-card__stat">
           {{ fmt(npmWeekly) }}<em>downloads / week</em>
         </span>
-        <code class="dl-card__cmd">npm i -g @friehub/frensense@preview</code>
+        <code class="dl-card__cmd">npm i -g @friehub/frensense</code>
         <span class="dl-card__cta">View on npm &rarr;</span>
       </a>
 
@@ -107,13 +107,13 @@ onMounted(refresh)
         <span class="dl-card__stat dl-card__stat--muted"
           >SLSA L3 provenance<em>Linux, macOS, Windows</em></span
         >
-        <code class="dl-card__cmd">npx @friehub/frensense@preview .</code>
+        <code class="dl-card__cmd">npx @friehub/frensense .</code>
         <span class="dl-card__cta">All releases &rarr;</span>
       </a>
     </div>
 
     <p class="download-strip__foot">
-      No install needed - run <code>npx @friehub/frensense@preview .</code>.
+      No install needed - run <code>npx @friehub/frensense .</code>.
       Every surface shares one engine and one finding-ID scheme. Full options
       in the <a href="/guide/installation">installation guide</a>.
     </p>
