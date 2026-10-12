@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791836144167,
+  "lastUpdate": 1791843787881,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -879,6 +879,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "OWASP Benchmark True Positives (TP)",
             "value": 127,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 12,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "aaa447ef5ea0bb93df8cb525f208b930134a459c",
+          "message": "Merge pull request #44 from Friehub/fix/v0.7-package-scoping\n\nfix(benchmark): apply OWASP scorer attribution, regression, and valid…",
+          "timestamp": "2026-10-12T22:22:02Z",
+          "tree_id": "cb4aa3b6afd3d5e3c5e09b920d86de175328a8a2",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/aaa447ef5ea0bb93df8cb525f208b930134a459c"
+        },
+        "date": 1791843787188,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 14.2,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 15.7,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 1.5,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 71,
             "unit": "cases"
           },
           {
