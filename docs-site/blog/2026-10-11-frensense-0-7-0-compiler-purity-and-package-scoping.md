@@ -1,7 +1,7 @@
 ---
 title: "Inside Frensense 0.7.0: Package-Aware Dataflow, Compiler Purity, and Zero-Bleed Static Analysis"
 date: 2026-10-11
-description: A deep technical dive into Frensense 0.7.0 — solving cross-framework false positives with package-scoped facts, decoupling AST vocabularies into pure compiler IR, and enforcing held-out replay verification.
+description: A deep technical dive into Frensense 0.7.0 - solving cross-framework false positives with package-scoped facts, decoupling AST vocabularies into pure compiler IR, and enforcing held-out replay verification.
 ---
 
 # Inside Frensense 0.7.0: Package-Aware Dataflow, Compiler Purity, and Zero-Bleed Static Analysis
@@ -12,7 +12,7 @@ For traditional static application security testing (SAST), this polyglot densit
 
 The consequence is **Cross-Framework Bleed**: an aggressive rule tailored for a backend ORM fires on harmless UI components, utility helpers, or unrelated client libraries. Security teams are inundated with false positive noise, developers lose trust in the scanner, and legitimate vulnerabilities are lost in the backlog.
 
-With the release of **Frensense 0.7.0**—following an intensive cycle from Preview 1 through Preview 5—we solved this problem at the compiler and dataflow level. 
+With the release of **Frensense 0.7.0**-following an intensive cycle from Preview 1 through Preview 5-we solved this problem at the compiler and dataflow level. 
 
 This release introduces **Bundle Format v6** with package-aware dataflow scoping, a complete **engine purity refactor** that decouples language ASTs from the analysis core, an **abstract-interpretation value lattice**, and an immutable **4-file held-out verification contract**.
 
@@ -146,7 +146,7 @@ In Frensense 0.7.0, we completed a total **Engine Purity Refactor**:
    - The Sparse Value-Flow Graph (SVFG).
    - Data-driven `FactTable` facts.
 2. **Standalone `frensense-packgen` Compiler**: We extracted all language grammatical knowledge into a dedicated compiler crate, `frensense-packgen`. It extracts language provider vocabularies (JavaScript, TypeScript, Python, Go, Rust, C) and emits standalone binary `.frc` packs.
-3. **13 Teachable Security Dimensions**: The engine can be taught entirely through `.frc` bundles across 13 distinct security dimensions—including custom taint sources, sinks, sanitizers, propagators, memory allocators, memory deallocators, IDOR verbs, weak crypto algorithms, schema policy builders, and argument literal constraints—with zero engine recompilation.
+3. **13 Teachable Security Dimensions**: The engine can be taught entirely through `.frc` bundles across 13 distinct security dimensions-including custom taint sources, sinks, sanitizers, propagators, memory allocators, memory deallocators, IDOR verbs, weak crypto algorithms, schema policy builders, and argument literal constraints-with zero engine recompilation.
 
 ---
 

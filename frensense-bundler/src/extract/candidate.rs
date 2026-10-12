@@ -48,6 +48,9 @@ pub enum Candidate {
         message: String,
         require: Vec<PolicyRequirement>,
         scope: PolicyScope,
+        /// Package qualification: when `Some(pkg)`, the policy only fires
+        /// in files that import `pkg` (mirrors sink/source scoping).
+        package: Option<String>,
     },
     /// A custom allocation/deallocation wrapper contract learned from corpus examples.
     MemoryContract {
@@ -160,14 +163,29 @@ impl Candidate {
                 message,
                 require,
                 scope,
-            } => LearnedFactEntry::Policy {
-                rule: rule.clone(),
-                when_call: call.clone(),
-                require: require.clone(),
-                scope: *scope,
-                message: message.clone(),
-                severity: "warning".into(),
-            },
+                package,
+            } => {
+                if let Some(pkg) = package {
+                    LearnedFactEntry::PolicyScoped {
+                        rule: rule.clone(),
+                        when_call: call.clone(),
+                        require: require.clone(),
+                        scope: *scope,
+                        message: message.clone(),
+                        severity: "warning".into(),
+                        package: pkg.clone(),
+                    }
+                } else {
+                    LearnedFactEntry::Policy {
+                        rule: rule.clone(),
+                        when_call: call.clone(),
+                        require: require.clone(),
+                        scope: *scope,
+                        message: message.clone(),
+                        severity: "warning".into(),
+                    }
+                }
+            }
             Candidate::MemoryContract {
                 name,
                 returns_fresh,
@@ -266,6 +284,7 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
             message,
             require,
             scope,
+            package,
         } => {
             table.policy_facts.push((
                 PolicyFact {
@@ -275,6 +294,7 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
                     scope: *scope,
                     message: message.clone(),
                     severity: "warning".into(),
+                    package: package.clone(),
                 },
                 Provenance::Learned,
             ));
@@ -374,6 +394,9 @@ pub fn fact_key(e: &LearnedFactEntry) -> (String, String) {
         LearnedFactEntry::Sanitizer { call, .. } => ("san".into(), call.clone()),
         LearnedFactEntry::Check { rule, call, .. } => ("check".into(), format!("{rule}:{call}")),
         LearnedFactEntry::Policy {
+            rule, when_call, ..
+        } => ("policy".into(), format!("{rule}:{when_call}")),
+        LearnedFactEntry::PolicyScoped {
             rule, when_call, ..
         } => ("policy".into(), format!("{rule}:{when_call}")),
         LearnedFactEntry::MemoryContract { name, .. } => ("mem".into(), name.clone()),

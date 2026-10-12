@@ -248,6 +248,11 @@ pub struct PolicyFact {
     pub message: String,
     /// Advisory severity hint: "warning" or "critical".
     pub severity: String,
+    /// Optional package qualification: when `Some(pkg)`, the policy only
+    /// fires in files that import `pkg` (mirrors the sink/source
+    /// package-scoping model). `None` = fires globally.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub package: Option<String>,
 }
 
 impl PolicyFact {
@@ -269,6 +274,7 @@ impl PolicyFact {
             scope: PolicyScope::Function,
             message: f.message.clone(),
             severity: f.severity.clone(),
+            package: None,
         }
     }
 }

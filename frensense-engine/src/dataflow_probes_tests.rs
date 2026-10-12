@@ -187,7 +187,6 @@ mod tier1_syntactic_probes {
     }
 
     #[test]
-    #[ignore = "Blind spot: Promise await target variable taint transfer"]
     fn probe_11_promise_await() {
         let src = r#"
             export async function test(req: any) {

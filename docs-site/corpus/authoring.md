@@ -111,6 +111,20 @@ The positive file may open with a structured comment block in the first 30 lines
   // SAFE: <explanation of why this variant is secure>
   ```
 
+### 4.1 Framework Provenance Scoping (`package:`)
+
+For framework-specific or third-party library rules, declare the framework package:
+
+```typescript
+// [frensense]
+// observation: User-controlled file parameter passed to res.sendFile without directory boundary check
+// package: express
+```
+
+- **Format v6+ Feature**: Qualified facts carry `package: Option<String>` in `.frc` bundles.
+- **Engine Scoping**: The engine binds sinks, sanitizers, and policies to files that explicitly import or declare the specified package. Calls to matching method names in other frameworks (e.g. Next.js, Electron, Hono) remain unaffected.
+- **Blast-Radius Quarantine**: The bundler compiler quarantines candidate facts: a candidate carrying a package may only be published if the voting family actually imports or declares that package.
+
 ## 5. What each family shape teaches
 
 ### 5.1 Dataflow taint families (sinks & sanitizers)

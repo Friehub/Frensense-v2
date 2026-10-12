@@ -250,6 +250,7 @@ export function outer (cmd: string) {
         let mut facts = FactTable::default();
         facts.policy_facts.push((
             PolicyFact {
+                package: None,
                 rule: "policy_run_tool".into(),
                 when_call: "runTool".into(),
                 require: vec![PolicyRequirement::GuardCall {
@@ -354,6 +355,7 @@ export function outer(c: any, db: any) {
         let mut pfacts = FactTable::default();
         pfacts.policy_facts.push((
             crate::analysis::taint::facts::PolicyFact {
+                package: None,
                 rule: "policy_run_tool".into(),
                 when_call: "runTool".into(),
                 require: vec![

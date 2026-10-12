@@ -10,49 +10,16 @@ function getWorkspaceVersion(): string {
   try {
     const cargoTomlPath = path.resolve(__dirname, '../../Cargo.toml')
     const content = fs.readFileSync(cargoTomlPath, 'utf-8')
-    const match = content.match(/\[package\][\s\S]*?version\s*=\s*"([^"]+)"/)
+    const match = content.match(/\[(?:workspace\.)?package\][\s\S]*?version\s*=\s*"([^"]+)"/)
     if (match && match[1]) {
       return match[1]
     }
   } catch {}
-  return '0.7.0-preview'
+  return '0.7.0'
 }
 
 async function getPublishedVersion(): Promise<string> {
-  const fallback = getWorkspaceVersion()
-
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 1500)
-    const res = await fetch('https://api.github.com/repos/Friehub/frensense-v2/releases/latest', {
-      headers: { 'User-Agent': 'frensense-docs-builder' },
-      signal: controller.signal
-    })
-    clearTimeout(timer)
-    if (res.ok) {
-      const data = (await res.json()) as { tag_name?: string }
-      if (data?.tag_name) {
-        return data.tag_name.replace(/^v/, '')
-      }
-    }
-  } catch {}
-
-  try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 1500)
-    const res = await fetch('https://registry.npmjs.org/@friehub/frensense/latest', {
-      signal: controller.signal
-    })
-    clearTimeout(timer)
-    if (res.ok) {
-      const data = (await res.json()) as { version?: string }
-      if (data?.version) {
-        return data.version
-      }
-    }
-  } catch {}
-
-  return fallback
+  return getWorkspaceVersion()
 }
 
 const currentVersion = await getPublishedVersion()
@@ -233,52 +200,6 @@ export default defineConfig({
           url: 'https://friehub.cloud'
         }
       })
-    ],
-    [
-      'script',
-      {},
-      `
-      (function() {
-        if (typeof window === 'undefined') return;
-        var STORAGE_KEY = 'frensense_latest_version';
-        function applyVersion(v) {
-          if (!v) return;
-          var display = v.startsWith('v') ? v : 'v' + v;
-          var targets = document.querySelectorAll('.VPNavBarMenuGroup button span, .frensense-version');
-          targets.forEach(function(el) {
-            if (/^v?\\d+\\.\\d+\\.\\d+/.test(el.textContent ? el.textContent.trim() : '')) {
-              el.textContent = display;
-            }
-          });
-        }
-        try {
-          var cached = sessionStorage.getItem(STORAGE_KEY);
-          if (cached) applyVersion(cached);
-        } catch (_) {}
-
-        function syncLatestVersion() {
-          if (!window.fetch) return;
-          fetch('https://api.github.com/repos/Friehub/frensense-v2/releases/latest')
-            .then(function(res) { return res.ok ? res.json() : null; })
-            .then(function(data) {
-              if (data && data.tag_name) {
-                var ver = data.tag_name;
-                try { sessionStorage.setItem(STORAGE_KEY, ver); } catch (_) {}
-                applyVersion(ver);
-              }
-            })
-            .catch(function() {});
-        }
-
-        if ('requestIdleCallback' in window) {
-          window.requestIdleCallback(syncLatestVersion);
-        } else {
-          window.addEventListener('load', function() {
-            setTimeout(syncLatestVersion, 1500);
-          });
-        }
-      })();
-      `
     ]
   ],
 
@@ -303,20 +224,17 @@ export default defineConfig({
       { text: 'Corpus', link: '/corpus/', activeMatch: '/corpus/' },
       { text: 'Bundles', link: '/bundles', activeMatch: '/bundles' },
       { text: 'Blog', link: '/blog/', activeMatch: '/blog/' },
-      {
-        text: 'v1 (legacy)',
-        items: [
-          { text: 'v1 documentation archive', link: '/v1/' },
-          { text: 'v1 on GitHub (Friehub/Frensense)', link: 'https://github.com/Friehub/Frensense' }
-        ]
-      },
+      { text: 'Changelog', link: '/changelog', activeMatch: '/changelog' },
       {
         text: `v${currentVersion}`,
         items: [
-          { text: 'Changelog', link: 'https://github.com/Friehub/frensense-v2/blob/main/CHANGELOG.md' },
+          { text: 'Changelog', link: '/changelog' },
+          { text: 'v0.7.0 Previews (GitHub)', link: 'https://github.com/Friehub/frensense-v2/releases' },
+          { text: 'v0.6.0 (Previous Stable)', link: 'https://github.com/Friehub/frensense-v2/releases/tag/v0.6.0' },
+          { text: 'v1.x (Legacy Archive)', link: '/v1/' },
           { text: 'crates.io', link: 'https://crates.io/crates/frensense' },
-          { text: 'npm', link: 'https://www.npmjs.com/package/@friehub/frensense' },
-          { text: 'GitHub Releases', link: 'https://github.com/Friehub/frensense-v2/releases' }
+          { text: 'npm (@friehub/frensense)', link: 'https://www.npmjs.com/package/@friehub/frensense' },
+          { text: 'GitHub Repository', link: 'https://github.com/Friehub/frensense-v2' }
         ]
       }
     ],

@@ -30,6 +30,12 @@ fn format_entry_tag(entry: &LearnedFactEntry) -> String {
         LearnedFactEntry::Policy {
             rule, when_call, ..
         } => format!("policy:{rule}({when_call})"),
+        LearnedFactEntry::PolicyScoped {
+            rule,
+            when_call,
+            package,
+            ..
+        } => format!("policy:{rule}({when_call}, pkg={package})"),
         LearnedFactEntry::MemoryContract {
             name,
             returns_fresh,

@@ -739,6 +739,7 @@ mod tests {
                 scope: PolicyScope::Function,
                 message: "author-declared advisory".to_string(),
                 severity: "critical".to_string(),
+                package: None,
             })],
         })
         .expect("v5 payload serializes");
@@ -771,6 +772,7 @@ mod tests {
                 scope: PolicyScope::Function,
                 message: "author-declared advisory".to_string(),
                 severity: "critical".to_string(),
+                package: Some("checkout-lib".to_string()),
             })],
         };
         let bytes = write_bundle(&payload, 0).expect("v6 write");

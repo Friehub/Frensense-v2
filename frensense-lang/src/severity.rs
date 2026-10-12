@@ -162,6 +162,18 @@ impl SanitizerKind {
     pub fn from_slug(slug: &str) -> Option<Self> {
         match slug {
             "full" => Some(Self::Full),
+            // Legacy dialect aliases: `DEFAULT_SANITIZER_KIND` ("encode")
+            // and `ALLOWLIST_SANITIZER_KIND` ("allowlist") are the labels
+            // `FactTable::from_config` and bundle-learned sanitizers emit.
+            // Map them to Full so role-qualified evaluation sees a known
+            // kind instead of falling through to the sink-agnostic path.
+            "encode" | "allowlist" | "generic" => Some(Self::Full),
+            // Anything else is a genuinely unknown slug. The role-
+            // qualified evaluator (`is_sanitizer_effective_for_role`)
+            // treats `None` as "no cut": an unrecognized label must
+            // never silence a sink it was never proven to defeat
+            // (residual #15). Producers that need an opaque full cut
+            // must emit one of the aliases above.
             "html_escape" => Some(Self::HtmlEscape),
             "url_encode" => Some(Self::UrlEncode),
             "sql_parameterize" => Some(Self::SqlParameterize),

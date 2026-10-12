@@ -79,7 +79,7 @@ onMounted(refresh)
         <span v-if="cratesWeekly !== null" class="dl-card__stat">
           {{ fmt(cratesWeekly) }}<em>downloads / week</em>
         </span>
-        <code class="dl-card__cmd">cargo install frensense --version 0.7.0-preview.5</code>
+        <code class="dl-card__cmd">cargo install frensense --version 0.7.0</code>
         <span class="dl-card__cta">View on crates.io &rarr;</span>
       </a>
 

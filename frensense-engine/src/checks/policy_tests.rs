@@ -83,6 +83,7 @@ export function handler (cmd: string) {
         let mut facts = FactTable::default();
         facts.policy_facts.push((
             PolicyFact {
+                package: None,
                 rule: "policy_run_tool".into(),
                 when_call: "runTool".into(),
                 require: vec![PolicyRequirement::GuardCall {
@@ -110,6 +111,7 @@ export function handler (cmd: string) {
         let mut facts = FactTable::default();
         facts.policy_facts.push((
             PolicyFact {
+                package: None,
                 rule: "policy_run_tool".into(),
                 when_call: "runTool".into(),
                 require: vec![PolicyRequirement::GuardCall {
@@ -149,6 +151,7 @@ export function handler (cmd: string, doAudit: boolean) {
         let mut facts = FactTable::default();
         facts.policy_facts.push((
             PolicyFact {
+                package: None,
                 rule: "policy_run_tool".into(),
                 when_call: "runTool".into(),
                 require: vec![PolicyRequirement::GuardCall {
@@ -182,6 +185,7 @@ export function handler (cmd: string) {
         let mut facts = FactTable::default();
         facts.policy_facts.push((
             PolicyFact {
+                package: None,
                 rule: "policy_run_tool".into(),
                 when_call: "runTool".into(),
                 require: vec![PolicyRequirement::GuardCall {
@@ -217,6 +221,7 @@ export function handler (cmd: string) {
         let mut facts = FactTable::default();
         facts.policy_facts.push((
             PolicyFact {
+                package: None,
                 rule: "policy_run_tool".into(),
                 when_call: "runTool".into(),
                 require: vec![PolicyRequirement::GuardCall {
@@ -255,6 +260,7 @@ export function handler (cmd: string) {
         let mut facts = FactTable::default();
         facts.policy_facts.push((
             PolicyFact {
+                package: None,
                 rule: "policy_run_tool_audited".into(),
                 when_call: "runTool".into(),
                 require: vec![PolicyRequirement::RequireCall {
@@ -293,6 +299,7 @@ export function handler (t: string) {
         let mut facts = FactTable::default();
         facts.policy_facts.push((
             PolicyFact {
+                package: None,
                 rule: "policy_no_token_echo".into(),
                 when_call: "renderToken".into(),
                 require: vec![PolicyRequirement::NotCall {
@@ -330,6 +337,7 @@ export function checkPermission (cmd: string) {
         let mut facts_fn = FactTable::default();
         facts_fn.policy_facts.push((
             PolicyFact {
+                package: None,
                 rule: "policy_run_tool".into(),
                 when_call: "runTool".into(),
                 require: vec![PolicyRequirement::GuardCall {
@@ -353,6 +361,7 @@ export function checkPermission (cmd: string) {
         let mut facts_mod = FactTable::default();
         facts_mod.policy_facts.push((
             PolicyFact {
+                package: None,
                 rule: "policy_run_tool".into(),
                 when_call: "runTool".into(),
                 require: vec![PolicyRequirement::GuardCall {
@@ -407,6 +416,7 @@ export function checkPermission (cmd: string) {
         let mut facts = FactTable::default();
         facts.policy_facts.push((
             PolicyFact {
+                package: None,
                 rule: "policy_banned_insecure_transport".into(),
                 when_call: "initConnection".into(),
                 require: vec![PolicyRequirement::BannedArgLiteral {
@@ -453,6 +463,7 @@ export function connectClient (host: string) {
         let mut facts = FactTable::default();
         facts.policy_facts.push((
             PolicyFact {
+                package: None,
                 rule: "policy_require_secure_algorithm".into(),
                 when_call: "signToken".into(),
                 require: vec![PolicyRequirement::RequiredArgLiteral {

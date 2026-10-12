@@ -124,6 +124,18 @@ pub fn check_all_with_graph<'a>(
     facts: &FactTable,
     prog: Option<&ProgramSvfg<'_>>,
 ) -> Vec<CheckerFinding> {
+    check_all_with_graph_scoped(irs, facts, prog, None)
+}
+
+/// [`check_all_with_graph`] with package-scope filtering for policy facts:
+/// policies carrying `package: Some(pkg)` only fire in functions whose
+/// file imports `pkg`. `scope = None` disables filtering.
+pub fn check_all_with_graph_scoped<'a>(
+    irs: impl IntoIterator<Item = &'a FunctionIR>,
+    facts: &FactTable,
+    prog: Option<&ProgramSvfg<'_>>,
+    pkg_scope: Option<&policy::PackageScope<'_>>,
+) -> Vec<CheckerFinding> {
     let mut seen: FxHashSet<(String, String, usize)> = FxHashSet::default();
     let mut all = Vec::new();
     let irs: Vec<&FunctionIR> = irs.into_iter().collect();
@@ -138,7 +150,7 @@ pub fn check_all_with_graph<'a>(
     // Co-occurrence policies: function-scoped ones run per function,
     // module-scoped ones run once over the whole scanned set. Legacy
     // learned checks fire through the same evaluator after conversion.
-    for f in policy::check_program(&irs, facts) {
+    for f in policy::check_program_scoped(&irs, facts, pkg_scope) {
         let key = finding_key(&f);
         if seen.insert(key) {
             all.push(f);

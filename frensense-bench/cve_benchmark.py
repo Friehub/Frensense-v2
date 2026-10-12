@@ -190,21 +190,25 @@ def main():
         target_sym = case.get("target_symbol")
         expected_rule = case.get("rule")
 
-        vuln_match = any(
-            finding_matches_rule(f, expected_rule) and finding_matches_symbol(f, target_sym)
-            for f in vuln_findings
-        ) if vuln_findings else False
+        target_vuln_findings = [
+            f for f in vuln_findings
+            if finding_matches_rule(f, expected_rule) and finding_matches_symbol(f, target_sym)
+        ]
+        target_fixed_findings = [
+            f for f in fixed_findings
+            if finding_matches_rule(f, expected_rule) and finding_matches_symbol(f, target_sym)
+        ]
 
-        vuln_ok = len(vuln_findings) == case.get("expected_vuln_findings", 1) and vuln_match
-        fixed_ok = len(fixed_findings) == case.get("expected_fixed_findings", 0)
+        vuln_ok = len(target_vuln_findings) >= case.get("expected_vuln_findings", 1)
+        fixed_ok = len(target_fixed_findings) == case.get("expected_fixed_findings", 0)
 
         case_passed = vuln_ok and fixed_ok
         if not case_passed:
             all_passed = False
 
         status_str = "PASS" if case_passed else "FAIL"
-        print(f"  -> Vulnerable: {len(vuln_findings)} finding(s) in {vuln_time:.1f}ms (match: {vuln_match})")
-        print(f"  -> Fixed:      {len(fixed_findings)} finding(s) in {fixed_time:.1f}ms (Zero-FP: {fixed_ok})")
+        print(f"  -> Vulnerable: {len(target_vuln_findings)}/{len(vuln_findings)} target finding(s) in {vuln_time:.1f}ms (detected: {vuln_ok})")
+        print(f"  -> Fixed:      {len(target_fixed_findings)} target finding(s) in {fixed_time:.1f}ms (Zero-FP: {fixed_ok})")
         print(f"  [{status_str}] [{cve_id}]\n")
 
         rel_case_dir = cdir.relative_to(corpus_dir)

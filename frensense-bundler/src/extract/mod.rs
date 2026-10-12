@@ -357,6 +357,7 @@ fn extract_facts_with(
             let cand_pkg = match &cand {
                 Candidate::Sink { package, .. } => package.as_deref(),
                 Candidate::Sanitizer { package, .. } => package.as_deref(),
+                Candidate::Policy { package, .. } => package.as_deref(),
                 _ => None,
             };
             if let Some(pkg) = cand_pkg {

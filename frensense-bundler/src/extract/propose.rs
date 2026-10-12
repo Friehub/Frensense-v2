@@ -357,6 +357,7 @@ pub fn propose_with_trace(
                 )
             });
             if let Some(guard) = eligible_guards.last() {
+                let pkg = package_for_call(family, &trigger, false);
                 candidates.push(Candidate::Policy {
                     rule: format!("policy_{trigger}"),
                     call: trigger.clone(),
@@ -367,6 +368,7 @@ pub fn propose_with_trace(
                         call: (*guard).clone(),
                     }],
                     scope: PolicyScope::Function,
+                    package: pkg,
                 });
             }
             // Shape (c): banned-call co-occurrence. Calls the POSITIVES make
@@ -386,6 +388,7 @@ pub fn propose_with_trace(
             // chosen name is baked into the learned fact's bytes.
             banned.sort();
             if let Some(banned_call) = banned.first() {
+                let pkg = package_for_call(family, &trigger, false);
                 candidates.push(Candidate::Policy {
                     rule: format!("policy_{trigger}_no_{banned_call}"),
                     call: trigger.clone(),
@@ -398,6 +401,7 @@ pub fn propose_with_trace(
                         call: banned_call.clone(),
                     }],
                     scope: PolicyScope::Function,
+                    package: pkg,
                 });
             }
 
@@ -410,6 +414,7 @@ pub fn propose_with_trace(
                 cross_function_helper(family, &pos_calls, &neg_calls, Some(builtin))
             {
                 if builtin.sanitizer_fact(&helper).is_none() {
+                    let pkg = package_for_call(family, &trigger, false);
                     candidates.push(Candidate::Policy {
                         rule: format!("policy_{trigger}_with_{helper}"),
                         call: trigger.clone(),
@@ -420,6 +425,7 @@ pub fn propose_with_trace(
                             any_of: vec![helper.clone()],
                         }],
                         scope: PolicyScope::Module,
+                        package: pkg,
                     });
                 }
             }
@@ -457,6 +463,7 @@ pub fn propose_with_trace(
                 .map(|s| s.contains(pos_val))
                 .unwrap_or(false);
             if !neg_has {
+                let pkg = package_for_call(family, call, false);
                 candidates.push(Candidate::Policy {
                     rule: format!("policy_{call}_banned_arg_{slot}_{pos_val}"),
                     call: call.clone(),
@@ -470,10 +477,12 @@ pub fn propose_with_trace(
                         values: vec![pos_val.clone()],
                     }],
                     scope: PolicyScope::Function,
+                    package: pkg,
                 });
                 if let Some(neg_vals) = neg_arg_literals.get(&(call.clone(), *slot)) {
                     for neg_val in neg_vals {
                         if neg_val != pos_val {
+                            let pkg = package_for_call(family, call, false);
                             candidates.push(Candidate::Policy {
                                 rule: format!("policy_{call}_required_arg_{slot}_{neg_val}"),
                                 call: call.clone(),
@@ -485,6 +494,7 @@ pub fn propose_with_trace(
                                     values: vec![neg_val.clone()],
                                 }],
                                 scope: PolicyScope::Function,
+                                package: pkg,
                             });
                         }
                     }

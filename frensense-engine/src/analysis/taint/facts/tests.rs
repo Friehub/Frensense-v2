@@ -410,6 +410,7 @@ fn check(rule: &str, call: &str, msg: &str) -> LearnedCheckFact {
 
 fn policy(rule: &str, when: &str, msg: &str) -> PolicyFact {
     PolicyFact {
+        package: None,
         rule: rule.into(),
         when_call: when.into(),
         require: vec![],

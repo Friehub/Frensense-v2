@@ -156,8 +156,18 @@ pub fn scan_prepared(
     // Non-dataflow policy checks run on the same lowered IR, no taint
     // needed, so weak-crypto/config bugs surface even with zero taint paths.
     // `facts` also carries corpus-learned checks installed by the bundle.
-    let checker_findings =
-        checks::check_all_with_graph(statics.values().copied(), facts, Some(&prog));
+    // Package-scope context: policies carrying `package: Some(pkg)` only
+    // fire in functions whose file imports `pkg`.
+    let pkg_scope = checks::policy::PackageScope {
+        fn_file: &prepared.fn_file,
+        file_package_imports: &prepared.file_package_imports,
+    };
+    let checker_findings = checks::check_all_with_graph_scoped(
+        statics.values().copied(),
+        facts,
+        Some(&prog),
+        Some(&pkg_scope),
+    );
 
     let fn_file = &prepared.fn_file;
     let file_source = &prepared.file_source;

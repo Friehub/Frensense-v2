@@ -21,8 +21,42 @@ use super::CheckerFinding;
 use super::Provenance;
 use super::learned::{call_segments, is_range_guarded};
 use crate::analysis::taint::facts::{FactTable, PolicyFact, PolicyRequirement, PolicyScope};
+use crate::graph::module::PackageImport;
 use crate::ir::control::{self, DomSets};
 use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand};
+
+/// Package-import context for policy scoping: which file each function
+/// came from, and which external packages each file imports. Policies
+/// carrying `package: Some(pkg)` only fire in functions whose file
+/// imports `pkg` (mirrors the sink/source package-scoping model).
+pub struct PackageScope<'a> {
+    /// Function name -> source file path.
+    pub fn_file: &'a FxHashMap<String, String>,
+    /// File path -> (local import name -> import record).
+    pub file_package_imports: &'a FxHashMap<String, FxHashMap<String, PackageImport>>,
+}
+
+impl<'a> PackageScope<'a> {
+    /// Does the file containing `fn_name` import `pkg`?
+    ///
+    /// Mirrors the taint engine's single-file fallback
+    /// (`walk.rs`): when the map holds exactly one file's imports,
+    /// use those regardless of the function's declared file.
+    pub fn fn_imports_package(&self, fn_name: &str, pkg: &str) -> bool {
+        let imports = self
+            .fn_file
+            .get(fn_name)
+            .and_then(|file| self.file_package_imports.get(file))
+            .or_else(|| {
+                if self.file_package_imports.len() == 1 {
+                    self.file_package_imports.values().next()
+                } else {
+                    None
+                }
+            });
+        imports.is_some_and(|m| m.values().any(|i| i.package == pkg))
+    }
+}
 
 /// Evaluate every policy fact in `facts` over the scanned program.
 ///
@@ -32,6 +66,17 @@ use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand};
 /// refers to). Active `learned_checks` participate alongside native policies,
 /// ensuring both check representations fire harmoniously.
 pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFinding> {
+    check_program_scoped(irs, facts, None)
+}
+
+/// [`check_program`] with package-scope filtering: policies carrying
+/// `package: Some(pkg)` only fire in functions whose file imports `pkg`.
+/// `scope = None` disables filtering (backward-compatible default).
+pub fn check_program_scoped(
+    irs: &[&FunctionIR],
+    facts: &FactTable,
+    scope: Option<&PackageScope<'_>>,
+) -> Vec<CheckerFinding> {
     if facts.learned_checks.is_empty() && facts.policy_facts.is_empty() {
         return Vec::new();
     }
@@ -94,6 +139,15 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
                 None => continue,
             };
             if !segs.iter().any(|s| s == trigger_seg) {
+                continue;
+            }
+            // Package-scope filter: a policy carrying `package: Some(pkg)`
+            // only fires in functions whose file imports `pkg` (mirrors the
+            // sink/source package-scoping model). When no scope context is
+            // supplied (unit tests, legacy callers) the filter is inert.
+            if let (Some(pkg), Some(scope)) = (&policy.package, scope)
+                && !scope.fn_imports_package(&ir.name, pkg)
+            {
                 continue;
             }
             let doms: Option<&DomSets> = if needs_dom {

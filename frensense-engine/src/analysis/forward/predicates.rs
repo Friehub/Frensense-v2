@@ -54,16 +54,25 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
                 return true;
             }
             if let Operand::Var(r) = receiver
-                && let Some(root) = FactTable::receiver_root(ir, *r)
+                && let Some(path_sans_method) = FactTable::receiver_access_path(ir, *r)
             {
-                let path = format!("{root}.{method}");
-                if config.sources.contains(&path)
-                    || config.sources.iter().any(|s| {
-                        path.starts_with(s.as_str()) && path.as_bytes().get(s.len()) == Some(&b'.')
-                    })
-                {
-                    return true;
-                }
+                let path = format!("{path_sans_method}.{method}");
+                let root = path_sans_method.split('.').next().unwrap_or("");
+                // Use `source_path_matches` (not a raw prefix rule): it
+                // suppresses bare-root re-widening when granular field
+                // rules exist for that root, so `req.replace(...)` (a
+                // String method) is NOT a source just because `req` is
+                // registered as a bare root. The raw prefix rule matched
+                // `req.replace` because `"req.replace".starts_with("req")`.
+                //
+                // The receiver's FULL access path is reconstructed (not
+                // just its root): `request.args.get('cmd')` must match the
+                // granular fact `request.args.get`, which the truncated
+                // root (`request` + method → `request.get`) can never
+                // reach, and the bare-root widening suppression would
+                // then correctly refuse to re-widen `request` over its
+                // granular children.
+                return source_path_matches(config, &path, root);
             }
             false
         }
@@ -191,6 +200,11 @@ pub(crate) fn is_sanitizer_effective_for_role(
     role: SinkRole,
     label: Option<&str>,
 ) -> bool {
+    // `config` is retained for API stability with callers; the legacy
+    // flat `config.sanitizers` fallback was removed (it cut sink-
+    // agnostically, bypassing role checks). Fact-table sanitizers
+    // carry a `kind` slug that `from_slug` resolves.
+    let _ = config;
     let NodeKey {
         block,
         instr_idx: Some(idx),
@@ -211,10 +225,13 @@ pub(crate) fn is_sanitizer_effective_for_role(
                 if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
                     return kind.defeats_role_and_label(role, label);
                 }
-                return true;
-            }
-            if config.sanitizers.contains(func) {
-                return true;
+                // Unknown kind slug: do NOT cut sink-agnostically. The
+                // previous `return true` fallback let any unrecognized
+                // label defeat every role (residual #15: "encode" from
+                // from_config silenced Execution sinks). Legacy
+                // "encode"/"allowlist" are now mapped to Full in
+                // `from_slug`; anything else is genuinely unknown.
+                return false;
             }
             false
         }
@@ -229,7 +246,7 @@ pub(crate) fn is_sanitizer_effective_for_role(
                         if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
                             return kind.defeats_role_and_label(role, label);
                         }
-                        return true;
+                        return false;
                     }
                 }
                 if facts.is_session_path(method, path.as_deref()) {
@@ -240,10 +257,7 @@ pub(crate) fn is_sanitizer_effective_for_role(
                 if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
                     return kind.defeats_role_and_label(role, label);
                 }
-                return true;
-            }
-            if config.sanitizers.contains(method) {
-                return true;
+                return false;
             }
             false
         }

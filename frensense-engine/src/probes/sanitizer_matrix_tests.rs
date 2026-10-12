@@ -19,7 +19,6 @@ fn probe_sm_01_sequential_sanitizers() {
 }
 
 #[test]
-#[ignore = "Blind spot: Order inversion sanitizer smearing across pipeline"]
 fn probe_sm_02_order_inversion_untaint_reversal() {
     let src = r#"
         export function test(req: any) {
