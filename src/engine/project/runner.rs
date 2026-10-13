@@ -350,6 +350,13 @@ fn advisory_from_checker(
     if let Some(p) = pattern {
         apply_bundle_pattern(&mut advisory, p);
     }
+    // Built-in classification tag: the rule registry's CWE, unless the
+    // bundle overlay already stamped one (corpus-authored id wins).
+    if let Some(cwe) = frensense_lang::severity::checker_rule_cwe(&c.rule)
+        && !advisory.tags.iter().any(|t| t == cwe)
+    {
+        advisory.tags.push(cwe.to_string());
+    }
     advisory.requires_human = false;
     advisory.fingerprint = stable_fingerprint(&[file, &c.rule, &c.function]);
     advisory
@@ -415,6 +422,14 @@ fn advisory_from_finding(
     // observation stays (it is the finding's own description).
     if let Some(pattern) = bundle_advisories.get(&f.sink) {
         apply_bundle_pattern(&mut advisory, pattern);
+    }
+    // Built-in classification tag: role+label pin the CWE precisely;
+    // skip when the bundle overlay already stamped one (corpus-authored
+    // id wins over the built-in guess).
+    if let Some(cwe) = frensense_lang::severity::taint_cwe(f.role, f.label.as_deref())
+        && !advisory.tags.iter().any(|t| t == cwe)
+    {
+        advisory.tags.push(cwe.to_string());
     }
     advisory.requires_human = false;
     // Taint path steps (source→sink) for SARIF codeFlows / rich clients.
@@ -623,7 +638,10 @@ mod checker_observation_tests {
              digests (use bcrypt/argon2/scrypt or SHA-256+)"
         );
         assert_eq!(advisories[0].title, "Policy violation: weak_hash (digest)");
-        assert_eq!(advisories[0].tags, ["checker", "weak_hash", "policy"]);
+        assert_eq!(
+            advisories[0].tags,
+            ["checker", "weak_hash", "policy", "CWE-328"]
+        );
     }
 
     #[test]

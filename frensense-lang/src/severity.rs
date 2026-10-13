@@ -121,6 +121,51 @@ impl SinkRole {
     }
 }
 
+/// CWE id for a taint finding, resolved from the sink's role and its
+/// semantic label slug. Both are known precisely at emit time; the role
+/// alone is not (`Execution` spans code, command, SQL/LDAP injection
+/// and deserialization), so a pair that pins no single class returns
+/// `None`: an honest gap beats a mis-tagged id.
+#[must_use]
+pub fn taint_cwe(role: SinkRole, label: Option<&str>) -> Option<&'static str> {
+    match (role, label) {
+        (SinkRole::Xss, _) => Some("CWE-79"),
+        (SinkRole::Response, Some("redirect")) => Some("CWE-601"),
+        (SinkRole::Resource, Some("traversal")) => Some("CWE-22"),
+        (SinkRole::Execution, Some("sql")) => Some("CWE-89"),
+        (SinkRole::Execution, Some("nosql")) => Some("CWE-947"),
+        (SinkRole::Execution, Some("ldap")) => Some("CWE-90"),
+        (SinkRole::Execution, Some("command")) => Some("CWE-78"),
+        (SinkRole::Execution, Some("deserialize")) => Some("CWE-502"),
+        (SinkRole::Execution, Some("eval")) => Some("CWE-94"),
+        (SinkRole::Execution, Some("ssrf")) => Some("CWE-918"),
+        _ => None,
+    }
+}
+
+/// CWE id for a built-in checker rule id. Memory-safety rules map to
+/// their canonical CWEs; crypto-policy rules map where the class is
+/// unambiguous. Learned bundle rule ids and guard/policy rules with no
+/// single class return `None` - the bundle pattern overlay carries the
+/// corpus-authored CWE for those.
+#[must_use]
+pub fn checker_rule_cwe(rule: &str) -> Option<&'static str> {
+    Some(match rule {
+        "weak_hash" | crate::rules::WEAK_HASH_WRAPPER | "learned_broken_hash_func" => "CWE-328",
+        "weak_rsa_key_size" => "CWE-326",
+        crate::rules::USE_AFTER_FREE => "CWE-416",
+        crate::rules::DOUBLE_FREE => "CWE-415",
+        crate::rules::UNINITIALIZED_FREE => "CWE-908",
+        crate::rules::BUFFER_OVERFLOW => "CWE-120",
+        crate::rules::OUT_OF_BOUNDS_READ => "CWE-125",
+        crate::rules::OUT_OF_BOUNDS_ACCESS => "CWE-787",
+        crate::rules::INTEGER_OVERFLOW_ALLOC => "CWE-190",
+        crate::rules::MEMORY_LEAK => "CWE-401",
+        "policy_open_redirect" => "CWE-601",
+        _ => return None,
+    })
+}
+
 /// Sanitizer strength: what kind of injection does this call defeat?
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SanitizerKind {
@@ -684,5 +729,68 @@ mod checker_observation_tests {
         assert_eq!(level, super::Severity::Critical);
         assert_eq!(title, "Memory safety violation: buffer_overflow (f)");
         assert_eq!(obs, "buffer_overflow violated in `f` at a.c:3.");
+    }
+}
+
+#[cfg(test)]
+mod cwe_mapping_tests {
+    use super::{checker_rule_cwe, taint_cwe, SinkRole};
+
+    #[test]
+    fn taint_role_and_label_pin_the_cwe() {
+        assert_eq!(taint_cwe(SinkRole::Xss, None), Some("CWE-79"));
+        assert_eq!(taint_cwe(SinkRole::Execution, Some("sql")), Some("CWE-89"));
+        assert_eq!(
+            taint_cwe(SinkRole::Execution, Some("command")),
+            Some("CWE-78")
+        );
+        assert_eq!(
+            taint_cwe(SinkRole::Execution, Some("deserialize")),
+            Some("CWE-502")
+        );
+        assert_eq!(
+            taint_cwe(SinkRole::Resource, Some("traversal")),
+            Some("CWE-22")
+        );
+        assert_eq!(
+            taint_cwe(SinkRole::Response, Some("redirect")),
+            Some("CWE-601")
+        );
+    }
+
+    #[test]
+    fn ambiguous_roles_stay_untagged() {
+        assert_eq!(
+            taint_cwe(SinkRole::Execution, None),
+            None,
+            "bare execution spans command/SQL/code injection"
+        );
+        assert_eq!(
+            taint_cwe(SinkRole::Resource, None),
+            None,
+            "resource spans traversal and IDOR-class queries"
+        );
+        assert_eq!(taint_cwe(SinkRole::Storage, None), None);
+        assert_eq!(taint_cwe(SinkRole::Validation, None), None);
+        assert_eq!(taint_cwe(SinkRole::Other, None), None);
+    }
+
+    #[test]
+    fn checker_rules_map_to_their_canonical_cwe() {
+        assert_eq!(checker_rule_cwe("weak_hash"), Some("CWE-328"));
+        assert_eq!(
+            checker_rule_cwe(crate::rules::WEAK_HASH_WRAPPER),
+            Some("CWE-328")
+        );
+        assert_eq!(
+            checker_rule_cwe(crate::rules::USE_AFTER_FREE),
+            Some("CWE-416")
+        );
+        assert_eq!(checker_rule_cwe(crate::rules::MEMORY_LEAK), Some("CWE-401"));
+        assert_eq!(
+            checker_rule_cwe("policy_custom_rule"),
+            None,
+            "learned rules take their CWE from the bundle pattern overlay"
+        );
     }
 }
