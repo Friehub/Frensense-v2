@@ -20,6 +20,7 @@ flips the verdict names the cause:
   engine-const-fold       (FP) constant ternary folded by hand
   harness                 (with --root-scan) verdict flips when the
                           helpers/ package is importable
+  already-fires-untagged  finding fires but CWE tag missing - tagging fix
   absent-rule             class has zero TPs in the whole scorecard and
                           no rewrite flipped it - missing checker/sink
   unexplained             no rewrite flipped it; needs human eyes
@@ -448,6 +449,17 @@ def run_case_ladder(binary: Path, case: dict, testcode: Path, root: Path,
         def flipped(n: int) -> bool:
             return n >= 1 if kind == "FN" else n == 0
 
+        # Baseline first: an FN whose ORIGINAL already has findings is a
+        # tagging/classification miss, not a flow bug - no rewrite can
+        # "flip" what already fires. Record and skip the ladder.
+        base = scan_file(binary, target)
+        base_n = base.get("findings", 0)
+        if kind == "FN" and "error" not in base and base_n >= 1:
+            return _record(case, kind, "already-fires-untagged", [], repro_dir, target)
+        if kind == "FP" and "error" not in base and base_n == 0:
+            # FP that no longer reproduces (engine already clean) - nothing to fix.
+            return _record(case, kind, "already-clean", [], repro_dir, target)
+
         # Phase A: single rewrites, original source each time.
         for name, bucket, fn in ladder:
             mutated, changed = fn(original_src)
@@ -537,6 +549,8 @@ def markdown(summary: dict, results: list[dict]) -> str:
         "engine-imports": "indented-import lowering gap - engine backlog",
         "engine-const-fold": "value analysis missed a constant fold - engine backlog",
         "harness": "verdict depends on helpers/ being importable - scan setup",
+        "already-fires-untagged": "finding fires but CWE tag missing/mismatched - tagging fix, not flow",
+        "already-clean": "FP no longer reproduces - engine already clean",
         "absent-rule": "class has ZERO TPs in the whole scorecard and no rewrite flipped it - missing checker/sink model",
         "unexplained": "no rewrite flipped it - needs human eyes",
     }
