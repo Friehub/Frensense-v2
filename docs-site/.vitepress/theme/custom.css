@@ -19,14 +19,9 @@
   --vp-button-brand-hover-text: #04120a;
   --vp-button-brand-active-text: #04120a;
 
-  /* hero name: neutral high-contrast gradient (green stays for accents,
-     never for large text - green-on-dark hurts legibility) */
+  /* hero name: v1 green gradient */
   --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: linear-gradient(120deg, #18181b, #52525b);
-}
-
-.dark {
-  --vp-home-hero-name-background: linear-gradient(120deg, #fafafa, #a1a1aa);
+  --vp-home-hero-name-background: linear-gradient(120deg, #1cc858, #7ee2a4);
 }
 
 /* v1 dark palette */
@@ -57,10 +52,10 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
 }
 
-/* hero: balanced breathing room below the nav, still compact */
+/* hero: balanced breathing room below the nav, tight against the strip */
 .VPHomeHero {
   padding-top: 88px !important;
-  padding-bottom: 48px !important;
+  padding-bottom: 12px !important;
 }
 .VPHomeHero .name,
 .VPHomeHero .text {
@@ -158,6 +153,11 @@
   margin: 0 auto;
   padding: 0 24px 8px;
   text-align: left;
+}
+/* the strip lives in the home markdown container; zero its default
+   top padding so hero -> strip spacing is controlled by the hero alone */
+.VPHome > .vp-doc.container {
+  padding-top: 0 !important;
 }
 .download-strip__head {
   text-align: center;
@@ -313,5 +313,23 @@
 
 .vp-doc td {
   color: var(--vp-c-text-1) !important;
+}
+
+/* Download-strip cards are anchors for click targets, not links:
+   they must not inherit the doc-link color, underline or weight.
+   (These selectors out-specify the `.vp-doc a` rule above.) */
+.vp-doc a.dl-card,
+.vp-doc .dl-card {
+  color: inherit;
+  font-weight: inherit;
+  text-decoration: none;
+}
+.vp-doc a.dl-card:hover {
+  text-decoration: none;
+}
+.vp-doc .dl-card__cmd {
+  color: var(--vp-c-text-1);
+  text-decoration: none;
+  font-weight: 400;
 }
 
