@@ -138,6 +138,10 @@ pub fn taint_cwe(role: SinkRole, label: Option<&str>) -> Option<&'static str> {
         (SinkRole::Execution, Some("command")) => Some("CWE-78"),
         (SinkRole::Execution, Some("deserialize")) => Some("CWE-502"),
         (SinkRole::Execution, Some("eval")) => Some("CWE-94"),
+        // CodeExecution sinks (eval/exec/compile) serialize the slug
+        // "execution"; it is distinct from the bare-Execution role (no
+        // label), which spans command/SQL/code and stays None.
+        (SinkRole::Execution, Some("execution")) => Some("CWE-94"),
         (SinkRole::Execution, Some("ssrf")) => Some("CWE-918"),
         _ => None,
     }
