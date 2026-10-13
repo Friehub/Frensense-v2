@@ -396,6 +396,24 @@ impl<'a> LoweringContext<'a> {
         Some(Operand::Var(dest))
     }
 
+    /// Pop a branch-arm scope and hoist its *new* bindings into the
+    /// enclosing scope. Python/JS/C give assignments function scope, not
+    /// block scope: a name first bound inside an `if`/`else` arm must
+    /// survive to the merge so the SSA pass can place a phi for it.
+    /// Names already present in an enclosing scope are left alone (the
+    /// arm reused the same VarId, and the phi is driven by the def sites).
+    fn hoist_arm_scope(env: &mut Vec<FxHashMap<String, VarId>>) {
+        let arm = match env.pop() {
+            Some(m) => m,
+            None => return,
+        };
+        if let Some(parent) = env.last_mut() {
+            for (name, var) in arm {
+                parent.entry(name).or_insert(var);
+            }
+        }
+    }
+
     pub fn visit_branch(&mut self, node: Node) -> Option<Operand> {
         let mut cursor = node.walk();
         let children: Vec<Node> = node
@@ -471,7 +489,7 @@ impl<'a> LoweringContext<'a> {
                 .set_terminator(self.current_block, Terminator::Jump(merge_block));
             self.ir.add_edge(self.current_block, merge_block);
         }
-        self.env.pop();
+        Self::hoist_arm_scope(&mut self.env);
 
         // False Branch
         if let Some(alt) = alt_node {
@@ -488,7 +506,7 @@ impl<'a> LoweringContext<'a> {
                     .set_terminator(self.current_block, Terminator::Jump(merge_block));
                 self.ir.add_edge(self.current_block, merge_block);
             }
-            self.env.pop();
+            Self::hoist_arm_scope(&mut self.env);
         }
 
         if is_switch {
