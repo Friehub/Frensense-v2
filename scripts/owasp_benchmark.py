@@ -29,11 +29,9 @@ What counts as "a finding" is set by --match:
   any                     Legacy: any finding in the file counts, whatever
                           its class. Overstates TPR; shown as an upper bound.
 
-A finding's CWE comes from a "CWE-n" tag (bundle-backed findings carry one)
-or from --tag-cwe-map / the small built-in map for tags whose meaning is
-unambiguous. Built-in checker findings do not carry CWE tags today, so
-bare-engine runs report an "unattributed" count; the real fix is for the
-engine to tag them.
+A finding's CWE comes from a "CWE-n" tag (built-in and bundle-backed
+findings carry one since 0.7.1-beta) or from --tag-cwe-map / the small
+built-in map for legacy binaries whose findings predate engine tagging.
 
 A scan that crashes, times out, exits with a code other than 0 or 1, or
 prints invalid JSON is class ERR: reported separately, excluded from the
@@ -396,8 +394,9 @@ def generate_markdown_report(s: dict, elapsed: float, binary_version: str,
         "## Finding attribution",
         "",
         f"{a['advisories']} advisories in total; {a['unattributed']} carry no CWE the scorer can resolve. "
-        "Built-in checker findings do not tag a CWE today, so these cannot be credited to a category "
-        "until the engine tags them or a `--tag-cwe-map` is supplied.",
+        "Engine findings tagged since 0.7.1-beta resolve their CWE in the engine; anything still "
+        "unattributed is a sink class without a single mapping (or a pre-0.7.1 binary) and can be "
+        "extended with `--tag-cwe-map`.",
         "",
     ]
     if a["unattributed_tags"]:
