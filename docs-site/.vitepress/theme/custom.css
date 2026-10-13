@@ -19,8 +19,14 @@
   --vp-button-brand-hover-text: #04120a;
   --vp-button-brand-active-text: #04120a;
 
+  /* hero name: neutral high-contrast gradient (green stays for accents,
+     never for large text - green-on-dark hurts legibility) */
   --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: linear-gradient(120deg, #1cc858, #7ee2a4);
+  --vp-home-hero-name-background: linear-gradient(120deg, #18181b, #52525b);
+}
+
+.dark {
+  --vp-home-hero-name-background: linear-gradient(120deg, #fafafa, #a1a1aa);
 }
 
 /* v1 dark palette */
@@ -51,10 +57,10 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
 }
 
-/* hero: compact, space-efficient, centered */
+/* hero: balanced breathing room below the nav, still compact */
 .VPHomeHero {
-  padding-top: 32px !important;
-  padding-bottom: 20px !important;
+  padding-top: 88px !important;
+  padding-bottom: 48px !important;
 }
 .VPHomeHero .name,
 .VPHomeHero .text {
@@ -198,7 +204,7 @@
   font-size: 1.7rem;
   font-weight: 800;
   letter-spacing: -0.02em;
-  color: var(--vp-c-brand-1);
+  color: var(--vp-c-text-1);
   line-height: 1.1;
 }
 .dl-card__stat em {
@@ -231,7 +237,10 @@
 .dl-card__cta {
   font-size: 0.9rem;
   font-weight: 600;
-  color: var(--vp-c-brand-1);
+  color: #0969da;
+}
+.dark .dl-card__cta {
+  color: #58a6ff;
 }
 .download-strip__foot {
   margin-top: 20px;
