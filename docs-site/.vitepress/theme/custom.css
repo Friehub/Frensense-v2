@@ -52,6 +52,11 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
 }
 
+/* no divider line under the nav on the home page */
+.VPNavBar.home .divider {
+  display: none !important;
+}
+
 /* hero: balanced breathing room below the nav, tight against the strip */
 .VPHomeHero {
   padding-top: 88px !important;
@@ -74,18 +79,18 @@
 .VPHomeHero .tagline {
   font-size: 1.05rem !important;
   line-height: 1.5 !important;
-  max-width: 620px;
-  margin: 0 auto 16px auto !important;
+  max-width: 640px;
+  margin: 0 0 16px 0 !important;
 }
 .VPHomeHero .container {
-  text-align: center;
+  text-align: left;
 }
 .VPHomeHero .main {
-  max-width: 640px;
-  margin: 0 auto;
+  max-width: 720px;
+  margin: 0;
 }
 .VPHomeHero .actions {
-  justify-content: center;
+  justify-content: flex-start;
   margin-top: 14px !important;
   gap: 10px !important;
 }
@@ -155,9 +160,10 @@
   text-align: left;
 }
 /* the strip lives in the home markdown container; zero its default
-   top padding so hero -> strip spacing is controlled by the hero alone */
+   paddings so hero -> strip -> features spacing is deliberate */
 .VPHome > .vp-doc.container {
   padding-top: 0 !important;
+  padding-bottom: 24px !important;
 }
 .download-strip__head {
   text-align: center;
