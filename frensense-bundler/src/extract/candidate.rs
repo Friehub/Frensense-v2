@@ -38,6 +38,11 @@ pub enum Candidate {
         /// Fire only when the trigger arg has NO literal range comparison
         /// (inline enforcement modality).
         unless_range_check: Option<Vec<String>>,
+        /// Optional package qualification from the family's `// package:`
+        /// metadata. When set, the check is published as a package-scoped
+        /// policy (`PolicyScoped`) so it cannot fire on unrelated files
+        /// that merely share the trigger verb. `None` = unscoped `Check`.
+        package: Option<String>,
     },
     /// Generalized co-occurrence policy (the `LearnedFactEntry::Policy`
     /// shape): trigger + a list of requirements the trigger's scope must
@@ -149,14 +154,41 @@ impl Candidate {
                 message,
                 unless_guard,
                 unless_range_check,
-            } => LearnedFactEntry::Check {
-                rule: rule.clone(),
-                call: call.clone(),
-                message: message.clone(),
-                severity: "warning".into(),
-                unless_guard: unless_guard.clone(),
-                unless_range_check: unless_range_check.clone(),
-            },
+                package,
+            } => {
+                // A family-declared package turns the check into a
+                // package-scoped policy (same engine mechanism as
+                // `Candidate::Policy` + package): the generic presence
+                // trigger can then never collide with unrelated bundle
+                // families that share the verb but not the package import.
+                if let Some(pkg) = package {
+                    let mut require = Vec::new();
+                    if let Some(g) = unless_guard {
+                        require.push(PolicyRequirement::GuardCall { call: g.clone() });
+                    }
+                    if let Some(ops) = unless_range_check {
+                        require.push(PolicyRequirement::RangeCheck { ops: ops.clone() });
+                    }
+                    LearnedFactEntry::PolicyScoped {
+                        rule: rule.clone(),
+                        when_call: call.clone(),
+                        require,
+                        scope: PolicyScope::Function,
+                        message: message.clone(),
+                        severity: "warning".into(),
+                        package: pkg.clone(),
+                    }
+                } else {
+                    LearnedFactEntry::Check {
+                        rule: rule.clone(),
+                        call: call.clone(),
+                        message: message.clone(),
+                        severity: "warning".into(),
+                        unless_guard: unless_guard.clone(),
+                        unless_range_check: unless_range_check.clone(),
+                    }
+                }
+            }
             Candidate::Policy {
                 rule,
                 call,
@@ -265,18 +297,43 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
             message,
             unless_guard,
             unless_range_check,
+            package,
         } => {
-            table.learned_checks.push((
-                LearnedCheckFact {
-                    rule: rule.clone(),
-                    call: call.clone(),
-                    message: message.clone(),
-                    severity: "warning".into(),
-                    unless_guard: unless_guard.clone(),
-                    unless_range_check: unless_range_check.clone(),
-                },
-                Provenance::Learned,
-            ));
+            // Scoped checks are replayed as package-scoped policies so the
+            // trial scan exercises the exact publish shape.
+            if let Some(pkg) = package {
+                let mut require = Vec::new();
+                if let Some(g) = unless_guard {
+                    require.push(PolicyRequirement::GuardCall { call: g.clone() });
+                }
+                if let Some(ops) = unless_range_check {
+                    require.push(PolicyRequirement::RangeCheck { ops: ops.clone() });
+                }
+                table.policy_facts.push((
+                    PolicyFact {
+                        rule: rule.clone(),
+                        when_call: call.clone(),
+                        require,
+                        scope: PolicyScope::Function,
+                        message: message.clone(),
+                        severity: "warning".into(),
+                        package: Some(pkg.clone()),
+                    },
+                    Provenance::Learned,
+                ));
+            } else {
+                table.learned_checks.push((
+                    LearnedCheckFact {
+                        rule: rule.clone(),
+                        call: call.clone(),
+                        message: message.clone(),
+                        severity: "warning".into(),
+                        unless_guard: unless_guard.clone(),
+                        unless_range_check: unless_range_check.clone(),
+                    },
+                    Provenance::Learned,
+                ));
+            }
         }
         Candidate::Policy {
             rule,

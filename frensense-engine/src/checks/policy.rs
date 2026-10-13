@@ -138,9 +138,6 @@ pub fn check_program_scoped(
                 Some(s) => s,
                 None => continue,
             };
-            if !segs.iter().any(|s| s == trigger_seg) {
-                continue;
-            }
             // Package-scope filter: a policy carrying `package: Some(pkg)`
             // only fires in functions whose file imports `pkg` (mirrors the
             // sink/source package-scoping model). When no scope context is
@@ -161,20 +158,26 @@ pub fn check_program_scoped(
             let val_info = crate::analysis::value::analyze(ir);
             // Collect every trigger call site in this function with its args.
             for (bid, idx, args, span) in trigger_sites(ir, trigger_seg) {
-                let satisfied = policy.require.iter().all(|req| {
-                    requirement_holds(
-                        req,
-                        ir,
-                        bid,
-                        idx,
-                        doms,
-                        &val_info,
-                        args,
-                        segs,
-                        &module_segs,
-                        policy.scope,
-                    )
-                });
+                // A requirement violation is the finding — but a
+                // presence-only policy (`require` empty) alerts whenever
+                // the trigger call occurs at all: the corpus twins proved
+                // the call site itself is the vulnerability (the negative
+                // avoids the call, not a guard shape around it).
+                let satisfied = !policy.require.is_empty()
+                    && policy.require.iter().all(|req| {
+                        requirement_holds(
+                            req,
+                            ir,
+                            bid,
+                            idx,
+                            doms,
+                            &val_info,
+                            args,
+                            segs,
+                            &module_segs,
+                            policy.scope,
+                        )
+                    });
                 if !satisfied {
                     findings.push(CheckerFinding {
                         function: ir.name.clone(),

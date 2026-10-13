@@ -305,6 +305,9 @@ pub fn propose_with_trace(
             message,
             unless_guard,
             unless_range_check,
+            // Family-declared package scopes the learned check so its
+            // generic trigger cannot collide on other bundle families.
+            package: package_for_call(family, call, false),
         });
     }
 
@@ -810,28 +813,87 @@ fn candidate_keys(candidates: &[Candidate]) -> String {
         .join(", ")
 }
 
+/// Mirrors the engine's import normalization (`graph/module.rs`): a
+/// `node:` builtin keeps only its bare name, so a check/sink policy scoped
+/// to `node:crypto` can match the engine's stored import token.
+pub(crate) fn normalize_pkg(pkg: &str) -> &str {
+    pkg.strip_prefix("node:").unwrap_or(pkg)
+}
+
 fn package_for_call(family: &Family, call: &str, is_negative: bool) -> Option<String> {
+    // The order mirrors the engine's token model: collect the import
+    // tokens the family's files actually ship, then resolve the call's
+    // package to one of them. The engine's package filter compares the
+    // fact's token to its import map exactly, so a published fact must
+    // carry a token that appears verbatim in the scanned files (declared
+    // aliases like `package: prisma` for `@prisma/client` otherwise drop
+    // their whole fact at the replay gate as "positive never alerts").
+    let mut import_pkgs: Vec<String> = Vec::new();
+    for files in [
+        if is_negative {
+            family.negatives.iter()
+        } else {
+            family.positives.iter()
+        },
+        family.positives.iter(),
+    ] {
+        for (_path, source, ext) in files {
+            if let Some(spec) = frensense_lang::spec_for_ext(ext) {
+                let mut parser = tree_sitter::Parser::new();
+                if parser.set_language(&spec.tree_sitter_language()).is_ok() {
+                    if let Some(tree) = parser.parse(source, None) {
+                        for imp in spec.extract_imports(tree.root_node(), source) {
+                            let norm = normalize_pkg(&imp.package).to_string();
+                            if !import_pkgs.contains(&norm) {
+                                import_pkgs.push(norm);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // A family-declared package wins — but resolve the alias to the real
+    // import token when the declared name is not a verbatim import:
+    // `prisma` matches the npm scope of `@prisma/client`; `crypto` matches
+    // the builtin `node:crypto`.
     if let Some(pkg) = &family.metadata.package {
+        if import_pkgs.iter().any(|t| t == pkg) {
+            return Some(pkg.clone());
+        }
+        if let Some(tok) = import_pkgs.iter().find(|t| {
+            t.strip_prefix("node:") == Some(pkg.as_str())
+                || t.strip_prefix('@')
+                    .and_then(|s| s.split_once('/'))
+                    .map(|(scope, _rest)| scope == pkg)
+                    .unwrap_or(false)
+        }) {
+            return Some(tok.clone());
+        }
         return Some(pkg.clone());
     }
-    let files = if is_negative {
-        &family.negatives
-    } else {
-        &family.positives
-    };
     let receiver = call.split('.').next().unwrap_or(call);
-    for (_path, source, ext) in files {
-        if let Some(spec) = frensense_lang::spec_for_ext(ext) {
-            let mut parser = tree_sitter::Parser::new();
-            if parser.set_language(&spec.tree_sitter_language()).is_ok() {
-                if let Some(tree) = parser.parse(source, None) {
-                    let imports = spec.extract_imports(tree.root_node(), source);
-                    if let Some(imp) = imports.iter().find(|i| {
-                        i.local_name == call
-                            || i.local_name == receiver
-                            || i.symbol.as_deref() == Some(call)
-                    }) {
-                        return Some(imp.package.clone());
+    for files in [
+        if is_negative {
+            family.negatives.iter()
+        } else {
+            family.positives.iter()
+        },
+        family.positives.iter(),
+    ] {
+        for (_path, source, ext) in files {
+            if let Some(spec) = frensense_lang::spec_for_ext(ext) {
+                let mut parser = tree_sitter::Parser::new();
+                if parser.set_language(&spec.tree_sitter_language()).is_ok() {
+                    if let Some(tree) = parser.parse(source, None) {
+                        let imports = spec.extract_imports(tree.root_node(), source);
+                        if let Some(imp) = imports.iter().find(|i| {
+                            i.local_name == call
+                                || i.local_name == receiver
+                                || i.symbol.as_deref() == Some(call)
+                        }) {
+                            return Some(normalize_pkg(&imp.package).to_string());
+                        }
                     }
                 }
             }
