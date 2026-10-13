@@ -445,6 +445,88 @@ mod policy_proposal_tests {
         );
     }
 
+    /// A family whose `[frensense]` block declares `package:` scopes its
+    /// learned checks' blast radius: the candidate publishes as a
+    /// package-scoped policy (`PolicyScoped`) so its generic presence
+    /// trigger can never collide with unrelated bundle families that
+    /// merely share the verb but not the package import.
+    #[test]
+    fn family_declared_package_turns_checks_into_scoped_policies() {
+        let dir = TempDir::new().unwrap();
+        // Positive: privileged export inside the declared toolkit package.
+        // The `// package:` line lives in the positive's metadata block;
+        // the file also genuinely imports the package, because a scoped
+        // policy fires only in files that actually import it.
+        write(
+            &dir,
+            "sc_positive.ts",
+            concat!(
+                "// [frensense]\n",
+                "// package: toolkit-internal\n",
+                "\n",
+                "import { exportRecord, verifyExportPolicy } from 'toolkit-internal';\n",
+                "function handle(uid: string): void {\n",
+                "    exportRecord(uid);\n",
+                "}\n",
+            ),
+        );
+        // Negative: same trigger, but the enforcement guard is present.
+        write(
+            &dir,
+            "sc_negative.ts",
+            concat!(
+                "import { exportRecord, verifyExportPolicy } from 'toolkit-internal';\n",
+                "function handle(uid: string): void {\n",
+                "    if (!verifyExportPolicy(uid)) {\n",
+                "        throw new Error('denied');\n",
+                "    }\n",
+                "    exportRecord(uid);\n",
+                "}\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(
+            families[0].metadata.package.as_deref(),
+            Some("toolkit-internal"),
+            "the positive's package: line must land in the family metadata"
+        );
+
+        let (_, published) = extract_facts_with_tables(&families, &config, &table);
+
+        let scoped = published.iter().find(|f| match &f.entry {
+            LearnedFactEntry::PolicyScoped {
+                when_call,
+                require,
+                package,
+                ..
+            } => {
+                when_call == "exportRecord"
+                    && package == "toolkit-internal"
+                    && require.iter().any(|r| {
+                        matches!(r, PolicyRequirement::GuardCall { call }
+                            if call == "verifyExportPolicy")
+                    })
+            }
+            _ => false,
+        });
+        assert!(
+            scoped.is_some(),
+            "a family-declared package must scope its learned checks as \
+             PolicyScoped; got: {:#?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+        // No unscoped check fact may ship for the same trigger: the scoped
+        // policy replaces it outright.
+        assert!(
+            published
+                .iter()
+                .all(|f| !matches!(&f.entry, LearnedFactEntry::Check { call, .. } if call == "exportRecord")),
+            "the scoped policy must not be duplicated by an unscoped check"
+        );
+    }
+
     #[test]
     fn undeclared_families_get_no_policy_proposals() {
         let dir = TempDir::new().unwrap();

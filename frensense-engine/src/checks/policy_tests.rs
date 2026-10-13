@@ -503,4 +503,101 @@ export function generateToken (payload: string, key: string) {
             "approved required literal must stay silent on negative sample"
         );
     }
+
+    /// A presence-only policy (`require` empty) must ALERT whenever the
+    /// trigger call occurs: the corpus twins proved the call site itself is
+    /// the vulnerability - the negative avoids the call, it does not guard
+    /// around it. Regression: rerouting legacy learned checks into the
+    /// policy evaluator turned empty-require policies permanently silent.
+    /// Also covers package-scoping end-to-end through [`crate::scan::scan`].
+    #[test]
+    fn presence_only_policy_alarms_on_trigger_and_respects_package_scope() {
+        use crate::checks::Provenance as CheckProvenance;
+        use crate::scan;
+        let pos = concat!(
+            "import jwt from 'jsonwebtoken';\n",
+            "import type { Request, Response } from 'express';\n",
+            "\n",
+            "function authenticate(req: Request, res: Response) {\n",
+            "  const token = req.headers.authorization?.split(' ')[1];\n",
+            "  const payload = jwt.decode(token);\n",
+            "  req.user = payload;\n",
+            "}\n",
+        );
+        let neg = concat!(
+            "import jwt from 'jsonwebtoken';\n",
+            "import type { Request, Response } from 'express';\n",
+            "\n",
+            "function authenticate(req: Request, res: Response) {\n",
+            "  const token = req.headers.authorization?.split(' ')[1];\n",
+            "  const payload = jwt.verify(token, process.env.JWT_SECRET);\n",
+            "  req.user = payload;\n",
+            "}\n",
+        );
+        let pos_files = vec![(
+            "ts_jwt_bypass_positive.ts".to_string(),
+            pos.to_string(),
+            "ts".to_string(),
+        )];
+        let neg_files = vec![(
+            "ts_jwt_bypass_negative.ts".to_string(),
+            neg.to_string(),
+            "ts".to_string(),
+        )];
+        let mk = |package: Option<&str>| {
+            let mut facts = FactTable::default();
+            facts.policy_facts.push((
+                PolicyFact {
+                    rule: "policy_decode".into(),
+                    when_call: "decode".into(),
+                    require: vec![],
+                    scope: PolicyScope::Function,
+                    message: "probe".into(),
+                    severity: "critical".into(),
+                    package: package.map(|s| s.to_string()),
+                },
+                CheckProvenance::Learned,
+            ));
+            facts
+        };
+
+        // Presence-only, unscoped: fires on the positive twin only.
+        let hits = policy::check_program(&lower(pos), &mk(None));
+        assert_eq!(
+            hits.len(),
+            1,
+            "presence-only policy must alert on the trigger call: {:?}",
+            hits
+        );
+        assert!(policy::check_program(&lower(neg), &mk(None)).is_empty());
+
+        // Package-scoped through the full scan(): fires when the file
+        // imports the declared package, silent under an unrelated scope.
+        let scan_pos = scan::scan(
+            &pos_files,
+            &crate::analysis::taint::config::TaintConfig::default(),
+            &mk(Some("jsonwebtoken")),
+        );
+        assert!(
+            !scan_pos.checker.is_empty(),
+            "scoped presence-only policy must fire on the importing file: {:?}",
+            scan_pos.checker
+        );
+        let scan_miss = scan::scan(
+            &pos_files,
+            &crate::analysis::taint::config::TaintConfig::default(),
+            &mk(Some("unrelated-pkg")),
+        );
+        assert!(
+            scan_miss.checker.is_empty(),
+            "scoped policy must stay silent when the package is not imported: {:?}",
+            scan_miss.checker
+        );
+        let scan_neg = scan::scan(
+            &neg_files,
+            &crate::analysis::taint::config::TaintConfig::default(),
+            &mk(Some("jsonwebtoken")),
+        );
+        assert!(scan_neg.checker.is_empty());
+    }
 }
