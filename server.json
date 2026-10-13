@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-07/server.schema.json",
   "name": "io.github.friehub/frensense",
   "description": "Deterministic static analysis and code scanning MCP server. Directory audit, single-file scan for agent edit loops, and diff-scoped scan of only added lines. Taint paths from source to sink for TypeScript, JavaScript, Python, Go, Rust and C.",
-  "version": "0.7.0",
+  "version": "0.7.1-beta",
   "websiteUrl": "https://frensense.friehub.cloud",
   "repository": {
     "url": "https://github.com/Friehub/frensense-v2",
