@@ -131,6 +131,10 @@ pub fn taint_cwe(role: SinkRole, label: Option<&str>) -> Option<&'static str> {
     match (role, label) {
         (SinkRole::Xss, _) => Some("CWE-79"),
         (SinkRole::Response, Some("redirect")) => Some("CWE-601"),
+        // OpenRedirect sinks serialize under the Resource role with the
+        // "redirect" label (role_map maps OpenRedirect -> Resource); the
+        // Response arm above is the header/response-channel redirect.
+        (SinkRole::Resource, Some("redirect")) => Some("CWE-601"),
         (SinkRole::Resource, Some("traversal")) => Some("CWE-22"),
         (SinkRole::Execution, Some("sql")) => Some("CWE-89"),
         (SinkRole::Execution, Some("nosql")) => Some("CWE-947"),
