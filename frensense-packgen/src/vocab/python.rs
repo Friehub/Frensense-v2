@@ -207,8 +207,6 @@ pub(super) static PY_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("check_output", crate::role_map::SinkLabel::CommandInjection),
     ("Popen", crate::role_map::SinkLabel::CommandInjection),
     ("execfile", crate::role_map::SinkLabel::CommandInjection),
-    ("spawn", crate::role_map::SinkLabel::CommandInjection),
-    ("spawnSync", crate::role_map::SinkLabel::CommandInjection),
     // SQL Injection
     ("execute", crate::role_map::SinkLabel::SqlInjection),
     ("executemany", crate::role_map::SinkLabel::SqlInjection),
@@ -224,9 +222,6 @@ pub(super) static PY_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("open", crate::role_map::SinkLabel::PathTraversal),
     ("read", crate::role_map::SinkLabel::PathTraversal),
     ("write", crate::role_map::SinkLabel::PathTraversal),
-    ("readFile", crate::role_map::SinkLabel::PathTraversal),
-    ("writeFile", crate::role_map::SinkLabel::PathTraversal),
-    ("readFileSync", crate::role_map::SinkLabel::PathTraversal),
     ("join", crate::role_map::SinkLabel::PathTraversal),
     ("unlink", crate::role_map::SinkLabel::PathTraversal),
     ("stat", crate::role_map::SinkLabel::PathTraversal),
@@ -236,19 +231,8 @@ pub(super) static PY_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("post", crate::role_map::SinkLabel::Ssrf),
     ("request", crate::role_map::SinkLabel::Ssrf),
     ("send", crate::role_map::SinkLabel::Ssrf),
-    ("fetch", crate::role_map::SinkLabel::Ssrf),
-    ("http.get", crate::role_map::SinkLabel::Ssrf),
-    ("https.get", crate::role_map::SinkLabel::Ssrf),
-    ("got", crate::role_map::SinkLabel::Ssrf),
     // Open Redirect
     ("redirect", crate::role_map::SinkLabel::OpenRedirect),
-    // XSS
-    ("innerHTML", crate::role_map::SinkLabel::XssDom),
-    ("outerHTML", crate::role_map::SinkLabel::XssDom),
-    (
-        "dangerouslySetInnerHTML",
-        crate::role_map::SinkLabel::XssDom,
-    ),
     // SSTI - Template engine renders
     ("render_template", crate::role_map::SinkLabel::TemplateSsti),
     (
@@ -257,17 +241,8 @@ pub(super) static PY_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ),
     ("from_string", crate::role_map::SinkLabel::TemplateSsti),
     ("render", crate::role_map::SinkLabel::TemplateSsti),
-    ("ejs.render", crate::role_map::SinkLabel::TemplateSsti),
-    ("nunjucks.render", crate::role_map::SinkLabel::TemplateSsti),
-    ("marko.render", crate::role_map::SinkLabel::TemplateSsti),
-    ("eta.render", crate::role_map::SinkLabel::TemplateSsti),
-    ("swig.render", crate::role_map::SinkLabel::TemplateSsti),
-    ("liquid.render", crate::role_map::SinkLabel::TemplateSsti),
-    ("mustache.render", crate::role_map::SinkLabel::TemplateSsti),
     // Response
     ("make_response", crate::role_map::SinkLabel::XssReflected),
-    ("res.send", crate::role_map::SinkLabel::ResponseLeak),
-    ("res.json", crate::role_map::SinkLabel::ResponseLeak),
     // Unsafe Deserialization
     // (yaml.safe_load is deliberately NOT a sink: it resolves only
     // basic YAML types, which is what makes it the *safe* API.)
@@ -284,10 +259,6 @@ pub(super) static PY_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("shelve.open", crate::role_map::SinkLabel::UnsafeDeserialize),
     ("loads", crate::role_map::SinkLabel::UnsafeDeserialize),
     ("load", crate::role_map::SinkLabel::UnsafeDeserialize),
-    (
-        "bincode::deserialize",
-        crate::role_map::SinkLabel::UnsafeDeserialize,
-    ),
     // Log Leak
     ("log", crate::role_map::SinkLabel::LogLeak),
     ("error", crate::role_map::SinkLabel::LogLeak),
@@ -300,10 +271,6 @@ pub(super) static PY_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     // bare "_.set" entry would make every `.set(` call (e.g.
     // Flask's response.set_cookie lowering, ConfigParser.set) a
     // prototype-pollution sink. Python has no prototype chains.
-    // XXE
-    ("DOMParser", crate::role_map::SinkLabel::Xxe),
-    // JWT
-    ("jwt.sign", crate::role_map::SinkLabel::Jwt),
     // MongoDB / ORM operators
     ("$where", crate::role_map::SinkLabel::NoSqlInjection),
     ("$regex", crate::role_map::SinkLabel::NoSqlInjection),
