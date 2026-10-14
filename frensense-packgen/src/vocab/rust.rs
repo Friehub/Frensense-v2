@@ -274,7 +274,6 @@ pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("status", crate::role_map::SinkLabel::CommandInjection),
     ("output", crate::role_map::SinkLabel::CommandInjection),
     ("spawn", crate::role_map::SinkLabel::CommandInjection),
-    ("spawnSync", crate::role_map::SinkLabel::CommandInjection),
     ("exec", crate::role_map::SinkLabel::CommandInjection),
     // Path Traversal
     ("read", crate::role_map::SinkLabel::PathTraversal),
@@ -282,40 +281,18 @@ pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("open", crate::role_map::SinkLabel::PathTraversal),
     ("create", crate::role_map::SinkLabel::PathTraversal),
     ("write", crate::role_map::SinkLabel::PathTraversal),
-    ("readFile", crate::role_map::SinkLabel::PathTraversal),
-    ("writeFile", crate::role_map::SinkLabel::PathTraversal),
-    ("readFileSync", crate::role_map::SinkLabel::PathTraversal),
-    ("join", crate::role_map::SinkLabel::PathTraversal),
-    ("unlink", crate::role_map::SinkLabel::PathTraversal),
-    ("stat", crate::role_map::SinkLabel::PathTraversal),
-    ("access", crate::role_map::SinkLabel::PathTraversal),
     // SSRF
     ("reqwest::get", crate::role_map::SinkLabel::Ssrf),
     ("Client::get", crate::role_map::SinkLabel::Ssrf),
     ("ureq::get", crate::role_map::SinkLabel::Ssrf),
-    ("http.get", crate::role_map::SinkLabel::Ssrf),
-    ("https.get", crate::role_map::SinkLabel::Ssrf),
-    ("got", crate::role_map::SinkLabel::Ssrf),
     ("get", crate::role_map::SinkLabel::Ssrf),
     ("post", crate::role_map::SinkLabel::Ssrf),
     ("send", crate::role_map::SinkLabel::Ssrf),
     ("request", crate::role_map::SinkLabel::Ssrf),
     // Open Redirect
     ("redirect", crate::role_map::SinkLabel::OpenRedirect),
-    // XSS
-    ("innerHTML", crate::role_map::SinkLabel::XssDom),
-    ("outerHTML", crate::role_map::SinkLabel::XssDom),
-    (
-        "dangerouslySetInnerHTML",
-        crate::role_map::SinkLabel::XssDom,
-    ),
     // SSTI
     ("render", crate::role_map::SinkLabel::TemplateSsti),
-    ("render_template", crate::role_map::SinkLabel::TemplateSsti),
-    (
-        "render_template_string",
-        crate::role_map::SinkLabel::TemplateSsti,
-    ),
     // Unsafe Memory
     ("transmute", crate::role_map::SinkLabel::UnsafeMemory),
     ("transmute_copy", crate::role_map::SinkLabel::UnsafeMemory),
@@ -341,33 +318,19 @@ pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
         "serde_pickle::from_slice",
         crate::role_map::SinkLabel::UnsafeDeserialize,
     ),
-    // MongoDB / ORM
-    ("update", crate::role_map::SinkLabel::NoSqlInjection),
-    ("updateOne", crate::role_map::SinkLabel::NoSqlInjection),
-    ("updateMany", crate::role_map::SinkLabel::NoSqlInjection),
-    ("insert", crate::role_map::SinkLabel::NoSqlInjection),
-    ("insertOne", crate::role_map::SinkLabel::NoSqlInjection),
-    ("insertMany", crate::role_map::SinkLabel::NoSqlInjection),
-    ("delete", crate::role_map::SinkLabel::NoSqlInjection),
-    ("deleteOne", crate::role_map::SinkLabel::NoSqlInjection),
-    ("deleteMany", crate::role_map::SinkLabel::NoSqlInjection),
+    // MongoDB / ORM (snake_case mongodb-crate verbs; camelCase JS
+    // driver names like findOne/insertMany are not Rust APIs)
     ("find_one", crate::role_map::SinkLabel::NoSqlInjection),
     ("find_many", crate::role_map::SinkLabel::NoSqlInjection),
     (
         "Collection::find",
         crate::role_map::SinkLabel::NoSqlInjection,
     ),
-    ("findOne", crate::role_map::SinkLabel::NoSqlInjection),
-    ("findAll", crate::role_map::SinkLabel::NoSqlInjection),
-    // Storage Write
-    ("put", crate::role_map::SinkLabel::StorageWrite),
     // Log Leak
     ("log", crate::role_map::SinkLabel::LogLeak),
     ("error", crate::role_map::SinkLabel::LogLeak),
     ("info", crate::role_map::SinkLabel::LogLeak),
     ("debug", crate::role_map::SinkLabel::LogLeak),
-    // JWT
-    ("jwt.sign", crate::role_map::SinkLabel::Jwt),
 ];
 
 pub(super) static RUST_SOURCE_PATTERNS: &[&str] = &[

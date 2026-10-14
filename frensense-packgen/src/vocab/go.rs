@@ -169,7 +169,6 @@ pub(super) static GO_REQUEST_PARAM_NAMES: &[&str] =
 
 pub(super) static GO_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     // Code Execution
-    ("eval", crate::role_map::SinkLabel::CodeExecution),
     ("exec", crate::role_map::SinkLabel::CommandInjection),
     ("Exec", crate::role_map::SinkLabel::CommandInjection),
     ("Command", crate::role_map::SinkLabel::CommandInjection),
@@ -179,8 +178,6 @@ pub(super) static GO_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
         "CombinedOutput",
         crate::role_map::SinkLabel::CommandInjection,
     ),
-    ("spawn", crate::role_map::SinkLabel::CommandInjection),
-    ("spawnSync", crate::role_map::SinkLabel::CommandInjection),
     // SQL Injection
     ("Query", crate::role_map::SinkLabel::SqlInjection),
     ("QueryRow", crate::role_map::SinkLabel::SqlInjection),
@@ -188,24 +185,12 @@ pub(super) static GO_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("ExecContext", crate::role_map::SinkLabel::SqlInjection),
     ("Prepare", crate::role_map::SinkLabel::SqlInjection),
     ("PrepareContext", crate::role_map::SinkLabel::SqlInjection),
-    ("executeRaw", crate::role_map::SinkLabel::SqlInjection),
-    ("queryRaw", crate::role_map::SinkLabel::SqlInjection),
     ("prepare", crate::role_map::SinkLabel::SqlInjection),
     // Path Traversal
     ("ReadFile", crate::role_map::SinkLabel::PathTraversal),
     ("Open", crate::role_map::SinkLabel::PathTraversal),
     ("Create", crate::role_map::SinkLabel::PathTraversal),
     ("WriteFile", crate::role_map::SinkLabel::PathTraversal),
-    ("read", crate::role_map::SinkLabel::PathTraversal),
-    ("read_to_string", crate::role_map::SinkLabel::PathTraversal),
-    ("write", crate::role_map::SinkLabel::PathTraversal),
-    ("readFile", crate::role_map::SinkLabel::PathTraversal),
-    ("writeFile", crate::role_map::SinkLabel::PathTraversal),
-    ("readFileSync", crate::role_map::SinkLabel::PathTraversal),
-    ("join", crate::role_map::SinkLabel::PathTraversal),
-    ("unlink", crate::role_map::SinkLabel::PathTraversal),
-    ("stat", crate::role_map::SinkLabel::PathTraversal),
-    ("access", crate::role_map::SinkLabel::PathTraversal),
     // SSRF
     ("http.Get", crate::role_map::SinkLabel::Ssrf),
     ("http.Post", crate::role_map::SinkLabel::Ssrf),
@@ -215,120 +200,15 @@ pub(super) static GO_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("Post", crate::role_map::SinkLabel::Ssrf),
     ("Do", crate::role_map::SinkLabel::Ssrf),
     ("NewRequest", crate::role_map::SinkLabel::Ssrf),
-    ("fetch", crate::role_map::SinkLabel::Ssrf),
-    ("request", crate::role_map::SinkLabel::Ssrf),
-    ("got", crate::role_map::SinkLabel::Ssrf),
     // Open Redirect
-    ("redirect", crate::role_map::SinkLabel::OpenRedirect),
     ("Redirect", crate::role_map::SinkLabel::OpenRedirect),
-    ("c.redirect", crate::role_map::SinkLabel::OpenRedirect),
-    ("location.href", crate::role_map::SinkLabel::OpenRedirect),
-    ("window.location", crate::role_map::SinkLabel::OpenRedirect),
-    // XSS
-    ("innerHTML", crate::role_map::SinkLabel::XssDom),
-    ("outerHTML", crate::role_map::SinkLabel::XssDom),
-    ("document.writeln", crate::role_map::SinkLabel::XssDom),
-    (
-        "dangerouslySetInnerHTML",
-        crate::role_map::SinkLabel::XssDom,
-    ),
-    // SSTI - Template engine renders
+    // SSTI
     ("ExecuteTemplate", crate::role_map::SinkLabel::TemplateSsti),
-    ("render_template", crate::role_map::SinkLabel::TemplateSsti),
-    (
-        "render_template_string",
-        crate::role_map::SinkLabel::TemplateSsti,
-    ),
-    ("ejs.render", crate::role_map::SinkLabel::TemplateSsti),
-    ("nunjucks.render", crate::role_map::SinkLabel::TemplateSsti),
-    ("marko.render", crate::role_map::SinkLabel::TemplateSsti),
-    ("eta.render", crate::role_map::SinkLabel::TemplateSsti),
-    ("swig.render", crate::role_map::SinkLabel::TemplateSsti),
-    ("liquid.render", crate::role_map::SinkLabel::TemplateSsti),
-    ("mustache.render", crate::role_map::SinkLabel::TemplateSsti),
     // Insecure Deserialization
-    (
-        "bincode::deserialize",
-        crate::role_map::SinkLabel::UnsafeDeserialize,
-    ),
-    (
-        "serde_json::from_str",
-        crate::role_map::SinkLabel::UnsafeDeserialize,
-    ),
-    ("yaml.load", crate::role_map::SinkLabel::UnsafeDeserialize),
-    (
-        "js-yaml.load",
-        crate::role_map::SinkLabel::UnsafeDeserialize,
-    ),
-    (
-        "pickle.loads",
-        crate::role_map::SinkLabel::UnsafeDeserialize,
-    ),
     (
         "msgpack.decode",
         crate::role_map::SinkLabel::UnsafeDeserialize,
     ),
-    // Prototype Pollution
-    (
-        "Object.assign",
-        crate::role_map::SinkLabel::PrototypePollution,
-    ),
-    ("_.merge", crate::role_map::SinkLabel::PrototypePollution),
-    (
-        "_.defaultsDeep",
-        crate::role_map::SinkLabel::PrototypePollution,
-    ),
-    ("_.set", crate::role_map::SinkLabel::PrototypePollution),
-    ("$.extend", crate::role_map::SinkLabel::PrototypePollution),
-    (
-        "setPrototypeOf",
-        crate::role_map::SinkLabel::PrototypePollution,
-    ),
-    // XXE
-    ("DOMParser", crate::role_map::SinkLabel::Xxe),
-    // JWT
-    ("jwt.sign", crate::role_map::SinkLabel::Jwt),
-    // Cloudflare Workers / Prisma
-    ("c.redirect", crate::role_map::SinkLabel::OpenRedirect),
-    ("env.KV.put", crate::role_map::SinkLabel::StorageWrite),
-    ("KVNamespace.put", crate::role_map::SinkLabel::StorageWrite),
-    ("env.DB.prepare", crate::role_map::SinkLabel::SqlInjection),
-    ("res.send", crate::role_map::SinkLabel::ResponseLeak),
-    ("res.json", crate::role_map::SinkLabel::ResponseLeak),
-    ("res.redirect", crate::role_map::SinkLabel::OpenRedirect),
-    ("res.render", crate::role_map::SinkLabel::TemplateSsti),
-    ("revalidatePath", crate::role_map::SinkLabel::StorageWrite),
-    (
-        "prisma.queryRawUnsafe",
-        crate::role_map::SinkLabel::SqlInjection,
-    ),
-    (
-        "prisma.executeRawUnsafe",
-        crate::role_map::SinkLabel::SqlInjection,
-    ),
-    ("R2Bucket.put", crate::role_map::SinkLabel::StorageWrite),
-    (
-        "D1Database.prepare",
-        crate::role_map::SinkLabel::SqlInjection,
-    ),
-    ("DurableObjectStub.fetch", crate::role_map::SinkLabel::Ssrf),
-    ("Queue.send", crate::role_map::SinkLabel::Ssrf),
-    // MongoDB / ORM
-    ("update", crate::role_map::SinkLabel::NoSqlInjection),
-    ("updateOne", crate::role_map::SinkLabel::NoSqlInjection),
-    ("updateMany", crate::role_map::SinkLabel::NoSqlInjection),
-    ("insert", crate::role_map::SinkLabel::NoSqlInjection),
-    ("insertOne", crate::role_map::SinkLabel::NoSqlInjection),
-    ("insertMany", crate::role_map::SinkLabel::NoSqlInjection),
-    ("delete", crate::role_map::SinkLabel::NoSqlInjection),
-    ("deleteOne", crate::role_map::SinkLabel::NoSqlInjection),
-    ("deleteMany", crate::role_map::SinkLabel::NoSqlInjection),
-    ("find", crate::role_map::SinkLabel::NoSqlInjection),
-    ("findOne", crate::role_map::SinkLabel::NoSqlInjection),
-    ("findAll", crate::role_map::SinkLabel::NoSqlInjection),
-    // Storage Write
-    ("put", crate::role_map::SinkLabel::StorageWrite),
-    ("setItem", crate::role_map::SinkLabel::StorageWrite),
     // Log Leak
     ("log", crate::role_map::SinkLabel::LogLeak),
     ("error", crate::role_map::SinkLabel::LogLeak),

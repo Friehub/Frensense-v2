@@ -46,6 +46,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### Language Facts
+- **Cross-language sink contamination removed**: the Python, Go, C, and Rust
+  vocab tables carried large copy-pasted blocks of foreign APIs (JS DOM sinks
+  like `innerHTML`/`dangerouslySetInnerHTML`, Express `res.send`, Node
+  `spawnSync`/`readFile`, prototype-pollution `Object.assign`/`_.set`, Cloudflare
+  Workers and Prisma bindings, camelCase MongoDB driver verbs, Flask
+  `render_template` in Go/C/Rust, Rust `bincode`/`serde_json` in Python/Go/C).
+  Because the engine registers each dotted entry's last segment as a bare sink,
+  every one of these was a false-positive generator for the host language -
+  e.g. a Go `Object.assign` entry made every Go `.assign(` call a
+  prototype-pollution sink, and Go/C's `_.set` made every `.set(` call one.
+  All foreign entries are removed; each table now contains only APIs that
+  exist in its own language. Default pack 93,036 -> 82,697 bytes. OWASP score
+  unchanged (25.9%).
+
 #### Engine
 - **Propagator install is consistently last-wins**: duplicate `join`/`Join`
   propagator entries (a string/array method and a path-builder sharing one bare
