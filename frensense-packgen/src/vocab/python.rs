@@ -179,12 +179,6 @@ pub(super) static PYTHON_PROPAGATORS: &[PropagatorRule] = &[
         tainted_arg: None,
         tainted_receiver: true,
     },
-    // path building
-    PropagatorRule {
-        call: "join",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
     // f-string interpolation: `f"SELECT {user}"` is handled by the
     // flow_fingerprint's is_interpolation_node check, not propagator rules.
     // Listed here for documentation completeness.

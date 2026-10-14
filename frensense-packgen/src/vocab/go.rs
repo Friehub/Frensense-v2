@@ -141,11 +141,6 @@ pub(super) static GO_PROPAGATORS: &[PropagatorRule] = &[
     },
     // path/filepath - path building propagates traversal risk
     PropagatorRule {
-        call: "Join",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
-    PropagatorRule {
         call: "Base",
         tainted_arg: Some(0),
         tainted_receiver: false,
