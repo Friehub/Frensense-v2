@@ -42,6 +42,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 #### Engine
+- **Propagator install is consistently last-wins**: duplicate `join`/`Join`
+  propagator entries (a string/array method and a path-builder sharing one bare
+  call key) resolved by order-dependent accident. The install used first-wins
+  for the last-segment alias and an append-only receiver-block set, so a
+  `tainted_receiver: false` entry permanently blocked the receiver edge even
+  when a later `true` entry should unblock it - silently dropping the
+  string/array-`join` receiver->return flow (Python `sep.join(...)`, JS
+  `[...].join(...)`). `propagator_blocks_receiver` is now a two-way map
+  (`call -> blocked`), and both the arg slots and the receiver flag install
+  last-wins; `merge` matches. The redundant path-join duplicates (Python, Go,
+  JS) and a duplicate JS `toString` are removed, with a packgen regression test
+  asserting no duplicate propagator keys per language. OWASP score unchanged
+  (25.9%).
 - **Branch-arm-assigned variables survive the merge**: variables assigned only
   inside a `match`/`switch` arm were dropped from the environment at the branch
   merge (`env.pop` without hoisting), so a value defined in one arm and consumed

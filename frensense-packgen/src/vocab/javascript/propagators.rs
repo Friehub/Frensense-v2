@@ -127,11 +127,6 @@ pub(super) static JS_PROPAGATORS: &[PropagatorRule] = &[
         tainted_receiver: false,
     },
     PropagatorRule {
-        call: "toString",
-        tainted_arg: None,
-        tainted_receiver: true,
-    },
-    PropagatorRule {
         call: "atob",
         tainted_arg: Some(0),
         tainted_receiver: false,
@@ -168,11 +163,6 @@ pub(super) static JS_PROPAGATORS: &[PropagatorRule] = &[
         tainted_receiver: false,
     },
     // Path manipulation
-    PropagatorRule {
-        call: "join",
-        tainted_arg: None,
-        tainted_receiver: false,
-    },
     PropagatorRule {
         call: "resolve",
         tainted_arg: None,

@@ -322,12 +322,17 @@ fn install_language_group(
                     Some(idx) => vec![*idx],
                     None => Vec::new(),
                 };
+                // Consistent last-wins for every map: the final entry for a
+                // key fully determines its arg slots AND its receiver-blocked
+                // state. (Previously the alias was first-wins and the block
+                // set was append-only, so a `tainted_receiver: false` entry
+                // permanently poisoned the key even when a later `true` entry
+                // should unblock it.)
                 facts.propagators.insert(key.clone(), args.clone());
-                facts.propagators.entry(last.clone()).or_insert(args);
-                if !*tainted_receiver {
-                    facts.propagator_blocks_receiver.insert(key);
-                    facts.propagator_blocks_receiver.insert(last);
-                }
+                facts.propagators.insert(last.clone(), args);
+                let blocked = !*tainted_receiver;
+                facts.propagator_blocks_receiver.insert(key, blocked);
+                facts.propagator_blocks_receiver.insert(last, blocked);
             }
             LearnedFactEntry::LanguageSessionRoot { root, .. } => {
                 facts.session_roots.insert(root.clone());

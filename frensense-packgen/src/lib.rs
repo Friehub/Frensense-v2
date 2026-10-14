@@ -802,4 +802,25 @@ mod tests {
             );
         }
     }
+
+    /// Regression: no two propagator rules in one language may share a call
+    /// key. The install path resolves a key last-wins, so a duplicate is
+    /// always dead weight at best and a silent semantic flip at worst (the
+    /// old append-only receiver-block set made a `tainted_receiver: false`
+    /// duplicate permanently override a `true` one - e.g. the string/array
+    /// `join` receiver edge).
+    #[test]
+    fn propagator_tables_have_no_duplicate_call_keys() {
+        for v in crate::vocab::all_vocab() {
+            let mut seen = std::collections::HashSet::new();
+            for rule in v.propagators {
+                assert!(
+                    seen.insert(rule.call),
+                    "duplicate propagator key {:?} in {} vocabulary",
+                    rule.call,
+                    v.language
+                );
+            }
+        }
+    }
 }
