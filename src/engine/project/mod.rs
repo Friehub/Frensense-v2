@@ -21,6 +21,12 @@ pub struct Engine {
     pub(crate) severity_filter: Option<Severity>,
     pub(crate) language_filter: Option<Vec<&'static str>>,
     pub(crate) min_confidence: f64,
+    /// When `true`, the runner records every explored sink argument that
+    /// did NOT become an advisory (see [`crate::reporting::ExplainRecord`]),
+    /// surfaced via [`Engine::take_explain`] under `--explain`.
+    pub(crate) explain: bool,
+    /// Silent-finding records from the most recent `run` (when `explain`).
+    pub(crate) explain_records: Vec<crate::reporting::ExplainRecord>,
 }
 
 impl Engine {
@@ -32,6 +38,8 @@ impl Engine {
             severity_filter: None,
             language_filter: None,
             min_confidence: 0.0,
+            explain: false,
+            explain_records: Vec::new(),
         }
     }
 
@@ -56,6 +64,20 @@ impl Engine {
 
     pub fn set_min_confidence(&mut self, min: f64) {
         self.min_confidence = min;
+    }
+
+    /// Enable `--explain`: record every silent sink argument (not reported)
+    /// with the reason the engine stayed silent, for later retrieval via
+    /// [`Engine::take_explain`].
+    pub fn set_explain(&mut self, on: bool) {
+        self.explain = on;
+    }
+
+    /// Take the explain records collected by the most recent `run`.
+    /// Returns an empty vec when `--explain` was not enabled.
+    #[must_use]
+    pub fn take_explain(&mut self) -> Vec<crate::reporting::ExplainRecord> {
+        std::mem::take(&mut self.explain_records)
     }
 
     /// Register a synthetic file id for a scanned path (used by the runner

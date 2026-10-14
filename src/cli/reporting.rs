@@ -4,6 +4,7 @@
 
 use super::options::CliOptions;
 use crate::reporter::Reporter;
+use crate::reporting::ExplainRecord;
 use crate::{Advisory, FrensenseError, Result};
 use std::collections::HashSet;
 
@@ -195,6 +196,36 @@ pub fn print_results(
         }
     }
     Ok(())
+}
+
+/// Print the `--explain` section: every explored sink argument that did
+/// NOT become an advisory, with the reason the engine stayed silent.
+/// Written to stderr so it never contaminates the report on stdout.
+pub fn print_explain(records: &[ExplainRecord]) {
+    eprintln!();
+    eprintln!(
+        "Explain: {} silent sink argument(s) explored (no advisory)",
+        records.len()
+    );
+    if records.is_empty() {
+        eprintln!("  (none - every explored sink argument either reported or was not a sink)");
+        return;
+    }
+    eprintln!();
+    let mut sorted: Vec<&ExplainRecord> = records.iter().collect();
+    sorted.sort_by(|a, b| {
+        (&a.file, a.line, &a.sink, a.arg_slot).cmp(&(&b.file, b.line, &b.sink, b.arg_slot))
+    });
+    for r in sorted {
+        eprintln!(
+            "  {:<14} {}:{}  {}(arg {})",
+            r.verdict, r.file, r.line, r.sink, r.arg_slot
+        );
+        eprintln!("      why: {}", r.reason);
+        if let Some(src) = &r.source_desc {
+            eprintln!("      source: {src}");
+        }
+    }
 }
 
 /// Format an advisory cleanly for human consumption.

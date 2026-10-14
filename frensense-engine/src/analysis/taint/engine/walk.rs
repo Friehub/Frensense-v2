@@ -107,6 +107,14 @@ fn compare_consts(op: &str, l: i64, r: i64) -> Option<bool> {
     })
 }
 
+/// Record a silent stop site on the current root's exploration, keeping
+/// the list free of duplicates (a walk can hit the same cut on many nodes).
+fn record_cut(cuts: &mut Vec<&'static str>, reason: &'static str) {
+    if !cuts.contains(&reason) {
+        cuts.push(reason);
+    }
+}
+
 /// For the Phi `dest_var` in `merge_block`, return the incoming edges whose
 /// arm block is unreachable because the branch condition is a constant
 /// comparison with a decided outcome. Empty = nothing prunable.
@@ -479,6 +487,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 label: label.clone(),
                 source_desc: state.source_desc.clone(),
                 path,
+                cut_reasons: state.cuts.clone(),
                 // Span of the SINK CALL itself, not the tainted operand's
                 // definition: reports must point at the line the user fixes.
                 // (Reporting the operand's def site put `search.ts` SQLi at
@@ -602,6 +611,7 @@ impl<'a> BackwardTaintEngine<'a> {
                     || (cf == fi && gm.is_guarded(cur.var, root.block)))
             {
                 state.saw_sanitized_root_only = true;
+                record_cut(&mut state.cuts, "guard");
                 continue;
             }
 
@@ -630,6 +640,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 .value_info_for(cf)
                 .is_some_and(|info| info.converged && info.values.contains_key(&cur.var));
             if provably_independent {
+                record_cut(&mut state.cuts, "value-const");
                 continue;
             }
 
@@ -644,6 +655,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 state.sink_label.as_deref(),
             ) {
                 state.saw_sanitized_root_only = true;
+                record_cut(&mut state.cuts, "sanitizer");
                 continue;
             }
 
@@ -732,6 +744,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 // allocations) is a genuinely clean root.
                 if self.node_is_unresolvable(cf, &cur) {
                     state.saw_unknown = true;
+                    record_cut(&mut state.cuts, "unresolvable");
                 }
                 // Otherwise: clean root, stop.
                 continue;

@@ -6,7 +6,7 @@
 //! The frensense CLI: collect files → compiler scan → report.
 
 use frensense::cli::{
-    compare_baseline, parse_options, print_results, print_scan_banner, save_baseline,
+    compare_baseline, parse_options, print_explain, print_results, print_scan_banner, save_baseline,
 };
 use frensense::engine::Engine;
 use frensense::{FRENSENSE_VERSION, Result};
@@ -500,7 +500,9 @@ fn main() -> Result<()> {
         engine.set_language_filter(exts.to_vec());
     }
     engine.set_severity_filter(options.severity_filter);
+    engine.set_explain(options.explain);
 
+    let mut explain_records = Vec::new();
     let advisories = if options.diff_only {
         let repo_dir = if input_path.is_dir() {
             input_path.clone()
@@ -538,7 +540,11 @@ fn main() -> Result<()> {
                 if let Some(ref path) = options.corpus_bundle_path {
                     e2.set_corpus_bundle_path(path.clone());
                 }
+                e2.set_explain(options.explain);
                 all.extend(e2.run(f)?);
+                if options.explain {
+                    explain_records.extend(e2.take_explain());
+                }
             }
             all
         }
@@ -548,8 +554,15 @@ fn main() -> Result<()> {
         for p in &input_paths {
             all.extend(engine.run(p)?);
         }
+        if options.explain {
+            explain_records = engine.take_explain();
+        }
         all
     };
+
+    if options.explain {
+        print_explain(&explain_records);
+    }
 
     print_results(
         &advisories,
