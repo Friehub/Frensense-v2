@@ -4,6 +4,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1-beta] - 2026-10-13
+
+### Added
+
+#### CLI Diagnostics
+- **`--explain` flag**: surfaces *where the engine stayed silent*. Every explored
+  sink argument that did not become an advisory is recorded with the reason the
+  backward taint walk was cut, so a false negative is no longer a black box.
+  Silent stop sites are tracked as pure bookkeeping on the walk state
+  (`SinkFinding.cut_reasons`): `guard` (a validating guard dominated the use),
+  `value-const` (the value folded to an attacker-independent constant),
+  `sanitizer` (a sanitizer transformed the value), and `unresolvable` (the flow
+  hit a value the engine cannot resolve). The section prints to stderr, so it
+  composes with any `--format` and never contaminates the report on stdout.
+  Example output for a `match`-statement blind spot:
+  ```
+  Explain: 1 silent sink argument(s) explored (no advisory)
+    clean   BenchmarkTest00160.py:49  exec(arg 0)
+        why: the value folded to an attacker-independent constant
+  ```
+- **Benchmark triage tooling**: added `scripts/owasp_mutation_ladder.py`, a
+  mutation-ladder triager that rewrites OWASP Benchmark false negatives into
+  minimal variants and classifies each cause into a bucket (knowledge gap,
+  engine bug, absent rule, harness artifact, unexplained), producing a
+  reproducible `--json-out` scorecard and per-case repro files.
+
+#### Language Facts
+- **CWE-94 tagging for Code Execution**: `eval`, `exec`, and `compile` sinks now
+  carry CWE-94 (Code Injection). The mapping previously matched a dead arm - the
+  sink slug is `"execution"`, not `"eval"` - so Code Execution findings were
+  reported without a resolvable CWE. CWE-94 class TPR moves from 0% to 35%.
+- **CWE-601 tagging for Open Redirect**: `redirect`-labelled Resource-role sinks
+  now carry CWE-601 (URL Redirection to Untrusted Site). CWE-601 class TPR moves
+  from 0% to 61.5%.
+
+### Fixed
+
+#### Engine
+- **Branch-arm-assigned variables survive the merge**: variables assigned only
+  inside a `match`/`switch` arm were dropped from the environment at the branch
+  merge (`env.pop` without hoisting), so a value defined in one arm and consumed
+  after the branch lost its taint. The lowering now hoists per-arm bindings
+  through a `hoist_arm_scope` pass, restoring flows that cross an arm boundary.
+  CWE-22 class TPR 33.8% -> 35.4%, CWE-78 class TPR 23.1% -> 30.8%.
+
+### Changed
+
+#### Benchmarks
+- **OWASP Benchmark for Python**: score on this branch improves from **22.4% to
+  25.9%** (TPR 23.9% -> 27.7%, FPR held flat at 1.8%) across the three fixes
+  above. Remaining false negatives are dominated by absent non-taint rules
+  (CWE-330 weak randomness, CWE-643 XPath injection) rather than dataflow gaps.
+
 ## [0.7.0] - 2026-10-12
 
 ### Added
