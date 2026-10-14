@@ -28,6 +28,8 @@ pub struct CliOptions {
     pub compare_baseline_path: Option<String>,
     /// Only scan files modified relative to git HEAD.
     pub diff_only: bool,
+    /// Record every silent sink argument (why the engine stayed quiet).
+    pub explain: bool,
 }
 
 /// Parse CLI arguments into structured scan options.
@@ -43,6 +45,7 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
         emit_baseline_path: None,
         compare_baseline_path: None,
         diff_only: false,
+        explain: false,
     };
 
     let mut i = 1;
@@ -79,6 +82,7 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
             }
             "--strict" => options.is_strict = true,
             "--diff-only" => options.diff_only = true,
+            "--explain" => options.explain = true,
             "-s" | "--severity" => {
                 let level = args
                     .get(i + 1)
@@ -234,6 +238,14 @@ mod tests {
     fn unknown_flag_rejected() {
         let err = parse_options(&to_args(&["--unknown"])).expect_err("should reject");
         assert!(err.contains("unknown flag: --unknown"));
+    }
+
+    #[test]
+    fn explain_flag_parses() {
+        let opts = parse_options(&to_args(&["--explain"])).expect("parse");
+        assert!(opts.explain);
+        let opts = parse_options(&to_args(&["Cargo.toml"])).expect("parse");
+        assert!(!opts.explain);
     }
 
     #[test]

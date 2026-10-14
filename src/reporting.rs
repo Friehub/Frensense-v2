@@ -17,6 +17,7 @@
 
 use crate::{Advisory, Severity};
 use frensense_engine::analysis::taint::engine::{BackwardVerdict, SinkFinding};
+use frensense_engine::scan::LocatedFinding;
 
 /// Engine output that becomes an advisory: a vulnerable verdict on a
 /// dangerous sink slot (sink-signature aware).
@@ -46,4 +47,170 @@ pub fn apply(
         .filter(|a| a.confidence >= min_confidence)
         .filter(|a| severity_floor.is_none_or(|floor| a.severity.meets_threshold(floor)))
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// --explain: why the engine stayed silent
+// ---------------------------------------------------------------------------
+
+/// One explored sink argument that did NOT become an advisory, with the
+/// reason the engine stayed silent. Collected under `--explain` so users
+/// can see *where* analysis stopped - the "engine limitation" map.
+#[derive(Debug, Clone)]
+pub struct ExplainRecord {
+    pub file: String,
+    pub line: u32,
+    pub sink: String,
+    pub arg_slot: usize,
+    /// Short verdict label: `"clean"`, `"sanitized"`, `"unknown"`, or
+    /// `"safe-channel"` (vulnerable flow into a non-dangerous slot).
+    pub verdict: String,
+    /// Distinct silent stop sites hit during the walk (`"guard"`,
+    /// `"value-const"`, `"sanitizer"`, `"unresolvable"`); empty when the
+    /// walk simply exhausted its predecessors without a source.
+    pub cut_reasons: Vec<&'static str>,
+    /// Human summary of why nothing was reported.
+    pub reason: String,
+    /// The source access path, when the walk did reach one (e.g. a
+    /// `Vulnerable` flow into a safe channel).
+    pub source_desc: Option<String>,
+}
+
+fn verdict_label(v: &BackwardVerdict) -> &'static str {
+    match v {
+        BackwardVerdict::Vulnerable => "vulnerable",
+        BackwardVerdict::Sanitized => "sanitized",
+        BackwardVerdict::Unknown => "unknown",
+        BackwardVerdict::Clean => "clean",
+    }
+}
+
+fn cut_summary(cuts: &[&'static str]) -> String {
+    if cuts.is_empty() {
+        return "no attacker source reached the sink; the backward walk exhausted its predecessors (flow died or was never tainted)".to_string();
+    }
+    let names: Vec<&str> = cuts
+        .iter()
+        .map(|c| match *c {
+            "guard" => "a validating guard dominated the use",
+            "value-const" => "the value folded to an attacker-independent constant",
+            "sanitizer" => "a sanitizer transformed the value",
+            "unresolvable" => "the flow hit a value the engine cannot resolve",
+            other => other,
+        })
+        .collect();
+    names.join("; ")
+}
+
+/// Build an [`ExplainRecord`] for a located finding that will not be
+/// reported. Returns `None` for findings that *are* reported (callers
+/// should only pass silent ones).
+#[must_use]
+pub fn explain_silent(loc: &LocatedFinding) -> Option<ExplainRecord> {
+    let f = &loc.finding;
+    if reports_finding(f) {
+        return None;
+    }
+    let (verdict, reason) = if f.verdict == BackwardVerdict::Vulnerable {
+        // Vulnerable but alert is None: the flow landed in a safe channel.
+        (
+            "safe-channel".to_string(),
+            format!(
+                "taint reaches `{}` but argument {} is a safe (non-injection) channel",
+                f.sink, f.arg_slot
+            ),
+        )
+    } else {
+        (
+            verdict_label(&f.verdict).to_string(),
+            cut_summary(&f.cut_reasons),
+        )
+    };
+    Some(ExplainRecord {
+        file: loc.file.clone(),
+        line: loc.line,
+        sink: f.sink.clone(),
+        arg_slot: f.arg_slot,
+        verdict,
+        cut_reasons: f.cut_reasons.clone(),
+        reason,
+        source_desc: f.source_desc.clone(),
+    })
+}
+
+#[cfg(test)]
+mod explain_tests {
+    use super::*;
+    use frensense_engine::analysis::forward::SinkAlert;
+    use frensense_engine::analysis::taint::engine::FindingClass;
+    use frensense_engine::analysis::taint::path::TaintPath;
+    use frensense_engine::analysis::taint::role::SinkRole;
+
+    fn loc(
+        verdict: BackwardVerdict,
+        alert: Option<SinkAlert>,
+        cuts: Vec<&'static str>,
+    ) -> LocatedFinding {
+        LocatedFinding {
+            finding: SinkFinding {
+                function: "handler".to_string(),
+                sink: "exec".to_string(),
+                arg_slot: 0,
+                alert,
+                verdict,
+                finding_class: FindingClass::Injection,
+                role: SinkRole::Execution,
+                label: None,
+                source_desc: None,
+                sink_span: None,
+                path: TaintPath::default(),
+                cut_reasons: cuts,
+            },
+            file: "app.py".to_string(),
+            line: 42,
+            column: 1,
+        }
+    }
+
+    #[test]
+    fn vulnerable_with_alert_is_not_explained() {
+        let alert = Some(SinkAlert {
+            sink: "exec".to_string(),
+            slot: 0,
+            function: "handler".to_string(),
+            class: FindingClass::Injection,
+        });
+        let l = loc(BackwardVerdict::Vulnerable, alert, Vec::new());
+        assert!(explain_silent(&l).is_none());
+    }
+
+    #[test]
+    fn vulnerable_without_alert_is_safe_channel() {
+        let l = loc(BackwardVerdict::Vulnerable, None, Vec::new());
+        let rec = explain_silent(&l).expect("record");
+        assert_eq!(rec.verdict, "safe-channel");
+        assert!(rec.reason.contains("safe"));
+    }
+
+    #[test]
+    fn clean_with_cuts_reports_reason() {
+        let l = loc(BackwardVerdict::Clean, None, vec!["guard"]);
+        let rec = explain_silent(&l).expect("record");
+        assert_eq!(rec.verdict, "clean");
+        assert!(rec.reason.contains("guard"));
+    }
+
+    #[test]
+    fn clean_without_cuts_reports_exhausted() {
+        let l = loc(BackwardVerdict::Clean, None, Vec::new());
+        let rec = explain_silent(&l).expect("record");
+        assert!(rec.reason.contains("exhausted"));
+    }
+
+    #[test]
+    fn sanitized_verdict_label() {
+        let l = loc(BackwardVerdict::Sanitized, None, vec!["sanitizer"]);
+        let rec = explain_silent(&l).expect("record");
+        assert_eq!(rec.verdict, "sanitized");
+    }
 }

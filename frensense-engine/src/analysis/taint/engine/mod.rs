@@ -119,6 +119,13 @@ pub struct SinkFinding {
     /// Reconstructed source→sink chain (vulnerable findings only; empty
     /// otherwise, and empty when path capture is disabled).
     pub path: TaintPath,
+    /// Distinct reasons the backward walk was cut short on this argument
+    /// (non-empty only for non-vulnerable verdicts). Each entry names a
+    /// silent stop site: `"guard"`, `"value-const"`, `"sanitizer"`,
+    /// `"unresolvable"`. Surfaces *where* a flow died under `--explain`;
+    /// empty for vulnerable findings and for walks that simply exhausted
+    /// their predecessors without hitting a source.
+    pub cut_reasons: Vec<&'static str>,
 }
 
 /// Traversal statistics, proof of the demand-driven cost model.
@@ -232,6 +239,9 @@ struct ExploreState {
     visited: FxHashSet<(usize, NodeKey, BlockId, bool, u32)>,
     /// Distinct `(function, node)` pairs seen, for stats only.
     seen_nodes: FxHashSet<(usize, NodeKey)>,
+    /// Silent stop sites hit during this root's exploration, for
+    /// `--explain` diagnostics (pure bookkeeping; no analysis effect).
+    cuts: Vec<&'static str>,
 }
 
 /// Human-readable description of the taint origin at a source node:

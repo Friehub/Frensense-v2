@@ -155,6 +155,13 @@ impl Engine {
         for loc in &result.located {
             let f = &loc.finding;
             if !crate::reporting::reports_finding(f) {
+                // --explain: record every silent sink argument so users can
+                // see where the engine looked and stayed quiet (why).
+                if self.explain
+                    && let Some(rec) = crate::reporting::explain_silent(loc)
+                {
+                    self.explain_records.push(rec);
+                }
                 continue;
             }
             let key = (
@@ -562,6 +569,7 @@ mod shape_dedup_tests {
                     })
                     .collect(),
             },
+            cut_reasons: Vec::new(),
         };
         LocatedFinding {
             finding,
