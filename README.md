@@ -6,6 +6,7 @@
     <a href="https://www.npmjs.com/package/@friehub/frensense"><img src="https://img.shields.io/npm/v/@friehub/frensense.svg" alt="npm" /></a>
     <a href="https://frensense.friehub.cloud"><img src="https://img.shields.io/badge/docs-frensense.friehub.cloud-blue.svg" alt="Documentation" /></a>
     <a href="https://github.com/Friehub/Frensense-v2/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License" /></a>
+    <a href="https://github.com/sponsors/0xademola"><img src="https://img.shields.io/badge/sponsor-♥-ea4aaa.svg" alt="Sponsor" /></a>
   </p>
   <p>
     <a href="https://frensense.friehub.cloud">Documentation</a> &bull;
