@@ -150,9 +150,45 @@ jobs:
       - name: Install cargo-semver-checks
         run: cargo install cargo-semver-checks --locked
       - name: Check SemVer
-        # This will fail if the current version introduces breaking changes
-        # relative to the version currently on crates.io.
-        run: cargo semver-checks check-release || echo "SemVer check failed (expected for major/minor bumps)"
+        # Hard gate: fails if any publishable crate introduces a breaking
+        # public-API change relative to its latest crates.io release. The
+        # unpublished build-time crates (packgen, devtools) are excluded -
+        # they have no registry baseline.
+        run: cargo semver-checks check-release --workspace --exclude frensense-packgen --exclude frensense-devtools
+
+  # --- Release Graph Validation ---
+  release-graph:
+    name: Release Graph (smart-release)
+    runs-on: ubuntu-latest
+    needs: [qa]
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+        with:
+          fetch-depth: 0
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: stable
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+      - name: Install cargo-smart-release
+        run: cargo install cargo-smart-release --locked
+      - name: Validate release graph (dry-run)
+        # Fails if the workspace cannot be released coherently: inconsistent
+        # inter-crate version requirements, missing publishable deps, etc.
+        # Versions are hand-set, so `--bump keep` validates them as-is.
+        run: |
+          cargo smart-release \
+            --bump keep --bump-dependencies keep \
+            --no-changelog --no-changelog-preview --no-changelog-github-release \
+            --no-tag --no-push \
+            frensense
 
   # --- Correctness (Rust) ---
   test-rust:

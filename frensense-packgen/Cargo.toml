@@ -7,6 +7,11 @@ description = "Generates the frensense default .frc pack asset from the generato
 readme = "../README.md"
 repository = "https://github.com/Friehub/Frensense-v2"
 homepage = "https://frensense.friehub.cloud"
+# Build-time generator only: the committed asset it writes is embedded by
+# frensense-bundler via include_bytes!. Never published - frensense-engine
+# uses it solely as a dev-dependency (test-time pack decode), so publishing
+# the engine does not require this crate on crates.io.
+publish = false
 
 [dependencies]
 bincode = "1.3"
