@@ -6,7 +6,12 @@ use crate::Severity;
 use std::path::PathBuf;
 
 /// CLI options for the deterministic dataflow compiler scan.
+///
+/// `#[non_exhaustive]`: an evolving options DTO. New flags (e.g. `explain` in
+/// 0.8.0) are added as minor releases; construct via [`super::parse_options`],
+/// not literals.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct CliOptions {
     /// Positional scan target paths (files or directories).
     pub paths: Vec<PathBuf>,

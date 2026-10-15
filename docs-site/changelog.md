@@ -9,7 +9,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.1-beta] - 2026-10-13
+## [0.8.0-beta] - Unreleased
+
+### Breaking
+- **Version bump to 0.8.0** (from 0.7.0). This release adds fields to public
+  types (`CliOptions.explain`, `SinkFinding.cut_reasons`,
+  `Candidate::Check.package`). Under Cargo's `0.x` rules any field addition to
+  a constructible public type is a breaking change, so the whole workspace moves
+  to the `0.8.0` line. To keep future additions minor-compatible, the evolving
+  output/option DTOs are now `#[non_exhaustive]`: `CliOptions`, `Advisory`,
+  `ExplainRecord`, `SinkFinding`, `BackwardStats`, and `Candidate`. Consumers
+  read fields (and match `Candidate` with a wildcard arm); they no longer
+  construct these types via literals.
 
 ### Added
 

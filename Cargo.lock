@@ -100,7 +100,7 @@ checksum = "3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d"
 
 [[package]]
 name = "frensense"
-version = "0.7.1-beta"
+version = "0.8.0-beta"
 dependencies = [
  "frensense-bundler",
  "frensense-engine",
@@ -117,7 +117,7 @@ dependencies = [
 
 [[package]]
 name = "frensense-bundler"
-version = "0.7.1-beta"
+version = "0.8.0-beta"
 dependencies = [
  "bincode",
  "blake3",
@@ -135,7 +135,7 @@ dependencies = [
 
 [[package]]
 name = "frensense-devtools"
-version = "0.7.1-beta"
+version = "0.8.0-beta"
 dependencies = [
  "frensense-engine",
  "frensense-lang",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "frensense-engine"
-version = "0.7.1-beta"
+version = "0.8.0-beta"
 dependencies = [
  "bincode",
  "blake3",
@@ -165,7 +165,7 @@ dependencies = [
 
 [[package]]
 name = "frensense-lang"
-version = "0.7.1-beta"
+version = "0.8.0-beta"
 dependencies = [
  "rustc-hash",
  "serde",
@@ -180,7 +180,7 @@ dependencies = [
 
 [[package]]
 name = "frensense-packgen"
-version = "0.7.1-beta"
+version = "0.8.0-beta"
 dependencies = [
  "bincode",
  "frensense-bundler",

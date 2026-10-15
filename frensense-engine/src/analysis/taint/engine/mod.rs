@@ -91,7 +91,12 @@ pub enum FindingClass {
 }
 
 /// One explored sink argument with its verdict.
+///
+/// `#[non_exhaustive]`: this is an evolving output DTO. New diagnostic fields
+/// (e.g. `cut_reasons` in 0.8.0) are added as minor releases; consumers read
+/// fields, they do not construct literals.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SinkFinding {
     /// Function in which the sink call lives.
     pub function: String,
@@ -128,8 +133,137 @@ pub struct SinkFinding {
     pub cut_reasons: Vec<&'static str>,
 }
 
+impl SinkFinding {
+    /// Start a [`SinkFindingBuilder`].
+    ///
+    /// `SinkFinding` is `#[non_exhaustive]`, so downstream crates cannot build
+    /// it with a struct literal. This builder is the sanctioned constructor:
+    /// each field starts at a neutral value and is set with a chained method.
+    /// Adding a field later is a minor release (it gains a builder method).
+    pub fn builder() -> SinkFindingBuilder {
+        SinkFindingBuilder {
+            function: String::new(),
+            sink: String::new(),
+            arg_slot: 0,
+            alert: None,
+            verdict: BackwardVerdict::Clean,
+            finding_class: FindingClass::default(),
+            role: crate::analysis::taint::role::SinkRole::Execution,
+            label: None,
+            source_desc: None,
+            sink_span: None,
+            path: TaintPath::default(),
+            cut_reasons: Vec::new(),
+        }
+    }
+}
+
+/// Builder for [`SinkFinding`] (which is `#[non_exhaustive]`).
+///
+/// All fields start at neutral defaults; set only what you care about, then
+/// call [`SinkFindingBuilder::build`].
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct SinkFindingBuilder {
+    function: String,
+    sink: String,
+    arg_slot: usize,
+    alert: Option<SinkAlert>,
+    verdict: BackwardVerdict,
+    finding_class: FindingClass,
+    role: crate::analysis::taint::role::SinkRole,
+    label: Option<String>,
+    source_desc: Option<String>,
+    sink_span: Option<(usize, usize)>,
+    path: TaintPath,
+    cut_reasons: Vec<&'static str>,
+}
+
+impl SinkFindingBuilder {
+    /// Set the enclosing function name.
+    pub fn function(mut self, v: impl Into<String>) -> Self {
+        self.function = v.into();
+        self
+    }
+    /// Set the sink call name.
+    pub fn sink(mut self, v: impl Into<String>) -> Self {
+        self.sink = v.into();
+        self
+    }
+    /// Set the tainted argument slot (receiver = 0).
+    pub fn arg_slot(mut self, v: usize) -> Self {
+        self.arg_slot = v;
+        self
+    }
+    /// Set the structured sink alert.
+    pub fn alert(mut self, v: Option<SinkAlert>) -> Self {
+        self.alert = v;
+        self
+    }
+    /// Set the backward-walk verdict.
+    pub fn verdict(mut self, v: BackwardVerdict) -> Self {
+        self.verdict = v;
+        self
+    }
+    /// Set the shape classification.
+    pub fn finding_class(mut self, v: FindingClass) -> Self {
+        self.finding_class = v;
+        self
+    }
+    /// Set what the sink does with its input.
+    pub fn role(mut self, v: crate::analysis::taint::role::SinkRole) -> Self {
+        self.role = v;
+        self
+    }
+    /// Set the identity-reporting label slug.
+    pub fn label(mut self, v: Option<String>) -> Self {
+        self.label = v;
+        self
+    }
+    /// Set the human description of the taint origin.
+    pub fn source_desc(mut self, v: Option<String>) -> Self {
+        self.source_desc = v;
+        self
+    }
+    /// Set the byte range of the sink call.
+    pub fn sink_span(mut self, v: Option<(usize, usize)>) -> Self {
+        self.sink_span = v;
+        self
+    }
+    /// Set the reconstructed source-to-sink chain.
+    pub fn path(mut self, v: TaintPath) -> Self {
+        self.path = v;
+        self
+    }
+    /// Set the distinct reasons the backward walk was cut short.
+    pub fn cut_reasons(mut self, v: Vec<&'static str>) -> Self {
+        self.cut_reasons = v;
+        self
+    }
+    /// Finish, returning the [`SinkFinding`].
+    pub fn build(self) -> SinkFinding {
+        SinkFinding {
+            function: self.function,
+            sink: self.sink,
+            arg_slot: self.arg_slot,
+            alert: self.alert,
+            verdict: self.verdict,
+            finding_class: self.finding_class,
+            role: self.role,
+            label: self.label,
+            source_desc: self.source_desc,
+            sink_span: self.sink_span,
+            path: self.path,
+            cut_reasons: self.cut_reasons,
+        }
+    }
+}
+
 /// Traversal statistics, proof of the demand-driven cost model.
+///
+/// `#[non_exhaustive]`: evolving metrics DTO; new counters are minor releases.
 #[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct BackwardStats {
     /// `(function, node)` pairs visited during backward exploration.
     pub nodes_visited: usize,
