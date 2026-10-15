@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791843787881,
+  "lastUpdate": 1792076322943,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -908,6 +908,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/aaa447ef5ea0bb93df8cb525f208b930134a459c"
         },
         "date": 1791843787188,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 14.2,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 15.7,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 1.5,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 71,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 12,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "58cb0b105e00d3b48ad0dce4113ed141a679a174",
+          "message": "Merge pull request #45 from Friehub/feat/funding\n\nFeat/funding",
+          "timestamp": "2026-10-15T14:57:31Z",
+          "tree_id": "da8a611f20ffa6ad1564c3806571774d72b90d9e",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/58cb0b105e00d3b48ad0dce4113ed141a679a174"
+        },
+        "date": 1792076321419,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
