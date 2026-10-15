@@ -172,3 +172,7 @@ frensense-bench/cve_corpus/
 
 # Embedded default pack asset (Phase 5.2 / D1): committed despite *.frc
 !frensense-bundler/assets/*.frc
+
+# Backward-compat wire-format fixtures (bincode is positional; these pin the
+# LearnedFactEntry schema so a serde-shape change is caught, not silently broken)
+!frensense-bundler/tests/fixtures/*.frc

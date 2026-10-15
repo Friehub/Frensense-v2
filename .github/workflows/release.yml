@@ -258,42 +258,33 @@ jobs:
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: stable
+      - name: Install cargo-smart-release
+        run: cargo install cargo-smart-release --locked
       - name: Publish workspace crates in dependency order
+        # cargo-smart-release replaces the old hand-rolled publish loop
+        # (curl + `sleep 35` + `cargo publish --allow-dirty`). It resolves
+        # the dependency graph, publishes lang -> engine -> bundler -> frensense
+        # in topological order, and waits on the crates.io index properly.
+        #
+        # Strictness:
+        #   - No `--allow-dirty`: a clean tag checkout is required; smart-release
+        #     refuses to publish from a dirty tree.
+        #   - `--bump keep --bump-dependencies keep`: versions are set by hand in
+        #     the manifests (the `chore(release)` commit); we publish exactly those.
+        #   - `--no-changelog`: the curated per-crate CHANGELOG.md files are
+        #     preserved verbatim, not regenerated from commits.
+        #   - `--no-tag --no-push`: the `prepare` job already created the release
+        #     tag; this job only publishes.
+        #   - `frensense-packgen` / `frensense-devtools` are `publish = false`
+        #     and are skipped automatically.
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          publish_crate() {
-            CRATE=$1
-            if [ -f "$CRATE/Cargo.toml" ]; then
-              CRATE_VER=$(grep '^version' "$CRATE/Cargo.toml" | head -1 | cut -d'"' -f2)
-            else
-              CRATE_VER=$(grep '^version' Cargo.toml | head -1 | cut -d'"' -f2)
-            fi
-
-            echo "Checking crates.io for $CRATE@$CRATE_VER..."
-            EXISTS=$(curl -sf -H "User-Agent: frensense-release" "https://crates.io/api/v1/crates/$CRATE" | python3 -c "import json,sys; print(json.load(sys.stdin).get('crate',{}).get('max_version',''))" 2>/dev/null || echo "")
-
-            if [ "$EXISTS" = "$CRATE_VER" ]; then
-              echo "$CRATE@$CRATE_VER is already published. Skipping."
-            else
-              echo "Publishing $CRATE@$CRATE_VER to crates.io..."
-              cargo publish -p "$CRATE" --allow-dirty
-              echo "Waiting 35s for crates.io index propagation..."
-              sleep 35
-            fi
-          }
-
-          # 1. Base AST specification crate (0 internal deps)
-          publish_crate frensense-lang
-
-          # 2. Analysis engine core (depends on frensense-lang)
-          publish_crate frensense-engine
-
-          # 3. Knowledge bundler (depends on frensense-lang and frensense-engine)
-          publish_crate frensense-bundler
-
-          # 4. Main scanner CLI/MCP/LSP binary (depends on all workspace crates)
-          publish_crate frensense
+          cargo smart-release --execute \
+            --bump keep --bump-dependencies keep \
+            --no-changelog --no-changelog-preview --no-changelog-github-release \
+            --no-tag --no-push \
+            frensense
 
   # 5. Publish to NPM
   publish-npm:
