@@ -12,7 +12,12 @@ use frensense_engine::analysis::taint::facts::{
 use frensense_engine::checks::memory_summary::CapacitySpec;
 
 /// A candidate fact proposed by delta analysis.
+///
+/// `#[non_exhaustive]`: an evolving internal DTO. Variant fields (e.g.
+/// `Check.package` in 0.8.0) are added as minor releases; it never escapes the
+/// bundler's functional API, so consumers match with a wildcard arm.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum Candidate {
     /// Call is a dangerous sink at these arg slots.
     Sink {

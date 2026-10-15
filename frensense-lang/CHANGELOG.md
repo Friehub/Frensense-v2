@@ -4,7 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.7.1-beta] - 2026-10-13
+## [0.8.0-beta] - Unreleased
+
+Lockstep release with the workspace 0.8.0 line (no breaking change in this
+crate; the bump is for workspace version coherence).
 
 ### Added
 - **Advisory CWE classification**: built-in advisories now carry their canonical

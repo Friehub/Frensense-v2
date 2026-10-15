@@ -32,6 +32,7 @@ pub use frensense_lang::Severity;
 /// A single finding, rendered compiler-style: where, what, why, how to fix.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[must_use]
+#[non_exhaustive]
 pub struct Advisory {
     pub title: String,
     pub file_id: FileId,

@@ -56,7 +56,11 @@ pub fn apply(
 /// One explored sink argument that did NOT become an advisory, with the
 /// reason the engine stayed silent. Collected under `--explain` so users
 /// can see *where* analysis stopped - the "engine limitation" map.
+///
+/// `#[non_exhaustive]`: an evolving diagnostic DTO; new fields are minor
+/// releases.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ExplainRecord {
     pub file: String,
     pub line: u32,
@@ -152,20 +156,17 @@ mod explain_tests {
         cuts: Vec<&'static str>,
     ) -> LocatedFinding {
         LocatedFinding {
-            finding: SinkFinding {
-                function: "handler".to_string(),
-                sink: "exec".to_string(),
-                arg_slot: 0,
-                alert,
-                verdict,
-                finding_class: FindingClass::Injection,
-                role: SinkRole::Execution,
-                label: None,
-                source_desc: None,
-                sink_span: None,
-                path: TaintPath::default(),
-                cut_reasons: cuts,
-            },
+            finding: SinkFinding::builder()
+                .function("handler")
+                .sink("exec")
+                .arg_slot(0)
+                .alert(alert)
+                .verdict(verdict)
+                .finding_class(FindingClass::Injection)
+                .role(SinkRole::Execution)
+                .path(TaintPath::default())
+                .cut_reasons(cuts)
+                .build(),
             file: "app.py".to_string(),
             line: 42,
             column: 1,

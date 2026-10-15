@@ -536,23 +536,21 @@ mod shape_dedup_tests {
     /// `resolved` of them carry spans. Identical step sequence + tag
     /// produces an identical shape_id (variable numbers are ignored).
     fn located(file: &str, line: u32, steps: usize, resolved: usize, tag: &str) -> LocatedFinding {
-        let finding = SinkFinding {
-            function: "handler".to_string(),
-            sink: "exec".to_string(),
-            arg_slot: 0,
-            alert: Some(SinkAlert {
+        let finding = SinkFinding::builder()
+            .function("handler")
+            .sink("exec")
+            .arg_slot(0)
+            .alert(Some(SinkAlert {
                 sink: "exec".to_string(),
                 slot: 0,
                 function: "handler".to_string(),
                 class: FindingClass::Injection,
-            }),
-            verdict: BackwardVerdict::Vulnerable,
-            finding_class: FindingClass::Injection,
-            role: SinkRole::Execution,
-            label: None,
-            source_desc: Some(format!("source-{tag}")),
-            sink_span: None,
-            path: TaintPath {
+            }))
+            .verdict(BackwardVerdict::Vulnerable)
+            .finding_class(FindingClass::Injection)
+            .role(SinkRole::Execution)
+            .source_desc(Some(format!("source-{tag}")))
+            .path(TaintPath {
                 steps: (0..steps)
                     .map(|i| PathStep::Assignment {
                         function: format!("f{tag}"),
@@ -568,9 +566,8 @@ mod shape_dedup_tests {
                         }
                     })
                     .collect(),
-            },
-            cut_reasons: Vec::new(),
-        };
+            })
+            .build();
         LocatedFinding {
             finding,
             file: file.to_string(),
