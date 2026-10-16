@@ -27,7 +27,18 @@ pub(super) struct GuardMap {
 }
 
 impl GuardMap {
-    pub(super) fn build(ir: &FunctionIR, facts: &FactTable, config: &TaintConfig) -> Self {
+    /// `file_package_imports`: the owning file's package-import table (or
+    /// the single-file fallback table), used to arm package-scoped
+    /// guard-style sanitizer facts through their import origin — a
+    /// scoped guard only registers when the callee's origin names its
+    /// package; unknown origin leaves it inert (recall-safe: an
+    /// unproven guard must never validate a value).
+    pub(super) fn build(
+        ir: &FunctionIR,
+        facts: &FactTable,
+        config: &TaintConfig,
+        file_package_imports: Option<&FxHashMap<String, crate::graph::module::PackageImport>>,
+    ) -> Self {
         let mut guards: FxHashMap<VarId, Vec<BlockId>> = FxHashMap::default();
 
         // Walk: cond var → def instruction, up to 3 hops, collecting
@@ -73,17 +84,33 @@ impl GuardMap {
         // (predicate on an argument) or the receiver (predicate on the
         // receiver, e.g. `file.includes('..')`).
         let checked_vars = |instr: &Instruction| -> Vec<VarId> {
-            let (method, receiver, args) = match instr {
+            let (method, receiver, args, origin) = match instr {
                 Instruction::CallVirtual {
                     method,
                     receiver,
                     args,
                     ..
-                } => (method, Some(receiver), args),
-                Instruction::CallStatic { func, args, .. } => (func, None, args),
+                } => {
+                    // Receiver import alias: `ALLOWLIST.has(x)` where
+                    // ALLOWLIST was imported from a package.
+                    let origin = match receiver {
+                        Operand::Var(r) => FactTable::receiver_root(ir, *r)
+                            .and_then(|root| file_package_imports.and_then(|m| m.get(&root)))
+                            .map(|p| p.package.clone()),
+                        _ => None,
+                    };
+                    (method, Some(receiver), args, origin)
+                }
+                Instruction::CallStatic { func, args, .. } => {
+                    // Static import: `import { isSafe } from 'pkg'`.
+                    let origin = file_package_imports
+                        .and_then(|m| m.get(func))
+                        .map(|p| p.package.clone());
+                    (func, None, args, origin)
+                }
                 _ => return Vec::new(),
             };
-            let Some(f) = facts.sanitizer_fact(method) else {
+            let Some(f) = facts.sanitizer_fact_scoped(method, origin.as_deref()) else {
                 return Vec::new();
             };
             if !f.guard_style {

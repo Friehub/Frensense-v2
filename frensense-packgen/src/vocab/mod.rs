@@ -40,6 +40,10 @@ pub(crate) struct LanguageVocab {
     /// may narrow it.
     pub ambiguous_verbs: &'static [&'static str],
     pub sink_names: &'static [(&'static str, SinkLabel)],
+    /// Package-scoped framework sinks (dotted call, package, label):
+    /// facts installed under (package, call) so a call only counts as a
+    /// sink when import-origin resolution names the package.
+    pub package_scoped_sinks: &'static [(&'static str, &'static str, SinkLabel)],
     pub sink_signatures: &'static [(&'static str, &'static [usize], bool)],
     pub idor_sinks: &'static [(&'static str, &'static [&'static str])],
     pub source_patterns: &'static [&'static str],
@@ -74,6 +78,18 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
                 sink_role_name(sink_role_for_label(*label)),
                 label.slug()
             ),
+        });
+    }
+    // Package-scoped framework sinks: package-qualified LanguageSinkSlots
+    // entries (slot data synthesized as all-args dangerous) so packets
+    // matching by lowered facts get the exact (package, call) binding.
+    for (call, package, _label) in v.package_scoped_sinks {
+        entries.push(LearnedFactEntry::LanguageSinkSlots {
+            language: language.clone(),
+            call: (*call).to_string(),
+            package: Some((*package).to_string()),
+            dangerous_args: std::collections::BTreeSet::new(),
+            binding_args_safe: false,
         });
     }
     for (call, slots, binding_safe) in v.sink_signatures {

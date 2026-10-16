@@ -209,6 +209,19 @@ fn install_language_group(
                             facts.client_roots.insert(root.to_string());
                         }
                     }
+                } else if ambiguous.contains(&last) {
+                    // Bare ambiguous verb with no dotted client entry in
+                    // this pack: still arm verb-gating so the name only
+                    // counts as a sink on a *qualified* receiver (see
+                    // is_sink_call_scoped). Without this, `execute`,
+                    // `aggregate`, `delete` ... sink any receiver in the
+                    // program (RecipeExecutor.execute, Prisma
+                    // db.trade.aggregate, array helpers, ...) - measured
+                    // 10+ false-positive advisories on one live TS repo.
+                    // Client roots must still come from dotted entries,
+                    // which is exactly the point: an unqualified bare
+                    // verb matches nothing by name alone.
+                    facts.verb_sinks.insert(last.to_string());
                 }
             }
             LearnedFactEntry::LanguageSinkSlots {
@@ -232,36 +245,68 @@ fn install_language_group(
                     role,
                     label,
                 };
-                if let Some(pkg) = package {
-                    facts
-                        .scoped_sink_signatures
-                        .insert((pkg.clone(), call.clone()), entry.clone());
-                } else if let Some((root, _)) = call.split_once('.') {
-                    let last = call.rsplit('.').next().unwrap_or(call);
-                    facts
-                        .scoped_sink_signatures
-                        .insert((root.to_string(), last.to_string()), entry.clone());
-                }
-                facts.sink_signatures.insert(call.clone(), entry.clone());
-                let last = call.rsplit('.').next().unwrap_or(call);
-                if last != call {
-                    // Bare-wins alias rule: a dotted per-slot rule may
-                    // replace the mechanical dotted alias but never a
-                    // bare-owned entry (mirrors the spec seed).
-                    let alias_owned_by_dotted = facts
-                        .sink_signatures
-                        .get(last)
-                        .map(|cur| cur.call.contains('.'))
-                        .unwrap_or(false);
-                    if alias_owned_by_dotted {
-                        facts.sink_signatures.insert(last.to_string(), entry);
-                    } else {
+                match package {
+                    Some(pkg) => {
+                        // Package-scoped fact: install ONLY under
+                        // (package, call). No universal signature, no
+                        // bare-name aliases, no `config.sinks` entry —
+                        // matching is origin-gated (`is_sink_call_scoped`
+                        // -> `sink_signature_scoped`), so an unrelated
+                        // receiver or an unimported file never inherits
+                        // the framework's sink semantics. Also store the
+                        // last-segment key so receiver-call matching (the
+                        // walker matches on the method's last segment)
+                        // resolves the scoped fact.
                         facts
-                            .sink_signatures
-                            .entry(last.to_string())
-                            .or_insert(entry);
+                            .scoped_sink_signatures
+                            .insert((pkg.clone(), call.clone()), entry.clone());
+                        let last = call
+                            .rsplit('.')
+                            .next()
+                            .map(String::from)
+                            .unwrap_or_else(|| call.clone());
+                        if last != *call {
+                            facts
+                                .scoped_sink_signatures
+                                .insert((pkg.clone(), last.clone()), entry.clone());
+                        }
+                    }
+                    None => {
+                        if let Some((root, _)) = call.split_once('.') {
+                            let last = call.rsplit('.').next().unwrap_or(call);
+                            facts
+                                .scoped_sink_signatures
+                                .insert((root.to_string(), last.to_string()), entry.clone());
+                        }
+                        facts.sink_signatures.insert(call.clone(), entry.clone());
+                        let last = call.rsplit('.').next().unwrap_or(call);
+                        if last != call {
+                            // Bare-wins alias rule: a dotted per-slot rule may
+                            // replace the mechanical dotted alias but never a
+                            // bare-owned entry (mirrors the spec seed).
+                            let alias_owned_by_dotted = facts
+                                .sink_signatures
+                                .get(last)
+                                .map(|cur| cur.call.contains('.'))
+                                .unwrap_or(false);
+                            if alias_owned_by_dotted {
+                                facts
+                                    .sink_signatures
+                                    .insert(last.to_string(), entry.clone());
+                            } else {
+                                facts
+                                    .sink_signatures
+                                    .entry(last.to_string())
+                                    .or_insert(entry.clone());
+                            }
+                        }
                     }
                 }
+                // Role/label carry into the scoped design too: above the
+                // (role, label) lookup consulted the universal table only;
+                // package-scoped entries without a universal sibling keep
+                // the default role (Other) unless a bundle sources the same
+                // call.'s role separately.
             }
             LearnedFactEntry::LanguageIdorSink { call, keys, .. } => {
                 let last = call.rsplit('.').next().unwrap_or(call).to_string();
@@ -295,7 +340,6 @@ fn install_language_group(
                 guard_style,
                 ..
             } => {
-                config.sanitizers.insert(call.clone());
                 let fact = SanitizerFact {
                     call: call.clone(),
                     package: package.clone(),
@@ -303,12 +347,25 @@ fn install_language_group(
                     sanitizes_args: Default::default(),
                     guard_style: *guard_style,
                 };
-                if let Some(pkg) = package {
-                    facts
-                        .scoped_sanitizer_facts
-                        .insert((pkg.clone(), call.clone()), fact.clone());
+                match package {
+                    Some(pkg) => {
+                        // Package-scoped sanitizer: install ONLY under
+                        // (package, call). No universal `sanitizer_facts`
+                        // entry and no `config.sanitizers` entry — both
+                        // are consulted without import context, so a
+                        // universal alias would cut the call on ANY
+                        // receiver and silence true findings whose origin
+                        // is a different package (or unknown). Matching
+                        // is origin-gated (`sanitizer_fact_scoped`).
+                        facts
+                            .scoped_sanitizer_facts
+                            .insert((pkg.clone(), call.clone()), fact);
+                    }
+                    None => {
+                        config.sanitizers.insert(call.clone());
+                        facts.sanitizer_facts.entry(call.clone()).or_insert(fact);
+                    }
                 }
-                facts.sanitizer_facts.entry(call.clone()).or_insert(fact);
             }
             LearnedFactEntry::LanguagePropagator {
                 call,

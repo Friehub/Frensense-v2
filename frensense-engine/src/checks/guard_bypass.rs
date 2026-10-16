@@ -27,6 +27,7 @@ use rustc_hash::FxHashSet;
 /// allowlist validation over attacker input.
 pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     let mut findings = Vec::new();
+    let mut rule1_fired = false;
     let param_names: Vec<String> = ir
         .parameters
         .iter()
@@ -91,6 +92,14 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                 if !feeds_predicate(ir, *d) {
                     continue;
                 }
+                // One finding per function: every `includes(...)` call in
+                // a dispatcher fires with the same rule+function identity,
+                // flooding the report (7 advisories for
+                // rateLimiter.detectService on one live repo).
+                if rule1_fired {
+                    continue;
+                }
+                rule1_fired = true;
                 let span = ir.var_metadata.get(d).and_then(|m| m.byte_range);
                 findings.push(CheckerFinding {
                     provenance: guard_prov,

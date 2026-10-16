@@ -23,7 +23,7 @@ use super::learned::{call_segments, is_range_guarded};
 use crate::analysis::taint::facts::{FactTable, PolicyFact, PolicyRequirement, PolicyScope};
 use crate::graph::module::PackageImport;
 use crate::ir::control::{self, DomSets};
-use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand};
+use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand, VarId};
 
 /// Package-import context for policy scoping: which file each function
 /// came from, and which external packages each file imports. Policies
@@ -288,7 +288,82 @@ fn requirement_holds(
             }
             false
         }
+        PolicyRequirement::RequireArgKey { slot, keys } => {
+            if *slot == usize::MAX {
+                args.iter().any(|a| match a {
+                    Operand::Var(v) => arg_has_key(ir, *v, keys),
+                    _ => false,
+                })
+            } else {
+                args.get(*slot).is_some_and(|arg| match arg {
+                    Operand::Var(v) => arg_has_key(ir, *v, keys),
+                    _ => false,
+                })
+            }
+        }
     }
+}
+
+/// Does `start` trace to an object construction carrying any of `keys`?
+/// Fully-keyed object literals lower to `Allocate(kind: Object)` plus one
+/// `StoreField { base, field }` per key, and the lowering records the pair
+/// keys on the composite var's metadata (shorthand/mixed composites carry
+/// the metadata without stores). Both paths are checked; plain `Assign`
+/// hops are followed like the shape classifier in `forward/predicates.rs`
+/// (`arg_is_idor_shape`), depth-bounded.
+fn arg_has_key(ir: &FunctionIR, start: VarId, keys: &[String]) -> bool {
+    let mut frontier = vec![start];
+    let mut seen: rustc_hash::FxHashSet<VarId> = rustc_hash::FxHashSet::default();
+    seen.insert(start);
+    for _ in 0..8 {
+        let mut next = Vec::new();
+        for v in frontier.drain(..) {
+            // (1) Metadata path: the composite var remembers its pair keys.
+            if ir
+                .var_metadata
+                .get(&v)
+                .is_some_and(|m| m.object_keys.iter().any(|k| keys.contains(k)))
+            {
+                return true;
+            }
+            for b in ir.blocks.values() {
+                for instr in &b.instructions {
+                    match instr {
+                        // (2) Store path: the literal's own per-key store
+                        // (`where: ...`), checked by field name.
+                        Instruction::StoreField {
+                            base, field, src, ..
+                        } if *base == v => {
+                            if keys.iter().any(|k| k == field) {
+                                return true;
+                            }
+                            // (3) Recurse into stored member objects:
+                            // a nested `{ lt: ... }` is a fresh Allocate
+                            // reached through the outer object's store.
+                            if let Operand::Var(s) = src
+                                && seen.insert(*s)
+                            {
+                                next.push(*s);
+                            }
+                        }
+                        // (4) Plain assign hop keeps the shape identity.
+                        Instruction::Assign {
+                            dest,
+                            src: Operand::Var(s),
+                        } if *dest == v && seen.insert(*s) => {
+                            next.push(*s);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        frontier = next;
+    }
+    false
 }
 
 fn strip_quotes(lit: &str) -> &str {

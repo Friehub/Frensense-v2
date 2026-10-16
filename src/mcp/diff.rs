@@ -259,7 +259,7 @@ fn path_matches(advisory_path: &str, diff_path: &str) -> bool {
 }
 
 /// Severity/confidence filter. Thin wrapper over
-/// [`crate::reporting::apply`], the one reporting policy every surface
+/// [`crate::policy::apply`], the one reporting policy every surface
 /// shares.
 #[must_use]
 pub fn filter_advisories(
@@ -267,7 +267,7 @@ pub fn filter_advisories(
     severity_threshold: &str,
     min_confidence: f64,
 ) -> Vec<Advisory> {
-    crate::reporting::apply(
+    crate::policy::apply(
         advisories,
         min_confidence,
         Some(Severity::parse(severity_threshold)),

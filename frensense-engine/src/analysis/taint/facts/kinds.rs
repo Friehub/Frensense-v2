@@ -185,6 +185,16 @@ pub enum PolicyRequirement {
     /// The call's argument at `slot` MUST match one of `values`
     /// (case-insensitive comparison over string, boolean, or integer literals).
     RequiredArgLiteral { slot: usize, values: Vec<String> },
+    /// The call's argument at `slot` must trace to an object construction
+    /// carrying at least one of `keys` as an object-literal pair key
+    /// (`updateMany({ where: ... })`: the where clause scopes which rows
+    /// the bulk write touches). `slot` indexes the call's argument list as
+    /// the lowering records it (receiver excluded); `usize::MAX` matches
+    /// ANY argument position. Traceability: fully-keyed object literals
+    /// lower to `Allocate(kind: Object)` plus one `StoreField` per key,
+    /// and the lowering records the pair keys on the composite var, so
+    /// key presence is checkable in the IR without value analysis.
+    RequireArgKey { slot: usize, keys: Vec<String> },
 }
 
 impl PolicyRequirement {
@@ -199,7 +209,8 @@ impl PolicyRequirement {
             }
             PolicyRequirement::RangeCheck { .. }
             | PolicyRequirement::BannedArgLiteral { .. }
-            | PolicyRequirement::RequiredArgLiteral { .. } => Vec::new(),
+            | PolicyRequirement::RequiredArgLiteral { .. }
+            | PolicyRequirement::RequireArgKey { .. } => Vec::new(),
         }
     }
 }

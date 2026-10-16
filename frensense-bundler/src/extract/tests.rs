@@ -832,3 +832,58 @@ export function badSearch (req: any) {
         );
     }
 }
+
+/// Gate/consumer parity for package-scoped sanitizers: `apply_candidate`
+/// builds the replay-gate trial tables, so it must install a package-
+/// scoped sanitizer under `(package, call)` ONLY — exactly like the
+/// engine's load path (`apply_language_entries`). A universal alias here
+/// would let the gate cut any receiver and approve facts whose strict
+/// consumer semantics differ.
+mod scoped_candidate_install_tests {
+    use super::*;
+    use crate::extract::{apply_candidate, Candidate};
+
+    #[test]
+    fn scoped_sanitizer_candidate_installs_no_universal_alias() {
+        let mut table = FactTable::default();
+        apply_candidate(
+            &mut table,
+            &Candidate::Sanitizer {
+                call: "scrub".into(),
+                package: Some("@acme/sanitize".into()),
+                guard: false,
+            },
+        );
+        assert!(
+            table
+                .scoped_sanitizer_facts
+                .contains_key(&("@acme/sanitize".to_string(), "scrub".to_string())),
+            "the scoped entry must be installed under (package, call)"
+        );
+        assert!(
+            table.sanitizer_facts.get("scrub").is_none(),
+            "a package-scoped sanitizer must not install a universal alias: \n             consumers load it origin-gated, so the gate must replay the same semantics"
+        );
+    }
+
+    #[test]
+    fn unscoped_sanitizer_candidate_stays_universal() {
+        let mut table = FactTable::default();
+        apply_candidate(
+            &mut table,
+            &Candidate::Sanitizer {
+                call: "scrub".into(),
+                package: None,
+                guard: false,
+            },
+        );
+        assert!(
+            table.sanitizer_facts.contains_key("scrub"),
+            "an unpackage-qualified sanitizer must stay universal"
+        );
+        assert!(
+            table.scoped_sanitizer_facts.is_empty(),
+            "an unpackage-qualified sanitizer must not create a scoped entry"
+        );
+    }
+}
