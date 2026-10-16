@@ -297,6 +297,15 @@ struct CtxLink {
 const MAX_CTX_DEPTH: usize = 8;
 const MAX_CTX_CHAINS: usize = 4096;
 
+/// Type alias for the route-registration predicate used in the engine's
+/// per-call-site framing (schema §5.1 of the framework-scope doc): the
+/// exact signature of the harness's `is_route_registration`.
+pub type RouteRegistration = fn(
+    callee_text: &str,
+    spec: &dyn frensense_lang::spec::LanguageSpec,
+    facts: Option<&FactTable>,
+) -> bool;
+
 /// Demand-driven backward taint engine over the whole-program SVFG.
 pub struct BackwardTaintEngine<'a> {
     pub(crate) prog: &'a ProgramSvfg<'a>,
@@ -333,6 +342,12 @@ pub struct BackwardTaintEngine<'a> {
     /// Per-file external package imports: `file_path -> local_name -> PackageImport`.
     pub(crate) file_package_imports:
         FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
+    /// Route-registration predicate for per-call-site framing, wired from
+    /// the harness via [`BackwardTaintEngine::with_route_registration`]
+    /// (schema §5.1 of the framework-scope doc). Consulted before a
+    /// framework-stemmable receiver is treated as a source; `None` keeps
+    /// the pre-wiring behaviour (spec verbs only, no pack route patterns).
+    pub route_registration: Option<RouteRegistration>,
     /// When `true`, reconstruct the walked source→sink chain per vulnerable
     /// finding (small extra bookkeeping; path reporting needs it).
     capture_paths: bool,
@@ -454,6 +469,7 @@ impl<'a> BackwardTaintEngine<'a> {
             prog,
             config,
             facts: FactTable::from_config(config),
+            route_registration: None,
             honour_suppression: true,
             reverse_cross: FxHashMap::default(),
             guard_maps: FxHashMap::default(),
@@ -490,7 +506,14 @@ impl<'a> BackwardTaintEngine<'a> {
         self
     }
 
-    /// Provide external package imports per file: `file_path -> local_name -> PackageImport`.
+    /// Wire the harness's `is_route_registration` predicate into the engine
+    /// so the backward analysis consults it before arming a framework
+    /// origin (schema §5.1 of the framework-scope doc).
+    pub fn with_route_registration(mut self, predicate: RouteRegistration) -> Self {
+        self.route_registration = Some(predicate);
+        self
+    }
+
     pub fn with_file_package_imports(
         mut self,
         imports: &FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,

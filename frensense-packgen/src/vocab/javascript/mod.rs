@@ -41,6 +41,9 @@ static ROUTE_PATTERNS: &[&str] = &[
 const TYPESCRIPT_VOCAB: LanguageVocab = LanguageVocab {
     language: "typescript",
     ambiguous_verbs: crate::data::BOOTSTRAP_AMBIGUOUS_VERBS,
+    // `eval` is a global builtin in both dialects: `engine.eval(x)` on an
+    // unqualified receiver is not the language's eval (WI-12).
+    global_only_sinks: &["eval"],
     sink_names: tables::JS_SINK_NAMES,
     package_scoped_sinks: tables::JS_PACKAGE_SCOPED_SINKS,
     sink_signatures: tables::JS_SINK_SIGNATURES,

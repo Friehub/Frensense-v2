@@ -131,6 +131,23 @@ impl FactTable {
         }
         // Origin unknown: universal facts only (same rule as sanitizers
         // — a package-scoped fact applies only under a confirmed origin).
+        // Scope-separated callees (`std::fs::read_to_string`) fall back
+        // through their `::` suffixes exactly like [`Self::sink_signature`],
+        // so a qualified call matches the bare callable entry when no
+        // qualified shape was declared (WI-11); exact matches keep precedence.
+        if let Some(sig) = self.sink_signatures.get(call) {
+            return Some(sig);
+        }
+        if call.contains("::") {
+            let parts: Vec<&str> = call.split("::").collect();
+            for i in 1..parts.len() {
+                let suffix = parts[i..].join("::");
+                if let Some(sig) = self.sink_signatures.get(&suffix) {
+                    return Some(sig);
+                }
+            }
+            return None;
+        }
         self.sink_signatures.get(call)
     }
 
@@ -230,8 +247,19 @@ impl FactTable {
         origin_package: Option<&str>,
     ) -> bool {
         if !self.verb_sinks.contains(last) {
-            // Ordinary sink: presence in the signature table decides.
-            return self.sink_signature_scoped(last, origin_package).is_some();
+            // Ordinary sink: presence in the signature table decides, with
+            // one carve-out: a global-only fact (schema §WI-12) arms the
+            // bare / unqualified call form only. A receiver-qualified call
+            // (`engine.eval(x)`) matches just once its origin resolves to a
+            // known package — an unrelated receiver's method must never
+            // inherit a global builtin's semantics.
+            if let Some(sig) = self.sink_signature_scoped(last, origin_package) {
+                if sig.global_only && receiver_root.is_some() && origin_package.is_none() {
+                    return false;
+                }
+                return true;
+            }
+            return false;
         }
         match receiver_root {
             Some(root) => {

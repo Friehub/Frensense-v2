@@ -234,8 +234,12 @@ fn build_spec_tables(files: &[(String, String, String)]) -> (TaintConfig, FactTa
 /// the finding keeps the registry's severity.
 fn corpus_severity(raw: &str) -> Option<crate::Severity> {
     match raw.trim().to_ascii_lowercase().as_str() {
-        "critical" | "high" => Some(crate::Severity::Critical),
-        "medium" => Some(crate::Severity::Warning),
+        "critical" => Some(crate::Severity::Critical),
+        // The CLI's advisory ladder is 3-tier (critical / warning / info):
+        // a CVSS `high` (7.0-8.9) ranks below `critical` (9.0+), so it
+        // shares the `warning` tier with `medium` instead of collapsing
+        // into the top tier.
+        "high" | "medium" => Some(crate::Severity::Warning),
         "low" => Some(crate::Severity::Info),
         _ => None,
     }
@@ -743,7 +747,7 @@ mod bundle_pattern_tests {
             cwe: Some("CWE-79".to_string()),
             cvss: Some(7.5),
             owasp: Some("A03:2021".to_string()),
-            severity: Some("High".to_string()),
+            severity: Some("Critical".to_string()),
             rules: rules.iter().map(|r| r.to_string()).collect(),
         }
     }
@@ -759,7 +763,9 @@ mod bundle_pattern_tests {
     #[test]
     fn corpus_severity_maps_cvss_labels_to_tiers() {
         assert_eq!(corpus_severity("critical"), Some(Severity::Critical));
-        assert_eq!(corpus_severity("High"), Some(Severity::Critical));
+        // CVSS `high` ranks below critical; the 3-tier advisory ladder
+        // puts it with `medium` on the warning tier.
+        assert_eq!(corpus_severity("High"), Some(Severity::Warning));
         assert_eq!(corpus_severity("medium"), Some(Severity::Warning));
         assert_eq!(corpus_severity("Low"), Some(Severity::Info));
         assert_eq!(corpus_severity("Bogus"), None);

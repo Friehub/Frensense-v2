@@ -276,7 +276,16 @@ fn enclosing_extracted_name(
     None
 }
 
-fn is_route_registration(
+/// Route-registration predicate: a call site is a route handler when the
+/// spec's hard verb suffixes match the callee, OR when pack vocabulary
+/// (`facts.route_patterns`) lists a registration shape for that spec's
+/// language.
+///
+/// Used by the harness's IR lowering to extract route handlers, and by
+/// the backward engine's per-call-site resolution (when wired via
+/// [`EngineBuilder::route_registration`]) so a framework origin arms
+/// only at route handlers (schema §5.1).
+pub(crate) fn is_route_registration(
     callee_text: &str,
     spec: &dyn frensense_lang::spec::LanguageSpec,
     facts: Option<&FactTable>,

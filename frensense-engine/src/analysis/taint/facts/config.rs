@@ -76,6 +76,7 @@ pub fn languages_for_exts<'a>(exts: impl IntoIterator<Item = &'a str>) -> Vec<&'
 fn entry_language(e: &LearnedFactEntry) -> Option<&str> {
     match e {
         LearnedFactEntry::LanguageSink { language, .. }
+        | LearnedFactEntry::LanguageSinkGlobalOnly { language, .. }
         | LearnedFactEntry::LanguageSinkSlots { language, .. }
         | LearnedFactEntry::LanguageIdorSink { language, .. }
         | LearnedFactEntry::LanguageSource { language, .. }
@@ -169,6 +170,22 @@ fn install_language_group(
         .collect();
     for e in group {
         match e {
+            LearnedFactEntry::LanguageSinkGlobalOnly { call, .. } => {
+                // Mark-only fact (WI-12): the language's `LanguageSink`
+                // entry carries the sink semantics; this flips the
+                // `global_only` flag on the already-published signature so
+                // a receiver-qualified call matches only under a resolved
+                // origin (`engine.eval(x)` vs the global `eval`).
+                let last = call.rsplit('.').next().unwrap_or(call);
+                if let Some(sig) = facts.sink_signatures.get_mut(call.as_str()) {
+                    sig.global_only = true;
+                }
+                if last != call
+                    && let Some(sig) = facts.sink_signatures.get_mut(last)
+                {
+                    sig.global_only = true;
+                }
+            }
             LearnedFactEntry::LanguageSink { call, role, .. } => {
                 let slug = crate::analysis::taint::role::sink_label_slug_from_role_str(role)
                     .map(String::from);
@@ -244,6 +261,7 @@ fn install_language_group(
                     idor_keys: Vec::new(),
                     role,
                     label,
+                    global_only: false,
                 };
                 match package {
                     Some(pkg) => {

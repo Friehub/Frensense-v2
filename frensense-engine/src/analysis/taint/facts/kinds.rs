@@ -36,6 +36,12 @@ pub struct SinkSignature {
     pub role: crate::analysis::taint::role::SinkRole,
     /// Semantic label slug for identity reporting (e.g. "prototype", "ssrf", "regex").
     pub label: Option<String>,
+    /// When `true`, this sink is a *global* builtin: it matches the bare /
+    /// unqualified call form, and a receiver-qualified call (`engine.eval(x)`)
+    /// only matches once the receiver's origin resolves to a known package
+    /// (schema "global-only" fact: JS `eval` vs an unrelated `engine.eval`).
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub global_only: bool,
 }
 
 impl SinkSignature {
@@ -49,6 +55,7 @@ impl SinkSignature {
             idor_keys: Vec::new(),
             role: crate::analysis::taint::role::SinkRole::Other,
             label: None,
+            global_only: false,
         }
     }
 
@@ -62,6 +69,7 @@ impl SinkSignature {
             idor_keys: Vec::new(),
             role: crate::analysis::taint::role::SinkRole::Other,
             label: None,
+            global_only: false,
         }
     }
 

@@ -526,6 +526,10 @@ pub fn fact_key(e: &LearnedFactEntry) -> (String, String) {
         LearnedFactEntry::LanguageSink { language, call, .. } => {
             ("language_sink".into(), format!("{language}:{call}"))
         }
+        LearnedFactEntry::LanguageSinkGlobalOnly { language, call } => (
+            "language_sink_global_only".into(),
+            format!("{language}:{call}"),
+        ),
         LearnedFactEntry::LanguageSinkSlots { language, call, .. } => {
             ("language_sink_slots".into(), format!("{language}:{call}"))
         }

@@ -2313,4 +2313,101 @@ export function b(id: any): void {
             engine.stats
         );
     }
+
+    /// WI-12 global-only sink facts: a table entry can say "global only",
+    /// so the bare call form is the sink (`eval(x)` fires) while a
+    /// receiver-qualified call on an unqualified, unimported receiver
+    /// (`engine.eval(x)`) does not. The pack carries the global-only flag
+    /// for `eval` on both JS/TS and Python; the negative below must stay
+    /// silent even though its callee's last segment is the same `eval`.
+    #[test]
+    fn global_only_sink_bare_matches_receiver_qualified_does_not() {
+        use crate::analysis::taint::facts::seeded_tables;
+        use crate::harness::lower_source;
+
+        let src = r#"
+            function b() {
+                const s = getSource();
+                return eval(s);
+            }
+            function g() {
+                const x = getSource();
+                const engine = getUnrelated();
+                return engine.eval(x);
+            }
+        "#;
+        let irs = lower_source("probe.js", src, "js").expect("lower probe");
+        let prog = build_program(irs.into_values().collect());
+        let (cfg, facts) = seeded_tables(["js"]);
+        let mut cfg = cfg.clone();
+        cfg.sources.insert("getSource".to_string());
+
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg).with_fact_table(&facts);
+        engine.run();
+
+        assert!(
+            engine
+                .findings
+                .iter()
+                .any(|f| f.function == "b" && f.verdict == BackwardVerdict::Vulnerable),
+            "bare eval(…) must stay a sink, got {:?}",
+            engine.findings
+        );
+        assert!(
+            !engine
+                .findings
+                .iter()
+                .any(|f| f.function == "g" && f.verdict == BackwardVerdict::Vulnerable),
+            "engine.eval(…) on an unqualified local receiver must stay silent, got {:?}",
+            engine.findings
+        );
+    }
+
+    /// WI-11: scope-separated callees (`std::fs::read_to_string`,
+    /// `fs::read_to_string`) must match the entry that matches the bare
+    /// `read_to_string(..)`. The engine resolves them at fact-matching time
+    /// through `::` suffix fallbacks — an engine-mechanism rule, keeping the
+    /// engine free of Rust-specific vocabulary. Qualified entries keep exact
+    /// precedence (the `Command::new` family stays qualified), and the
+    /// negative (literal path) stays silent.
+    #[test]
+    fn scope_separated_rust_calls_match_bare_entries() {
+        use crate::analysis::taint::facts::seeded_tables;
+        use crate::harness::lower_source;
+
+        let src = r#"
+            fn with_env() {
+                let p = std::env::var("FILE_PATH");
+                let s = std::fs::read_to_string(p);
+            }
+            fn clean() {
+                let s = std::fs::read_to_string("/etc/hostname");
+            }
+        "#;
+        let irs = lower_source("probe.rs", src, "rs").expect("lower probe");
+        let prog = build_program(irs.into_values().collect());
+        let (cfg, facts) = seeded_tables(["rs"]);
+        let mut cfg = cfg.clone();
+        cfg.sources.insert("std::env::var".to_string());
+
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg).with_fact_table(&facts);
+        engine.run();
+
+        assert!(
+            engine
+                .findings
+                .iter()
+                .any(|f| f.function == "with_env" && f.verdict == BackwardVerdict::Vulnerable),
+            "std::fs::read_to_string(tainted) must match the bare read_to_string entry, got {:?}",
+            engine.findings
+        );
+        assert!(
+            !engine
+                .findings
+                .iter()
+                .any(|f| f.function == "clean" && f.verdict == BackwardVerdict::Vulnerable),
+            "read_to_string(untainted literal) must stay silent, got {:?}",
+            engine.findings
+        );
+    }
 }

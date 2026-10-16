@@ -76,6 +76,122 @@ export function handler (cmd: string) {
         );
     }
 
+    /// Rust path-qualified trigger calls (`storage::ops::wipe_volume`)
+    /// match the bare callable the corpus taught (`wipe_volume`): the
+    /// learned-check matching reduces every callee through `.` and `::`
+    /// separators, the same mechanism-first rule the sink vocabulary uses.
+    /// The bare-statement guard still suppresses when scanning — the
+    /// dominance check only requires the guard to execute before the
+    /// trigger on every path.
+    fn rust_lower(src: &str) -> Vec<&'static FunctionIR> {
+        let fns = lower_source("t.rs", src, "rs").unwrap();
+        fns.into_values()
+            .map(|ir| -> &'static FunctionIR { Box::leak(Box::new(ir)) })
+            .collect()
+    }
+
+    fn wipe_check_at(call: &str, guard: Option<&str>) -> LearnedCheckFact {
+        LearnedCheckFact {
+            rule: "policy_wipe_without_owner".into(),
+            call: call.to_string(),
+            message: format!("{call} executed without owner check"),
+            severity: "high".into(),
+            unless_guard: guard.map(|g| g.to_string()),
+            unless_range_check: None,
+        }
+    }
+
+    const RUST_QUALIFIED_POSITIVE: &str = r#"
+pub fn wipe(vol: &Volume) {
+    storage::ops::wipe_volume(vol);
+}
+"#;
+    const RUST_QUALIFIED_NEGATIVE: &str = r#"
+pub fn wipe(vol: &Volume) {
+    ensure_owner(&vol);
+    storage::ops::wipe_volume(vol);
+}
+"#;
+
+    /// Import-aliased Python trigger (`from billing import issue_refund as
+    /// refund`): the call site is spelled with the local alias; the check
+    /// taught at the shipped name must still fire on it.
+    #[test]
+    fn python_import_alias_trigger_matches_shipped_name() {
+        use crate::checks::policy::PackageScope;
+        use crate::graph::module::PackageImport;
+        use rustc_hash::FxHashMap;
+
+        let src = r#"
+            from billing import issue_refund as refund
+
+            def pay(amount):
+                refund(amount)
+            "#;
+        let fns = lower_source("t.py", src, "py").unwrap();
+        let irs: Vec<&'static FunctionIR> = fns
+            .into_values()
+            .map(|ir| -> &'static FunctionIR { Box::leak(Box::new(ir)) })
+            .collect();
+        let mut facts = FactTable::default();
+        facts
+            .learned_checks
+            .push((wipe_check_at("issue_refund", None), Provenance::Learned));
+
+        let mut fn_file = FxHashMap::default();
+        fn_file.insert("pay".to_string(), "t.py".to_string());
+        let mut imports = FxHashMap::default();
+        imports.insert(
+            "refund".to_string(),
+            PackageImport {
+                package: "billing".to_string(),
+                symbol: Some("issue_refund".to_string()),
+            },
+        );
+        let mut file_package_imports = FxHashMap::default();
+        file_package_imports.insert("t.py".to_string(), imports);
+        let scope = PackageScope {
+            fn_file: &fn_file,
+            file_package_imports: &file_package_imports,
+        };
+
+        let hits = policy::check_program_scoped(&irs, &facts, Some(&scope));
+        assert_eq!(
+            hits.len(),
+            1,
+            "alias-triggering call must match the taught shipped name: {:?}",
+            hits
+        );
+        assert_eq!(hits[0].rule, "policy_wipe_without_owner");
+    }
+
+    #[test]
+    fn rust_path_qualified_trigger_matches_bare_vocabulary() {
+        let mut facts = FactTable::default();
+        facts.learned_checks.push((
+            wipe_check_at("wipe_volume", Some("ensure_owner")),
+            Provenance::Learned,
+        ));
+
+        let irs = rust_lower(RUST_QUALIFIED_POSITIVE);
+        let hits = policy::check_program(&irs, &facts);
+        assert_eq!(
+            hits.len(),
+            1,
+            "qualified unguarded trigger must fire: {:?}",
+            hits
+        );
+        assert_eq!(hits[0].rule, "policy_wipe_without_owner");
+
+        let irs = rust_lower(RUST_QUALIFIED_NEGATIVE);
+        let hits = policy::check_program(&irs, &facts);
+        assert!(
+            hits.is_empty(),
+            "qualified trigger behind an executing guard must stay silent: {:?}",
+            hits
+        );
+    }
+
     /// The same rule expressed as a native PolicyFact must fire/suppress
     /// identically: `from_legacy` is the lossless inverse.
     #[test]

@@ -117,15 +117,46 @@ pub fn check_program_scoped(
     }
 
     let mut findings = Vec::new();
+    // Function-scoped import-alias resolution (`from x import A as B`):
+    // a Trigger call spelled with the local alias `B` resolves to the
+    // original symbol `A`, so a check taught at the shipped name still
+    // fires on renamed callers (WI cross-cut: aliasing is callee
+    // resolution, engine-side mechanism, no per-language vocabulary).
+    let mut alias_maps: FxHashMap<&str, FxHashMap<String, String>> = FxHashMap::default();
+    if let Some(scope) = scope {
+        for ir in irs {
+            let imports = scope
+                .fn_file
+                .get(ir.name.as_str())
+                .and_then(|file| scope.file_package_imports.get(file))
+                .or_else(|| {
+                    if scope.file_package_imports.len() == 1 {
+                        scope.file_package_imports.values().next()
+                    } else {
+                        None
+                    }
+                });
+            if let Some(imports) = imports {
+                let aliases: FxHashMap<String, String> = imports
+                    .iter()
+                    .filter_map(|(local, pi)| {
+                        pi.symbol
+                            .as_deref()
+                            .filter(|sym| *sym != local)
+                            .map(|sym| (local.to_string(), sym.to_string()))
+                    })
+                    .collect();
+                if !aliases.is_empty() {
+                    alias_maps.insert(ir.name.as_str(), aliases);
+                }
+            }
+        }
+    }
     // Dominance for function-scoped guard/require presence: cached per
     // function across policies (computed at most once per scanned IR).
     let mut dom_cache: FxHashMap<&str, DomSets> = FxHashMap::default();
     for (policy, policy_provenance) in &all_policies {
-        let trigger_seg = policy
-            .when_call
-            .rsplit('.')
-            .next()
-            .unwrap_or(&policy.when_call);
+        let trigger_seg: &str = super::last_segment(&policy.when_call);
         let needs_dom = policy.scope == PolicyScope::Function
             && policy.require.iter().any(|r| {
                 matches!(
@@ -157,7 +188,9 @@ pub fn check_program_scoped(
             };
             let val_info = crate::analysis::value::analyze(ir);
             // Collect every trigger call site in this function with its args.
-            for (bid, idx, args, span) in trigger_sites(ir, trigger_seg) {
+            for (bid, idx, args, span) in
+                trigger_sites(ir, trigger_seg, alias_maps.get(ir.name.as_str()))
+            {
                 // A requirement violation is the finding — but a
                 // presence-only policy (`require` empty) alerts whenever
                 // the trigger call occurs at all: the corpus twins proved
@@ -200,7 +233,11 @@ pub fn check_program_scoped(
 /// guard/trigger pairs.
 type TriggerSite<'a> = (BlockId, usize, &'a [Operand], Option<(usize, usize)>);
 
-fn trigger_sites<'a>(ir: &'a FunctionIR, seg: &str) -> Vec<TriggerSite<'a>> {
+fn trigger_sites<'a>(
+    ir: &'a FunctionIR,
+    seg: &str,
+    aliases: Option<&FxHashMap<String, String>>,
+) -> Vec<TriggerSite<'a>> {
     let mut out = Vec::new();
     for (&bid, block) in &ir.blocks {
         for (idx, instr) in block.instructions.iter().enumerate() {
@@ -209,8 +246,10 @@ fn trigger_sites<'a>(ir: &'a FunctionIR, seg: &str) -> Vec<TriggerSite<'a>> {
                 Instruction::CallVirtual { method, args, .. } => (method, args),
                 _ => continue,
             };
-            let last = name.rsplit('.').next().unwrap_or(name);
-            if last != seg {
+            // The callee's bare last segment, or an import alias resolving
+            // to `seg` (`refund` -> `issue_refund`), counts as the trigger.
+            let last = super::last_segment(name);
+            if last != seg && aliases.is_none_or(|m| m.get(last).is_none_or(|sym| sym != seg)) {
                 continue;
             }
             out.push((bid, idx, args.as_slice(), instr_span(ir, instr)));
@@ -240,7 +279,7 @@ fn requirement_holds(
             // dominates the trigger's, or same block with the guard first) -
             // a call that may be skipped enforces nothing. Module scope
             // stays presence (the helper exists somewhere in the module).
-            let seg = call.rsplit('.').next().unwrap_or(call);
+            let seg = super::last_segment(call);
             if scope == PolicyScope::Module {
                 module_segs.iter().any(|s| s == seg)
             } else {
@@ -249,19 +288,16 @@ fn requirement_holds(
         }
         PolicyRequirement::RequireCall { any_of } => {
             if scope == PolicyScope::Module {
-                let wanted: Vec<&str> = any_of
-                    .iter()
-                    .map(|c| c.rsplit('.').next().unwrap_or(c))
-                    .collect();
+                let wanted: Vec<&str> = any_of.iter().map(|c| super::last_segment(c)).collect();
                 return module_segs.iter().any(|s| wanted.contains(&s.as_str()));
             }
             any_of.iter().any(|c| {
-                let seg = c.rsplit('.').next().unwrap_or(c);
+                let seg = super::last_segment(c);
                 guard_executes_before(ir, seg, block, trigger_idx, doms)
             })
         }
         PolicyRequirement::NotCall { call } => {
-            let seg = call.rsplit('.').next().unwrap_or(call);
+            let seg = super::last_segment(call);
             !scope_segs(scope, fn_segs, module_segs)
                 .iter()
                 .any(|s| s == seg)
@@ -450,7 +486,7 @@ fn guard_executes_before(
                 Instruction::CallVirtual { method, .. } => method,
                 _ => continue,
             };
-            if name.rsplit('.').next().unwrap_or(name) == seg {
+            if super::last_segment(name) == seg {
                 sites.push((bid, idx));
             }
         }

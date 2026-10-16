@@ -174,7 +174,10 @@ pub fn scan_prepared(
     let mut engine = BackwardTaintEngine::new(&prog, config)
         .with_fact_table(facts)
         .with_fn_file(fn_file)
-        .with_file_package_imports(&prepared.file_package_imports);
+        .with_file_package_imports(&prepared.file_package_imports)
+        // Route anchoring for per-call-site framing (schema §5.1):
+        // consult the same predicate the harness lowered the file with.
+        .with_route_registration(crate::harness::is_route_registration);
     engine.run();
 
     // Resolve each finding to a file + line/column from the sink's byte span.

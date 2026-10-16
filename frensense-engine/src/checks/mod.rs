@@ -205,10 +205,10 @@ pub(crate) mod learned {
             for instr in &block.instructions {
                 match instr {
                     Instruction::CallStatic { func, .. } => {
-                        segs.push(func.rsplit('.').next().unwrap_or(func).to_string());
+                        segs.push(super::last_segment(func).to_string());
                     }
                     Instruction::CallVirtual { method, .. } => {
-                        segs.push(method.rsplit('.').next().unwrap_or(method).to_string());
+                        segs.push(super::last_segment(method).to_string());
                     }
                     _ => {}
                 }
@@ -299,13 +299,14 @@ pub(crate) mod learned {
                     } => (func, args),
                     _ => continue,
                 };
-                for (fact, provenance) in facts.learned_checks_for(callee) {
+                let last = super::last_segment(callee);
+                for (fact, provenance) in facts.learned_checks_for(last) {
                     // Guard qualification: a rule with `unless_guard` is
                     // silent when the guard call is present in the same
                     // function, the corpus says "trigger without
                     // enforcement" is the violation.
                     if let Some(guard) = &fact.unless_guard {
-                        let gseg = guard.rsplit('.').next().unwrap_or(guard);
+                        let gseg = super::last_segment(guard);
                         if segs.iter().any(|s| s == gseg) {
                             continue;
                         }

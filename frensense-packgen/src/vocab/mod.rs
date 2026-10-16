@@ -40,6 +40,11 @@ pub(crate) struct LanguageVocab {
     /// may narrow it.
     pub ambiguous_verbs: &'static [&'static str],
     pub sink_names: &'static [(&'static str, SinkLabel)],
+    /// Global-only builtin sinks (WI-12): the bare call form is the sink,
+    /// while a receiver-qualified call (`engine.eval(x)`) matches only once
+    /// its origin resolves to a known package. Emitted as the `global_only`
+    /// flag on the language's `LanguageSink` entries.
+    pub global_only_sinks: &'static [&'static str],
     /// Package-scoped framework sinks (dotted call, package, label):
     /// facts installed under (package, call) so a call only counts as a
     /// sink when import-origin resolution names the package.
@@ -78,6 +83,14 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
                 sink_role_name(sink_role_for_label(*label)),
                 label.slug()
             ),
+        });
+    }
+    // Global-only builtin markers (WI-12): emitted after the sink names so
+    // the install marks the already-published signatures.
+    for call in v.global_only_sinks {
+        entries.push(LearnedFactEntry::LanguageSinkGlobalOnly {
+            language: language.clone(),
+            call: (*call).to_string(),
         });
     }
     // Package-scoped framework sinks: package-qualified LanguageSinkSlots

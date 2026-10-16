@@ -286,6 +286,13 @@ pub enum LearnedFactEntry {
         /// Only fire in files that import this package.
         package: String,
     },
+    /// Global-only builtin sink marker (appended last: bincode encodes the
+    /// variant index first, so existing wire bytes keep decoding unchanged).
+    /// Marks the language's already-published `LanguageSink` entry with the
+    /// `global_only` runtime flag: the bare call form is the sink, while a
+    /// receiver-qualified call (`engine.eval(x)`) matches only once its
+    /// origin resolves to a known package (WI-12).
+    LanguageSinkGlobalOnly { language: String, call: String },
 }
 
 impl LearnedFactEntry {
@@ -359,6 +366,7 @@ impl LearnedFactEntry {
                     package: package.clone(),
                     dangerous_args: dangerous_args.clone(),
                     binding_args_safe: *binding_args_safe,
+                    global_only: false,
                     idor_keys,
                     role,
                     label,
@@ -576,6 +584,7 @@ impl LearnedFactEntry {
                     package: None,
                     dangerous_args: std::collections::BTreeSet::new(),
                     binding_args_safe: false,
+                    global_only: false,
                     // Per-call keys when taught; otherwise the learned global
                     // identity keys (no engine built-in fallback - vocabulary
                     // is spec/bundle-owned, empty disables the gate).
@@ -756,6 +765,7 @@ impl LearnedFactEntry {
             // ignores it so a family bundle can never pollute another
             // language's tables.
             LearnedFactEntry::LanguageSink { .. }
+            | LearnedFactEntry::LanguageSinkGlobalOnly { .. }
             | LearnedFactEntry::LanguageSinkSlots { .. }
             | LearnedFactEntry::LanguageIdorSink { .. }
             | LearnedFactEntry::LanguageSource { .. }
