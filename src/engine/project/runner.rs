@@ -154,11 +154,11 @@ impl Engine {
         let mut candidates: Vec<&_> = Vec::new();
         for loc in &result.located {
             let f = &loc.finding;
-            if !crate::reporting::reports_finding(f) {
+            if !crate::policy::reports_finding(f) {
                 // --explain: record every silent sink argument so users can
                 // see where the engine looked and stayed quiet (why).
                 if self.explain
-                    && let Some(rec) = crate::reporting::explain_silent(loc)
+                    && let Some(rec) = crate::explain::explain_silent(loc)
                 {
                     self.explain_records.push(rec);
                 }
@@ -189,10 +189,11 @@ impl Engine {
                 loc.column,
                 crate::engine::project::Engine::next_file_id(seq),
                 &bundle_advisories,
+                self.show_flows,
             ));
         }
 
-        Ok(crate::reporting::apply(
+        Ok(crate::policy::apply(
             advisories,
             self.min_confidence,
             self.severity_filter,
@@ -377,6 +378,7 @@ fn advisory_from_finding(
     column: u32,
     file_id: crate::FileId,
     bundle_advisories: &rustc_hash::FxHashMap<String, frensense_bundler::format::BundlePattern>,
+    show_flows: bool,
 ) -> Advisory {
     let src = f.source_desc.as_deref().unwrap_or("user input");
     let path = Path::new(file);
@@ -399,14 +401,26 @@ fn advisory_from_finding(
         &f.sink,
         src,
     );
-    let flow = crate::reporter::render_taint_path(&f.path);
-    let observation = format!(
-        "Tainted value from `{src}` flows to sink `{}` (argument {}) in function `{}`.\nTaint path:\n{}",
-        f.sink,
-        f.arg_slot,
-        f.function,
-        flow.trim_end()
-    );
+    // Human-facing path: compacted (adjacent def/use duplicates collapsed,
+    // bare SSA hops merged) so the rendered flow is readable; the raw path
+    // still feeds shape-based dedup above. Only materialized under
+    // `--show-flows`: the flow is debug-grade detail, off in a clean report.
+    let rendered_path = show_flows.then(|| f.path.compacted());
+    let observation = if let Some(rendered_path) = rendered_path.as_ref() {
+        let flow = crate::reporter::render_taint_path(rendered_path);
+        format!(
+            "Tainted value from `{src}` flows to sink `{}` (argument {}) in function `{}`.\nTaint path:\n{}",
+            f.sink,
+            f.arg_slot,
+            f.function,
+            flow.trim_end()
+        )
+    } else {
+        format!(
+            "Tainted value from `{src}` flows to sink `{}` (argument {}) in function `{}`.",
+            f.sink, f.arg_slot, f.function
+        )
+    };
     let mut advisory = Advisory::bare(title, severity, file_id, path, observation)
         .with_confidence(1.0)
         .with_line(line)
@@ -439,20 +453,25 @@ fn advisory_from_finding(
         advisory.tags.push(cwe.to_string());
     }
     advisory.requires_human = false;
-    // Taint path steps (source→sink) for SARIF codeFlows / rich clients.
-    advisory.taint_steps = f
-        .path
-        .steps
-        .iter()
-        .zip(&f.path.spans)
-        .map(|(step, span)| {
-            (
-                crate::reporter::describe_path_step(step),
-                span.as_ref()
-                    .map(|(file, (start, _))| (file.clone(), *start)),
-            )
+    // Taint path steps (source→sink) for SARIF codeFlows / rich clients,
+    // from the same compacted path the text observation embeds.
+    advisory.taint_steps = rendered_path
+        .as_ref()
+        .map(|rendered_path| {
+            rendered_path
+                .steps
+                .iter()
+                .zip(rendered_path.spans.iter())
+                .map(|(step, span)| {
+                    (
+                        crate::reporter::describe_path_step(step),
+                        span.as_ref()
+                            .map(|(file, (start, _))| (file.clone(), *start)),
+                    )
+                })
+                .collect()
         })
-        .collect();
+        .unwrap_or_default();
     advisory.fingerprint = stable_fingerprint(&[file, f.sink.as_str(), f.function.as_str(), src]);
     advisory
 }

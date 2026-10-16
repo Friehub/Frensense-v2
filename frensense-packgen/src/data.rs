@@ -407,4 +407,17 @@ pub static BOOTSTRAP_AMBIGUOUS_VERBS: &[&str] = &[
     "aggregate",
     "exec",
     "query",
+    // SQL/NoSQL driver-verb family (Phase F1: receiver-qualified sinks).
+    // Bare `connection.execute(sql)` (mysql2), `db.prepare(sql)` and
+    // model-query verbs are matched through (root, method) pairs from
+    // dotted entries, not by name alone: a bare-name sink any-receiver
+    // fired on `RecipeExecutor.execute(recipe)`, Prisma
+    // `db.trade.aggregate(..)` / `db.template.delete(..)` and every array
+    // map helper in application code - measured 10+ advisories on one
+    // local TS repo, all false positives.
+    "execute",
+    "count",
+    "distinct",
+    "remove",
+    "prepare",
 ];

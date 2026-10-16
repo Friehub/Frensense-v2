@@ -103,6 +103,11 @@ impl NodeKey {
 // Node kind
 // ---------------------------------------------------------------------------
 
+/// `arg_index` recorded on an [`NodeKind::ActualArg`] node created for a
+/// call's *receiver* operand (`x.map(..)`): receivers are not positional
+/// arguments, so they carry no slot number.
+pub const RECEIVER_ARG_INDEX: usize = usize::MAX;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub enum NodeKind {
@@ -696,7 +701,7 @@ impl<'a> SvfgBuilder<'a> {
             let arg_key = NodeKey::instr(block, idx, *recv_var);
             self.upgrade_node_kind(arg_key, || NodeKind::ActualArg {
                 call_site: call_site_key,
-                arg_index: usize::MAX,
+                arg_index: RECEIVER_ARG_INDEX,
             });
         }
 

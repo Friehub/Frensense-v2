@@ -289,12 +289,23 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
                 sanitizes_args: Default::default(),
                 guard_style: *guard,
             };
-            if let Some(pkg) = package {
-                table
-                    .scoped_sanitizer_facts
-                    .insert((pkg.clone(), call.clone()), fact.clone());
+            match package {
+                Some(pkg) => {
+                    // Package-scoped sanitizer: install ONLY under
+                    // (package, call), mirroring the engine's load path
+                    // (`apply_language_entries`). The gate must replay
+                    // exactly the origin-gated semantics consumers get —
+                    // a universal alias here would let the trial table
+                    // cut any receiver and approve a fact that no longer
+                    // cuts (or wrongly cuts) once loaded strictly.
+                    table
+                        .scoped_sanitizer_facts
+                        .insert((pkg.clone(), call.clone()), fact);
+                }
+                None => {
+                    table.sanitizer_facts.insert(call.clone(), fact);
+                }
             }
-            table.sanitizer_facts.insert(call.clone(), fact);
         }
         Candidate::Check {
             rule,

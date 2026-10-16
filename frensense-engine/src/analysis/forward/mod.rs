@@ -293,7 +293,7 @@ impl<'a> InterproceduralTaintEngine<'a> {
             let fe = &self.prog.functions[fi];
 
             // Sink check at every visited node.
-            if let Some(alert) = sink_alert_with_facts(fe.ir, self.config, &self.facts, &cur)
+            if let Some(alert) = sink_alert_with_facts(fe.ir, self.config, &self.facts, &cur, None)
                 && !self.alerts.contains(&alert)
             {
                 self.alerts.push(alert);

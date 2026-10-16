@@ -102,6 +102,15 @@ impl FactTable {
     }
 
     /// Sink signature for a call, package-aware.
+    ///
+    /// Scoping semantics (zero-FP): a fact installed under `(package, call)`
+    /// matches ONLY when `origin_package` names that package. Origin
+    /// unknown matches universal facts only for non-verb sinks; origin
+    /// known-but-different matches universal facts only (the walker arms
+    /// origin via import resolution before implying a package from the
+    /// receiver root). This is what keeps a bundle fact like
+    /// `(@prisma/client).$queryRawUnsafe` from firing on a local object
+    /// whose method happens to share the name.
     pub fn sink_signature_scoped(
         &self,
         call: &str,
@@ -119,25 +128,68 @@ impl FactTable {
                 // Known package origin mismatch: do not fall back to other packages' scoped sinks
                 return self.sink_signatures.get(call);
             }
-        } else {
-            // Origin unknown (dynamic require, unresolvable receiver):
-            // Fall back to checking universal first, then any package-scoped signature.
-            if let Some(sig) = self.sink_signatures.get(call) {
-                return Some(sig);
-            }
-            if let Some(sig) = self
-                .scoped_sink_signatures
-                .iter()
-                .find(|((_, c), _)| c == call)
-                .map(|(_, s)| s)
-            {
-                return Some(sig);
-            }
         }
+        // Origin unknown: universal facts only (same rule as sanitizers
+        // — a package-scoped fact applies only under a confirmed origin).
         self.sink_signatures.get(call)
     }
 
+    /// Role for a sink call, receiver-aware and package-aware.
+    ///
+    /// Consults (in order): the (receiver-root, method) pair from dotted
+    /// entries, the (origin-package, method) scoped entry set, then the
+    /// universal signature map.
+    pub fn role_for_call_scoped(
+        &self,
+        last: &str,
+        receiver_root: Option<&str>,
+        origin_package: Option<&str>,
+    ) -> Option<crate::analysis::taint::role::SinkRole> {
+        if let Some(pkg) = origin_package
+            && let Some(sig) = self
+                .scoped_sink_signatures
+                .get(&(pkg.to_string(), last.to_string()))
+        {
+            return Some(sig.role);
+        }
+        self.role_for_call(last, receiver_root)
+    }
+
+    /// Semantic label slug for a sink call, receiver- and package-aware.
+    pub fn label_for_call_scoped(
+        &self,
+        last: &str,
+        receiver_root: Option<&str>,
+        origin_package: Option<&str>,
+    ) -> Option<String> {
+        if let Some(pkg) = origin_package
+            && let Some(sig) = self
+                .scoped_sink_signatures
+                .get(&(pkg.to_string(), last.to_string()))
+            && let Some(label) = sig.label.clone()
+        {
+            return Some(label);
+        }
+        self.label_for_call(last, receiver_root)
+    }
+
     /// Sanitizer fact for a call, package-aware.
+    ///
+    /// Scoping semantics (recall-safe): a fact installed under
+    /// `(package, call)` applies ONLY when `origin_package` names that
+    /// package. Origin known-but-different falls back to universal
+    /// facts only — a foreign package's sanitizer must never cut this
+    /// call. Origin unknown also matches universal facts only.
+    ///
+    /// Recall-safety analysis (why unknown origin does NOT take the
+    /// any-package fallback): a sanitizer CUTS a finding, so a scoped
+    /// fact that fires on an unconfirmed origin can silence a true
+    /// finding — the one error that costs recall. The reverse error
+    /// (a genuine package sanitizer whose origin does not resolve goes
+    /// uncut) surfaces an advisory, which costs precision only.
+    /// Universal facts were proven for the bare call name regardless of
+    /// receiver, so they remain safe under any origin; a scoped fact
+    /// suppresses only once import resolution confirms its package.
     pub fn sanitizer_fact_scoped(
         &self,
         call: &str,
@@ -152,25 +204,20 @@ impl FactTable {
             }
             let is_package_scoped = self.scoped_sanitizer_facts.keys().any(|(_, c)| c == call);
             if is_package_scoped {
+                // Known-package mismatch: another package's sanitizer
+                // must never cut this call — universal facts only.
                 return self.sanitizer_facts.get(call);
-            }
-        } else {
-            if let Some(f) = self.sanitizer_facts.get(call) {
-                return Some(f);
-            }
-            if let Some(f) = self
-                .scoped_sanitizer_facts
-                .iter()
-                .find(|((_, c), _)| c == call)
-                .map(|(_, f)| f)
-            {
-                return Some(f);
             }
         }
         self.sanitizer_facts.get(call)
     }
 
     /// Sanitizer fact for a call; `None` if not a sanitizer.
+    ///
+    /// No import origin is available at this call site, so package-
+    /// scoped facts are inert here (recall-safe: they only ever suppress
+    /// under a confirmed origin). Pass `Some(origin)` via
+    /// [`Self::sanitizer_fact_scoped`] where import context exists.
     pub fn sanitizer_fact(&self, call: &str) -> Option<&SanitizerFact> {
         self.sanitizer_fact_scoped(call, None)
     }
@@ -188,7 +235,17 @@ impl FactTable {
         }
         match receiver_root {
             Some(root) => {
-                if self.client_roots.contains(root) {
+                // A client root alone no longer arms every verb: `db` must
+                // qualify for a method through a dotted entry (db.query,
+                // db.prepare). Prisma reaches the same root with model
+                // methods (`db.trade.aggregate(..)`, `db.template
+                // .delete(..)`) that are fully parameterized ORM calls,
+                // not SQL execution - requiring the exact (root, method)
+                // pair keeps generic client handles from matching
+                // arbitrary methods. Import-origin resolution still
+                // qualifies known client packages.
+                let pair = (root.to_string(), last.to_string());
+                if self.receiver_roles.contains_key(&pair) {
                     true
                 } else if let Some(pkg) = origin_package {
                     self.client_roots.contains(pkg)

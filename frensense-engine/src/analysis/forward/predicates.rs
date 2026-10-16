@@ -192,6 +192,11 @@ use frensense_lang::severity::SanitizerKind;
 
 /// Fact-table-aware sanitizer check qualified by the sink's role and label.
 /// Returns true if this node is inside a sanitizer that actually defeats the candidate sink.
+///
+/// Package-scoped sanitizer facts additionally require `origin_package`
+/// to name their package (import resolution) — pass `None` when no
+/// origin is known; scoped facts then stay inert (recall-safe: they may
+/// only cut a flow under a confirmed origin).
 pub(crate) fn is_sanitizer_effective_for_role(
     ir: &FunctionIR,
     config: &TaintConfig,
@@ -199,6 +204,7 @@ pub(crate) fn is_sanitizer_effective_for_role(
     key: &NodeKey,
     role: SinkRole,
     label: Option<&str>,
+    origin_package: Option<&str>,
 ) -> bool {
     // `config` is retained for API stability with callers; the legacy
     // flat `config.sanitizers` fallback was removed (it cut sink-
@@ -221,7 +227,7 @@ pub(crate) fn is_sanitizer_effective_for_role(
     }
     match &b.instructions[idx] {
         Instruction::CallStatic { func, .. } => {
-            if let Some(fact) = facts.sanitizer_fact(func) {
+            if let Some(fact) = facts.sanitizer_fact_scoped(func, origin_package) {
                 if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
                     return kind.defeats_role_and_label(role, label);
                 }
@@ -242,7 +248,7 @@ pub(crate) fn is_sanitizer_effective_for_role(
                 let path = FactTable::receiver_access_path(ir, *r);
                 if let Some(ref p) = path {
                     let full = format!("{p}.{method}");
-                    if let Some(fact) = facts.sanitizer_fact(&full) {
+                    if let Some(fact) = facts.sanitizer_fact_scoped(&full, origin_package) {
                         if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
                             return kind.defeats_role_and_label(role, label);
                         }
@@ -253,7 +259,7 @@ pub(crate) fn is_sanitizer_effective_for_role(
                     return true;
                 }
             }
-            if let Some(fact) = facts.sanitizer_fact(method) {
+            if let Some(fact) = facts.sanitizer_fact_scoped(method, origin_package) {
                 if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
                     return kind.defeats_role_and_label(role, label);
                 }
@@ -268,6 +274,12 @@ pub(crate) fn is_sanitizer_effective_for_role(
 /// Fact-table-aware sanitizer check: configured sanitizers PLUS any call with
 /// a [`SanitizerFact`] in the table (e.g. `.replace()`, `.test()` guard
 /// methods learned from `frensense-lang` tables or a bundle).
+///
+/// Fact lookups pass no import origin (this path serves the forward
+/// relevance engine and summaries, which carry no per-file import
+/// context), so package-scoped sanitizer facts are inert here — the
+/// recall-safe direction: universal sanitizers still cut, a bundle-
+/// scoped one never silences a flow it was not proven on.
 pub(crate) fn is_sanitizer_use_with_facts(
     ir: &FunctionIR,
     config: &TaintConfig,
@@ -335,12 +347,15 @@ pub struct SinkAlert {
 /// Alert if the node is a tainted use inside a configured sink call.
 /// Honours [`FactTable`] sink signatures when one matches: a tainted arg in a
 /// *non-dangerous* slot (e.g. a parameterized query's binding array) does not
-/// alert. Callers build the [`FactTable`] once and pass it in.
+/// alert. Callers build the [`FactTable`] once and pass it in. Package-scoped
+/// sink facts additionally require `origin_package` to name their package
+/// (import resolution) — pass `None` when no origin is known.
 pub(crate) fn sink_alert_with_facts(
     ir: &FunctionIR,
     config: &TaintConfig,
     facts: &FactTable,
     key: &NodeKey,
+    origin_package: Option<&str>,
 ) -> Option<SinkAlert> {
     let NodeKey {
         block,
@@ -356,7 +371,8 @@ pub(crate) fn sink_alert_with_facts(
     }
     let slot_and_name = match &b.instructions[idx] {
         Instruction::CallStatic { func, args, .. }
-            if config.sinks.contains(func) || facts.is_sink_call(func, None) =>
+            if config.sinks.contains(func)
+                || facts.is_sink_call_scoped(func, None, origin_package) =>
         {
             args.iter()
                 .position(|a| *a == Operand::Var(var))
@@ -372,7 +388,7 @@ pub(crate) fn sink_alert_with_facts(
                 Operand::Var(r) => FactTable::receiver_root(ir, *r),
                 _ => None,
             };
-            facts.is_sink_call(method, root.as_deref())
+            facts.is_sink_call_scoped(method, root.as_deref(), origin_package)
         } =>
         {
             if receiver == &Operand::Var(var) {

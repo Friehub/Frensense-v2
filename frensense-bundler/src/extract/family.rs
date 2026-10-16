@@ -45,6 +45,14 @@ pub struct FamilyMetadata {
     pub wrap_max: Option<u128>,
     /// Declared framework package provenance (`package: name`).
     pub package: Option<String>,
+    /// Explicit policy requirements authored in the metadata block
+    /// (`require-arg-key: <slot|any> <key[,key...]>`): the trigger call's
+    /// argument at `slot` must trace to an object construction carrying
+    /// one of the keys (`updateMany({ where: ... })`). `usize::MAX` slot
+    /// means any argument position. Declaration replaces automatic guard
+    /// synthesis: authors state the discriminator instead of hoping the
+    /// twin diff collides with it (the Date-guard coincidence class).
+    pub require_arg_keys: Vec<(usize, String)>,
 }
 
 impl FamilyMetadata {
@@ -114,11 +122,44 @@ impl FamilyMetadata {
                     }
                 }
                 "package" => meta.package = Some(value.to_string()),
+                "require-arg-key" => {
+                    let mut parts = value.split_whitespace();
+                    match parts.next() {
+                        Some("any") => {
+                            for key in parts {
+                                meta.require_arg_keys.push((usize::MAX, key.to_string()));
+                            }
+                        }
+                        Some(slot) => match slot.parse::<usize>() {
+                            Ok(slot) => {
+                                let keys: Vec<String> = match parts.next() {
+                                    Some(rest) => split_csv_keys(rest),
+                                    None => Vec::new(),
+                                };
+                                for key in keys {
+                                    meta.require_arg_keys.push((slot, key));
+                                }
+                            }
+                            Err(_) => {}
+                        },
+                        None => {}
+                    }
+                }
                 _ => {}
             }
         }
         meta
     }
+}
+
+/// Split a `require-arg-key` value's key list: comma and/or whitespace
+/// separated (`where`, `where,filter`, `where filter`).
+fn split_csv_keys(rest: &str) -> Vec<String> {
+    rest.split([',', ' '])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 /// One corpus family: id + variant files.

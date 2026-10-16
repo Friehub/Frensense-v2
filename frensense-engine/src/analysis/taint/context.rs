@@ -228,7 +228,7 @@ impl<'a> ContextSensitiveTaintEngine<'a> {
         while let Some((fi, cur, ctx)) = queue.pop_front() {
             let fe = &self.prog.functions[fi];
 
-            if let Some(alert) = sink_alert_with_facts(fe.ir, self.config, &facts, &cur) {
+            if let Some(alert) = sink_alert_with_facts(fe.ir, self.config, &facts, &cur, None) {
                 let ca = ContextualAlert {
                     alert,
                     context: ctx,

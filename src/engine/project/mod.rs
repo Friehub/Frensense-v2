@@ -22,11 +22,15 @@ pub struct Engine {
     pub(crate) language_filter: Option<Vec<&'static str>>,
     pub(crate) min_confidence: f64,
     /// When `true`, the runner records every explored sink argument that
-    /// did NOT become an advisory (see [`crate::reporting::ExplainRecord`]),
+    /// did NOT become an advisory (see [`crate::explain::ExplainRecord`]),
     /// surfaced via [`Engine::take_explain`] under `--explain`.
     pub(crate) explain: bool,
+    /// When `true` (`--show-flows`), taint advisories carry the full
+    /// source→sink flow (observation embed + `taint_steps`/SARIF
+    /// codeFlows). Off by default: the flow is debug-grade detail.
+    pub(crate) show_flows: bool,
     /// Silent-finding records from the most recent `run` (when `explain`).
-    pub(crate) explain_records: Vec<crate::reporting::ExplainRecord>,
+    pub(crate) explain_records: Vec<crate::explain::ExplainRecord>,
 }
 
 impl Engine {
@@ -39,6 +43,7 @@ impl Engine {
             language_filter: None,
             min_confidence: 0.0,
             explain: false,
+            show_flows: false,
             explain_records: Vec::new(),
         }
     }
@@ -73,10 +78,17 @@ impl Engine {
         self.explain = on;
     }
 
+    /// Enable `--show-flows`: taint advisories carry the full source→sink
+    /// flow in the observation text and `taint_steps` (SARIF codeFlows).
+    /// Off by default - the flow is debug-grade detail.
+    pub fn set_show_flows(&mut self, on: bool) {
+        self.show_flows = on;
+    }
+
     /// Take the explain records collected by the most recent `run`.
     /// Returns an empty vec when `--explain` was not enabled.
     #[must_use]
-    pub fn take_explain(&mut self) -> Vec<crate::reporting::ExplainRecord> {
+    pub fn take_explain(&mut self) -> Vec<crate::explain::ExplainRecord> {
         std::mem::take(&mut self.explain_records)
     }
 

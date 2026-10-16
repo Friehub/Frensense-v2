@@ -551,9 +551,24 @@ impl<'a> BackwardTaintEngine<'a> {
         for fi in 0..self.prog.functions.len() {
             let ir = self.prog.functions[fi].ir;
             // Guard map per function (task 8.3): guards + dominators.
+            // Package-import context arms package-scoped guard-style
+            // sanitizers through their import origin (single-file
+            // fallback when the function's own file is untracked).
+            let fn_name = self.prog.functions[fi].name.clone();
+            let imports = self
+                .fn_file
+                .get(&fn_name)
+                .and_then(|file| self.file_package_imports.get(file))
+                .or_else(|| {
+                    if self.file_package_imports.len() == 1 {
+                        self.file_package_imports.values().next()
+                    } else {
+                        None
+                    }
+                });
             self.guard_maps
                 .entry(fi)
-                .or_insert_with(|| GuardMap::build(ir, &self.facts, self.config));
+                .or_insert_with(|| GuardMap::build(ir, &self.facts, self.config, imports));
             let mut block_ids: Vec<BlockId> = ir.blocks.keys().copied().collect();
             block_ids.sort_by_key(|b| b.0);
 

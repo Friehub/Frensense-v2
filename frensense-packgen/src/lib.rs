@@ -773,12 +773,16 @@ mod tests {
             // entries install - `verb_sinks` and `client_roots` must hold
             // exactly the dotted sinks whose last segment is one of them
             // (the bare spec seed stays empty; step 1 asserted that).
+            // Verb arming has two paths since Phase F1: dotted client
+            // entries arm (root, verb) pairs AND a bare ambiguous sink
+            // name arms verb-gating on itself (an unqualified bare verb
+            // matches nothing by name alone - `is_sink_call_scoped`).
             let expected_verbs: std::collections::BTreeSet<String> = v
                 .sink_names
                 .iter()
                 .filter(|(call, _)| {
                     let last = call.rsplit('.').next().unwrap_or(call);
-                    last != *call && v.ambiguous_verbs.contains(&last)
+                    v.ambiguous_verbs.contains(&last)
                 })
                 .map(|(call, _)| call.rsplit('.').next().unwrap_or(call).to_string())
                 .collect();

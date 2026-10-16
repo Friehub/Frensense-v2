@@ -208,6 +208,30 @@ pub(super) static PY_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("Popen", crate::role_map::SinkLabel::CommandInjection),
     ("execfile", crate::role_map::SinkLabel::CommandInjection),
     // SQL Injection
+    // DB-handle notebooks. Python drivers reach the cursor through ANY
+    // local handle name (`cur = con.cursor()`), so the sink lives on the
+    // (handle, method) pair, mirrored as dotted entries. The bare last
+    // segments stay verb-gated (ambiguous verbs): `RecipeExecutor.execute`
+    // style receivers must never qualify. Measured on OWASP BenchmarkPython:
+    // without these pairs the whole CWE-89 class collapses to 0% (was 40%).
+    ("cur.execute", crate::role_map::SinkLabel::SqlInjection),
+    ("cursor.execute", crate::role_map::SinkLabel::SqlInjection),
+    ("con.execute", crate::role_map::SinkLabel::SqlInjection),
+    ("conn.execute", crate::role_map::SinkLabel::SqlInjection),
+    (
+        "connection.execute",
+        crate::role_map::SinkLabel::SqlInjection,
+    ),
+    ("db.execute", crate::role_map::SinkLabel::SqlInjection),
+    ("cnx.execute", crate::role_map::SinkLabel::SqlInjection),
+    ("session.execute", crate::role_map::SinkLabel::SqlInjection),
+    ("cur.executemany", crate::role_map::SinkLabel::SqlInjection),
+    (
+        "cursor.executemany",
+        crate::role_map::SinkLabel::SqlInjection,
+    ),
+    ("con.executemany", crate::role_map::SinkLabel::SqlInjection),
+    ("conn.executemany", crate::role_map::SinkLabel::SqlInjection),
     ("execute", crate::role_map::SinkLabel::SqlInjection),
     ("executemany", crate::role_map::SinkLabel::SqlInjection),
     ("raw", crate::role_map::SinkLabel::SqlInjection),
@@ -233,6 +257,12 @@ pub(super) static PY_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("send", crate::role_map::SinkLabel::Ssrf),
     // Open Redirect
     ("redirect", crate::role_map::SinkLabel::OpenRedirect),
+    // XPath injection (CWE-643): lxml shapes. `lxml.etree.XPath(expr)`
+    // builds an evaluator from a string; `.xpath(expr)` on an element
+    // evaluates one directly. Measured on OWASP BenchmarkPython: the
+    // class was 9.8% (v0.7) and 0% (v0.8) entirely for missing vocabulary.
+    ("XPath", crate::role_map::SinkLabel::XpathInjection),
+    ("xpath", crate::role_map::SinkLabel::XpathInjection),
     // SSTI - Template engine renders
     ("render_template", crate::role_map::SinkLabel::TemplateSsti),
     (
@@ -353,6 +383,7 @@ pub(super) static PY_SANITIZER_NAMES: &[&str] = &[
 pub(super) const PY_VOCAB: LanguageVocab = LanguageVocab {
     language: "python",
     ambiguous_verbs: crate::data::BOOTSTRAP_AMBIGUOUS_VERBS,
+    package_scoped_sinks: &[],
     sink_names: PY_SINK_NAMES,
     sink_signatures: PY_SINK_SIGNATURES,
     idor_sinks: &[],

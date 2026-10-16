@@ -9,6 +9,7 @@ use frensense_engine::analysis::taint::facts::{
     FactTable, GuardBypassFact, PolicyRequirement, PolicyScope, SchemaPolicyFact, WeakCryptoFact,
 };
 use frensense_engine::checks::memory_summary::MemorySummaryRegistry;
+use frensense_engine::ir::function::{FunctionIR, Instruction, Operand, Terminator, VarId};
 
 use super::call_analysis::{
     collect_calls, cross_function_helper, extract_call_arg_literals,
@@ -48,6 +49,10 @@ pub fn propose_with_trace(
 ) -> (Vec<Candidate>, Vec<String>) {
     let mut notes: Vec<String> = Vec::new();
     let mut candidates = Vec::new();
+    // Author-declared discriminators (`require-arg-key:` metadata): when
+    // present, automatic guard/co-occurrence synthesis must not also mint
+    // requirements for the same family - the author stated the intent.
+    let meta_explicit = !family.metadata.require_arg_keys.is_empty();
 
     // Memory allocation / deallocation wrapper discovery from corpus examples:
     let mut family_irs = Vec::new();
@@ -299,6 +304,11 @@ pub fn propose_with_trace(
             // Emitted natively as Candidate::Policy in the declared_check_call block below.
             continue;
         }
+        if meta_explicit {
+            // Explicit author requirements own this family's suppression
+            // shape; a synthesized guard would weaken or contradict them.
+            continue;
+        }
         candidates.push(Candidate::Check {
             rule,
             call: call.clone(),
@@ -340,6 +350,36 @@ pub fn propose_with_trace(
                     .map(|v| collect_calls(std::slice::from_ref(v), Some(builtin)))
                     .all(|calls| calls.contains_key(g))
             };
+            // Author-declared discriminators (`// require-arg-key:` block
+            // lines) replace automatic guard/co-occurrence synthesis: the
+            // metadata states the exact discriminator the corpus intends,
+            // so the proposal never invents one from a coincidental twin
+            // difference (the "GuardCall { call: \"Date\" }" class).
+            let explicit_req = !family.metadata.require_arg_keys.is_empty();
+            if explicit_req {
+                let pkg = package_for_call(family, &trigger, false);
+                let require = family
+                    .metadata
+                    .require_arg_keys
+                    .iter()
+                    .map(|(slot, key)| PolicyRequirement::RequireArgKey {
+                        slot: *slot,
+                        keys: vec![key.clone()],
+                    })
+                    .collect();
+                candidates.push(Candidate::Policy {
+                    rule: format!("policy_{trigger}"),
+                    call: trigger.clone(),
+                    message: family
+                        .metadata
+                        .observation
+                        .clone()
+                        .unwrap_or_else(|| format!("Policy violation: `{trigger}`")),
+                    require,
+                    scope: PolicyScope::Function,
+                    package: pkg,
+                });
+            }
             // Shape (b-native): required guard call in the same function.
             let mut eligible_guards: Vec<&String> = neg_calls
                 .keys()
@@ -359,6 +399,12 @@ pub fn propose_with_trace(
                     std::cmp::Reverse(*g),
                 )
             });
+            if explicit_req {
+                // Explicit author requirements own this family's suppression
+                // shape; a synthesized guard would weaken or contradict
+                // them, so the eligible-guard set stays empty.
+                eligible_guards.clear();
+            }
             if let Some(guard) = eligible_guards.last() {
                 let pkg = package_for_call(family, &trigger, false);
                 candidates.push(Candidate::Policy {
@@ -390,6 +436,9 @@ pub fn propose_with_trace(
             // Pick alphabetically, not in FxHashMap iteration order: the
             // chosen name is baked into the learned fact's bytes.
             banned.sort();
+            if explicit_req {
+                banned.clear();
+            }
             if let Some(banned_call) = banned.first() {
                 let pkg = package_for_call(family, &trigger, false);
                 candidates.push(Candidate::Policy {
@@ -413,9 +462,12 @@ pub fn propose_with_trace(
             // enforcement lives outside the trigger's function, so the fact
             // uses Module scope (the engine accepts the definition site as
             // enforcement evidence).
-            if let Some(helper) =
+            let helper = if explicit_req {
+                None
+            } else {
                 cross_function_helper(family, &pos_calls, &neg_calls, Some(builtin))
-            {
+            };
+            if let Some(helper) = helper {
                 if builtin.sanitizer_fact(&helper).is_none() {
                     let pkg = package_for_call(family, &trigger, false);
                     candidates.push(Candidate::Policy {
@@ -772,12 +824,201 @@ pub fn propose_with_trace(
         }
     }
 
+    // Coincidental-Guard Rejection: a fact must prove its suppression.
+    // Every proposed guard must participate in the dataflow feeding the
+    // trigger call's arguments in at least one negative variant. A guard
+    // merely present somewhere in the negative (the
+    // `GuardCall { call: "Date" }` coincidence class, learned from a twin
+    // that happened to call `new Date()` inside its where clause) does not
+    // discriminate anything about the trigger and is rejected. Families
+    // that lose their only discriminator publish nothing, which is loud
+    // (the family stops teaching) instead of silently wrong.
+    candidates.retain(|c| match candidate_guard(c) {
+        Some((trigger, guard)) => {
+            let gseg = guard.rsplit('.').next().unwrap_or(guard.as_str());
+            let tseg = trigger.rsplit('.').next().unwrap_or(trigger.as_str());
+            let grounded = guard_feeds_trigger_args(&neg_irs, gseg, tseg);
+            if !grounded {
+                notes.push(format!(
+                    "guard `{guard}` rejected: does not feed `{trigger}` arguments in any negative (coincidental guard)"
+                ));
+            }
+            grounded
+        }
+        None => true,
+    });
+
     notes.push(format!(
         "proposed {} candidate(s): {}",
         candidates.len(),
         candidate_keys(&candidates)
     ));
     (candidates, notes)
+}
+
+/// The `(trigger, guard)` pair a policy/check candidate suppresses by, if any.
+fn candidate_guard(c: &Candidate) -> Option<(String, String)> {
+    match c {
+        Candidate::Policy { call, require, .. } => {
+            for r in require {
+                if let PolicyRequirement::GuardCall { call: guard } = r {
+                    return Some((call.clone(), guard.clone()));
+                }
+            }
+            None
+        }
+        Candidate::Check {
+            call, unless_guard, ..
+        } => unless_guard.as_ref().map(|g| (call.clone(), g.clone())),
+        _ => None,
+    }
+}
+
+/// Grounding test: does the guard call produce a value that reaches the
+/// trigger call's argument vars in at least one of `irs`? Forward def-use
+/// BFS from the guard's produced values over
+/// `Assign`/`BinaryOp`/`UnaryOp`/`Cast`/`Await`/call-arg passes and
+/// `StoreField{src}` (a stored value reaches its base object, which is how
+/// `where: { lt: new Date() }` connects the `Date` result to the config
+/// argument). Bounded (visited set + hop cap) - a proposal filter, not an
+/// analysis pass.
+fn guard_feeds_trigger_args(irs: &[FunctionIR], guard_seg: &str, trigger_seg: &str) -> bool {
+    for ir in irs {
+        let mut guard_values: Vec<VarId> = Vec::new();
+        let mut trigger_arg_vars: rustc_hash::FxHashSet<VarId> = Default::default();
+
+        for b in ir.blocks.values() {
+            for instr in &b.instructions {
+                let (callee, dest, args) = match instr {
+                    Instruction::CallStatic {
+                        func, dest, args, ..
+                    } => (func.rsplit('.').next().unwrap_or(func), dest.as_ref(), args),
+                    Instruction::CallVirtual {
+                        method, dest, args, ..
+                    } => (
+                        method.rsplit('.').next().unwrap_or(method),
+                        dest.as_ref(),
+                        args,
+                    ),
+                    _ => continue,
+                };
+                if callee == trigger_seg {
+                    push_all_arg_vars(&mut trigger_arg_vars, args);
+                }
+                if callee == guard_seg {
+                    guard_values.extend(dest.iter().map(|d| *d));
+                }
+            }
+        }
+        if guard_values.is_empty() || trigger_arg_vars.is_empty() {
+            continue;
+        }
+
+        let mut seen: rustc_hash::FxHashSet<VarId> = Default::default();
+        let mut frontier = guard_values;
+        for _ in 0..64 {
+            let mut next = Vec::new();
+            for v in frontier.drain(..) {
+                if trigger_arg_vars.contains(&v) {
+                    return true;
+                }
+                // Control-flow guard: the guard's value gates whether the
+                // trigger executes (feeds a branch/switch condition) even
+                // though it never reaches the trigger's argument list
+                // (`if (!verify_admin_permission(...)) return;`). This is a
+                // legitimate discriminator, not a coincidental guard.
+                for b in ir.blocks.values() {
+                    let cond_is_v = match &b.terminator {
+                        Terminator::Branch { cond, .. } => {
+                            matches!(cond, Operand::Var(x) if *x == v)
+                        }
+                        Terminator::Switch { cond, .. } => {
+                            matches!(cond, Operand::Var(x) if *x == v)
+                        }
+                        _ => false,
+                    };
+                    if cond_is_v {
+                        return true;
+                    }
+                }
+                for b in ir.blocks.values() {
+                    for instr in &b.instructions {
+                        if !operand_in_instr(instr, v) {
+                            continue;
+                        }
+                        match instr {
+                            Instruction::Assign { dest, .. }
+                            | Instruction::BinaryOp { dest, .. }
+                            | Instruction::UnaryOp { dest, .. }
+                            | Instruction::Cast { dest, .. }
+                            | Instruction::Await { dest, .. }
+                            | Instruction::ExtractValue { dest, .. } => {
+                                if seen.insert(*dest) {
+                                    next.push(*dest);
+                                }
+                            }
+                            Instruction::CallStatic { dest, .. }
+                            | Instruction::CallVirtual { dest, .. }
+                            | Instruction::CallPointer { dest, .. } => {
+                                if let Some(d) = dest {
+                                    if seen.insert(*d) {
+                                        next.push(*d);
+                                    }
+                                }
+                            }
+                            // value reaches the object it is stored into
+                            Instruction::StoreField { base, .. }
+                            | Instruction::StoreElement { base, .. } => {
+                                if seen.insert(*base) {
+                                    next.push(*base);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            frontier = next;
+        }
+    }
+    false
+}
+
+/// True when `v` appears in any operand position of `instr`.
+fn operand_in_instr(instr: &Instruction, v: VarId) -> bool {
+    let eq = |op: &Operand| matches!(op, Operand::Var(x) if *x == v);
+    match instr {
+        Instruction::Assign { src, .. }
+        | Instruction::Cast { src, .. }
+        | Instruction::UnaryOp { src, .. } => eq(src),
+        Instruction::BinaryOp { lhs, rhs, .. } => eq(lhs) || eq(rhs),
+        Instruction::LoadField { base, .. } => *base == v,
+        Instruction::StoreField { base, src, .. } => *base == v || eq(src),
+        Instruction::LoadElement { base, index, .. } => *base == v || eq(index),
+        Instruction::StoreElement {
+            base, index, src, ..
+        } => *base == v || eq(index) || eq(src),
+        Instruction::CallStatic { args, .. } => args.iter().any(eq),
+        Instruction::CallVirtual { receiver, args, .. } => eq(receiver) || args.iter().any(eq),
+        Instruction::CallPointer { func_ptr, args, .. } => eq(func_ptr) || args.iter().any(eq),
+        Instruction::AddressOf { src, .. } => *src == v,
+        Instruction::Dereference { ptr, .. } => eq(ptr),
+        Instruction::ExtractValue { tuple, .. } => eq(tuple),
+        Instruction::Await { promise, .. } => eq(promise),
+        Instruction::Yield { src, .. } => src.as_ref().is_some_and(eq),
+        _ => false,
+    }
+}
+
+fn push_all_arg_vars(out: &mut rustc_hash::FxHashSet<VarId>, args: &[Operand]) {
+    for op in args {
+        if let Operand::Var(v) = op {
+            out.insert(*v);
+        }
+    }
 }
 
 /// Compact `kind:name` list of candidates, for the proposal trace.

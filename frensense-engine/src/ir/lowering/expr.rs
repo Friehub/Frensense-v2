@@ -514,7 +514,19 @@ impl<'a> LoweringContext<'a> {
         if self.is_template_string(node.kind())
             || node.kind() == "string"
             || node.kind() == "binary_expression"
+            || node.kind() == "concatenated_string"
         {
+            // An *interpolated* string (JS template literal, Python f-string,
+            // implicit concat with a substitution) carries both literal text
+            // and tainted parts. Fold every part - literal fragments AND
+            // substitutions - into a left-associative `concat` chain so the
+            // literal PREFIX survives in the IR. This is what lets the SSRF
+            // carve-out see a fixed `scheme://authority` that precedes the
+            // attacker-controlled fragment (`fetch(\`https://host/?q=${id}\`)`
+            // must not read as a fully attacker-chosen URL).
+            if let Some(folded) = self.try_fold_interpolated_string(node) {
+                return Some(folded);
+            }
             let mut cursor = node.walk();
             let mut last_op = None;
             for child in node.children(&mut cursor) {
@@ -540,6 +552,69 @@ impl<'a> LoweringContext<'a> {
                 Some(Operand::StringLiteral(text.to_string()))
             }
         }
+    }
+
+    /// Fold an interpolated string into a `concat` `BinaryOp` chain when it
+    /// genuinely mixes literal text with at least one non-literal part.
+    ///
+    /// Returns `None` for a plain literal (no interpolation) or a single-part
+    /// expression, leaving the caller's original single-value behaviour intact.
+    fn try_fold_interpolated_string(&mut self, node: Node) -> Option<Operand> {
+        let mut cursor = node.walk();
+        let children: Vec<Node> = node
+            .children(&mut cursor)
+            .filter(|c| c.is_named())
+            .collect();
+
+        let mut parts: Vec<Operand> = Vec::new();
+        let mut has_interp = false;
+        let mut has_literal = false;
+        for child in &children {
+            let kind = child.kind();
+            if kind == "comment" {
+                continue;
+            }
+            // A literal text fragment (JS `string_fragment`, or any node the
+            // spec flags as an untainted template fragment).
+            let is_literal_frag = kind == "string_fragment"
+                || kind == "string_content"
+                || self.is_template_fragment(kind);
+            if is_literal_frag {
+                let text = &self.source[child.start_byte()..child.end_byte()];
+                if !text.is_empty() {
+                    parts.push(Operand::StringLiteral(text.to_string()));
+                    has_literal = true;
+                }
+            } else if let Some(op) = self.visit_node(*child) {
+                parts.push(op);
+                has_interp = true;
+            }
+        }
+
+        // Only fold a true interpolation (literal text AND a dynamic part).
+        // A single dynamic part with no literal prefix keeps the old
+        // pass-through so behaviour is unchanged for `\`${id}\`` and friends.
+        if !(has_interp && has_literal) || parts.len() < 2 {
+            return None;
+        }
+
+        // Left-associative fold: ((p0 + p1) + p2) ...
+        let mut it = parts.into_iter();
+        let mut acc = it.next().unwrap();
+        for rhs in it {
+            let dest = self.new_temp(node);
+            self.ir.push_instruction(
+                self.current_block,
+                Instruction::BinaryOp {
+                    dest,
+                    op: "concat".to_string(),
+                    lhs: acc,
+                    rhs,
+                },
+            );
+            acc = Operand::Var(dest);
+        }
+        Some(acc)
     }
 
     pub fn visit_cast(&mut self, node: Node) -> Option<Operand> {

@@ -3,8 +3,8 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use super::options::CliOptions;
+use crate::explain::ExplainRecord;
 use crate::reporter::Reporter;
-use crate::reporting::ExplainRecord;
 use crate::{Advisory, FrensenseError, Result};
 use std::collections::HashSet;
 

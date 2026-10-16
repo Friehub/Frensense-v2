@@ -116,7 +116,6 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("deepExtend", crate::role_map::SinkLabel::PrototypePollution),
     ("mixin", crate::role_map::SinkLabel::PrototypePollution),
     ("cloneDeep", crate::role_map::SinkLabel::PrototypePollution),
-    ("sign", crate::role_map::SinkLabel::JwtWeakAlgorithm),
     ("decode", crate::role_map::SinkLabel::JwtUnsafeDecode),
     ("existsSync", crate::role_map::SinkLabel::Toctou),
     ("exists", crate::role_map::SinkLabel::Toctou),
@@ -135,6 +134,17 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
         crate::role_map::SinkLabel::CommandInjection,
     ),
     // Code Execution
+    // First-party recipe interpreter: RecipeExecutor.execute runs the
+    // recipe's logic expressions through the execution engine's mathjs
+    // evaluator (see @friehub/execution-engine dist/utils/logicEngine.js:
+    // evaluate -> math.evaluate(expression, scope)). Request bodies that
+    // become expression/recipe config must not reach it. Dotted entry so
+    // the (receiver, method) pair - not the bare verb `execute` - governs
+    // matching: generic `.execute()` receivers stay silent.
+    (
+        "RecipeExecutor.execute",
+        crate::role_map::SinkLabel::CodeExecution,
+    ),
     ("eval", crate::role_map::SinkLabel::CodeExecution),
     ("Function", crate::role_map::SinkLabel::CodeExecution),
     ("RegExp", crate::role_map::SinkLabel::Regex),
@@ -333,14 +343,6 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("res.redirect", crate::role_map::SinkLabel::OpenRedirect),
     ("res.render", crate::role_map::SinkLabel::TemplateSsti),
     ("revalidatePath", crate::role_map::SinkLabel::StorageWrite),
-    (
-        "prisma.queryRawUnsafe",
-        crate::role_map::SinkLabel::SqlInjection,
-    ),
-    (
-        "prisma.executeRawUnsafe",
-        crate::role_map::SinkLabel::SqlInjection,
-    ),
     ("R2Bucket.put", crate::role_map::SinkLabel::StorageWrite),
     (
         "D1Database.prepare",
@@ -364,6 +366,7 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
         crate::role_map::SinkLabel::CommandInjection,
     ),
     ("db.query", crate::role_map::SinkLabel::SqlInjection),
+    ("db.prepare", crate::role_map::SinkLabel::SqlInjection),
     ("db.exec", crate::role_map::SinkLabel::CommandInjection),
     ("pool.query", crate::role_map::SinkLabel::SqlInjection),
     ("connection.query", crate::role_map::SinkLabel::SqlInjection),
@@ -396,6 +399,26 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     (
         "Model.aggregate",
         crate::role_map::SinkLabel::NoSqlInjection,
+    ),
+];
+
+/// Package-scoped framework sinks: named AFTER import-origin resolution,
+/// not by bare call name. A row fires only when the caller's origin
+/// resolves to the declaring package (`@prisma/client` files arm via
+/// `import { PrismaClient }`, the singleton factory `new PrismaClient()`,
+/// or a receiver imported under the package); everywhere else the call
+/// name stays inert — an unrelated object with a same-named method never
+/// inherits the framework's sink semantics. `(dotted call, package, label)`.
+pub(super) static JS_PACKAGE_SCOPED_SINKS: &[(&str, &str, crate::role_map::SinkLabel)] = &[
+    (
+        "prisma.$queryRawUnsafe",
+        "@prisma/client",
+        crate::role_map::SinkLabel::SqlInjection,
+    ),
+    (
+        "prisma.$executeRawUnsafe",
+        "@prisma/client",
+        crate::role_map::SinkLabel::SqlInjection,
     ),
 ];
 

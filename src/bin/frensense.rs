@@ -53,6 +53,7 @@ fn print_help() {
     println!("  --diff-only                Only scan files changed since the last git commit");
     println!("  --emit-baseline <file>     Save current findings as a baseline");
     println!("  --compare-baseline <file>  Fail on new findings vs. baseline");
+    println!("  --show-flows               Include the source->sink taint flow in findings");
     println!("  -h, --help                 Print this help");
     println!("  -v, --version              Print version");
     println!();
@@ -501,6 +502,7 @@ fn main() -> Result<()> {
     }
     engine.set_severity_filter(options.severity_filter);
     engine.set_explain(options.explain);
+    engine.set_show_flows(options.show_flows);
 
     let mut explain_records = Vec::new();
     let advisories = if options.diff_only {
@@ -541,6 +543,7 @@ fn main() -> Result<()> {
                     e2.set_corpus_bundle_path(path.clone());
                 }
                 e2.set_explain(options.explain);
+                e2.set_show_flows(options.show_flows);
                 all.extend(e2.run(f)?);
                 if options.explain {
                     explain_records.extend(e2.take_explain());

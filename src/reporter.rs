@@ -243,7 +243,15 @@ pub fn describe_path_step(step: &PathStep) -> String {
             function,
             callee,
             slot,
-        } => format!("`{function}`: passes value to `{callee}` (arg {slot})"),
+        } => {
+            // The SVFG marks a call's receiver operand (`x.f(..)`), not a
+            // positional argument, with the sentinel arg index.
+            if *slot == frensense_engine::graph::svfg::RECEIVER_ARG_INDEX {
+                format!("`{function}`: passes receiver to `{callee}`")
+            } else {
+                format!("`{function}`: passes value to `{callee}` (arg {slot})")
+            }
+        }
         PathStep::FormalParam { function, param } => {
             format!("`{function}`: enters as parameter `{param}`")
         }

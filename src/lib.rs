@@ -9,11 +9,12 @@
 
 pub mod cli;
 pub mod engine;
+pub mod explain;
 pub mod lsp;
 pub mod mcp;
 pub mod parser;
+pub mod policy;
 pub mod reporter;
-pub mod reporting;
 
 pub use engine::Engine;
 

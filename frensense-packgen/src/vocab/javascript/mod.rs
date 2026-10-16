@@ -42,6 +42,7 @@ const TYPESCRIPT_VOCAB: LanguageVocab = LanguageVocab {
     language: "typescript",
     ambiguous_verbs: crate::data::BOOTSTRAP_AMBIGUOUS_VERBS,
     sink_names: tables::JS_SINK_NAMES,
+    package_scoped_sinks: tables::JS_PACKAGE_SCOPED_SINKS,
     sink_signatures: tables::JS_SINK_SIGNATURES,
     idor_sinks: tables::JS_IDOR_SINKS,
     source_patterns: tables::JS_SOURCE_PATTERNS,

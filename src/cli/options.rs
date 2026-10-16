@@ -35,6 +35,10 @@ pub struct CliOptions {
     pub diff_only: bool,
     /// Record every silent sink argument (why the engine stayed quiet).
     pub explain: bool,
+    /// Include the taint-path flow (source→sink SSA steps) in the
+    /// observation text and SARIF `codeFlows`. Off by default: the flow
+    /// is debug-grade detail, not part of a clean report.
+    pub show_flows: bool,
 }
 
 /// Parse CLI arguments into structured scan options.
@@ -51,6 +55,7 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
         compare_baseline_path: None,
         diff_only: false,
         explain: false,
+        show_flows: false,
     };
 
     let mut i = 1;
@@ -88,6 +93,7 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
             "--strict" => options.is_strict = true,
             "--diff-only" => options.diff_only = true,
             "--explain" => options.explain = true,
+            "--show-flows" => options.show_flows = true,
             "-s" | "--severity" => {
                 let level = args
                     .get(i + 1)
@@ -251,6 +257,14 @@ mod tests {
         assert!(opts.explain);
         let opts = parse_options(&to_args(&["Cargo.toml"])).expect("parse");
         assert!(!opts.explain);
+    }
+
+    #[test]
+    fn show_flows_flag_parses() {
+        let opts = parse_options(&to_args(&["--show-flows"])).expect("parse");
+        assert!(opts.show_flows);
+        let opts = parse_options(&to_args(&["Cargo.toml"])).expect("parse");
+        assert!(!opts.show_flows, "show_flows defaults to off");
     }
 
     #[test]
