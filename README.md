@@ -21,11 +21,21 @@
 
 Frensense is a static application security testing (SAST) engine that detects
 vulnerabilities by combining compiler-grade dataflow analysis with a learned
-knowledge base. No brittle YAML rule packs, no regex heuristics: the engine
 builds an AST, def-use chains, and a program dependence graph for your code,
 then runs taint analysis to verify whether untrusted data can actually reach a
 dangerous sink. Every finding carries the concrete source-to-sink path with
 file positions, so code scanning output points at the exact line to fix.
+
+
+
+
+https://github.com/user-attachments/assets/f4cfe73f-9883-4749-9936-5240b655a3c1
+
+
+
+https://github.com/user-attachments/assets/79b5682d-d075-4aed-bb55-01ab984ba9c2
+
+
 
 **AI agents:** a machine-readable documentation index is published at
 [llms.txt](https://frensense.friehub.cloud/llms.txt); the full docs in one
