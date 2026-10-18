@@ -407,11 +407,14 @@ fn advisory_from_finding(
     );
     // Human-facing path: compacted (adjacent def/use duplicates collapsed,
     // bare SSA hops merged) so the rendered flow is readable; the raw path
-    // still feeds shape-based dedup above. Only materialized under
-    // `--show-flows`: the flow is debug-grade detail, off in a clean report.
-    let rendered_path = show_flows.then(|| f.path.compacted());
-    let observation = if let Some(rendered_path) = rendered_path.as_ref() {
-        let flow = crate::reporter::render_taint_path(rendered_path);
+    // still feeds shape-based dedup above. Always materialized: those steps
+    // are the flow-path default (WI-54), carried in the JSON/SARIF finding
+    // (`taint_steps` / SARIF `codeFlows`) so agents act on the trace. The
+    // TEXT observation embeds the path only under `--show-flows`, keeping
+    // the clean text report terse.
+    let rendered_path = f.path.compacted();
+    let observation = if show_flows {
+        let flow = crate::reporter::render_taint_path(&rendered_path);
         format!(
             "Tainted value from `{src}` flows to sink `{}` (argument {}) in function `{}`.\nTaint path:\n{}",
             f.sink,
@@ -458,24 +461,22 @@ fn advisory_from_finding(
     }
     advisory.requires_human = false;
     // Taint path steps (source→sink) for SARIF codeFlows / rich clients,
-    // from the same compacted path the text observation embeds.
-    advisory.taint_steps = rendered_path
-        .as_ref()
-        .map(|rendered_path| {
-            rendered_path
-                .steps
-                .iter()
-                .zip(rendered_path.spans.iter())
-                .map(|(step, span)| {
-                    (
-                        crate::reporter::describe_path_step(step),
-                        span.as_ref()
-                            .map(|(file, (start, _))| (file.clone(), *start)),
-                    )
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    // from the same compacted path the text observation may embed (WI-54:
+    // default-on in JSON/SARIF; agents act on the trace).
+    advisory.taint_steps = {
+        rendered_path
+            .steps
+            .iter()
+            .zip(rendered_path.spans.iter())
+            .map(|(step, span)| {
+                (
+                    crate::reporter::describe_path_step(step),
+                    span.as_ref()
+                        .map(|(file, (start, _))| (file.clone(), *start)),
+                )
+            })
+            .collect()
+    };
     advisory.fingerprint = stable_fingerprint(&[file, f.sink.as_str(), f.function.as_str(), src]);
     advisory
 }

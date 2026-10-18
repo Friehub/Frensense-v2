@@ -25,9 +25,10 @@ pub struct Engine {
     /// did NOT become an advisory (see [`crate::explain::ExplainRecord`]),
     /// surfaced via [`Engine::take_explain`] under `--explain`.
     pub(crate) explain: bool,
-    /// When `true` (`--show-flows`), taint advisories carry the full
-    /// source→sink flow (observation embed + `taint_steps`/SARIF
-    /// codeFlows). Off by default: the flow is debug-grade detail.
+    /// When `true` (`--show-flows`), the taint advisory TEXT also embeds
+    /// the full source→sink flow. `taint_steps`/SARIF `codeFlows` carry
+    /// the path unconditionally now (WI-54); this knob only governs the
+    /// text observation, the debug-grade detail of a clean text report.
     pub(crate) show_flows: bool,
     /// Silent-finding records from the most recent `run` (when `explain`).
     pub(crate) explain_records: Vec<crate::explain::ExplainRecord>,
@@ -78,9 +79,10 @@ impl Engine {
         self.explain = on;
     }
 
-    /// Enable `--show-flows`: taint advisories carry the full source→sink
-    /// flow in the observation text and `taint_steps` (SARIF codeFlows).
-    /// Off by default - the flow is debug-grade detail.
+    /// Enable `--show-flows`: taint advisories embed the full source→sink
+    /// flow in the observation text as well. `taint_steps` (and SARIF
+    /// codeFlows) are always populated since WI-54; this only widens the
+    /// text observation.
     pub fn set_show_flows(&mut self, on: bool) {
         self.show_flows = on;
     }

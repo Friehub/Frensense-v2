@@ -30,7 +30,10 @@ pub fn tool_definition() -> Value {
                 },
                 "language": {
                     "type": "string",
-                    "description": "Filter by language (rust, typescript, javascript, python)"
+                    "description": format!(
+                        "Filter by language ({})",
+                        crate::parser::language_names_help()
+                    )
                 },
                 "corpus_bundle": {
                     "type": "string",

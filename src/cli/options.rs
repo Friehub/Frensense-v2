@@ -23,7 +23,7 @@ pub struct CliOptions {
     pub is_strict: bool,
     /// Minimum severity floor: critical, warning, info. Default: warning.
     pub severity_filter: Option<Severity>,
-    /// Language filter (e.g., rust, typescript, javascript, python, c).
+    /// Language filter (e.g., rust, go, typescript, javascript, python, c).
     pub language_filter: Option<String>,
     /// .frc bundle providing learned facts and advisory patterns.
     pub corpus_bundle_path: Option<PathBuf>,
@@ -35,9 +35,10 @@ pub struct CliOptions {
     pub diff_only: bool,
     /// Record every silent sink argument (why the engine stayed quiet).
     pub explain: bool,
-    /// Include the taint-path flow (source→sink SSA steps) in the
-    /// observation text and SARIF `codeFlows`. Off by default: the flow
-    /// is debug-grade detail, not part of a clean report.
+    /// Include the taint-path flow (source→sink SSA steps) in the text
+    /// observation. JSON/SARIF always carry the path (`taint_steps` / SARIF
+    /// `codeFlows`); `--show-flows` additionally embeds it in the text
+    /// observation for terminal reports.
     pub show_flows: bool,
 }
 

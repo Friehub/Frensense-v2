@@ -2410,4 +2410,62 @@ export function b(id: any): void {
             engine.findings
         );
     }
+
+    /// WI-41: a call whose callee is defined in this program must not be
+    /// armed as a sink even when the name matches a library sink (`run`),
+    /// otherwise the same bug reports twice — once at the call site and once
+    /// at the callee's real sink. The callee's own sink reports once, its
+    /// backward path crossing the caller.
+    #[test]
+    fn program_local_callee_is_not_an_extra_sink() {
+        use crate::analysis::taint::facts::seeded_tables;
+        use crate::harness::lower_source;
+
+        let src = r#"
+            def run(cmd):
+                execute(cmd)
+
+            def handler(req):
+                run(req.body.payload)
+        "#;
+        let irs = lower_source("probe.py", src, "py").expect("lower probe");
+        let prog = build_program(irs.into_values().collect());
+        let (cfg, facts) = seeded_tables(["py"]);
+        let mut cfg = cfg.clone();
+        cfg.sources.insert("req.body".to_string());
+
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg).with_fact_table(&facts);
+        engine.run();
+
+        let vulns: Vec<_> = engine
+            .findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert_eq!(
+            vulns.len(),
+            1,
+            "exactly one finding (inside `run`), not one at the call site too; got {:?}",
+            vulns
+                .iter()
+                .map(|f| (&f.function, &f.sink))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            (vulns[0].function.as_str(), vulns[0].sink.as_str()),
+            ("run", "execute"),
+            "the surviving finding is the callee's real sink"
+        );
+        // And the caller–callee path is present: the walk crossed from
+        // `run` back into `handler`.
+        assert!(
+            vulns[0]
+                .path
+                .steps
+                .iter()
+                .any(|s| s.function() == Some("handler")),
+            "path must cross caller→callee; got {:?}",
+            vulns[0].path
+        );
+    }
 }

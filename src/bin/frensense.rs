@@ -44,8 +44,11 @@ fn print_help() {
     println!(
         "  -s, --severity <level>     Minimum severity: critical, warning, info (default: warning)"
     );
+    // Generated from the lang registry so help, docs and MCP descriptions
+    // agree on one list (WI-56); see `frensense::parser::language_names_help`.
     println!(
-        "  -l, --language <lang>      Language filter: rust, typescript, javascript, python, c"
+        "  -l, --language <lang>      Language filter: {}",
+        frensense::parser::language_names_help()
     );
     println!(
         "  -b, --bundle <file>        .frc rules bundle (download: https://frensense.friehub.cloud/bundles)"
@@ -53,7 +56,9 @@ fn print_help() {
     println!("  --diff-only                Only scan files changed since the last git commit");
     println!("  --emit-baseline <file>     Save current findings as a baseline");
     println!("  --compare-baseline <file>  Fail on new findings vs. baseline");
-    println!("  --show-flows               Include the source->sink taint flow in findings");
+    println!(
+        "  --show-flows               Also embed the source->sink taint flow in text output (JSON/SARIF always carry the path)"
+    );
     println!("  -h, --help                 Print this help");
     println!("  -v, --version              Print version");
     println!();

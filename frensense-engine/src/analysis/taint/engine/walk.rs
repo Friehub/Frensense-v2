@@ -353,6 +353,22 @@ impl<'a> BackwardTaintEngine<'a> {
         }
     }
 
+    /// Does `name` resolve to a function defined in this program?
+    ///
+    /// Direct check via the call graph's exact-name index; the fallback
+    /// catches collision-rekeyed twins (`app/b.ts::helper`, built in
+    /// [`crate::scan::prepare_with_facts`]) and namespace-qualified keys.
+    /// Only absolute suffixes (a prefix ending in `:`) count, so
+    /// `execute_helper` is not a match for the name `helper`.
+    fn is_program_local(&self, name: &str) -> bool {
+        if self.prog.function_index(name).is_some() {
+            return true;
+        }
+        self.prog.functions.iter().any(|f| {
+            f.name.ends_with(name) && f.name.strip_suffix(name).is_some_and(|p| p.ends_with(':'))
+        })
+    }
+
     /// Explore one call site if it is a configured sink.
     pub(super) fn explore_call_site(
         &mut self,
@@ -407,6 +423,16 @@ impl<'a> BackwardTaintEngine<'a> {
                 .values()
                 .any(|m| m.source_name.as_deref() == Some(name))
             {
+                return;
+            }
+            // A static call resolving to a function defined in this program is
+            // not an external sink either, even when the name matches a library
+            // sink (a user helper named `run` is not `subprocess.run`; a package
+            // import of that name short-circuits this guard above via
+            // `pkg_import`). The callee's own configured sinks report once with
+            // the full caller→callee path; arming the call site itself would
+            // emit the same bug twice - once as a shorter path prefix (WI-41).
+            if self.is_program_local(name) {
                 return;
             }
             // Verb sinks that strictly require a receiver object (get, post, render, etc.);
