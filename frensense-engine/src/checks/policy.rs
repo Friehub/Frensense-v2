@@ -25,6 +25,37 @@ use crate::graph::module::PackageImport;
 use crate::ir::control::{self, DomSets};
 use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand, VarId};
 
+/// A taught callable matches a written callee in one of two modes:
+///
+/// - bare fact (`issue_refund`): matched by the callee's last segment, the
+///   dominant learned-check rule that every sink vocabulary shares;
+/// - qualified fact (`payments.issue_refund`, `storage::ops::wipe_volume`):
+///   matched through the full dotted tail against the callee's written
+///   path, so a trigger pinned to one member no longer collides with an
+///   unrelated object that happens to share the verb
+///   (`billing.issue_refund` stays silent for a `payments.issue_refund`
+///   policy).
+///
+/// Presence-level requirements only see bare segment lists (see
+/// `call_segments`), so they keep bare matching; this narrowing applies
+/// exactly where instruction-letter callee paths are available.
+#[inline]
+fn callee_matches(taught: &str, written: &str) -> bool {
+    if !taught.contains('.') && !taught.contains("::") {
+        return super::last_segment(written) == taught;
+    }
+    let norm = |s: &str| -> String { s.replace("::", ".") };
+    let t = norm(taught);
+    let w = norm(written);
+    if w == t {
+        return true;
+    }
+    let mut dotted_tail = String::with_capacity(t.len() + 1);
+    dotted_tail.push('.');
+    dotted_tail.push_str(&t);
+    w.ends_with(dotted_tail.as_str())
+}
+
 /// Package-import context for policy scoping: which file each function
 /// came from, and which external packages each file imports. Policies
 /// carrying `package: Some(pkg)` only fire in functions whose file
@@ -156,7 +187,10 @@ pub fn check_program_scoped(
     // function across policies (computed at most once per scanned IR).
     let mut dom_cache: FxHashMap<&str, DomSets> = FxHashMap::default();
     for (policy, policy_provenance) in &all_policies {
-        let trigger_seg: &str = super::last_segment(&policy.when_call);
+        // The FULL taught callee goes into trigger matching: a bare fact
+        // matches by last segment, a qualified fact (`payments.issue_refund`)
+        // matches the written callee path (see `callee_matches`).
+        let trigger_call: &str = &policy.when_call;
         let needs_dom = policy.scope == PolicyScope::Function
             && policy.require.iter().any(|r| {
                 matches!(
@@ -189,7 +223,7 @@ pub fn check_program_scoped(
             let val_info = crate::analysis::value::analyze(ir);
             // Collect every trigger call site in this function with its args.
             for (bid, idx, args, span) in
-                trigger_sites(ir, trigger_seg, alias_maps.get(ir.name.as_str()))
+                trigger_sites(ir, trigger_call, alias_maps.get(ir.name.as_str()))
             {
                 // A requirement violation is the finding — but a
                 // presence-only policy (`require` empty) alerts whenever
@@ -241,21 +275,49 @@ fn trigger_sites<'a>(
     let mut out = Vec::new();
     for (&bid, block) in &ir.blocks {
         for (idx, instr) in block.instructions.iter().enumerate() {
-            let (name, args) = match instr {
-                Instruction::CallStatic { func, args, .. } => (func, args),
-                Instruction::CallVirtual { method, args, .. } => (method, args),
+            // Written callee path: static calls carry their full path
+            // (Rust `storage::ops::wipe_volume`); member calls are
+            // reconstructed from the receiver chain (`payments.x` ->
+            // `payments.x`), so qualified facts can match the exact
+            // member instead of every object sharing the bare verb.
+            let name = match instr {
+                Instruction::CallStatic { func, .. } => func.clone(),
+                Instruction::CallVirtual {
+                    method, receiver, ..
+                } => crate::analysis::forward::receiver_call_path(ir, receiver, method),
                 _ => continue,
             };
             // The callee's bare last segment, or an import alias resolving
             // to `seg` (`refund` -> `issue_refund`), counts as the trigger.
-            let last = super::last_segment(name);
-            if last != seg && aliases.is_none_or(|m| m.get(last).is_none_or(|sym| sym != seg)) {
+            // A qualified taught name matches the written callee path
+            // instead of the bare verb (see `callee_matches`).
+            let matches = callee_matches(seg, &name)
+                || aliases.is_some_and(|m| {
+                    m.get(super::last_segment(&name))
+                        .is_some_and(|sym| callee_matches(seg, sym))
+                });
+            if !matches {
                 continue;
             }
-            out.push((bid, idx, args.as_slice(), instr_span(ir, instr)));
+            out.push((
+                bid,
+                idx,
+                call_args(instr).unwrap_or(&[]),
+                instr_span(ir, instr),
+            ));
         }
     }
     out
+}
+
+/// A call instruction's argument list, for site indexing outside the
+/// match arm that already destructures it.
+fn call_args(instr: &Instruction) -> Option<&[Operand]> {
+    match instr {
+        Instruction::CallStatic { args, .. } => Some(args.as_slice()),
+        Instruction::CallVirtual { args, .. } => Some(args.as_slice()),
+        _ => None,
+    }
 }
 
 /// Does one requirement hold for this trigger site?
@@ -286,7 +348,9 @@ fn requirement_holds(
             if scope == PolicyScope::Module {
                 module_segs.iter().any(|s| s == seg)
             } else {
-                guard_executes_before(ir, seg, block, trigger_idx, doms)
+                // Spatial matching sees the full taught guard name so a
+                // qualified helper matches its member-call sites exactly.
+                guard_executes_before(ir, call, block, trigger_idx, doms)
             }
         }
         PolicyRequirement::RequireCall { any_of } => {
@@ -295,9 +359,8 @@ fn requirement_holds(
                 return module_segs.iter().any(|s| wanted.contains(&s.as_str()));
             }
             any_of.iter().any(|c| {
-                let seg = super::last_segment(c);
-                is_entry_guarded(ir, seg)
-                    || guard_executes_before(ir, seg, block, trigger_idx, doms)
+                is_entry_guarded(ir, super::last_segment(c))
+                    || guard_executes_before(ir, c, block, trigger_idx, doms)
             })
         }
         PolicyRequirement::NotCall { call } => {
@@ -563,12 +626,17 @@ fn guard_executes_before(
     let mut sites: Vec<(BlockId, usize)> = Vec::new();
     for (&bid, block) in &ir.blocks {
         for (idx, instr) in block.instructions.iter().enumerate() {
-            let name = match instr {
-                Instruction::CallStatic { func, .. } => func,
-                Instruction::CallVirtual { method, .. } => method,
-                _ => continue,
+            let matched = match instr {
+                Instruction::CallStatic { func, .. } => callee_matches(seg, func),
+                Instruction::CallVirtual {
+                    method, receiver, ..
+                } => {
+                    let path = crate::analysis::forward::receiver_call_path(ir, receiver, method);
+                    callee_matches(seg, &path)
+                }
+                _ => false,
             };
-            if super::last_segment(name) == seg {
+            if matched {
                 sites.push((bid, idx));
             }
         }

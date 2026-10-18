@@ -83,6 +83,7 @@ pub enum Candidate {
         wrap_threshold: u128,
         severity: String,
         message: String,
+        unbounded_product: bool,
     },
 }
 
@@ -242,12 +243,29 @@ impl Candidate {
                 wrap_threshold,
                 severity,
                 message,
-            } => LearnedFactEntry::IntegerOverflowRule {
-                rule: rule.clone(),
-                wrap_threshold: *wrap_threshold,
-                severity: severity.clone(),
-                message: message.clone(),
-            },
+                unbounded_product,
+            } => {
+                // The wire schema is positional: the base `IntegerOverflowRule`
+                // variant keeps its byte layout, and the modality travels as
+                // the trailing `IntegerOverflowUnboundedRule` variant instead
+                // of a new field.
+                let payload: LearnedFactEntry = if *unbounded_product {
+                    LearnedFactEntry::IntegerOverflowUnboundedRule {
+                        rule: rule.clone(),
+                        wrap_threshold: *wrap_threshold,
+                        severity: severity.clone(),
+                        message: message.clone(),
+                    }
+                } else {
+                    LearnedFactEntry::IntegerOverflowRule {
+                        rule: rule.clone(),
+                        wrap_threshold: *wrap_threshold,
+                        severity: severity.clone(),
+                        message: message.clone(),
+                    }
+                };
+                payload
+            }
         }
     }
 }
@@ -438,12 +456,14 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
             wrap_threshold,
             severity,
             message,
+            unbounded_product,
         } => {
             let fact = frensense_engine::analysis::taint::facts::IntegerOverflowRule {
                 rule_id: rule.clone(),
                 wrap_threshold: *wrap_threshold,
                 severity: severity.clone(),
                 message: message.clone(),
+                unbounded_product: *unbounded_product,
             };
             if let Some(existing) = table
                 .integer_overflow_rules
@@ -508,7 +528,10 @@ pub fn fact_key(e: &LearnedFactEntry) -> (String, String) {
         LearnedFactEntry::GuardDenylistPattern { pattern } => {
             ("guard_denylist".into(), pattern.clone())
         }
-        LearnedFactEntry::IntegerOverflowRule { rule, .. } => ("io_rule".into(), rule.clone()),
+        LearnedFactEntry::IntegerOverflowRule { rule, .. }
+        | LearnedFactEntry::IntegerOverflowUnboundedRule { rule, .. } => {
+            ("io_rule".into(), rule.clone())
+        }
         LearnedFactEntry::Hints { kind, .. } => ("hints".into(), format!("{kind:?}")),
         LearnedFactEntry::WeakPrimitiveRule { rule_id, .. } => {
             ("weak_primitive".into(), rule_id.clone())

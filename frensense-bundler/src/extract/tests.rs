@@ -658,6 +658,148 @@ mod policy_proposal_tests {
         );
     }
 
+    /// Guard synonyms, author-declared: a `guard: a, b` metadata line
+    /// teaches the enforcement set in ONE family. The published fact must
+    /// accept ANY declared helper (RequireCall any_of) rather than the
+    /// single best-synthesized guard, so held-out files guarded by each
+    /// spelling stay silent.
+    #[test]
+    fn declared_guard_synonyms_publish_any_of() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "synonyms_positive.py",
+            concat!(
+                "# [frensense]\n",
+                "# check-call: delete_user_account\n",
+                "# guard: verify_admin_permission, user.can\n",
+                "def handle(uid):\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+        // Negative 1: traditional named helper, branch-guarded.
+        write(
+            &dir,
+            "synonyms_negative.py",
+            concat!(
+                "def handle(uid):\n",
+                "    if not verify_admin_permission(uid):\n",
+                "        raise Exception('denied')\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+        // Negative 2: member-qualified inline predicate, the synonym.
+        write(
+            &dir,
+            "synonyms_negative_second_guard.py",
+            concat!(
+                "def handle(user, uid):\n",
+                "    if not user.can('delete_users'):\n",
+                "        return\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families.len(), 1, "one family expected");
+
+        let (learned_table, published) = extract_facts_with_tables(&families, &config, &table);
+        let taught = published.iter().any(|f| match &f.entry {
+            LearnedFactEntry::Policy {
+                when_call, require, ..
+            } => {
+                when_call.ends_with("delete_user_account")
+                    && require.iter().any(|r| {
+                        matches!(r, PolicyRequirement::RequireCall { any_of }
+                            if any_of.contains(&"verify_admin_permission".to_string())
+                                && any_of.contains(&"user.can".to_string()))
+                    })
+            }
+            _ => false,
+        });
+        assert!(
+            taught,
+            "declared synonyms must publish a RequireCall any_of over ALL of them: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+
+        let family = &families[0];
+        let prep = gate::PreparedFamily::new(family, &table).unwrap();
+        assert!(
+            prep.separates(&config, &learned_table),
+            "synonym-guarded twins must separate under the learned facts"
+        );
+    }
+
+    /// Unbounded-operand modality teaching: `check-rule:` + `wrap-max:`
+    /// plus `unbounded-product: true` publishes the trailing
+    /// `IntegerOverflowUnboundedRule` wire variant; the replay gate
+    /// validates separation with the positive's both-dynamic
+    /// `malloc(rows * cols)` firing and the negative's literal-bounded
+    /// clamp staying silent.
+    #[test]
+    fn unbounded_product_rule_teaches_and_separates() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "unbounded_positive.c",
+            concat!(
+                "// [frensense]\n",
+                "// check-rule: integer_overflow_alloc_unbounded\n",
+                "// wrap-max: 4294967295\n",
+                "// unbounded-product: true\n",
+                "#include <stdlib.h>\n",
+                "void *matrix(unsigned long rows, unsigned long cols) {\n",
+                "  void *p = malloc(rows * cols);\n",
+                "  return p;\n",
+                "}\n",
+            ),
+        );
+        write(
+            &dir,
+            "unbounded_negative.c",
+            concat!(
+                "#include <stdlib.h>\n",
+                "void *matrix(unsigned long rows, unsigned long cols) {\n",
+                "  if (rows < 1 || rows > 60000 || cols > 60000) return NULL;\n",
+                "  void *p = malloc(rows * cols);\n",
+                "  return p;\n",
+                "}\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families.len(), 1, "one family expected");
+
+        let (learned_table, published) = extract_facts_with_tables(&families, &config, &table);
+        let taught = published.iter().any(|f| matches!(&f.entry,
+            LearnedFactEntry::IntegerOverflowUnboundedRule { rule, .. } if rule == "integer_overflow_alloc_unbounded"));
+        assert!(
+            taught,
+            "the unbounded product flag must publish the trailing wire variant: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+
+        let family = &families[0];
+        let prep = gate::PreparedFamily::new(family, &table).unwrap();
+        // Scan context = the bundle table: builtin base + every published
+        // fact (what a CLI scan with the .frc loads).
+        let mut bundle_table = table.clone();
+        for f in &published {
+            f.entry.apply_with(
+                &mut bundle_table,
+                frensense_engine::analysis::taint::facts::Provenance::Learned,
+            );
+        }
+        let (pos_alerts, neg_alerts) = prep.alert_flags(&config, &bundle_table);
+        assert!(
+            pos_alerts && !neg_alerts,
+            "unbounded twins must separate: positive fires, clamped negative silent (positive={pos_alerts}, negative={neg_alerts})"
+        );
+    }
+
     /// The same teaching WITHOUT a branch: a bare enforcement statement
     /// (`guard_cmd(); trigger()`) in the negative is the exact shape the
     /// scanner's `guard_executes_before` honors at scan time, so the

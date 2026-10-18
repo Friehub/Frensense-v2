@@ -161,6 +161,7 @@ void handler(unsigned long count) {
                 wrap_threshold: 4_294_967_295,
                 severity: "critical".to_string(),
                 message: "Corpus-taught 32-bit wrap rule".to_string(),
+                unbounded_product: true,
             },
             Provenance::Learned,
         ));
@@ -173,6 +174,58 @@ void handler(unsigned long count) {
         assert!(
             !rules.contains(&"integer_overflow_alloc".to_string()),
             "bootstrap rule must stay silent on the guarded site: {:?}",
+            rules
+        );
+    }
+
+    /// The corpus-taught unbounded-operand modality: a size
+    /// multiplication whose BOTH operands are unboundedly dynamic
+    /// (`malloc(rows * cols)` operator data) fires behind the flagged
+    /// rule, while mixed shapes (`rows * 528`, one constant operand) and
+    /// the default pack rule stay silent.
+    #[test]
+    fn unbounded_product_modality_fires_both_dynamic_operands_only() {
+        let both_dynamic = r#"
+#include <stdlib.h>
+void *matrix(unsigned long rows, unsigned long cols) {
+  void *p = malloc(rows * cols);
+  return p;
+}
+"#;
+        let mixed = r#"
+#include <stdlib.h>
+void *scaled(unsigned long rows) {
+  void *p = malloc(rows * 528);
+  return p;
+}
+"#;
+        let mut facts = ts_facts();
+        facts.integer_overflow_rules.push((
+            crate::analysis::taint::facts::IntegerOverflowRule {
+                rule_id: "integer_overflow_alloc_unbounded".to_string(),
+                wrap_threshold: 4_294_967_295,
+                severity: "critical".to_string(),
+                message: "Unbounded allocation-size product".to_string(),
+                unbounded_product: true,
+            },
+            Provenance::Learned,
+        ));
+
+        let rules = hits(both_dynamic, &facts);
+        assert!(
+            rules.contains(&"integer_overflow_alloc_unbounded".to_string()),
+            "both-dynamic product fires under the modality: {:?}",
+            rules
+        );
+        assert!(
+            !rules.contains(&"integer_overflow_alloc".to_string()),
+            "UNBOUNDED operands stay skipped for the default zero-FP rule: {:?}",
+            rules
+        );
+        let rules = hits(mixed, &facts);
+        assert!(
+            rules.is_empty(),
+            "mixed dynamic x constant shape stays silent even under the modality: {:?}",
             rules
         );
     }

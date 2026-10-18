@@ -293,6 +293,19 @@ pub enum LearnedFactEntry {
     /// receiver-qualified call (`engine.eval(x)`) matches only once its
     /// origin resolves to a known package (WI-12).
     LanguageSinkGlobalOnly { language: String, call: String },
+    /// Appended last (bincode encodes the variant index first, so existing
+    /// wire bytes keep decoding unchanged): the SAME rule as
+    /// `IntegerOverflowRule` with the unbounded-operand modality taught -
+    /// the engine may fire on a size multiplication whose BOTH operands
+    /// are unboundedly dynamic (`malloc(rows * cols)` CVE-190 shape).
+    /// New intent must be added as its own trailing variant; never insert
+    /// a variant before an established one.
+    IntegerOverflowUnboundedRule {
+        rule: String,
+        wrap_threshold: u128,
+        severity: String,
+        message: String,
+    },
 }
 
 impl LearnedFactEntry {
@@ -623,12 +636,24 @@ impl LearnedFactEntry {
                 wrap_threshold,
                 severity,
                 message,
+            }
+            | LearnedFactEntry::IntegerOverflowUnboundedRule {
+                rule,
+                wrap_threshold,
+                severity,
+                message,
             } => {
                 let fact = IntegerOverflowRule {
                     rule_id: rule.clone(),
                     wrap_threshold: *wrap_threshold,
                     severity: severity.clone(),
                     message: message.clone(),
+                    // The trailing wire variant carries the modality; the
+                    // base variant keeps the provable-range contract.
+                    unbounded_product: matches!(
+                        self,
+                        LearnedFactEntry::IntegerOverflowUnboundedRule { .. }
+                    ),
                 };
                 if let Some(existing) = table.integer_overflow_rules.iter_mut().find(|(r, _)| {
                     r.rule_id == fact.rule_id && r.wrap_threshold == fact.wrap_threshold

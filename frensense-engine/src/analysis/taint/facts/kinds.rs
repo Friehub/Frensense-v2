@@ -645,6 +645,16 @@ pub struct IntegerOverflowRule {
     pub severity: String,
     /// Corpus-authored advisory message (rendered with prover detail).
     pub message: String,
+    /// The unbounded-product modality (opt-in, default off). Default rules
+    /// keep the zero-FP property: both operand intervals must be provable
+    /// and non-negative, and unknown operands skip the site. When the
+    /// corpus teaches `unbounded_product`, a site whose multiplication has
+    /// BOTH operands unboundedly dynamic (no provable interval on either
+    /// side, no constant) is the plain `malloc(rows * cols)` CVE-190 shape
+    /// and fires; mixed shapes like `strlen(s) * 2` stay silent, as do
+    /// bounded operands.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub unbounded_product: bool,
 }
 
 /// A string-literal insecure-configuration selector: a call whose

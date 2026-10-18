@@ -192,6 +192,162 @@ pub fn wipe(vol: &Volume) {
         );
     }
 
+    /// Full-callee qualification: a policy taught at a member path
+    /// (`payments.issue_refund`) matches trigger sites through their
+    /// written callee path, so an unrelated object sharing the bare verb
+    /// (`billing.issue_refund`) no longer fires. Bare-taught facts keep
+    /// matching through the last segment. The qualified guard name
+    /// (`user.can`) likewise matches its member-call sites.
+    #[test]
+    fn qualified_trigger_is_path_aware_bare_stays_verb_aware() {
+        let qualified = |guards: Option<Vec<&str>>| -> PolicyFact {
+            PolicyFact {
+                package: None,
+                rule: "policy_qualified_refund".into(),
+                when_call: "payments.issue_refund".into(),
+                require: guards
+                    .map(|gs| vec![PolicyRequirement::GuardCall { call: gs[0].into() }])
+                    .unwrap_or_default(),
+                scope: PolicyScope::Function,
+                message: "refund requires finance authorization".into(),
+                severity: "high".into(),
+            }
+        };
+        let mut facts = FactTable::default();
+        facts
+            .policy_facts
+            .push((qualified(None), Provenance::Learned));
+
+        const PY_MATCHED_PATH: &str = r#"
+def pay(user, amount):
+    payments.issue_refund(amount)
+"#;
+        const PY_OTHER_OBJECT: &str = r#"
+def pay(user, amount):
+    billing.issue_refund(amount)
+"#;
+        const PY_METHOD_OWNER: &str = r#"
+def pay(self, amount):
+    self.payments.issue_refund(amount)
+"#;
+        // Unguarded on the taught path: fires.
+        let hits = policy::check_program(&py_lower(PY_MATCHED_PATH), &facts);
+        assert_eq!(hits.len(), 1, "taught path, unguarded: {:?}", hits);
+        // Bare fact semantics do not widen a qualified fact: the same
+        // verb on a different object is NOT the taught trigger.
+        let hits = policy::check_program(&py_lower(PY_OTHER_OBJECT), &facts);
+        assert!(
+            hits.is_empty(),
+            "qualified fact must not collide on another object's verb: {:?}",
+            hits
+        );
+        // A deeper owner of the same member stimulates through the
+        // dotted-tail (`self.payments.issue_refund`).
+        let hits = policy::check_program(&py_lower(PY_METHOD_OWNER), &facts);
+        assert_eq!(
+            hits.len(),
+            1,
+            "dotted-tail owner of the taught member still fires: {:?}",
+            hits
+        );
+
+        // Qualified guard: `user.can` matches only its member-call sites.
+        facts.policy_facts.clear();
+        facts
+            .policy_facts
+            .push((qualified(Some(vec!["user.can"])), Provenance::Learned));
+
+        const PY_MEMBER_GUARDED: &str = r#"
+def pay(user, amount):
+    if not user.can("refunds"):
+        return
+    payments.issue_refund(amount)
+"#;
+        const PY_BARE_GUARD: &str = r#"
+def pay(user, amount):
+    if not can("refunds"):
+        return
+    payments.issue_refund(amount)
+"#;
+        let hits = policy::check_program(&py_lower(PY_MEMBER_GUARDED), &facts);
+        assert!(
+            hits.is_empty(),
+            "qualified guard matches its member-call site: {:?}",
+            hits
+        );
+        let hits = policy::check_program(&py_lower(PY_BARE_GUARD), &facts);
+        assert_eq!(
+            hits.len(),
+            1,
+            "a bare same-verb guard is not the qualified taught helper: {:?}",
+            hits
+        );
+    }
+
+    /// Guard synonyms, engine side (WI-13 remainder): a RequireCall
+    /// `any_of` taught across family variants accepts every declared
+    /// spelling before the trigger - including a member-qualified inline
+    /// predicate (`user.can(...)`), which matches through its last
+    /// segment on the same last-segment rule every guard comparison
+    /// uses. Files guarded under an unrelated helper still fire.
+    fn py_lower(src: &str) -> Vec<&'static FunctionIR> {
+        let fns = lower_source("t.py", src, "py").unwrap();
+        fns.into_values()
+            .map(|ir| -> &'static FunctionIR { Box::leak(Box::new(ir)) })
+            .collect()
+    }
+
+    #[test]
+    fn guard_synonym_union_accepts_member_qualified_predicate() {
+        let mut facts = FactTable::default();
+        facts.policy_facts.push((
+            PolicyFact {
+                package: None,
+                rule: "policy_issue_refund".into(),
+                when_call: "issue_refund".into(),
+                require: vec![PolicyRequirement::RequireCall {
+                    any_of: vec!["require_finance_role".into(), "user.can".into()],
+                }],
+                scope: PolicyScope::Function,
+                message: "refund requires finance authorization".into(),
+                severity: "high".into(),
+            },
+            Provenance::Learned,
+        ));
+
+        const PY_MEMBER_GUARDED: &str = r#"
+def pay(user, amount):
+    if not user.can("issue_refunds"):
+        return
+    payments.issue_refund(amount)
+"#;
+        const PY_UNRELATED_GUARD: &str = r#"
+def pay(user, amount):
+    audit_log(amount)
+    payments.issue_refund(amount)
+"#;
+        const PY_UNGUARDED: &str = r#"
+def pay(user, amount):
+    payments.issue_refund(amount)
+"#;
+
+        let hits = policy::check_program(&py_lower(PY_MEMBER_GUARDED), &facts);
+        assert!(
+            hits.is_empty(),
+            "member-qualified declared synonym guard suppresses: {:?}",
+            hits
+        );
+        let hits = policy::check_program(&py_lower(PY_UNRELATED_GUARD), &facts);
+        assert_eq!(
+            hits.len(),
+            1,
+            "an unrelated helper is not one of the taught guards: {:?}",
+            hits
+        );
+        let hits = policy::check_program(&py_lower(PY_UNGUARDED), &facts);
+        assert_eq!(hits.len(), 1, "unguarded trigger fires: {:?}", hits);
+    }
+
     /// Decorator-as-guard: a definition decorated with the taught helper
     /// (`@ensure_owner`) enforces before ANY statement of the body, so a
     /// trigger inside it is guarded with no guard call present - the

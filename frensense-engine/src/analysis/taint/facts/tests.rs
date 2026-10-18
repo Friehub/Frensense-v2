@@ -426,6 +426,7 @@ fn iorule(rule: &str, msg: &str) -> IntegerOverflowRule {
         wrap_threshold: u64::MAX as u128,
         severity: "warning".into(),
         message: msg.into(),
+        unbounded_product: false,
     }
 }
 

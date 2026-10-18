@@ -107,6 +107,7 @@ pub fn propose_with_trace(
                 .observation
                 .clone()
                 .unwrap_or_else(|| "Integer overflow in allocation size".to_string()),
+            unbounded_product: family.metadata.unbounded_product,
         });
     }
 
@@ -355,18 +356,27 @@ pub fn propose_with_trace(
             // metadata states the exact discriminator the corpus intends,
             // so the proposal never invents one from a coincidental twin
             // difference (the "GuardCall { call: \"Date\" }" class).
+            // `guard:` declares the enforcement helpers instead (optionally
+            // a comma-separated synonym set); both declaration styles own
+            // the family's suppression shape and combine conjunctively in
+            // one policy candidate (the engine satisfies ALL requirements,
+            // and a RequireCall `any_of` accepts any declared equivalent).
             let explicit_req = !family.metadata.require_arg_keys.is_empty();
-            if explicit_req {
-                let pkg = package_for_call(family, &trigger, false);
-                let require = family
-                    .metadata
-                    .require_arg_keys
-                    .iter()
-                    .map(|(slot, key)| PolicyRequirement::RequireArgKey {
+            let guard_declared = !family.metadata.guards.is_empty();
+            if explicit_req || guard_declared {
+                let mut require = Vec::new();
+                if guard_declared {
+                    require.push(PolicyRequirement::RequireCall {
+                        any_of: family.metadata.guards.clone(),
+                    });
+                }
+                for (slot, key) in family.metadata.require_arg_keys.iter() {
+                    require.push(PolicyRequirement::RequireArgKey {
                         slot: *slot,
                         keys: vec![key.clone()],
-                    })
-                    .collect();
+                    });
+                }
+                let pkg = package_for_call(family, &trigger, false);
                 candidates.push(Candidate::Policy {
                     rule: format!("policy_{trigger}"),
                     call: trigger.clone(),
@@ -399,7 +409,7 @@ pub fn propose_with_trace(
                     std::cmp::Reverse(*g),
                 )
             });
-            if explicit_req {
+            if explicit_req || guard_declared {
                 // Explicit author requirements own this family's suppression
                 // shape; a synthesized guard would weaken or contradict
                 // them, so the eligible-guard set stays empty.
@@ -436,7 +446,7 @@ pub fn propose_with_trace(
             // Pick alphabetically, not in FxHashMap iteration order: the
             // chosen name is baked into the learned fact's bytes.
             banned.sort();
-            if explicit_req {
+            if explicit_req || guard_declared {
                 banned.clear();
             }
             if let Some(banned_call) = banned.first() {
@@ -462,7 +472,7 @@ pub fn propose_with_trace(
             // enforcement lives outside the trigger's function, so the fact
             // uses Module scope (the engine accepts the definition site as
             // enforcement evidence).
-            let helper = if explicit_req {
+            let helper = if explicit_req || guard_declared {
                 None
             } else {
                 cross_function_helper(family, &pos_calls, &neg_calls, Some(builtin))

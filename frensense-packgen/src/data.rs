@@ -177,6 +177,9 @@ pub static BOOTSTRAP_INTEGER_OVERFLOW_RULES: std::sync::LazyLock<Vec<IntegerOver
                       allocation is undersized and the count-driven fill \
                       overflows the heap buffer"
                 .to_string(),
+            // The bootstrap rule keeps the zero-FP provable-range contract;
+            // an unbounded-operand modality must be taught by a corpus.
+            unbounded_product: false,
         }]
     });
 
