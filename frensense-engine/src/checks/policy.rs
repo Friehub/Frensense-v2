@@ -280,6 +280,9 @@ fn requirement_holds(
             // a call that may be skipped enforces nothing. Module scope
             // stays presence (the helper exists somewhere in the module).
             let seg = super::last_segment(call);
+            if is_entry_guarded(ir, seg) {
+                return true;
+            }
             if scope == PolicyScope::Module {
                 module_segs.iter().any(|s| s == seg)
             } else {
@@ -293,7 +296,8 @@ fn requirement_holds(
             }
             any_of.iter().any(|c| {
                 let seg = super::last_segment(c);
-                guard_executes_before(ir, seg, block, trigger_idx, doms)
+                is_entry_guarded(ir, seg)
+                    || guard_executes_before(ir, seg, block, trigger_idx, doms)
             })
         }
         PolicyRequirement::NotCall { call } => {
@@ -338,6 +342,84 @@ fn requirement_holds(
             }
         }
     }
+}
+
+/// True when the function's own definition carries a decorator/attribute
+/// whose call name is `seg` (`@guard`, `#[guard]`). A decorator executes
+/// before ANY statement of the body, so it dominates every trigger in the
+/// function by construction - the caller-side enforcement shape.
+fn is_entry_guarded(ir: &FunctionIR, seg: &str) -> bool {
+    ir.entry_guards
+        .iter()
+        .any(|g| super::last_segment(g) == seg)
+}
+
+/// The bundler's fact extractor consults the SAME guard model the scanner
+/// uses, so a corpus twin can teach a check whose negative suppresses the
+/// trigger dominantly (a bare `guard(x);` statement before the trigger,
+/// same block earlier or in a dominating block) even when no dataflow
+/// connects the guard's value to the trigger's arguments. Argument-nested
+/// calls (`new Date()` inside a `where: { lt: ... }` literal) are excluded,
+/// as their span lies inside the trigger's argument span. Mechanism only;
+/// conclusions stay bundle data.
+pub fn guard_dominates_trigger_call(ir: &FunctionIR, guard_seg: &str, trigger_seg: &str) -> bool {
+    let doms = control::dominators(ir);
+    let call_span = |bid: BlockId, idx: usize| -> Option<(usize, usize)> {
+        ir.blocks
+            .get(&bid)
+            .and_then(|b| b.instructions.get(idx))
+            .and_then(|instr| match instr {
+                Instruction::CallStatic { dest, .. }
+                | Instruction::CallVirtual { dest, .. }
+                | Instruction::CallPointer { dest, .. } => *dest,
+                _ => None,
+            })
+            .and_then(|d| ir.var_metadata.get(&d).and_then(|m| m.byte_range))
+    };
+    for (&tb, block) in &ir.blocks {
+        for (tidx, instr) in block.instructions.iter().enumerate() {
+            let name = match instr {
+                Instruction::CallStatic { func, .. } => func,
+                Instruction::CallVirtual { method, .. } => method,
+                _ => continue,
+            };
+            if super::last_segment(name) != trigger_seg {
+                continue;
+            }
+            // Guard sites that execute before this trigger, with the
+            // argument-nested coincidence excluded by span containment.
+            for (&gb, gblock) in &ir.blocks {
+                for (gi, ginstr) in gblock.instructions.iter().enumerate() {
+                    let gname = match ginstr {
+                        Instruction::CallStatic { func, .. } => func,
+                        Instruction::CallVirtual { method, .. } => method,
+                        _ => continue,
+                    };
+                    if super::last_segment(gname) != guard_seg {
+                        continue;
+                    }
+                    let prev = if gb == tb {
+                        gi < tidx
+                    } else {
+                        doms.get(&tb).is_some_and(|d| d.contains(&gb))
+                    };
+                    if !prev {
+                        continue;
+                    }
+                    // Exclude guards nested inside the trigger's own
+                    // argument lowering.
+                    if let (Some(gs), Some(ts)) = (call_span(gb, gi), call_span(tb, tidx))
+                        && gs.0 >= ts.0
+                        && gs.1 <= ts.1
+                    {
+                        continue;
+                    }
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Does `start` trace to an object construction carrying any of `keys`?

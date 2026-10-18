@@ -825,19 +825,45 @@ pub fn propose_with_trace(
     }
 
     // Coincidental-Guard Rejection: a fact must prove its suppression.
-    // Every proposed guard must participate in the dataflow feeding the
-    // trigger call's arguments in at least one negative variant. A guard
-    // merely present somewhere in the negative (the
+    // Every proposed guard must discriminate the negatives in at least one
+    // variant, via one of three shapes shared with the scanner's guard
+    // model:
+    // 1. dataflow: the guard's value feeds the trigger call's arguments
+    //    (def-use through assign/cast/store chains),
+    // 2. control: the guard's value gates the branch condition the trigger
+    //    executes under, or the guard CALL itself dominates the trigger
+    //    call (bare `guard(x);` before the call site - the scanner's
+    //    `guard_executes_before` accepts exactly these),
+    // 3. decorator: the negative lowers the guard as an entry decorator
+    //    (`@guard(...)` / `#[guard]`), which dominates the whole body.
+    // A guard merely present somewhere in the negative (the
     // `GuardCall { call: "Date" }` coincidence class, learned from a twin
     // that happened to call `new Date()` inside its where clause) does not
-    // discriminate anything about the trigger and is rejected. Families
-    // that lose their only discriminator publish nothing, which is loud
-    // (the family stops teaching) instead of silently wrong.
+    // discriminate anything about the trigger and is rejected; guards
+    // nested inside the trigger's own argument lowering are excluded by
+    // span containment. Families that lose their only discriminator
+    // publish nothing, which is loud (the family stops teaching) instead
+    // of silently wrong.
     candidates.retain(|c| match candidate_guard(c) {
         Some((trigger, guard)) => {
             let gseg = guard.rsplit('.').next().unwrap_or(guard.as_str());
             let tseg = trigger.rsplit('.').next().unwrap_or(trigger.as_str());
-            let grounded = guard_feeds_trigger_args(&neg_irs, gseg, tseg);
+            let dataflow = guard_feeds_trigger_args(&neg_irs, gseg, tseg);
+            let dominant = neg_irs
+                .iter()
+                .any(|ir| {
+                    frensense_engine::checks::policy::guard_dominates_trigger_call(
+                        ir, gseg, tseg,
+                    )
+                });
+            let decorator = neg_irs
+                .iter()
+                .any(|ir| {
+                    ir.entry_guards
+                        .iter()
+                        .any(|g| g.rsplit('.').next().unwrap_or(g) == gseg)
+                });
+            let grounded = dataflow || dominant || decorator;
             if !grounded {
                 notes.push(format!(
                     "guard `{guard}` rejected: does not feed `{trigger}` arguments in any negative (coincidental guard)"

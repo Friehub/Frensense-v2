@@ -347,7 +347,13 @@ fn lower_one(
                 .set_terminator(ctx.current_block, Terminator::Return { src: Some(ret) });
         }
     }
-    SSABuilder::new(ctx.ir).build()
+    let mut ir = SSABuilder::new(ctx.ir).build();
+    ir.entry_guards = spec
+        .decorator_guard_calls(fn_node, source)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    ir
 }
 
 /// Walk a declarator chain until we find a `function_declarator` node.

@@ -657,6 +657,144 @@ mod policy_proposal_tests {
             "family must separate under learned facts: positive alerts, negative is silent"
         );
     }
+
+    /// The same teaching WITHOUT a branch: a bare enforcement statement
+    /// (`guard_cmd(); trigger()`) in the negative is the exact shape the
+    /// scanner's `guard_executes_before` honors at scan time, so the
+    /// proposal layer must ground it dominantly instead of discarding it
+    /// as a coincidental guard (the "TAUGHT NOTHING" asymmetry).
+    #[test]
+    fn bare_statement_guard_dom_gate_teaches() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "bare_guard_positive.py",
+            concat!(
+                "# check-call: delete_user_account\n",
+                "def handle(uid):\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+        write(
+            &dir,
+            "bare_guard_negative.py",
+            concat!(
+                "def handle(uid):\n",
+                "    verify_admin_permission(uid)\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families.len(), 1, "one family expected");
+
+        let (learned_table, published) = extract_facts_with_tables(&families, &config, &table);
+        let taught = published.iter().any(|f| match &f.entry {
+            LearnedFactEntry::Check {
+                call, unless_guard, ..
+            } => unless_guard
+                .as_deref()
+                .map(|g| {
+                    call.ends_with("delete_user_account") && g.contains("verify_admin_permission")
+                })
+                .unwrap_or(false),
+            LearnedFactEntry::Policy {
+                when_call, require, ..
+            } => {
+                when_call.ends_with("delete_user_account")
+                    && require.iter().any(|r| {
+                        matches!(
+                            r,
+                            PolicyRequirement::GuardCall { call }
+                                if call.contains("verify_admin_permission")
+                        )
+                    })
+            }
+            _ => false,
+        });
+        assert!(
+            taught,
+            "a dominant bare-statement guard must teach: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+
+        let family = &families[0];
+        let prep = gate::PreparedFamily::new(family, &table).unwrap();
+        assert!(
+            prep.separates(&config, &learned_table),
+            "bare-statement twins must separate under the learned facts"
+        );
+    }
+
+    /// Decorators-as-guards teaching: the negative enforces through an
+    /// entry decorator (`@verify_admin_permission` on the definition).
+    /// The decorator is lowered into `entry_guards`, proposes as a guard,
+    /// grounds via the decorator shape, and separates the twins end to
+    /// end (the scanner treats an entry decorator as a dominating guard).
+    #[test]
+    fn decorator_guard_teaches_and_scans() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "decorated_positive.py",
+            concat!(
+                "# check-call: delete_user_account\n",
+                "def handle(uid):\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+        write(
+            &dir,
+            "decorated_negative.py",
+            concat!(
+                "@verify_admin_permission\n",
+                "def handle(uid):\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families.len(), 1, "one family expected");
+
+        let (learned_table, published) = extract_facts_with_tables(&families, &config, &table);
+        let taught = published.iter().any(|f| match &f.entry {
+            LearnedFactEntry::Check {
+                call, unless_guard, ..
+            } => unless_guard
+                .as_deref()
+                .map(|g| {
+                    call.ends_with("delete_user_account") && g.contains("verify_admin_permission")
+                })
+                .unwrap_or(false),
+            LearnedFactEntry::Policy {
+                when_call, require, ..
+            } => {
+                when_call.ends_with("delete_user_account")
+                    && require.iter().any(|r| {
+                        matches!(
+                            r,
+                            PolicyRequirement::GuardCall { call }
+                                if call.contains("verify_admin_permission")
+                        )
+                    })
+            }
+            _ => false,
+        });
+        assert!(
+            taught,
+            "a decorated negative must teach its entry guard: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+
+        let family = &families[0];
+        let prep = gate::PreparedFamily::new(family, &table).unwrap();
+        assert!(
+            prep.separates(&config, &learned_table),
+            "decorator-guarded twins must separate under the learned facts"
+        );
+    }
 }
 
 mod slot_regression_tests {

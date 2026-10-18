@@ -309,6 +309,42 @@ pub trait LanguageSpec: Send + Sync + 'static {
         false
     }
 
+    /// Decorator / attribute call names applied to this function-definition
+    /// node (`@guard(...)`, `#[guard]`, `@app.route(...)`).
+    ///
+    /// Pure grammar mechanism: decorators are placed either as *direct
+    /// children* of the definition (Python `decorated_definition`, JS/TS
+    /// member decorators) or as *preceding sibling attribute nodes*
+    /// (Rust `#[attr]` on `fn`). Their text reliably starts with `@`
+    /// or `#[`, so placement and spelling are recognized structurally
+    /// and no per-language node-kind table is needed. The name is
+    /// stripped to its last `.` segment and cut at the call paren so
+    /// `@group.require_role(user)` yields `require_role`.
+    fn decorator_guard_calls<'a>(
+        &self,
+        node: tree_sitter::Node<'a>,
+        source: &'a str,
+    ) -> Vec<&'a str> {
+        let mut out = Vec::new();
+        let mut visit = |n: tree_sitter::Node<'a>| {
+            if let Some(name) = decorator_call_name(node_text(n, source)) {
+                out.push(name);
+            }
+        };
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            visit(child);
+        }
+        let mut prev = node;
+        while let Some(sib) = prev.prev_sibling() {
+            if is_attribute_text(node_text(sib, source)) {
+                visit(sib);
+            }
+            prev = sib;
+        }
+        out
+    }
+
     /// Returns `true` if this node kind represents a string template or interpolated string (e.g. `template_string`, `f_string`).
     fn is_template_string(&self, _kind: &str) -> bool {
         false
@@ -501,4 +537,35 @@ pub fn call_last_segment(call: &str) -> &str {
 #[inline]
 pub fn node_text<'s>(node: Node<'_>, source: &'s str) -> &'s str {
     source.get(node.start_byte()..node.end_byte()).unwrap_or("")
+}
+
+/// Does a node's text look like a decorator or attribute definition
+/// (`@...` or `#[...]`) rather than ordinary statements? Purely textual,
+/// so placement styles differ per language without a kind table.
+#[inline]
+fn is_attribute_text(text: &str) -> bool {
+    let t = text.trim();
+    t.starts_with('@') || t.starts_with("#[")
+}
+
+/// Parse the call name out of decorator/attribute text:
+/// `"@app.route("/x")"` → `route`, `"#[ensure_owner]"` → `ensure_owner`.
+#[inline]
+fn decorator_call_name(text: &str) -> Option<&str> {
+    let t = text.trim();
+    let inner = match (t.strip_prefix('@'), t.strip_prefix("#[")) {
+        (Some(s), _) => s,
+        (_, Some(s)) => s,
+        (None, None) => return None,
+    };
+    let inner = inner.trim();
+    // Rust `#[...]` closes with `]`; the name is everything before the
+    // first paren or bracket.
+    let end = inner.find(['(', '[', '{', ']']).unwrap_or(inner.len());
+    let name = inner[..end].trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(call_last_segment(name))
+    }
 }

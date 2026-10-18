@@ -117,6 +117,14 @@ pub fn collect_calls(
                             .or_insert(shape);
                     }
                 }
+                // Entry guards: the definition itself carries a decorator /
+                // attribute call (`@guard`, `#[guard]`). It never appears
+                // as a call instruction inside the body, so register it as
+                // a predicate-shaped call to let a decorated negative teach
+                // its enforcement shape.
+                for g in &ir.entry_guards {
+                    calls.entry(g.clone()).or_insert(CallShape::Predicate);
+                }
             }
         }
     }

@@ -293,6 +293,12 @@ pub struct FunctionIR {
     /// Closure edges resolve free variables through this lexical chain.
     #[cfg_attr(feature = "serialize", serde(default))]
     pub enclosing_fn: Option<String>,
+    /// Decorator / attribute call names applied to this function's
+    /// definition (`@guard`, `#[guard]`). A decorator executes before ANY
+    /// statement of the body, so policy guard requirements are satisfied
+    /// by a matching entry guard without a guard call inside the body.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub entry_guards: Vec<String>,
     #[cfg_attr(feature = "serialize", serde(default))]
     // legacy safety: recompute via max ids if absent
     next_var_id: usize,
@@ -314,6 +320,7 @@ impl FunctionIR {
             entry_block: entry_id,
             var_metadata: FxHashMap::default(),
             enclosing_fn: None,
+            entry_guards: Vec::new(),
             next_var_id: 1,
             next_block_id: 1,
         };

@@ -192,6 +192,55 @@ pub fn wipe(vol: &Volume) {
         );
     }
 
+    /// Decorator-as-guard: a definition decorated with the taught helper
+    /// (`@ensure_owner`) enforces before ANY statement of the body, so a
+    /// trigger inside it is guarded with no guard call present - the
+    /// caller-side enforcement shape that otherwise fires as a false
+    /// positive (WI-08).
+    #[test]
+    fn decorator_guard_suppresses_policy_finding() {
+        const PY_DECORATED_TRIGGER: &str = r#"
+@ensure_owner
+def wipe(vol):
+    ops.wipe_volume(vol)
+"#;
+        const PY_UNDECORATED_TRIGGER: &str = r#"
+def wipe(vol):
+    ops.wipe_volume(vol)
+"#;
+        let mut facts = FactTable::default();
+        facts.learned_checks.push((
+            wipe_check_at("wipe_volume", Some("ensure_owner")),
+            Provenance::Learned,
+        ));
+
+        let fns = lower_source("t.py", PY_DECORATED_TRIGGER, "py").unwrap();
+        let irs: Vec<&'static FunctionIR> = fns
+            .into_values()
+            .map(|ir| -> &'static FunctionIR { Box::leak(Box::new(ir)) })
+            .collect();
+        let hits = policy::check_program(&irs, &facts);
+        assert!(
+            hits.is_empty(),
+            "decorated definition is an entry guard that dominates every statement: {:?}",
+            hits
+        );
+
+        let fns = lower_source("t.py", PY_UNDECORATED_TRIGGER, "py").unwrap();
+        let irs: Vec<&'static FunctionIR> = fns
+            .into_values()
+            .map(|ir| -> &'static FunctionIR { Box::leak(Box::new(ir)) })
+            .collect();
+        let hits = policy::check_program(&irs, &facts);
+        assert_eq!(
+            hits.len(),
+            1,
+            "undecorated trigger must still fire: {:?}",
+            hits
+        );
+        assert_eq!(hits[0].rule, "policy_wipe_without_owner");
+    }
+
     /// The same rule expressed as a native PolicyFact must fire/suppress
     /// identically: `from_legacy` is the lossless inverse.
     #[test]
