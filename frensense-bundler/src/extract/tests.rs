@@ -773,7 +773,9 @@ mod policy_proposal_tests {
         let families = group_families(dir.path()).unwrap();
         assert_eq!(families.len(), 1, "one family expected");
 
-        let (learned_table, published) = extract_facts_with_tables(&families, &config, &table);
+        // This test's scan context is the bundle table below (_learned_table
+        // semantics are asserted by the sibling fixtures at 707/834/903).
+        let (_learned_table, published) = extract_facts_with_tables(&families, &config, &table);
         let taught = published.iter().any(|f| matches!(&f.entry,
             LearnedFactEntry::IntegerOverflowUnboundedRule { rule, .. } if rule == "integer_overflow_alloc_unbounded"));
         assert!(
