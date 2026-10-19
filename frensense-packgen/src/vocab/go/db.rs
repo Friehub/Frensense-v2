@@ -114,6 +114,9 @@ pub(crate) fn go_classify_sanitizer(call: &str) -> Option<crate::role_map::Sanit
         }
         // Path cleaning - partial mitigation for path traversal
         "Clean" | "Abs" | "EvalSymlinks" => Some(crate::role_map::SanitizerKind::PathNormalize),
+        // Basename extraction: `filepath.Base(p)` keeps only the last path
+        // element, so no directory component (and no traversal) survives it.
+        "Base" => Some(crate::role_map::SanitizerKind::PathNormalize),
         _ => None,
     }
 }
@@ -129,6 +132,7 @@ pub(crate) static GO_SANITIZER_NAMES: &[&str] = &[
     "strconv.Atoi",
     "Sanitize",
     "EscapeText",
+    "filepath.Base",
 ];
 
 /// Propagators: (call, tainted_arg-slot, tainted_receiver). Travels taint

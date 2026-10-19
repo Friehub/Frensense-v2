@@ -45,7 +45,11 @@ pub(crate) static PY_CORE_SINKS: &[(&str, SinkLabel)] = &[
     ("query", SinkLabel::SqlInjection),
     ("executeRaw", SinkLabel::SqlInjection),
     ("queryRaw", SinkLabel::SqlInjection),
-    ("filter", SinkLabel::SqlInjection),
+    // NOTE: no bare `filter` entry. `Model.objects.filter(**kwargs)` builds a
+    // *parameterized* query - Django escapes the bound values - so treating
+    // the call as a raw-SQL sink flagged every ORM read as an injection
+    // (`User.objects.filter(id=uid)`). The raw escape hatches are `raw()` and
+    // `extra()`, declared above and below.
     ("extra", SinkLabel::SqlInjection),
     ("prepare", SinkLabel::SqlInjection),
     // ── Path Traversal ──

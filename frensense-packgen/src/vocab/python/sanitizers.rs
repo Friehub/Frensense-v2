@@ -35,6 +35,10 @@ pub(crate) fn python_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
         "quote" | "quote_plus" | "urlencode" => Some(SanitizerKind::UrlEncode),
         // Path normalization
         "realpath" | "abspath" | "normpath" | "normcase" => Some(SanitizerKind::PathNormalize),
+        // Basename extraction: Werkzeug's `secure_filename` drops directory
+        // separators and traversal segments (the standard upload-name
+        // sanitiser), so a path built from its result has no traversal left.
+        "secure_filename" => Some(SanitizerKind::PathNormalize),
         // SQL parameterization (SQLAlchemy `text()` with bound params)
         "text" | "literal" | "bindparam" => Some(SanitizerKind::SqlParameterize),
         _ => None,
@@ -69,4 +73,5 @@ pub(crate) static PY_SANITIZER_NAMES: &[&str] = &[
     "urllib.parse.quote",
     "html.escape",
     "paramstyle",
+    "secure_filename",
 ];

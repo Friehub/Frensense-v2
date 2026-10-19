@@ -60,6 +60,20 @@ pub(crate) static PY_WEB_SINKS: &[(&str, crate::role_map::SinkLabel)] = &[
     ("post", crate::role_map::SinkLabel::Ssrf),
     ("request", crate::role_map::SinkLabel::Ssrf),
     ("send", crate::role_map::SinkLabel::Ssrf),
+    // HTTP clients: the URL argument is attacker-controlled when it comes
+    // from the request. Declared under the client root (`requests.get`, not
+    // the bare verb) so only a qualified call arms - a bare `get`/`post`
+    // on an unrelated receiver stays whatever that receiver's own API says.
+    ("requests.get", crate::role_map::SinkLabel::Ssrf),
+    ("requests.post", crate::role_map::SinkLabel::Ssrf),
+    ("requests.put", crate::role_map::SinkLabel::Ssrf),
+    ("requests.patch", crate::role_map::SinkLabel::Ssrf),
+    ("requests.delete", crate::role_map::SinkLabel::Ssrf),
+    ("requests.head", crate::role_map::SinkLabel::Ssrf),
+    ("requests.request", crate::role_map::SinkLabel::Ssrf),
+    ("httpx.get", crate::role_map::SinkLabel::Ssrf),
+    ("httpx.post", crate::role_map::SinkLabel::Ssrf),
+    ("urllib.request.urlopen", crate::role_map::SinkLabel::Ssrf),
     // Open Redirect
     ("redirect", crate::role_map::SinkLabel::OpenRedirect),
     // XSS (reflected)
