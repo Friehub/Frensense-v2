@@ -137,7 +137,10 @@ def load_baseline_facts(path: str | Path) -> dict[str, dict[str, int]]:
             rule = rule_id_of(m.group(1))
             if not rule:
                 raise ValueError(f"no rule id in baseline line: {line!r}")
-            tag, count = m.group(1).split(":", 1)
+            rest = m.group(1)
+            if ":" not in rest or rest.count(":") != 1:
+                raise ValueError(f"baseline line has no count separator: {line!r}")
+            tag, count = rest.split(":", 1)
             facts[rule][tag.strip()] = int(count.strip())
     return facts
 
