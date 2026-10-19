@@ -22,13 +22,24 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
         return false;
     };
     if idx >= b.instructions.len() {
-        // Sentinel node: function parameter. A parameter whose conventional
-        // name is a configured source (e.g. "req", "input", "body") is itself
-        // a taint source, the pack's conventional request-param vocabulary.
-        if let Some(meta) = ir.var_metadata.get(&var)
-            && let Some(name) = &meta.source_name
-        {
-            return config.sources.contains(name);
+        // Sentinel node: function parameter. Two pack-driven ways a parameter
+        // is a source:
+        //   1. its conventional NAME is a source ("req", "input", "body");
+        //   2. its TYPE annotation names one of the framework's request
+        //      value types (`Query<P>`, `web::Query<P>`, `*http.Request`).
+        // (2) exists because for typed languages the extractor type - not
+        // the author's variable name - decides that the argument carries
+        // attacker input. Matching the type keeps the knowledge in the
+        // pack's source vocabulary while the mechanism stays name-agnostic.
+        if let Some(meta) = ir.var_metadata.get(&var) {
+            if let Some(name) = &meta.source_name
+                && config.sources.contains(name)
+            {
+                return true;
+            }
+            return meta.type_name.as_deref().is_some_and(|ty| {
+                source_path_matches(config, ty, ty.split("::").next().unwrap_or(ty))
+            });
         }
         return false;
     }

@@ -12,11 +12,18 @@
 //! - `framework_ioc_tests`: Express, Flask, and NestJS route entrypoints
 
 use crate::analysis::taint::engine::BackwardVerdict;
-use crate::analysis::taint::facts::seeded_tables_all;
+use crate::analysis::taint::facts::seeded_tables;
 use crate::scan::{ScanResult, scan};
 
 pub fn scan_files(files: &[(&str, &str, &str)]) -> ScanResult {
-    let (config, facts) = seeded_tables_all();
+    // Scope the fact tables to the languages under test, exactly as the CLI
+    // does for the files it is given. Merging EVERY language's vocabulary
+    // instead drags in same-named facts from unrelated ecosystems - the JS
+    // sanitizer `format` (knex/pg SQL parameterization) cut Rust `format!`
+    // flows - which no real scan would ever do, so a probe could fail on
+    // vocabulary the product never applies to that file.
+    let exts: Vec<&str> = files.iter().map(|(_, _, e)| *e).collect();
+    let (config, facts) = seeded_tables(exts);
     let file_tuples: Vec<(String, String, String)> = files
         .iter()
         .map(|(p, s, e)| (p.to_string(), s.to_string(), e.to_string()))
@@ -77,6 +84,7 @@ pub fn assert_clean(res: &ScanResult, probe_name: &str) {
 
 mod async_concurrency_tests;
 mod cve_reproductions_tests;
+mod extractor_source_tests;
 mod financial_enterprise_tests;
 mod framework_ioc_tests;
 mod multi_lang_tests;

@@ -18,8 +18,10 @@ fn rust_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
         "clean" | "ammonia" | "escape_html" => Some(SanitizerKind::HtmlEscape),
         // URL
         "encode" | "percent_encode" | "utf8_percent_encode" => Some(SanitizerKind::UrlEncode),
-        // Path
-        "canonicalize" | "normalize" => Some(SanitizerKind::PathNormalize),
+        // Path: `canonicalize`/`normalize` resolve traversal away; the
+        // basename extractor `Path::file_name()` drops every directory
+        // component, so a traversal payload cannot survive it.
+        "canonicalize" | "normalize" | "file_name" => Some(SanitizerKind::PathNormalize),
         _ => None,
     }
 }
@@ -254,6 +256,9 @@ pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("executeRaw", crate::role_map::SinkLabel::SqlInjection),
     ("queryRaw", crate::role_map::SinkLabel::SqlInjection),
     ("prepare", crate::role_map::SinkLabel::SqlInjection),
+    // diesel's raw escape hatch: `sql_query(sql)` interpolates a SQL string
+    // (the DSL, `users::table.filter(..)`, binds parameters instead).
+    ("sql_query", crate::role_map::SinkLabel::SqlInjection),
     // Command Injection
     ("Command", crate::role_map::SinkLabel::CommandInjection),
     ("Command::new", crate::role_map::SinkLabel::CommandInjection),
@@ -291,6 +296,9 @@ pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("request", crate::role_map::SinkLabel::Ssrf),
     // Open Redirect
     ("redirect", crate::role_map::SinkLabel::OpenRedirect),
+    // Reflected XSS: `axum::response::Html(body)` writes the body into the
+    // response verbatim (compare the escaped `Html` wrapper from a template).
+    ("Html", crate::role_map::SinkLabel::XssReflected),
     // SSTI
     ("render", crate::role_map::SinkLabel::TemplateSsti),
     // Unsafe Memory
@@ -356,6 +364,11 @@ pub(super) static RUST_SANITIZER_NAMES: &[&str] = &[
     "urlencoding::encode",
     "shell_words::quote",
     "atoi",
+    // `"42".parse::<i64>()` yields a typed number - no injection payload
+    // survives it (the classifier maps it to Full).
+    "parse",
+    // `Path::new(p).file_name()` - basename only.
+    "file_name",
 ];
 
 pub(super) const RUST_VOCAB: LanguageVocab = LanguageVocab {
