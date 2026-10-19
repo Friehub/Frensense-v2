@@ -170,6 +170,8 @@ pub fn checker_rule_cwe(rule: &str) -> Option<&'static str> {
         crate::rules::INTEGER_OVERFLOW_ALLOC => "CWE-190",
         crate::rules::MEMORY_LEAK => "CWE-401",
         "policy_open_redirect" => "CWE-601",
+        "cookie_secure_missing" => "CWE-614",
+        "cookie_httponly_missing" => "CWE-1004",
         _ => return None,
     })
 }
@@ -746,6 +748,17 @@ mod checker_observation_tests {
 #[cfg(test)]
 mod cwe_mapping_tests {
     use super::{checker_rule_cwe, taint_cwe, SinkRole};
+
+    /// A cookie finding must be attributable: Secure and HttpOnly are
+    /// different weaknesses and carry different CWEs.
+    #[test]
+    fn cookie_rules_carry_distinct_cwes() {
+        assert_eq!(checker_rule_cwe("cookie_secure_missing"), Some("CWE-614"));
+        assert_eq!(
+            checker_rule_cwe("cookie_httponly_missing"),
+            Some("CWE-1004")
+        );
+    }
 
     #[test]
     fn taint_role_and_label_pin_the_cwe() {

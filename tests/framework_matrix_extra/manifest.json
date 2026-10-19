@@ -1045,8 +1045,7 @@
         "pg"
       ],
       "title": "pg Pool named x (name must not matter)"
-    }
-,
+    },
     {
       "id": "py29_list_append",
       "lang": "python",
@@ -1076,6 +1075,36 @@
         "flask"
       ],
       "title": "taint via list.append then return"
+    },
+    {
+      "id": "py50_cookie_secure_true_no_httponly",
+      "lang": "python",
+      "file": "python/py50_cookie_secure_true_no_httponly.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "Secure cookie lacking HttpOnly stays silent by default (hygiene tier)"
+    },
+    {
+      "id": "py51_cookie_secure_absent",
+      "lang": "python",
+      "file": "python/py51_cookie_secure_absent.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "cookie with no Secure flag"
+    },
+    {
+      "id": "py52_cookie_compliant",
+      "lang": "python",
+      "file": "python/py52_cookie_compliant.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "cookie with Secure and HttpOnly set"
     }
   ]
 }

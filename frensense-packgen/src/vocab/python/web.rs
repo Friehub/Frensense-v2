@@ -17,24 +17,38 @@ pub(crate) static PY_REQUEST_PARAM_NAMES: &[&str] = &["request", "req", "r"];
 /// secure=False)` puts it at slot 2. No positional slot rule is correct for
 /// both, which is why these key on the argument name the lowering records.
 /// Package-scoped: only `set_cookie` in a file importing Flask fires.
-pub(crate) static PY_POLICIES: &[super::super::PolicySpec] = &[super::super::PolicySpec {
-    rule: "insecure_cookie_flags",
-    when_call: "set_cookie",
-    require: &[
-        super::super::RequirementSpec::RequireNamedArgLiteral {
+///
+/// Two rules, not one: a cookie without `Secure` (CWE-614) and a cookie
+/// without `HttpOnly` (CWE-1004) are different defects with different
+/// confidence. A single rule that required both reported "without Secure
+/// and HttpOnly" even when Secure was set, and flagged every cookie that
+/// merely lacked HttpOnly, which produced the benchmark false positives.
+pub(crate) static PY_POLICIES: &[super::super::PolicySpec] = &[
+    super::super::PolicySpec {
+        rule: "cookie_secure_missing",
+        when_call: "set_cookie",
+        require: &[super::super::RequirementSpec::RequireNamedArgLiteral {
             name: "secure",
             values: &["true"],
-        },
-        super::super::RequirementSpec::RequireNamedArgLiteral {
+        }],
+        message: "Cookie is set without Secure=True; browsers may send it over plain HTTP.",
+        severity: "warning",
+        package: Some("flask"),
+        tier: super::super::RuleTier::Stable,
+    },
+    super::super::PolicySpec {
+        rule: "cookie_httponly_missing",
+        when_call: "set_cookie",
+        require: &[super::super::RequirementSpec::RequireNamedArgLiteral {
             name: "httponly",
             values: &["true"],
-        },
-    ],
-    message:
-        "Cookie is set without the Secure and HttpOnly flags; session cookies must carry both.",
-    severity: "warning",
-    package: Some("flask"),
-}];
+        }],
+        message: "Cookie is set without HttpOnly=True; page scripts can read it.",
+        severity: "warning",
+        package: Some("flask"),
+        tier: super::super::RuleTier::Hygiene,
+    },
+];
 
 /// Request-source patterns: which member paths carry untrusted input.
 /// Split by framework because `request.args` (Flask), `request.GET` (Django)

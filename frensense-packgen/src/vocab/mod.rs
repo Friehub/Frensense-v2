@@ -77,6 +77,21 @@ pub(crate) struct PolicySpec {
     pub severity: &'static str,
     /// Only fire in files importing this package (`None` = unscoped).
     pub package: Option<&'static str>,
+    /// Precision tier. Only [`RuleTier::Stable`] rules are emitted into the
+    /// default pack; the rest are defined and tested but stay out of default
+    /// scans until profile selection lands.
+    pub tier: RuleTier,
+}
+
+/// How much a rule's findings can be trusted without review.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum RuleTier {
+    /// High-confidence, benchmarked: ships in the default pack.
+    Stable,
+    /// Hygiene-grade: true statement about the code, but often not a
+    /// vulnerability on its own (for example a non-session cookie without
+    /// HttpOnly). Held out of the default pack to protect precision.
+    Hygiene,
 }
 
 /// Static form of a [`PolicyRequirement`]; owned strings are built at
@@ -209,7 +224,7 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
     // Structural policies: emitted as the same fact shapes a bundle uses,
     // so the conclusion (which call, which flags) is data from the moment
     // it is generated.
-    for p in v.policies {
+    for p in v.policies.iter().filter(|p| p.tier == RuleTier::Stable) {
         let require: Vec<PolicyRequirement> = p
             .require
             .iter()
@@ -256,4 +271,53 @@ pub(crate) fn all_vocab() -> Vec<&'static LanguageVocab> {
         rust::vocab(),
         javascript::typescript_vocab(),
     ]
+}
+
+#[cfg(test)]
+mod tier_tests {
+    use super::*;
+    use frensense_engine::analysis::taint::facts::LearnedFactEntry;
+
+    fn policy_rules(entries: &[LearnedFactEntry]) -> Vec<String> {
+        entries
+            .iter()
+            .filter_map(|e| match e {
+                LearnedFactEntry::Policy { rule, .. }
+                | LearnedFactEntry::PolicyScoped { rule, .. } => Some(rule.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The default pack carries the Secure rule and leaves the
+    /// hygiene-tier HttpOnly rule out, so a cookie with `secure=True` and
+    /// no `httponly` produces no default finding.
+    #[test]
+    fn default_pack_holds_stable_cookie_rule_only() {
+        let rules: Vec<String> = all_vocab()
+            .into_iter()
+            .flat_map(|v| policy_rules(&entries_for_static(v)))
+            .collect();
+        assert!(
+            rules.iter().any(|r| r == "cookie_secure_missing"),
+            "{rules:?}"
+        );
+        assert!(
+            !rules.iter().any(|r| r == "cookie_httponly_missing"),
+            "hygiene-tier rule leaked into the default pack: {rules:?}"
+        );
+    }
+
+    /// Every policy declares a tier, and the hygiene rule still exists as
+    /// data (so profile selection can enable it later).
+    #[test]
+    fn hygiene_rule_is_defined_but_not_emitted() {
+        let defined: Vec<&str> = all_vocab()
+            .into_iter()
+            .flat_map(|v| v.policies.iter())
+            .filter(|p| p.tier == RuleTier::Hygiene)
+            .map(|p| p.rule)
+            .collect();
+        assert!(defined.contains(&"cookie_httponly_missing"), "{defined:?}");
+    }
 }
