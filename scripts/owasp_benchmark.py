@@ -37,8 +37,8 @@ A scan that crashes, times out, exits with a code other than 0 or 1, or
 prints invalid JSON is class ERR: reported separately, excluded from the
 rates, and fails the run (exit 3) unless --allow-errors is given.
 
-Exit codes: 0 ok, 1 setup error, 3 scan errors, 4 regression vs --baseline
-(only with --fail-on-regression).
+Exit codes: 0 ok, 1 setup error, 3 scan errors, 4 regression vs
+--baseline (only with --fail-on-regression).
 
 Usage:
 
@@ -49,9 +49,9 @@ Usage:
   cargo build --release
 
   # 3. run
-  python3 scripts/owasp_benchmark.py \
-    --owasp-csv /tmp/BenchmarkPython/expectedresults-0.1.csv \
-    --owasp-testcode /tmp/BenchmarkPython/testcode \
+  python3 scripts/owasp_benchmark.py \\
+    --owasp-csv /tmp/BenchmarkPython/expectedresults-0.1.csv \\
+    --owasp-testcode /tmp/BenchmarkPython/testcode \\
     --json-out owasp_scorecard.json
 
   # 4. track progress: compare against a committed baseline in CI
@@ -198,7 +198,7 @@ def classify(vul: bool, mode: str, case_cwe: str, adv_cwes: list[set[str]]) -> s
     return "FP" if hit else "TN"
 
 
-def rates(d) -> dict:
+def rates(d: dict) -> dict:
     out = {}
     for k, v in d.items():
         tp, fp, fn, tn = (v.get(c, 0) for c in ("TP", "FP", "FN", "TN"))
@@ -301,7 +301,7 @@ def print_scorecard(s: dict, elapsed: float, diff: dict | None) -> None:
     n = t["TP"] + t["FP"] + t["FN"] + t["TN"] + t["ERR"]
     mode = s["meta"]["match"]
     print(f"\n{'=' * 62}")
-    print(f"FRENSENSE on OWASP BenchmarkPython  ({n} cases, {elapsed:.0f}s)")
+    print(f"FRENESENSE on OWASP BenchmarkPython  ({n} cases, {elapsed:.0f}s)")
     print(f"{'=' * 62}")
     print(f"match mode: {mode}")
     print(f"TPR {t['tpr']*100:5.1f}%   FPR {t['fpr']*100:5.1f}%   SCORE (TPR-FPR) {t['score']*100:5.1f}%")
@@ -516,7 +516,7 @@ def describe_bundle(bundle: Path | None, testcode: Path) -> tuple[str, dict | No
     neither is present."""
     if bundle is not None:
         digest = hashlib.sha256(bundle.read_bytes()).hexdigest()[:12]
-        return f"`{bundle.name}` (sha256 `{digest}`)", None
+        return f"`{bundle.name}` (sha256 `{digest}`)\n", None
     env = {k: v for k, v in os.environ.items() if k != "FRENSENSE_CORPUS_BUNDLE"}
     ambient = [
         p for p in (testcode / "frensense-corpus.frc",
@@ -528,7 +528,7 @@ def describe_bundle(bundle: Path | None, testcode: Path) -> tuple[str, dict | No
         print(f"[WARN] auto-discoverable bundle found: {ambient[0]}. "
               "This run may not be bare; remove it or pass --bundle explicitly.", file=sys.stderr)
         return f"**none passed, but `{ambient[0]}` is auto-discoverable; run may not be bare**", env
-    return "none (bare engine; `FRENSENSE_CORPUS_BUNDLE` cleared)", env
+    return "none (bare engine; `FRENSENSE_CORPUS_BUNDLE` cleared)\n", env
 
 
 def main() -> None:
@@ -563,7 +563,7 @@ def main() -> None:
 
     binary = resolve_binary(args.bin)
     if not binary or not binary.exists():
-        print(f"[ERROR] frensense binary not found.", file=sys.stderr)
+        print("[ERROR] frensense binary not found.", file=sys.stderr)
         print("        Build it with: cargo build --release", file=sys.stderr)
         print("        Or specify with: --bin /path/to/frensense", file=sys.stderr)
         sys.exit(1)
