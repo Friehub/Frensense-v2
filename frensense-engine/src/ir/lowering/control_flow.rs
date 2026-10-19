@@ -421,21 +421,46 @@ impl<'a> LoweringContext<'a> {
             .filter(|c| c.is_named())
             .collect();
 
-        let cond_node = children
-            .iter()
-            .find(|c| {
-                let k = c.kind();
-                !k.contains("statement") && k != "block" && k != "else_clause"
-            })
-            .copied();
-        let cons_node = children
-            .iter()
-            .find(|c| {
-                let k = c.kind();
-                k.contains("statement") || k.contains("block")
-            })
-            .copied();
-        let alt_node = children.iter().find(|c| c.kind().contains("else")).copied();
+        // Grammar fields first (every language we ship names these), so an
+        // `if` initializer is never mistaken for the condition and a
+        // grammar without an explicit `else_clause` node still finds its
+        // alternative. Go is the concrete case: `if v := get(); v != "" {...}
+        // else {...}` has an `initializer` field (`v := get()`) that the old
+        // first-child heuristic lowered as the condition - leaving the real
+        // `v != ""` comparison and the whole `else` arm unlowered, so taint
+        // assigned in the `else` arm (and the join) vanished.
+        let init_node = node.child_by_field_name("initializer");
+        let cond_node = node.child_by_field_name("condition").or_else(|| {
+            children
+                .iter()
+                .find(|c| {
+                    let k = c.kind();
+                    !k.contains("statement")
+                        && !k.contains("declaration")
+                        && !k.contains("assignment")
+                        && k != "block"
+                        && k != "else_clause"
+                })
+                .copied()
+        });
+        let cons_node = node.child_by_field_name("consequence").or_else(|| {
+            children
+                .iter()
+                .find(|c| {
+                    let k = c.kind();
+                    k.contains("statement") || k.contains("block")
+                })
+                .copied()
+        });
+        let alt_node = node
+            .child_by_field_name("alternative")
+            .or_else(|| children.iter().find(|c| c.kind().contains("else")).copied());
+
+        // An initializer runs on the fall-through path before the test; its
+        // bindings must be visible to the condition and both arms.
+        if let Some(init) = init_node {
+            self.visit_node(init);
+        }
 
         let cond_op = cond_node
             .and_then(|c| self.visit_node(c))

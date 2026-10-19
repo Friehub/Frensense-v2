@@ -36,6 +36,60 @@ func h(w http.ResponseWriter, r *http.Request) {
     assert_detected(&scan_go(src), "go_http_get_ssrf_slot_zero", "Get");
 }
 
+/// Go `if v := src(); v != "" { q = v } else { q = "0" }` then a sink on `q`:
+/// the initializer must not be lowered as the condition, the `else` arm must
+/// be found even though Go has no `else_clause` node, and the plain
+/// assignment must survive `expression_list` wrapping. Broken, the whole join
+/// vanished (empty arm blocks, no phi) and the sink was silent.
+#[test]
+fn probe_go_if_init_else_join_fires() {
+    let src = r#"
+package main
+
+import (
+	"database/sql"
+	"net/http"
+)
+
+var db *sql.DB
+
+func h(w http.ResponseWriter, r *http.Request) {
+	var q string
+	if v := r.URL.Query().Get("id"); v != "" {
+		q = v
+	} else {
+		q = "0"
+	}
+	db.Query("SELECT * FROM users WHERE id = " + q)
+}
+"#;
+    assert_detected(&scan_go(src), "go_if_init_else_join", "Query");
+}
+
+/// Python truthiness join: `if raw: q = raw else: q = "0"` followed by a
+/// sink on `q`. Branch sharpening must not record `BoolConst(true)` for a
+/// non-boolean condition operand - doing so claimed `q = raw` was a constant
+/// on the true arm and the walk cut the real flow as attacker-independent.
+#[test]
+fn probe_py_truthiness_join_fires() {
+    let src = r#"
+from flask import Flask, request
+import sqlite3
+
+app = Flask(__name__)
+
+@app.route("/u")
+def u():
+    raw = request.args.get("id")
+    if raw:
+        q = raw
+    else:
+        q = "0"
+    return str(sqlite3.connect("x").execute("SELECT * FROM t WHERE id = " + q).fetchall())
+"#;
+    assert_detected(&scan_py(src), "py_truthiness_join", "execute");
+}
+
 /// Control: the sqlx slot rule still governs a receiver whose origin is not
 /// `net/http`. `dest` at slot 0 is an out-parameter, so a tainted value
 /// there must stay silent rather than inheriting the transport's all-args

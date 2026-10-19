@@ -45,8 +45,20 @@ impl<'a> LoweringContext<'a> {
         lhs_field: &str,
         rhs_field: &str,
     ) -> Option<Operand> {
-        let left_node = node.child_by_field_name(lhs_field)?;
-        let right_node = node.child_by_field_name(rhs_field)?;
+        // Some grammars wrap the target and/or value in a list node: Go's
+        // `assignment_statement` gives `expression_list` for both sides, so
+        // `q = v` reached `visit_lvalue(expression_list)` (role Other) and the
+        // store was dropped entirely - taint assigned inside an `if`/loop
+        // body never reached the variable read after the join. Unwrap the
+        // single-target form the same way declarations already do
+        // (`short_var_declaration` was unaffected, which is why its binding
+        // survived while plain assignment did not).
+        let left_node = self
+            .spec
+            .unwrap_declarator_node(node.child_by_field_name(lhs_field)?);
+        let right_node = self
+            .spec
+            .unwrap_declarator_node(node.child_by_field_name(rhs_field)?);
 
         let rhs_op = self.visit_node(right_node).unwrap_or(Operand::Unknown);
         let compound = self.compound_operator(node);
