@@ -137,7 +137,7 @@
       "layer": "ENGINE",
       "work_item": "WI-01",
       "evidence": "verified",
-      "summary": "receiver origin through sqlite3.connect() is not tracked; only names like conn/cur/db match. Passes on 0.7.0, fails on engine/package-scoped-facts"
+      "summary": "sqlite3.connect() receiver origin tracked; single-letter receiver works (shown against 0.7.0)"
     },
     "js36_receiver_name_x": {
       "layer": "ENGINE",
@@ -156,6 +156,24 @@
       "also": [
         "KNOWLEDGE"
       ]
+    },
+    "py29_list_append": {
+      "layer": "ENGINE",
+      "work_item": "WI-15",
+      "evidence": "verified",
+      "summary": "list.append receives tainted element; SVFG copies args into receiver element-def; sink fires"
+    },
+    "py30_list_append_grow": {
+      "layer": "ENGINE",
+      "work_item": "WI-15",
+      "evidence": "verified",
+      "summary": "list.append receives tainted element; SVFG copies args into receiver element-def; sink fires"
+    },
+    "py31_list_append_sink": {
+      "layer": "ENGINE",
+      "work_item": "WI-15",
+      "evidence": "verified",
+      "summary": "list.append receives tainted element; SVFG copies args into receiver element-def; sink fires"
     }
   }
 }

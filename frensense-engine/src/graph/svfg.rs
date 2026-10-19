@@ -432,6 +432,26 @@ impl<'a> SvfgBuilder<'a> {
                         .add_edge(NodeKey::instr(block_id, idx, *sv), base_def);
                 }
 
+                if let Instruction::CallVirtual {
+                    receiver: Operand::Var(base),
+                    method,
+                    args,
+                    ..
+                } = instr
+                    && matches!(
+                        method.as_str(),
+                        "append" | "push" | "add" | "extend" | "unshift" | "insert"
+                    )
+                    && let Some(base_def) = self.allocation_def(*base)
+                {
+                    for arg in args {
+                        if let Operand::Var(sv) = arg {
+                            self.graph
+                                .add_edge(NodeKey::instr(block_id, idx, *sv), base_def);
+                        }
+                    }
+                }
+
                 // b) Memory flow: mem_in-use → mem_out-def (pass-through /
                 //    weak update semantics at the graph level).
                 if uses_mem && has_mem_out {
@@ -525,6 +545,27 @@ impl<'a> SvfgBuilder<'a> {
                         },
                         src,
                     ),
+                    Instruction::CallVirtual {
+                        receiver: Operand::Var(r),
+                        method,
+                        args,
+                        ..
+                    } if matches!(
+                        method.as_str(),
+                        "append" | "push" | "add" | "extend" | "unshift" | "insert"
+                    ) =>
+                    {
+                        for arg in args {
+                            if let Operand::Var(sv) = arg {
+                                stores.push((
+                                    *r,
+                                    "*".to_string(),
+                                    NodeKey::instr(block_id, idx, *sv),
+                                ));
+                            }
+                        }
+                        continue;
+                    }
                     _ => continue,
                 };
                 if let Operand::Var(sv) = src {
