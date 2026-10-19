@@ -50,6 +50,101 @@ impl Severity {
     }
 }
 
+/// Precision tier for rules and findings.
+#[derive(
+    Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RuleTier {
+    /// High-confidence, benchmarked: runs by default.
+    #[default]
+    Stable,
+    /// Medium-confidence: runs in `--profile recommended`.
+    Beta,
+    /// Low-confidence or unbenchmarked: runs in `--profile strict`.
+    Experimental,
+    /// True statement about code, but often not a vulnerability on its own.
+    /// Runs in `--profile strict`.
+    Hygiene,
+}
+
+impl RuleTier {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Beta => "beta",
+            Self::Experimental => "experimental",
+            Self::Hygiene => "hygiene",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "stable" => Some(Self::Stable),
+            "beta" => Some(Self::Beta),
+            "experimental" => Some(Self::Experimental),
+            "hygiene" => Some(Self::Hygiene),
+            _ => None,
+        }
+    }
+
+    /// The minimum profile required for findings of this tier to be reported.
+    #[must_use]
+    pub fn required_profile(&self) -> &'static str {
+        match self {
+            Self::Stable => "default",
+            Self::Beta => "recommended",
+            Self::Experimental | Self::Hygiene => "strict",
+        }
+    }
+}
+
+/// Profile selection for scans: governs which tiers are reported.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum Profile {
+    /// Default profile: runs benchmarked, precise `Stable` rules only.
+    #[default]
+    Default,
+    /// Recommended profile: runs `Stable` and `Beta` rules.
+    Recommended,
+    /// Strict profile: runs all rules including `Experimental` and `Hygiene`.
+    Strict,
+}
+
+impl Profile {
+    #[must_use]
+    pub fn includes_tier(&self, tier: RuleTier) -> bool {
+        match self {
+            Self::Default => matches!(tier, RuleTier::Stable),
+            Self::Recommended => matches!(tier, RuleTier::Stable | RuleTier::Beta),
+            Self::Strict => true,
+        }
+    }
+
+    pub fn parse(s: &str) -> std::result::Result<Self, String> {
+        match s.to_ascii_lowercase().as_str() {
+            "default" => Ok(Self::Default),
+            "recommended" => Ok(Self::Recommended),
+            "strict" => Ok(Self::Strict),
+            other => Err(format!(
+                "unknown profile '{other}' (expected: default, recommended, strict)"
+            )),
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Recommended => "recommended",
+            Self::Strict => "strict",
+        }
+    }
+}
+
 /// What the sink does with the value flowing into it.
 ///
 /// Two sinks that both "receive tainted data" are not equally dangerous:
@@ -174,6 +269,15 @@ pub fn checker_rule_cwe(rule: &str) -> Option<&'static str> {
         "cookie_httponly_missing" => "CWE-1004",
         _ => return None,
     })
+}
+
+/// Precision tier for a built-in checker or policy rule id.
+#[must_use]
+pub fn checker_rule_tier(rule: &str) -> RuleTier {
+    match rule {
+        "cookie_httponly_missing" => RuleTier::Hygiene,
+        _ => RuleTier::Stable,
+    }
 }
 
 /// Sanitizer strength: what kind of injection does this call defeat?
@@ -816,5 +920,78 @@ mod cwe_mapping_tests {
             None,
             "learned rules take their CWE from the bundle pattern overlay"
         );
+    }
+}
+
+#[cfg(test)]
+mod tier_profile_tests {
+    use super::*;
+
+    #[test]
+    fn checker_rule_tier_mapping() {
+        assert_eq!(
+            checker_rule_tier("cookie_httponly_missing"),
+            RuleTier::Hygiene
+        );
+        assert_eq!(checker_rule_tier("cookie_secure_missing"), RuleTier::Stable);
+        assert_eq!(
+            checker_rule_tier(crate::rules::USE_AFTER_FREE),
+            RuleTier::Stable
+        );
+    }
+
+    #[test]
+    fn profile_includes_tier_coverage() {
+        let def = Profile::Default;
+        assert!(def.includes_tier(RuleTier::Stable));
+        assert!(!def.includes_tier(RuleTier::Beta));
+        assert!(!def.includes_tier(RuleTier::Experimental));
+        assert!(!def.includes_tier(RuleTier::Hygiene));
+
+        let rec = Profile::Recommended;
+        assert!(rec.includes_tier(RuleTier::Stable));
+        assert!(rec.includes_tier(RuleTier::Beta));
+        assert!(!rec.includes_tier(RuleTier::Experimental));
+        assert!(!rec.includes_tier(RuleTier::Hygiene));
+
+        let strict = Profile::Strict;
+        assert!(strict.includes_tier(RuleTier::Stable));
+        assert!(strict.includes_tier(RuleTier::Beta));
+        assert!(strict.includes_tier(RuleTier::Experimental));
+        assert!(strict.includes_tier(RuleTier::Hygiene));
+    }
+
+    #[test]
+    fn profile_parse_and_str() {
+        assert_eq!(Profile::parse("default").unwrap(), Profile::Default);
+        assert_eq!(Profile::parse("RECOMMENDED").unwrap(), Profile::Recommended);
+        assert_eq!(Profile::parse("strict").unwrap(), Profile::Strict);
+        assert!(Profile::parse("unknown").is_err());
+
+        assert_eq!(Profile::Default.as_str(), "default");
+        assert_eq!(Profile::Recommended.as_str(), "recommended");
+        assert_eq!(Profile::Strict.as_str(), "strict");
+    }
+
+    #[test]
+    fn tier_parse_and_str() {
+        assert_eq!(RuleTier::parse("stable"), Some(RuleTier::Stable));
+        assert_eq!(RuleTier::parse("BETA"), Some(RuleTier::Beta));
+        assert_eq!(
+            RuleTier::parse("experimental"),
+            Some(RuleTier::Experimental)
+        );
+        assert_eq!(RuleTier::parse("hygiene"), Some(RuleTier::Hygiene));
+        assert_eq!(RuleTier::parse("other"), None);
+
+        assert_eq!(RuleTier::Stable.as_str(), "stable");
+        assert_eq!(RuleTier::Beta.as_str(), "beta");
+        assert_eq!(RuleTier::Experimental.as_str(), "experimental");
+        assert_eq!(RuleTier::Hygiene.as_str(), "hygiene");
+
+        assert_eq!(RuleTier::Stable.required_profile(), "default");
+        assert_eq!(RuleTier::Beta.required_profile(), "recommended");
+        assert_eq!(RuleTier::Experimental.required_profile(), "strict");
+        assert_eq!(RuleTier::Hygiene.required_profile(), "strict");
     }
 }

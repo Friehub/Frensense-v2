@@ -40,6 +40,9 @@ pub struct CliOptions {
     /// `codeFlows`); `--show-flows` additionally embeds it in the text
     /// observation for terminal reports.
     pub show_flows: bool,
+    /// Precision profile: default (stable), recommended (stable + beta),
+    /// or strict (all tiers, including hygiene and experimental).
+    pub profile: crate::Profile,
 }
 
 /// Parse CLI arguments into structured scan options.
@@ -57,6 +60,7 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
         diff_only: false,
         explain: false,
         show_flows: false,
+        profile: crate::Profile::Default,
     };
 
     let mut i = 1;
@@ -95,6 +99,13 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
             "--diff-only" => options.diff_only = true,
             "--explain" => options.explain = true,
             "--show-flows" => options.show_flows = true,
+            "-p" | "--profile" => {
+                let val = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                options.profile = crate::Profile::parse(val)?;
+                i += 1;
+            }
             "-s" | "--severity" => {
                 let level = args
                     .get(i + 1)
@@ -279,5 +290,22 @@ mod tests {
         let err = parse_options(&to_args(&["this_file_does_not_exist_at_all.xyz"]))
             .expect_err("should reject");
         assert!(err.contains("does not exist"));
+    }
+
+    #[test]
+    fn profile_flag_parses() {
+        let opts = parse_options(&to_args(&["Cargo.toml"])).expect("parse");
+        assert_eq!(opts.profile, crate::Profile::Default);
+
+        let opts =
+            parse_options(&to_args(&["--profile", "recommended", "Cargo.toml"])).expect("parse");
+        assert_eq!(opts.profile, crate::Profile::Recommended);
+
+        let opts = parse_options(&to_args(&["-p", "strict", "Cargo.toml"])).expect("parse");
+        assert_eq!(opts.profile, crate::Profile::Strict);
+
+        let err = parse_options(&to_args(&["--profile", "invalid", "Cargo.toml"]))
+            .expect_err("should reject");
+        assert!(err.contains("unknown profile 'invalid'"));
     }
 }

@@ -128,6 +128,7 @@ impl Reporter {
                             "confidence": adv.confidence,
                             "requires_human": adv.requires_human,
                             "tags": adv.tags,
+                            "tier": adv.tier.as_str(),
                         }
                     })
                 }).collect::<Vec<_>>()

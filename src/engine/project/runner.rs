@@ -193,11 +193,16 @@ impl Engine {
             ));
         }
 
-        Ok(crate::policy::apply(
+        let (surviving, hidden) = crate::policy::apply_with_profile(
             advisories,
             self.min_confidence,
             self.severity_filter,
-        ))
+            self.profile,
+        );
+        for (tier, count) in hidden {
+            *self.hidden_by_tier.entry(tier).or_insert(0) += count;
+        }
+        Ok(surviving)
     }
 
     fn load_bundle_bytes(&self, root: &Path) -> Result<Option<&'static [u8]>> {
@@ -350,7 +355,9 @@ fn advisory_from_checker(
     } else {
         sanitize_corpus_provenance(&observation)
     };
+    let tier = frensense_lang::severity::checker_rule_tier(&c.rule);
     let mut advisory = Advisory::bare(title, severity, file_id, path, observation)
+        .with_tier(tier)
         .with_confidence(1.0)
         .with_line(line)
         .with_column(column)

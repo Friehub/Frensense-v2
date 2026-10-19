@@ -28,7 +28,7 @@ pub const FRENSENSE_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Advisory severity ranking - declared in `frensense-lang` alongside the
 /// per-language rule registries; re-exported here so every reporter surface
 /// (`cli`, `lsp`, `mcp`) keeps the `crate::Severity` path.
-pub use frensense_lang::Severity;
+pub use frensense_lang::{Profile, RuleTier, Severity};
 
 /// A single finding, rendered compiler-style: where, what, why, how to fix.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -58,6 +58,9 @@ pub struct Advisory {
     pub fingerprint: String,
     pub requires_human: bool,
     pub tags: Vec<String>,
+    /// Precision tier governing profile filtering.
+    #[serde(default)]
+    pub tier: RuleTier,
     /// Per-step descriptions of the taint flow (source→sink) plus the byte
     /// offset of each step, when the engine captured a path. Empty for
     /// non-dataflow findings. Rendered into SARIF `codeFlows`.
@@ -93,8 +96,14 @@ impl Advisory {
             fingerprint: String::new(),
             requires_human: true,
             tags: Vec::new(),
+            tier: RuleTier::Stable,
             taint_steps: Vec::new(),
         }
+    }
+
+    pub fn with_tier(mut self, tier: RuleTier) -> Self {
+        self.tier = tier;
+        self
     }
 
     pub fn with_confidence(mut self, v: f64) -> Self {

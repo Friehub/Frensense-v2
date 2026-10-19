@@ -198,15 +198,37 @@ pub fn print_results(
     Ok(())
 }
 
+/// Helper to format hidden finding count by tier for `--explain`.
+#[must_use]
+pub fn format_hidden_summary(tier: crate::RuleTier, count: usize) -> String {
+    let noun = if count == 1 { "finding" } else { "findings" };
+    format!(
+        "{} {} {} hidden; use --profile {}",
+        count,
+        tier.as_str(),
+        noun,
+        tier.required_profile()
+    )
+}
+
 /// Print the `--explain` section: every explored sink argument that did
-/// NOT become an advisory, with the reason the engine stayed silent.
+/// NOT become an advisory, with the reason the engine stayed silent, as well
+/// as counts of findings hidden by profile tiers.
 /// Written to stderr so it never contaminates the report on stdout.
-pub fn print_explain(records: &[ExplainRecord]) {
+pub fn print_explain(
+    records: &[ExplainRecord],
+    hidden_by_tier: &std::collections::BTreeMap<crate::RuleTier, usize>,
+) {
     eprintln!();
     eprintln!(
         "Explain: {} silent sink argument(s) explored (no advisory)",
         records.len()
     );
+    for (tier, &count) in hidden_by_tier {
+        if count > 0 {
+            eprintln!("  {}", format_hidden_summary(*tier, count));
+        }
+    }
     if records.is_empty() {
         eprintln!("  (none - every explored sink argument either reported or was not a sink)");
         return;

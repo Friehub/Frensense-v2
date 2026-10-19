@@ -77,22 +77,12 @@ pub(crate) struct PolicySpec {
     pub severity: &'static str,
     /// Only fire in files importing this package (`None` = unscoped).
     pub package: Option<&'static str>,
-    /// Precision tier. Only [`RuleTier::Stable`] rules are emitted into the
-    /// default pack; the rest are defined and tested but stay out of default
-    /// scans until profile selection lands.
+    /// Precision tier. Governs which scan profile reports this rule.
+    #[allow(dead_code)]
     pub tier: RuleTier,
 }
 
-/// How much a rule's findings can be trusted without review.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum RuleTier {
-    /// High-confidence, benchmarked: ships in the default pack.
-    Stable,
-    /// Hygiene-grade: true statement about the code, but often not a
-    /// vulnerability on its own (for example a non-session cookie without
-    /// HttpOnly). Held out of the default pack to protect precision.
-    Hygiene,
-}
+pub(crate) use frensense_lang::RuleTier;
 
 /// Static form of a [`PolicyRequirement`]; owned strings are built at
 /// emission time so the tables stay `&'static`.
@@ -223,8 +213,8 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
     }
     // Structural policies: emitted as the same fact shapes a bundle uses,
     // so the conclusion (which call, which flags) is data from the moment
-    // it is generated.
-    for p in v.policies.iter().filter(|p| p.tier == RuleTier::Stable) {
+    // it is generated. Profile selection filters reportable tiers at scan time.
+    for p in v.policies.iter() {
         let require: Vec<PolicyRequirement> = p
             .require
             .iter()
@@ -289,11 +279,9 @@ mod tier_tests {
             .collect()
     }
 
-    /// The default pack carries the Secure rule and leaves the
-    /// hygiene-tier HttpOnly rule out, so a cookie with `secure=True` and
-    /// no `httponly` produces no default finding.
+    /// The default pack carries the policies defined across all vocabularies.
     #[test]
-    fn default_pack_holds_stable_cookie_rule_only() {
+    fn default_pack_holds_policies_with_tiers() {
         let rules: Vec<String> = all_vocab()
             .into_iter()
             .flat_map(|v| policy_rules(&entries_for_static(v)))
@@ -303,21 +291,28 @@ mod tier_tests {
             "{rules:?}"
         );
         assert!(
-            !rules.iter().any(|r| r == "cookie_httponly_missing"),
-            "hygiene-tier rule leaked into the default pack: {rules:?}"
+            rules.iter().any(|r| r == "cookie_httponly_missing"),
+            "hygiene rule should be emitted for profile selection: {rules:?}"
         );
     }
 
-    /// Every policy declares a tier, and the hygiene rule still exists as
-    /// data (so profile selection can enable it later).
+    /// Every policy declares a tier.
     #[test]
-    fn hygiene_rule_is_defined_but_not_emitted() {
-        let defined: Vec<&str> = all_vocab()
+    fn policy_declarations_have_expected_tiers() {
+        let stable: Vec<&str> = all_vocab()
+            .into_iter()
+            .flat_map(|v| v.policies.iter())
+            .filter(|p| p.tier == RuleTier::Stable)
+            .map(|p| p.rule)
+            .collect();
+        assert!(stable.contains(&"cookie_secure_missing"), "{stable:?}");
+
+        let hygiene: Vec<&str> = all_vocab()
             .into_iter()
             .flat_map(|v| v.policies.iter())
             .filter(|p| p.tier == RuleTier::Hygiene)
             .map(|p| p.rule)
             .collect();
-        assert!(defined.contains(&"cookie_httponly_missing"), "{defined:?}");
+        assert!(hygiene.contains(&"cookie_httponly_missing"), "{hygiene:?}");
     }
 }

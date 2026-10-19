@@ -30,8 +30,12 @@ pub struct Engine {
     /// the path unconditionally now (WI-54); this knob only governs the
     /// text observation, the debug-grade detail of a clean text report.
     pub(crate) show_flows: bool,
+    /// Precision profile governing reportable finding tiers.
+    pub(crate) profile: crate::Profile,
     /// Silent-finding records from the most recent `run` (when `explain`).
     pub(crate) explain_records: Vec<crate::explain::ExplainRecord>,
+    /// Hidden finding counts grouped by tier.
+    pub(crate) hidden_by_tier: std::collections::BTreeMap<crate::RuleTier, usize>,
 }
 
 impl Engine {
@@ -45,7 +49,9 @@ impl Engine {
             min_confidence: 0.0,
             explain: false,
             show_flows: false,
+            profile: crate::Profile::Default,
             explain_records: Vec::new(),
+            hidden_by_tier: std::collections::BTreeMap::new(),
         }
     }
 
@@ -92,6 +98,23 @@ impl Engine {
     #[must_use]
     pub fn take_explain(&mut self) -> Vec<crate::explain::ExplainRecord> {
         std::mem::take(&mut self.explain_records)
+    }
+
+    /// Set the scan profile governing which rule tiers are reported.
+    pub fn set_profile(&mut self, profile: crate::Profile) {
+        self.profile = profile;
+    }
+
+    /// The active scan profile.
+    #[must_use]
+    pub fn profile(&self) -> crate::Profile {
+        self.profile
+    }
+
+    /// Take the counts of hidden findings by tier collected by the most recent `run`.
+    #[must_use]
+    pub fn take_hidden_by_tier(&mut self) -> std::collections::BTreeMap<crate::RuleTier, usize> {
+        std::mem::take(&mut self.hidden_by_tier)
     }
 
     /// Register a synthetic file id for a scanned path (used by the runner

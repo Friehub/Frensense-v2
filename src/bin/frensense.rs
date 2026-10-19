@@ -506,10 +506,12 @@ fn main() -> Result<()> {
         engine.set_language_filter(exts.to_vec());
     }
     engine.set_severity_filter(options.severity_filter);
+    engine.set_profile(options.profile);
     engine.set_explain(options.explain);
     engine.set_show_flows(options.show_flows);
 
     let mut explain_records = Vec::new();
+    let mut hidden_by_tier = std::collections::BTreeMap::new();
     let advisories = if options.diff_only {
         let repo_dir = if input_path.is_dir() {
             input_path.clone()
@@ -547,11 +549,15 @@ fn main() -> Result<()> {
                 if let Some(ref path) = options.corpus_bundle_path {
                     e2.set_corpus_bundle_path(path.clone());
                 }
+                e2.set_profile(options.profile);
                 e2.set_explain(options.explain);
                 e2.set_show_flows(options.show_flows);
                 all.extend(e2.run(f)?);
                 if options.explain {
                     explain_records.extend(e2.take_explain());
+                    for (tier, count) in e2.take_hidden_by_tier() {
+                        *hidden_by_tier.entry(tier).or_insert(0) += count;
+                    }
                 }
             }
             all
@@ -564,12 +570,13 @@ fn main() -> Result<()> {
         }
         if options.explain {
             explain_records = engine.take_explain();
+            hidden_by_tier = engine.take_hidden_by_tier();
         }
         all
     };
 
     if options.explain {
-        print_explain(&explain_records);
+        print_explain(&explain_records, &hidden_by_tier);
     }
 
     print_results(
