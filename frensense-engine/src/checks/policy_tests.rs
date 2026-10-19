@@ -989,9 +989,8 @@ mod named_arg_tests {
 
     #[test]
     fn silent_when_both_flags_are_true() {
-        let hits = findings(
-            "def u():\n    r.set_cookie(\"sid\", \"abc\", secure=True, httponly=True)\n",
-        );
+        let hits =
+            findings("def u():\n    r.set_cookie(\"sid\", \"abc\", secure=True, httponly=True)\n");
         assert!(hits.is_empty(), "compliant cookie must be silent: {hits:?}");
     }
 
@@ -1022,9 +1021,8 @@ mod named_arg_tests {
     /// violation (the check may miss `secure=flag`, never invent it).
     #[test]
     fn non_literal_flag_value_is_not_a_proven_violation() {
-        let hits = findings(
-            "def u():\n    r.set_cookie(\"sid\", \"abc\", secure=flag, httponly=True)\n",
-        );
+        let hits =
+            findings("def u():\n    r.set_cookie(\"sid\", \"abc\", secure=flag, httponly=True)\n");
         assert!(hits.is_empty(), "unprovable flag must not fire: {hits:?}");
     }
 
@@ -1032,9 +1030,8 @@ mod named_arg_tests {
     /// positional arguments, and the value keeps its written position.
     #[test]
     fn lowering_records_names_parallel_to_args() {
-        let irs = lower_py(
-            "def u():\n    r.set_cookie(\"sid\", \"abc\", path=\"/\", secure=False)\n",
-        );
+        let irs =
+            lower_py("def u():\n    r.set_cookie(\"sid\", \"abc\", path=\"/\", secure=False)\n");
         let mut checked = false;
         for ir in irs {
             for block in ir.blocks.values() {

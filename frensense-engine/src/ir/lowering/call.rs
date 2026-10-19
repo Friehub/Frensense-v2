@@ -56,7 +56,9 @@ impl<'a> LoweringContext<'a> {
             {
                 if let Some(op) = self.visit_node(child.child_by_field_name("right").unwrap()) {
                     args.push(op);
-                    arg_names.push(self.source[name_node.start_byte()..name_node.end_byte()].to_string());
+                    arg_names.push(
+                        self.source[name_node.start_byte()..name_node.end_byte()].to_string(),
+                    );
                 }
                 continue;
             }

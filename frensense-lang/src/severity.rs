@@ -329,7 +329,9 @@ pub fn generic_rule_advisory(
         // shape, a bundle-authored misuse check. Prescribing a crypto
         // primitive here told operators to "use bcrypt" for a missing
         // Secure flag.
-        format!("Review the flagged call in `{function}` and enforce the condition `{rule}` requires."),
+        format!(
+            "Review the flagged call in `{function}` and enforce the condition `{rule}` requires."
+        ),
         "policy",
     )
 }

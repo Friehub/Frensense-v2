@@ -1046,5 +1046,36 @@
       ],
       "title": "pg Pool named x (name must not matter)"
     }
+,
+    {
+      "id": "py29_list_append",
+      "lang": "python",
+      "file": "python/py29_list_append.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "taint via list.append then index"
+    },
+    {
+      "id": "py30_list_append_grow",
+      "lang": "python",
+      "file": "python/py30_list_append_grow.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "taint via list literal + append"
+    },
+    {
+      "id": "py31_list_append_sink",
+      "lang": "python",
+      "file": "python/py31_list_append_sink.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "taint via list.append then return"
+    }
   ]
 }

@@ -1,0 +1,1090 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "py01_flask_sqlite_concat",
+      "lang": "python",
+      "file": "python/py01_flask_sqlite_concat.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask",
+        "sqlite3"
+      ],
+      "title": "string-concatenated SQL via sqlite3"
+    },
+    {
+      "id": "py02_flask_sqlite_param",
+      "lang": "python",
+      "file": "python/py02_flask_sqlite_param.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "flask",
+        "sqlite3"
+      ],
+      "title": "parameterized sqlite3 query"
+    },
+    {
+      "id": "py03_sqlalchemy_text_fstring",
+      "lang": "python",
+      "file": "python/py03_sqlalchemy_text_fstring.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask",
+        "sqlalchemy"
+      ],
+      "title": "SQLAlchemy text() with f-string"
+    },
+    {
+      "id": "py04_sqlalchemy_text_bind",
+      "lang": "python",
+      "file": "python/py04_sqlalchemy_text_bind.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "flask",
+        "sqlalchemy"
+      ],
+      "title": "SQLAlchemy text() with bind parameter"
+    },
+    {
+      "id": "py05_django_raw",
+      "lang": "python",
+      "file": "python/py05_django_raw.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "django"
+      ],
+      "title": "Django Manager.raw() with f-string"
+    },
+    {
+      "id": "py06_django_orm_filter",
+      "lang": "python",
+      "file": "python/py06_django_orm_filter.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "django"
+      ],
+      "title": "Django ORM filter()"
+    },
+    {
+      "id": "py07_fastapi_param_sqlite",
+      "lang": "python",
+      "file": "python/py07_fastapi_param_sqlite.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "fastapi",
+        "sqlite3"
+      ],
+      "title": "FastAPI route parameter reaches SQL"
+    },
+    {
+      "id": "py08_unrelated_execute",
+      "lang": "python",
+      "file": "python/py08_unrelated_execute.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "execute() on an unrelated local class"
+    },
+    {
+      "id": "py09_subprocess_list",
+      "lang": "python",
+      "file": "python/py09_subprocess_list.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "stdlib"
+      ],
+      "title": "subprocess without shell, list argv"
+    },
+    {
+      "id": "py10_subprocess_shell",
+      "lang": "python",
+      "file": "python/py10_subprocess_shell.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "stdlib"
+      ],
+      "title": "subprocess with shell=True and f-string"
+    },
+    {
+      "id": "py11_yaml_safe_load",
+      "lang": "python",
+      "file": "python/py11_yaml_safe_load.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "pyyaml"
+      ],
+      "title": "yaml.safe_load"
+    },
+    {
+      "id": "py12_yaml_load",
+      "lang": "python",
+      "file": "python/py12_yaml_load.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "pyyaml"
+      ],
+      "title": "yaml.load without Loader"
+    },
+    {
+      "id": "py13_pickle_loads",
+      "lang": "python",
+      "file": "python/py13_pickle_loads.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "stdlib"
+      ],
+      "title": "pickle.loads of request body"
+    },
+    {
+      "id": "py14_eval",
+      "lang": "python",
+      "file": "python/py14_eval.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "eval of request value"
+    },
+    {
+      "id": "py15_literal_eval",
+      "lang": "python",
+      "file": "python/py15_literal_eval.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "stdlib"
+      ],
+      "title": "ast.literal_eval of request value"
+    },
+    {
+      "id": "py16_render_template_string",
+      "lang": "python",
+      "file": "python/py16_render_template_string.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask",
+        "jinja2"
+      ],
+      "title": "render_template_string with request value"
+    },
+    {
+      "id": "py17_render_template",
+      "lang": "python",
+      "file": "python/py17_render_template.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "flask",
+        "jinja2"
+      ],
+      "title": "render_template with request value as context"
+    },
+    {
+      "id": "py18_open_redirect",
+      "lang": "python",
+      "file": "python/py18_open_redirect.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "redirect to request value"
+    },
+    {
+      "id": "py19_redirect_url_for",
+      "lang": "python",
+      "file": "python/py19_redirect_url_for.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "redirect to url_for"
+    },
+    {
+      "id": "py20_secure_filename",
+      "lang": "python",
+      "file": "python/py20_secure_filename.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "flask",
+        "werkzeug"
+      ],
+      "title": "open() with secure_filename sanitizer"
+    },
+    {
+      "id": "py21_open_request",
+      "lang": "python",
+      "file": "python/py21_open_request.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "open() of request value"
+    },
+    {
+      "id": "py22_requests_ssrf",
+      "lang": "python",
+      "file": "python/py22_requests_ssrf.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask",
+        "requests"
+      ],
+      "title": "requests.get of request value"
+    },
+    {
+      "id": "py23_requests_const",
+      "lang": "python",
+      "file": "python/py23_requests_const.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "flask",
+        "requests"
+      ],
+      "title": "requests.get of constant URL"
+    },
+    {
+      "id": "py24_join_if_else",
+      "lang": "python",
+      "file": "python/py24_join_if_else.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask",
+        "sqlite3"
+      ],
+      "title": "taint through if/else assignment join"
+    },
+    {
+      "id": "py25_weak_random_token",
+      "lang": "python",
+      "file": "python/py25_weak_random_token.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "stdlib"
+      ],
+      "title": "random.* used to build a security token"
+    },
+    {
+      "id": "py26_cookie_not_secure",
+      "lang": "python",
+      "file": "python/py26_cookie_not_secure.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "cookie set without Secure/HttpOnly"
+    },
+    {
+      "id": "py27_inline_guard_digits",
+      "lang": "python",
+      "file": "python/py27_inline_guard_digits.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "flask",
+        "sqlite3"
+      ],
+      "title": "isdigit() guard before SQL concat"
+    },
+    {
+      "id": "py28_int_cast",
+      "lang": "python",
+      "file": "python/py28_int_cast.py",
+      "expect": "SILENT",
+      "frameworks": [
+        "flask",
+        "sqlite3"
+      ],
+      "title": "int() cast before SQL concat"
+    },
+    {
+      "id": "go01_nethttp_sql_concat",
+      "lang": "go",
+      "file": "go/go01_nethttp_sql_concat.go",
+      "expect": "FIRE",
+      "frameworks": [
+        "net/http",
+        "database/sql"
+      ],
+      "title": "string-concatenated SQL"
+    },
+    {
+      "id": "go02_nethttp_sql_param",
+      "lang": "go",
+      "file": "go/go02_nethttp_sql_param.go",
+      "expect": "SILENT",
+      "frameworks": [
+        "net/http",
+        "database/sql"
+      ],
+      "title": "parameterized query"
+    },
+    {
+      "id": "go03_gin_exec_concat",
+      "lang": "go",
+      "file": "go/go03_gin_exec_concat.go",
+      "expect": "FIRE",
+      "frameworks": [
+        "gin",
+        "database/sql"
+      ],
+      "title": "gin query param reaches db.Exec"
+    },
+    {
+      "id": "go04_gorm_raw_sprintf",
+      "lang": "go",
+      "file": "go/go04_gorm_raw_sprintf.go",
+      "expect": "FIRE",
+      "frameworks": [
+        "net/http",
+        "gorm"
+      ],
+      "title": "gorm Raw with Sprintf"
+    },
+    {
+      "id": "go05_gorm_where_bind",
+      "lang": "go",
+      "file": "go/go05_gorm_where_bind.go",
+      "expect": "SILENT",
+      "frameworks": [
+        "net/http",
+        "gorm"
+      ],
+      "title": "gorm Where with placeholder"
+    },
+    {
+      "id": "go06_exec_sh_c",
+      "lang": "go",
+      "file": "go/go06_exec_sh_c.go",
+      "expect": "FIRE",
+      "frameworks": [
+        "net/http",
+        "os/exec"
+      ],
+      "title": "sh -c with request value"
+    },
+    {
+      "id": "go07_exec_argv",
+      "lang": "go",
+      "file": "go/go07_exec_argv.go",
+      "expect": "SILENT",
+      "frameworks": [
+        "net/http",
+        "os/exec"
+      ],
+      "title": "fixed program with request value as one argument"
+    },
+    {
+      "id": "go08_os_open",
+      "lang": "go",
+      "file": "go/go08_os_open.go",
+      "expect": "FIRE",
+      "frameworks": [
+        "net/http",
+        "os"
+      ],
+      "title": "os.Open of request value"
+    },
+    {
+      "id": "go09_filepath_base",
+      "lang": "go",
+      "file": "go/go09_filepath_base.go",
+      "expect": "SILENT",
+      "frameworks": [
+        "net/http",
+        "os",
+        "path/filepath"
+      ],
+      "title": "os.Open with filepath.Base sanitizer"
+    },
+    {
+      "id": "go10_redirect",
+      "lang": "go",
+      "file": "go/go10_redirect.go",
+      "expect": "FIRE",
+      "frameworks": [
+        "net/http"
+      ],
+      "title": "http.Redirect to request value"
+    },
+    {
+      "id": "go11_reflected_html",
+      "lang": "go",
+      "file": "go/go11_reflected_html.go",
+      "expect": "FIRE",
+      "frameworks": [
+        "net/http"
+      ],
+      "title": "request value written into HTML response"
+    },
+    {
+      "id": "go12_html_escaped",
+      "lang": "go",
+      "file": "go/go12_html_escaped.go",
+      "expect": "SILENT",
+      "frameworks": [
+        "net/http",
+        "html"
+      ],
+      "title": "html.EscapeString before writing"
+    },
+    {
+      "id": "go13_ssrf",
+      "lang": "go",
+      "file": "go/go13_ssrf.go",
+      "expect": "FIRE",
+      "frameworks": [
+        "net/http"
+      ],
+      "title": "http.Get of request value"
+    },
+    {
+      "id": "go14_unrelated_query",
+      "lang": "go",
+      "file": "go/go14_unrelated_query.go",
+      "expect": "SILENT",
+      "frameworks": [
+        "net/http"
+      ],
+      "title": "Query() on an unrelated local type"
+    },
+    {
+      "id": "go15_echo_sql",
+      "lang": "go",
+      "file": "go/go15_echo_sql.go",
+      "expect": "FIRE",
+      "frameworks": [
+        "echo",
+        "database/sql"
+      ],
+      "title": "echo QueryParam reaches db.Query"
+    },
+    {
+      "id": "go16_atoi_sanitizer",
+      "lang": "go",
+      "file": "go/go16_atoi_sanitizer.go",
+      "expect": "SILENT",
+      "frameworks": [
+        "net/http",
+        "database/sql",
+        "strconv"
+      ],
+      "title": "strconv.Atoi before SQL formatting"
+    },
+    {
+      "id": "go17_if_else_join",
+      "lang": "go",
+      "file": "go/go17_if_else_join.go",
+      "expect": "FIRE",
+      "frameworks": [
+        "net/http",
+        "database/sql"
+      ],
+      "title": "taint through if/else assignment join"
+    },
+    {
+      "id": "go18_weak_random",
+      "lang": "go",
+      "file": "go/go18_weak_random.go",
+      "expect": "FIRE",
+      "frameworks": [
+        "math/rand"
+      ],
+      "title": "math/rand used for a security token"
+    },
+    {
+      "id": "rs01_axum_sqlx_format",
+      "lang": "rust",
+      "file": "rust/rs01_axum_sqlx_format.rs",
+      "expect": "FIRE",
+      "frameworks": [
+        "axum",
+        "sqlx"
+      ],
+      "title": "sqlx::query with format!"
+    },
+    {
+      "id": "rs02_axum_sqlx_bind",
+      "lang": "rust",
+      "file": "rust/rs02_axum_sqlx_bind.rs",
+      "expect": "SILENT",
+      "frameworks": [
+        "axum",
+        "sqlx"
+      ],
+      "title": "sqlx::query with bind"
+    },
+    {
+      "id": "rs03_actix_command_sh",
+      "lang": "rust",
+      "file": "rust/rs03_actix_command_sh.rs",
+      "expect": "FIRE",
+      "frameworks": [
+        "actix-web",
+        "std::process"
+      ],
+      "title": "sh -c with request value"
+    },
+    {
+      "id": "rs04_command_argv",
+      "lang": "rust",
+      "file": "rust/rs04_command_argv.rs",
+      "expect": "SILENT",
+      "frameworks": [
+        "axum",
+        "std::process"
+      ],
+      "title": "fixed program with request value as one argument"
+    },
+    {
+      "id": "rs05_fs_read",
+      "lang": "rust",
+      "file": "rust/rs05_fs_read.rs",
+      "expect": "FIRE",
+      "frameworks": [
+        "axum",
+        "std::fs"
+      ],
+      "title": "fs::read_to_string of request value"
+    },
+    {
+      "id": "rs06_fs_file_name",
+      "lang": "rust",
+      "file": "rust/rs06_fs_file_name.rs",
+      "expect": "SILENT",
+      "frameworks": [
+        "axum",
+        "std::fs"
+      ],
+      "title": "fs read with Path::file_name() sanitizer"
+    },
+    {
+      "id": "rs07_reqwest_ssrf",
+      "lang": "rust",
+      "file": "rust/rs07_reqwest_ssrf.rs",
+      "expect": "FIRE",
+      "frameworks": [
+        "axum",
+        "reqwest"
+      ],
+      "title": "reqwest::get of request value"
+    },
+    {
+      "id": "rs08_diesel_sql_query",
+      "lang": "rust",
+      "file": "rust/rs08_diesel_sql_query.rs",
+      "expect": "FIRE",
+      "frameworks": [
+        "axum",
+        "diesel"
+      ],
+      "title": "diesel::sql_query with format!"
+    },
+    {
+      "id": "rs09_diesel_dsl",
+      "lang": "rust",
+      "file": "rust/rs09_diesel_dsl.rs",
+      "expect": "SILENT",
+      "frameworks": [
+        "axum",
+        "diesel"
+      ],
+      "title": "diesel query DSL filter"
+    },
+    {
+      "id": "rs10_unrelated_query",
+      "lang": "rust",
+      "file": "rust/rs10_unrelated_query.rs",
+      "expect": "SILENT",
+      "frameworks": [
+        "axum"
+      ],
+      "title": "query() on an unrelated local type"
+    },
+    {
+      "id": "rs11_html_format",
+      "lang": "rust",
+      "file": "rust/rs11_html_format.rs",
+      "expect": "FIRE",
+      "frameworks": [
+        "axum"
+      ],
+      "title": "request value formatted into an HTML response"
+    },
+    {
+      "id": "rs12_html_escaped",
+      "lang": "rust",
+      "file": "rust/rs12_html_escaped.rs",
+      "expect": "SILENT",
+      "frameworks": [
+        "axum",
+        "html-escape"
+      ],
+      "title": "html_escape::encode_text before HTML response"
+    },
+    {
+      "id": "rs13_redirect",
+      "lang": "rust",
+      "file": "rust/rs13_redirect.rs",
+      "expect": "FIRE",
+      "frameworks": [
+        "axum"
+      ],
+      "title": "Redirect::to request value"
+    },
+    {
+      "id": "rs14_unsafe_from_utf8",
+      "lang": "rust",
+      "file": "rust/rs14_unsafe_from_utf8.rs",
+      "expect": "FIRE",
+      "frameworks": [
+        "stdlib"
+      ],
+      "title": "unsafe from_utf8_unchecked on request bytes"
+    },
+    {
+      "id": "rs15_parse_sanitizer",
+      "lang": "rust",
+      "file": "rust/rs15_parse_sanitizer.rs",
+      "expect": "SILENT",
+      "frameworks": [
+        "axum",
+        "sqlx"
+      ],
+      "title": "integer parse before SQL formatting"
+    },
+    {
+      "id": "js01_prisma_unsafe_express",
+      "lang": "javascript",
+      "file": "javascript/js01_prisma_unsafe_express.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "express",
+        "prisma"
+      ],
+      "title": "$queryRawUnsafe with template literal"
+    },
+    {
+      "id": "js02_prisma_tagged",
+      "lang": "javascript",
+      "file": "javascript/js02_prisma_tagged.ts",
+      "expect": "SILENT",
+      "frameworks": [
+        "express",
+        "prisma"
+      ],
+      "title": "$queryRaw tagged template (parameterized)"
+    },
+    {
+      "id": "js03_unrelated_unsafe_method",
+      "lang": "javascript",
+      "file": "javascript/js03_unrelated_unsafe_method.ts",
+      "expect": "SILENT",
+      "frameworks": [
+        "express"
+      ],
+      "title": "same method name on an unrelated object"
+    },
+    {
+      "id": "js04_drizzle_sql_tag",
+      "lang": "javascript",
+      "file": "javascript/js04_drizzle_sql_tag.ts",
+      "expect": "SILENT",
+      "frameworks": [
+        "express",
+        "drizzle"
+      ],
+      "title": "drizzle sql`` tagged template"
+    },
+    {
+      "id": "js05_drizzle_sql_raw",
+      "lang": "javascript",
+      "file": "javascript/js05_drizzle_sql_raw.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "express",
+        "drizzle"
+      ],
+      "title": "drizzle sql.raw() with user input"
+    },
+    {
+      "id": "js06_unrelated_query",
+      "lang": "javascript",
+      "file": "javascript/js06_unrelated_query.ts",
+      "expect": "SILENT",
+      "frameworks": [
+        "express"
+      ],
+      "title": "query() on an unrelated object"
+    },
+    {
+      "id": "js07_pg_concat",
+      "lang": "javascript",
+      "file": "javascript/js07_pg_concat.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "express",
+        "pg"
+      ],
+      "title": "pg pool.query with concatenation"
+    },
+    {
+      "id": "js08_pg_param",
+      "lang": "javascript",
+      "file": "javascript/js08_pg_param.ts",
+      "expect": "SILENT",
+      "frameworks": [
+        "express",
+        "pg"
+      ],
+      "title": "pg pool.query with $1 placeholder"
+    },
+    {
+      "id": "js09_eval_express",
+      "lang": "javascript",
+      "file": "javascript/js09_eval_express.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "express"
+      ],
+      "title": "eval of request value"
+    },
+    {
+      "id": "js10_next_searchparams_prisma",
+      "lang": "javascript",
+      "file": "javascript/js10_next_searchparams_prisma.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "next",
+        "prisma"
+      ],
+      "title": "new URL(req.url).searchParams reaches $queryRawUnsafe"
+    },
+    {
+      "id": "js11_next_eval_const",
+      "lang": "javascript",
+      "file": "javascript/js11_next_eval_const.ts",
+      "expect": "SILENT",
+      "frameworks": [
+        "next"
+      ],
+      "title": "eval of a constant in a route handler"
+    },
+    {
+      "id": "js12_nuxt_eval",
+      "lang": "javascript",
+      "file": "javascript/js12_nuxt_eval.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "nuxt",
+        "h3"
+      ],
+      "title": "getQuery(event) reaches eval"
+    },
+    {
+      "id": "js13_next_post_eval",
+      "lang": "javascript",
+      "file": "javascript/js13_next_post_eval.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "next"
+      ],
+      "title": "await req.json() reaches eval"
+    },
+    {
+      "id": "js14_nest_di_prisma",
+      "lang": "javascript",
+      "file": "javascript/js14_nest_di_prisma.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "nest",
+        "prisma"
+      ],
+      "title": "Nest @Query param through injected PrismaService"
+    },
+    {
+      "id": "js15_nest_decorator_direct",
+      "lang": "javascript",
+      "file": "javascript/js15_nest_decorator_direct.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "nest",
+        "prisma"
+      ],
+      "title": "Nest @Query param reaches directly imported PrismaClient"
+    },
+    {
+      "id": "js16_next_nexturl_prisma",
+      "lang": "javascript",
+      "file": "javascript/js16_next_nexturl_prisma.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "next",
+        "prisma"
+      ],
+      "title": "NextRequest.nextUrl.searchParams reaches $queryRawUnsafe"
+    },
+    {
+      "id": "js17_next_post_prisma",
+      "lang": "javascript",
+      "file": "javascript/js17_next_post_prisma.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "next",
+        "prisma"
+      ],
+      "title": "await req.json() reaches $queryRawUnsafe"
+    },
+    {
+      "id": "js18_knex_raw_template",
+      "lang": "javascript",
+      "file": "javascript/js18_knex_raw_template.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "express",
+        "knex"
+      ],
+      "title": "knex.raw with template literal"
+    },
+    {
+      "id": "js19_knex_raw_bind",
+      "lang": "javascript",
+      "file": "javascript/js19_knex_raw_bind.ts",
+      "expect": "SILENT",
+      "frameworks": [
+        "express",
+        "knex"
+      ],
+      "title": "knex.raw with bindings"
+    },
+    {
+      "id": "js20_sequelize_query",
+      "lang": "javascript",
+      "file": "javascript/js20_sequelize_query.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "express",
+        "sequelize"
+      ],
+      "title": "sequelize.query with template literal"
+    },
+    {
+      "id": "js21_sequelize_replacements",
+      "lang": "javascript",
+      "file": "javascript/js21_sequelize_replacements.ts",
+      "expect": "SILENT",
+      "frameworks": [
+        "express",
+        "sequelize"
+      ],
+      "title": "sequelize.query with replacements"
+    },
+    {
+      "id": "js22_exec_concat",
+      "lang": "javascript",
+      "file": "javascript/js22_exec_concat.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "express",
+        "child_process"
+      ],
+      "title": "child_process.exec with concatenation"
+    },
+    {
+      "id": "js23_execfile_argv",
+      "lang": "javascript",
+      "file": "javascript/js23_execfile_argv.ts",
+      "expect": "SILENT",
+      "frameworks": [
+        "express",
+        "child_process"
+      ],
+      "title": "child_process.execFile with argv array"
+    },
+    {
+      "id": "js24_fs_readfile",
+      "lang": "javascript",
+      "file": "javascript/js24_fs_readfile.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "express",
+        "fs"
+      ],
+      "title": "fs.readFile of request value"
+    },
+    {
+      "id": "js25_fs_basename",
+      "lang": "javascript",
+      "file": "javascript/js25_fs_basename.ts",
+      "expect": "SILENT",
+      "frameworks": [
+        "express",
+        "fs"
+      ],
+      "title": "fs.readFile with path.basename sanitizer"
+    },
+    {
+      "id": "js26_res_send_html",
+      "lang": "javascript",
+      "file": "javascript/js26_res_send_html.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "express"
+      ],
+      "title": "request value concatenated into HTML response"
+    },
+    {
+      "id": "js27_res_json",
+      "lang": "javascript",
+      "file": "javascript/js27_res_json.ts",
+      "expect": "SILENT",
+      "frameworks": [
+        "express"
+      ],
+      "title": "request value returned as JSON"
+    },
+    {
+      "id": "js28_redirect",
+      "lang": "javascript",
+      "file": "javascript/js28_redirect.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "express"
+      ],
+      "title": "res.redirect to request value"
+    },
+    {
+      "id": "js29_axios_ssrf",
+      "lang": "javascript",
+      "file": "javascript/js29_axios_ssrf.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "express",
+        "axios"
+      ],
+      "title": "axios.get of request value"
+    },
+    {
+      "id": "js30_fastify_eval",
+      "lang": "javascript",
+      "file": "javascript/js30_fastify_eval.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "fastify"
+      ],
+      "title": "fastify request.query reaches eval"
+    },
+    {
+      "id": "js31_hono_pg",
+      "lang": "javascript",
+      "file": "javascript/js31_hono_pg.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "hono",
+        "pg"
+      ],
+      "title": "Hono c.req.query reaches pg query"
+    },
+    {
+      "id": "js32_innerhtml_dom",
+      "lang": "javascript",
+      "file": "javascript/js32_innerhtml_dom.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "browser"
+      ],
+      "title": "location.hash assigned to innerHTML"
+    },
+    {
+      "id": "js33_textcontent",
+      "lang": "javascript",
+      "file": "javascript/js33_textcontent.ts",
+      "expect": "SILENT",
+      "frameworks": [
+        "browser"
+      ],
+      "title": "location.hash assigned to textContent"
+    },
+    {
+      "id": "js34_parseint_guard",
+      "lang": "javascript",
+      "file": "javascript/js34_parseint_guard.ts",
+      "expect": "SILENT",
+      "frameworks": [
+        "express",
+        "pg"
+      ],
+      "title": "Number() cast before SQL concatenation"
+    },
+    {
+      "id": "js35_if_else_join",
+      "lang": "javascript",
+      "file": "javascript/js35_if_else_join.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "express",
+        "pg"
+      ],
+      "title": "taint through if/else assignment join"
+    },
+    {
+      "id": "py28_receiver_name_x",
+      "lang": "python",
+      "file": "python/py28_receiver_name_x.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask",
+        "sqlite3"
+      ],
+      "title": "DB handle named x (name must not matter)"
+    },
+    {
+      "id": "js36_receiver_name_x",
+      "lang": "javascript",
+      "file": "javascript/js36_receiver_name_x.ts",
+      "expect": "FIRE",
+      "frameworks": [
+        "express",
+        "pg"
+      ],
+      "title": "pg Pool named x (name must not matter)"
+    },
+    {
+      "id": "py29_list_append",
+      "lang": "python",
+      "file": "python/py29_list_append.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "taint via list.append then index"
+    },
+    {
+      "id": "py30_list_append_grow",
+      "lang": "python",
+      "file": "python/py30_list_append_grow.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "taint via list literal + append"
+    },
+    {
+      "id": "py31_list_append_sink",
+      "lang": "python",
+      "file": "python/py31_list_append_sink.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "taint via list.append then return"
+    },
+    {
+      "id": "py32_list_array_access",
+      "lang": "python",
+      "file": "tests/framework_matrix_extra/python/py32_list_array_access.py",
+      "expect": "FIRE",
+      "frameworks": [
+        "flask"
+      ],
+      "title": "taint via list indexing into response"
+    }
+  ]
+}
