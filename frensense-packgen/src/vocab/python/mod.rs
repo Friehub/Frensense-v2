@@ -50,6 +50,7 @@ pub(crate) fn vocab() -> &'static LanguageVocab {
             propagators: propagators::PYTHON_PROPAGATORS,
             session_roots: &[],
             route_patterns: &[],
+            policies: web::PY_POLICIES,
         }
     });
     &V

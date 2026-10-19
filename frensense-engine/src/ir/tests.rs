@@ -148,6 +148,7 @@ pub mod tests {
                 mem_in: mem_0,
                 func: "getSource".into(),
                 args: vec![],
+                arg_names: Vec::new(),
             },
         );
 
@@ -212,6 +213,7 @@ pub mod tests {
                 mem_in: mem_4,
                 func: "db.execute".into(),
                 args: vec![Operand::Var(val)],
+                arg_names: Vec::new(),
             },
         );
 
@@ -303,6 +305,7 @@ pub mod tests {
                 mem_in: mem_0,
                 func: "db.execute".into(),
                 args: vec![Operand::Var(data_1)],
+                arg_names: Vec::new(),
             },
         );
 
@@ -316,6 +319,7 @@ pub mod tests {
                 mem_in: mem_1,
                 func: "getSource".into(),
                 args: vec![],
+                arg_names: Vec::new(),
             },
         );
 
@@ -373,6 +377,7 @@ pub mod tests {
                 mem_in: mem_0,
                 func: "getSource".into(),
                 args: vec![],
+                arg_names: Vec::new(),
             },
         );
 
@@ -448,6 +453,7 @@ pub mod tests {
                 mem_in: mem_3,
                 func: "db.execute".into(),
                 args: vec![Operand::Var(alias)],
+                arg_names: Vec::new(),
             },
         );
 
@@ -512,6 +518,7 @@ pub mod tests {
                 mem_in: mem_1,
                 func: "getSource".into(),
                 args: vec![],
+                arg_names: Vec::new(),
             },
         );
 
@@ -565,6 +572,7 @@ pub mod tests {
                 mem_in: mem_4,
                 func: "escapeHtml".into(),
                 args: vec![Operand::Var(val)],
+                arg_names: Vec::new(),
             },
         );
 
@@ -578,6 +586,7 @@ pub mod tests {
                 mem_in: mem_5,
                 func: "db.execute".into(),
                 args: vec![Operand::Var(val)],
+                arg_names: Vec::new(),
             },
         );
 
@@ -591,6 +600,7 @@ pub mod tests {
                 mem_in: mem_6,
                 func: "db.execute".into(),
                 args: vec![Operand::Var(safe)],
+                arg_names: Vec::new(),
             },
         );
 

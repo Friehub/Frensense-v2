@@ -112,6 +112,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -123,6 +124,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "helper".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -142,6 +144,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(p0)],
+                    arg_names: Vec::new(),
                 },
             );
             helper.set_terminator(b, Terminator::Return { src: None });
@@ -203,6 +206,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             get.set_terminator(
@@ -227,6 +231,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "get".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -238,6 +243,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -276,6 +282,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let w = main.new_var(dummy_meta("w"));
@@ -288,6 +295,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "escapeHtml".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             let m3 = main.new_var(mem_meta("m3"));
@@ -299,6 +307,7 @@ pub mod demand_tests {
                     mem_in: m2,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(w)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -338,6 +347,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "db.execute".into(),
                     args: vec![Operand::StringLiteral("SELECT 1".into())],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -383,6 +393,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -422,6 +433,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -433,6 +445,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "helper".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -452,6 +465,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(p0)],
+                    arg_names: Vec::new(),
                 },
             );
             helper.set_terminator(b, Terminator::Return { src: None });
@@ -474,6 +488,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             noise.set_terminator(b, Terminator::Return { src: None });
@@ -526,6 +541,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "escapeHtml".into(),
                     args: vec![Operand::Var(x0)],
+                    arg_names: Vec::new(),
                 },
             );
             clean.set_terminator(
@@ -550,6 +566,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let w = main.new_var(dummy_meta("w"));
@@ -562,6 +579,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "clean".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             let m3 = main.new_var(mem_meta("m3"));
@@ -573,6 +591,7 @@ pub mod demand_tests {
                     mem_in: m2,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(w)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -629,6 +648,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -640,6 +660,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -695,6 +716,7 @@ pub mod demand_tests {
                     method: "randint".into(),
                     receiver: Operand::Var(random_mod),
                     args: vec![Operand::IntLiteral(0), Operand::IntLiteral(10)],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -706,6 +728,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "eval".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -789,6 +812,7 @@ pub mod demand_tests {
                     method: "get".into(),
                     receiver: Operand::Var(form),
                     args: vec![Operand::StringLiteral("\"p\"".into())],
+                    arg_names: Vec::new(),
                 },
             );
             let bar = handler.new_var(dummy_meta("bar"));
@@ -834,6 +858,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "open".into(),
                     args: vec![Operand::Var(bar)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(merge, Terminator::Return { src: None });
@@ -896,6 +921,7 @@ pub mod demand_tests {
                     method: "get".into(),
                     receiver: Operand::Var(form),
                     args: vec![Operand::StringLiteral("\"p\"".into())],
+                    arg_names: Vec::new(),
                 },
             );
             let bar = handler.new_var(dummy_meta("bar"));
@@ -919,6 +945,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "open".into(),
                     args: vec![Operand::Var(bar)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(merge, Terminator::Return { src: None });
@@ -976,6 +1003,7 @@ pub mod demand_tests {
                     method: "get".into(),
                     receiver: Operand::Var(form),
                     args: vec![Operand::StringLiteral("\"p\"".into())],
+                    arg_names: Vec::new(),
                 },
             );
             let bar = handler.new_var(dummy_meta("bar"));
@@ -1020,6 +1048,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "open".into(),
                     args: vec![Operand::Var(bar)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(flawed_sink_block, Terminator::Return { src: None });
@@ -1088,6 +1117,7 @@ pub mod demand_tests {
                     method: "get".into(),
                     receiver: Operand::Var(cookies),
                     args: vec![Operand::StringLiteral("\"p\"".into())],
+                    arg_names: Vec::new(),
                 },
             );
 
@@ -1179,6 +1209,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "open".into(),
                     args: vec![Operand::Var(bar)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(merge, Terminator::Return { src: None });
@@ -1241,6 +1272,7 @@ pub mod demand_tests {
                     method: "get".into(),
                     receiver: Operand::Var(cookies),
                     args: vec![Operand::StringLiteral("\"p\"".into())],
+                    arg_names: Vec::new(),
                 },
             );
 
@@ -1311,6 +1343,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "open".into(),
                     args: vec![Operand::Var(bar)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(merge, Terminator::Return { src: None });
@@ -1696,6 +1729,7 @@ export const redirect = ({ query }: any, res: any) => {
                     method: "get".into(),
                     receiver: Operand::Var(form),
                     args: vec![Operand::StringLiteral("\"p\"".into())],
+                    arg_names: Vec::new(),
                 },
             );
             let bar = handler.new_var(dummy_meta("bar"));
@@ -1806,6 +1840,7 @@ export const redirect = ({ query }: any, res: any) => {
                     mem_in: ms,
                     func: "open".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(merge, Terminator::Return { src: None });
@@ -1869,6 +1904,7 @@ export const redirect = ({ query }: any, res: any) => {
                     mem_in: main.initial_memory_state,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let flag = main.new_var(dummy_meta("flag"));
@@ -1890,6 +1926,7 @@ export const redirect = ({ query }: any, res: any) => {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(flag)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -1946,6 +1983,7 @@ export const redirect = ({ query }: any, res: any) => {
                     mem_in: main.initial_memory_state,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let y = main.new_var(dummy_meta("y"));
@@ -1977,6 +2015,7 @@ export const redirect = ({ query }: any, res: any) => {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(y), Operand::Var(x)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -2237,6 +2276,7 @@ export function b(id: any): void {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -2249,6 +2289,7 @@ export function b(id: any): void {
                     method: "json".into(),
                     receiver: Operand::Var(res),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             let m3 = main.new_var(mem_meta("m3"));
@@ -2261,6 +2302,7 @@ export function b(id: any): void {
                     method: "decode".into(),
                     receiver: Operand::Var(jwt),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             let m4 = main.new_var(mem_meta("m4"));
@@ -2272,6 +2314,7 @@ export function b(id: any): void {
                     mem_in: m3,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });

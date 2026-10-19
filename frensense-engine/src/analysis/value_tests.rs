@@ -363,6 +363,7 @@ export function runQuery () {
                     mem_in: main.initial_memory_state,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let a = dummy(&mut main, "a");
@@ -382,6 +383,7 @@ export function runQuery () {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(a)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -454,6 +456,7 @@ export function runQuery () {
                     mem_in: main.initial_memory_state,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = mem(&mut main, "m2");
@@ -465,6 +468,7 @@ export function runQuery () {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(t)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -642,6 +646,7 @@ export function f (k: number) {
                     mem_in: main.initial_memory_state,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(r)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -727,6 +732,7 @@ export function f (k: number) {
                     mem_in: main.initial_memory_state,
                     func: "helper".into(),
                     args: vec![Operand::Var(q)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -747,6 +753,7 @@ export function f (k: number) {
                     mem_in: helper.initial_memory_state,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(p)],
+                    arg_names: Vec::new(),
                 },
             );
             helper.set_terminator(b, Terminator::Return { src: None });
@@ -804,6 +811,7 @@ export function f (k: number) {
                 mem_in: ir.initial_memory_state,
                 func: "getSource".into(),
                 args: vec![],
+                arg_names: Vec::new(),
             },
         );
         // d = p.x - load dest, must stay Top.

@@ -922,3 +922,138 @@ export function generateToken (payload: string, key: string) {
         assert!(scan_neg.checker.is_empty());
     }
 }
+
+/// Keyword-argument policies: a flag's identity, not its position.
+///
+/// `set_cookie("k", "v", path="/", secure=False)` and
+/// `set_cookie("k", "v", secure=False)` put `secure` at different argument
+/// positions, so no slot rule is correct for both. These tests pin the
+/// named-argument path end to end: lowering records the name, the policy
+/// requirement reads it, and the value still lands at its written position.
+#[cfg(test)]
+mod named_arg_tests {
+    use crate::analysis::taint::facts::{
+        FactTable, PolicyFact, PolicyRequirement, PolicyScope, Provenance,
+    };
+    use crate::checks::policy;
+    use crate::harness::lower_source;
+    use crate::ir::function::{FunctionIR, Instruction};
+
+    fn lower_py(src: &str) -> Vec<&'static FunctionIR> {
+        lower_source("t.py", src, "py")
+            .expect("python lowering")
+            .into_values()
+            .map(|ir| -> &'static FunctionIR { Box::leak(Box::new(ir)) })
+            .collect()
+    }
+
+    fn cookie_policy() -> (PolicyFact, Provenance) {
+        (
+            PolicyFact {
+                rule: "insecure_cookie_flags".into(),
+                when_call: "set_cookie".into(),
+                require: vec![
+                    PolicyRequirement::RequireNamedArgLiteral {
+                        name: "secure".into(),
+                        values: vec!["true".into()],
+                    },
+                    PolicyRequirement::RequireNamedArgLiteral {
+                        name: "httponly".into(),
+                        values: vec!["true".into()],
+                    },
+                ],
+                scope: PolicyScope::Function,
+                message: "cookie flags".into(),
+                severity: "warning".into(),
+                package: None,
+            },
+            Provenance::Learned,
+        )
+    }
+
+    fn findings(src: &str) -> Vec<String> {
+        let mut facts = FactTable::default();
+        facts.policy_facts.push(cookie_policy());
+        let irs = lower_py(src);
+        policy::check_program(&irs, &facts)
+            .into_iter()
+            .map(|f| f.rule)
+            .collect()
+    }
+
+    #[test]
+    fn fires_when_a_flag_is_false() {
+        let hits = findings("def u():\n    r.set_cookie(\"sid\", \"abc\", secure=False)\n");
+        assert_eq!(hits, vec!["insecure_cookie_flags".to_string()]);
+    }
+
+    #[test]
+    fn silent_when_both_flags_are_true() {
+        let hits = findings(
+            "def u():\n    r.set_cookie(\"sid\", \"abc\", secure=True, httponly=True)\n",
+        );
+        assert!(hits.is_empty(), "compliant cookie must be silent: {hits:?}");
+    }
+
+    /// The regression the IR change exists for: `path="/"` shifts `secure`
+    /// to slot 3, so a positional rule would read `True` (httponly) and
+    /// stay silent while the cookie is insecure.
+    #[test]
+    fn fires_when_an_earlier_optional_argument_shifts_the_flag() {
+        let hits = findings(
+            "def u():\n    r.set_cookie(\"sid\", \"abc\", path=\"/\", secure=False, httponly=True)\n",
+        );
+        assert_eq!(
+            hits,
+            vec!["insecure_cookie_flags".to_string()],
+            "secure at slot 3 must still be read by name"
+        );
+    }
+
+    /// A flag the caller never mentions is the violation the rule exists
+    /// to catch (defaults are insecure).
+    #[test]
+    fn missing_flag_is_a_violation() {
+        let hits = findings("def u():\n    r.set_cookie(\"sid\", \"abc\")\n");
+        assert_eq!(hits, vec!["insecure_cookie_flags".to_string()]);
+    }
+
+    /// Literal-only proof: an unresolvable value is not evidence of a
+    /// violation (the check may miss `secure=flag`, never invent it).
+    #[test]
+    fn non_literal_flag_value_is_not_a_proven_violation() {
+        let hits = findings(
+            "def u():\n    r.set_cookie(\"sid\", \"abc\", secure=flag, httponly=True)\n",
+        );
+        assert!(hits.is_empty(), "unprovable flag must not fire: {hits:?}");
+    }
+
+    /// The lowering contract: names are parallel to args, empty for
+    /// positional arguments, and the value keeps its written position.
+    #[test]
+    fn lowering_records_names_parallel_to_args() {
+        let irs = lower_py(
+            "def u():\n    r.set_cookie(\"sid\", \"abc\", path=\"/\", secure=False)\n",
+        );
+        let mut checked = false;
+        for ir in irs {
+            for block in ir.blocks.values() {
+                for instr in &block.instructions {
+                    if let Instruction::CallVirtual {
+                        method,
+                        args,
+                        arg_names,
+                        ..
+                    } = instr
+                        && method == "set_cookie"
+                    {
+                        assert_eq!(args.len(), 4, "value keeps its written position");
+                        assert_eq!(arg_names, &["", "", "path", "secure"]);
+                        checked = true;
+                    }
+                }
+            }
+        }
+        assert!(checked, "set_cookie call not lowered");
+    }
+}

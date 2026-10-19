@@ -152,6 +152,12 @@ pub enum Instruction {
         mem_in: VarId,
         func: String,
         args: Vec<Operand>,
+        /// Keyword/keyed argument names, parallel to `args`: entry `i` is
+        /// the name of `args[i]`, or empty when that argument is
+        /// positional. Shorter than `args` (or empty) means the source
+        /// language, or the lowered node, carries no names - callers must
+        /// treat a missing entry as positional. See [`CallStatic::args`].
+        arg_names: Vec<String>,
     },
 
     /// mem_out, dest = receiver.method(args) @ mem_in
@@ -162,6 +168,8 @@ pub enum Instruction {
         method: String,
         receiver: Operand,
         args: Vec<Operand>,
+        /// Parallel to `args`; see [`Instruction::CallStatic`].
+        arg_names: Vec<String>,
     },
 
     /// mem_out, dest = func_ptr(args) @ mem_in
@@ -171,6 +179,8 @@ pub enum Instruction {
         mem_in: VarId,
         func_ptr: Operand,
         args: Vec<Operand>,
+        /// Parallel to `args`; see [`Instruction::CallStatic`].
+        arg_names: Vec<String>,
     },
 
     // --- Memory & Pointers (Systems Languages) ---

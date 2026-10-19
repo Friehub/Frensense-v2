@@ -55,6 +55,7 @@ const TYPESCRIPT_VOCAB: LanguageVocab = LanguageVocab {
     propagators: propagators::JS_PROPAGATORS,
     session_roots: tables::JS_SESSION_ROOTS,
     route_patterns: ROUTE_PATTERNS,
+    policies: &[],
 };
 
 const JAVASCRIPT_VOCAB: LanguageVocab = LanguageVocab {

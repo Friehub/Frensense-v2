@@ -93,6 +93,7 @@ pub mod callgraph_tests {
                     mem_in: caller.initial_memory_state,
                     func_ptr: Operand::Var(h),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -145,6 +146,7 @@ pub mod callgraph_tests {
                     receiver: Operand::Var(db),
                     method: "query".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -185,6 +187,7 @@ pub mod callgraph_tests {
                     mem_in: run.initial_memory_state,
                     func_ptr: Operand::Var(handler),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             run.set_terminator(b, Terminator::Return { src: None });
@@ -203,6 +206,7 @@ pub mod callgraph_tests {
                     mem_in: caller.initial_memory_state,
                     func: "run".into(),
                     args: vec![Operand::StringLiteral("processor".into())],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -250,6 +254,7 @@ pub mod callgraph_tests {
                     mem_in: a.initial_memory_state,
                     func: "b".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             a.set_terminator(bb, Terminator::Return { src: None });
@@ -265,6 +270,7 @@ pub mod callgraph_tests {
                     mem_in: b.initial_memory_state,
                     func: "a".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             b.set_terminator(bb, Terminator::Return { src: None });
@@ -306,6 +312,7 @@ pub mod callgraph_tests {
                     mem_in: caller.initial_memory_state,
                     func: "libraryFetch".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -367,6 +374,7 @@ pub mod callgraph_tests {
                     mem_in: caller.initial_memory_state,
                     func_ptr: Operand::Var(f),
                     args: vec![Operand::Var(inp)],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -417,6 +425,7 @@ pub mod callgraph_tests {
                     mem_in: a.initial_memory_state,
                     func: "b".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             a.set_terminator(bb, Terminator::Return { src: None });

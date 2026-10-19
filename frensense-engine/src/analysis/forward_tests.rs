@@ -96,6 +96,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -107,6 +108,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "helper".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -126,6 +128,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(p0)],
+                    arg_names: Vec::new(),
                 },
             );
             helper.set_terminator(b, Terminator::Return { src: None });
@@ -172,6 +175,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             get.set_terminator(
@@ -196,6 +200,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "get".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -207,6 +212,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -250,6 +256,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             source_fn.set_terminator(
@@ -274,6 +281,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "source_fn".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             middle.set_terminator(
@@ -298,6 +306,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "middle".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -309,6 +318,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -367,6 +377,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "escapeHtml".into(),
                     args: vec![Operand::Var(x0)],
+                    arg_names: Vec::new(),
                 },
             );
             clean.set_terminator(
@@ -391,6 +402,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let w = main.new_var(dummy_meta("w"));
@@ -403,6 +415,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "clean".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             let m3 = main.new_var(mem_meta("m3"));
@@ -414,6 +427,7 @@ pub mod interprocedural_tests {
                     mem_in: m2,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(w)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -452,6 +466,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "escapeHtml".into(),
                     args: vec![Operand::Var(x0)],
+                    arg_names: Vec::new(),
                 },
             );
             clean.set_terminator(
@@ -476,6 +491,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let w = main.new_var(dummy_meta("w"));
@@ -488,6 +504,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "clean".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             let m3 = main.new_var(mem_meta("m3"));
@@ -499,6 +516,7 @@ pub mod interprocedural_tests {
                     mem_in: m2,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(w)],
+                    arg_names: Vec::new(),
                 },
             );
             let m4 = main.new_var(mem_meta("m4"));
@@ -510,6 +528,7 @@ pub mod interprocedural_tests {
                     mem_in: m3,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)], // raw!
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -550,6 +569,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "rec".into(),
                     args: vec![Operand::Var(x0)],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = rec.new_var(mem_meta("m2"));
@@ -561,6 +581,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(y)],
+                    arg_names: Vec::new(),
                 },
             );
             rec.set_terminator(b, Terminator::Return { src: None });
@@ -580,6 +601,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -591,6 +613,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "rec".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -654,6 +677,7 @@ pub mod interprocedural_tests {
                     mem_in: caller.initial_memory_state,
                     func: "callee".into(),
                     args: vec![Operand::Var(x), Operand::Var(y)],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -719,6 +743,7 @@ pub mod interprocedural_tests {
                     mem_in: leaf.initial_memory_state,
                     func: "escapeHtml".into(),
                     args: vec![Operand::Var(la)],
+                    arg_names: Vec::new(),
                 },
             );
             leaf.set_terminator(
@@ -744,6 +769,7 @@ pub mod interprocedural_tests {
                     mem_in: f.initial_memory_state,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             f.push_instruction(
@@ -754,6 +780,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "leaf".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             f.push_instruction(
@@ -764,6 +791,7 @@ pub mod interprocedural_tests {
                     mem_in: m2,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(w)],
+                    arg_names: Vec::new(),
                 },
             );
             f.set_terminator(f.entry_block, Terminator::Return { src: None });
@@ -807,6 +835,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -818,6 +847,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -874,6 +904,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = handler.new_var(mem_meta("m2"));
@@ -885,6 +916,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "writer".into(),
                     args: vec![Operand::Var(obj), Operand::Var(taint)],
+                    arg_names: Vec::new(),
                 },
             );
             let ret = handler.new_var(dummy_meta("r"));
@@ -897,6 +929,7 @@ pub mod interprocedural_tests {
                     mem_in: m2,
                     func: "reader".into(),
                     args: vec![Operand::Var(obj)],
+                    arg_names: Vec::new(),
                 },
             );
             let m4 = handler.new_var(mem_meta("m4"));
@@ -908,6 +941,7 @@ pub mod interprocedural_tests {
                     mem_in: m3,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(ret)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(b, Terminator::Return { src: None });
@@ -1037,6 +1071,7 @@ pub mod interprocedural_tests {
                     receiver: Operand::Var(obj),
                     method: "method".into(),
                     args: vec![Operand::Var(val)],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -1121,6 +1156,7 @@ pub mod interprocedural_tests {
                     receiver: Operand::Var(obj),
                     method: "method".into(),
                     args: vec![Operand::Var(val)],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });

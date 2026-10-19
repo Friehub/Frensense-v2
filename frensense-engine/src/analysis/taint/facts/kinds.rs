@@ -203,6 +203,22 @@ pub enum PolicyRequirement {
     /// and the lowering records the pair keys on the composite var, so
     /// key presence is checkable in the IR without value analysis.
     RequireArgKey { slot: usize, keys: Vec<String> },
+    /// The **named** argument `name` must be present and, when its value is
+    /// a provable literal, carry one of `values` (case-insensitive).
+    ///
+    /// Distinct from [`Self::RequiredArgLiteral`]: a keyword argument's
+    /// position moves when the caller omits earlier optional parameters
+    /// (`set_cookie("k", "v", path="/", secure=False)` puts `secure` at
+    /// slot 3, not 2), so a slot rule cannot express it correctly. Names
+    /// arrive from the lowering's `arg_names` (Python `keyword_argument`).
+    ///
+    /// Absent name = violation (the caller did not set the flag at all).
+    /// Present with an unresolvable value (a variable, a call result) is
+    /// **not** a violation: the check proves literal violations only.
+    ///
+    /// Appended last: bincode encodes the variant index first, so existing
+    /// wire bytes keep decoding with their original indices.
+    RequireNamedArgLiteral { name: String, values: Vec<String> },
 }
 
 impl PolicyRequirement {
@@ -218,7 +234,8 @@ impl PolicyRequirement {
             PolicyRequirement::RangeCheck { .. }
             | PolicyRequirement::BannedArgLiteral { .. }
             | PolicyRequirement::RequiredArgLiteral { .. }
-            | PolicyRequirement::RequireArgKey { .. } => Vec::new(),
+            | PolicyRequirement::RequireArgKey { .. }
+            | PolicyRequirement::RequireNamedArgLiteral { .. } => Vec::new(),
         }
     }
 }
@@ -437,6 +454,12 @@ pub enum TeachableNodeRole {
     Literal,
     Parameters,
     Arguments,
+    /// A named call argument: the name travels with the value so slot
+    /// policies can key on the argument's identity, not its position.
+    KeywordArgument {
+        name_field: String,
+        value_field: String,
+    },
     ClassDef,
     BinaryOp,
     UnaryOp,
@@ -517,6 +540,13 @@ impl TeachableNodeRole {
             TeachableNodeRole::Match => frensense_lang::NodeRole::Match,
             TeachableNodeRole::Unsafe => frensense_lang::NodeRole::Unsafe,
             TeachableNodeRole::AsyncBlock => frensense_lang::NodeRole::AsyncBlock,
+            TeachableNodeRole::KeywordArgument {
+                name_field,
+                value_field,
+            } => frensense_lang::NodeRole::KeywordArgument {
+                name_field: name_field.clone().into(),
+                value_field: value_field.clone().into(),
+            },
             TeachableNodeRole::Other => frensense_lang::NodeRole::Other,
         }
     }
@@ -563,6 +593,13 @@ impl From<&frensense_lang::NodeRole> for TeachableNodeRole {
             } => TeachableNodeRole::MemberAccess {
                 object_field: object_field.to_string(),
                 property_field: property_field.to_string(),
+            },
+            frensense_lang::NodeRole::KeywordArgument {
+                name_field,
+                value_field,
+            } => TeachableNodeRole::KeywordArgument {
+                name_field: name_field.to_string(),
+                value_field: value_field.to_string(),
             },
             frensense_lang::NodeRole::Branch => TeachableNodeRole::Branch,
             frensense_lang::NodeRole::Conditional => TeachableNodeRole::Conditional,

@@ -222,7 +222,7 @@ pub fn check_program_scoped(
             };
             let val_info = crate::analysis::value::analyze(ir);
             // Collect every trigger call site in this function with its args.
-            for (bid, idx, args, span) in
+            for (bid, idx, args, arg_names, span) in
                 trigger_sites(ir, trigger_call, alias_maps.get(ir.name.as_str()))
             {
                 // A requirement violation is the finding — but a
@@ -240,6 +240,7 @@ pub fn check_program_scoped(
                             doms,
                             &val_info,
                             args,
+                            arg_names,
                             segs,
                             &module_segs,
                             policy.scope,
@@ -263,9 +264,16 @@ pub fn check_program_scoped(
 }
 
 /// Every call instruction in `ir` whose callee's last segment is `seg`,
-/// as (bid, instr index, args, span) tuples. The index orders same-block
-/// guard/trigger pairs.
-type TriggerSite<'a> = (BlockId, usize, &'a [Operand], Option<(usize, usize)>);
+/// as (bid, instr index, args, keyword names, span) tuples. The index
+/// orders same-block guard/trigger pairs; `keyword names` is parallel to
+/// `args` and may be shorter (missing entry = positional).
+type TriggerSite<'a> = (
+    BlockId,
+    usize,
+    &'a [Operand],
+    &'a [String],
+    Option<(usize, usize)>,
+);
 
 fn trigger_sites<'a>(
     ir: &'a FunctionIR,
@@ -299,23 +307,25 @@ fn trigger_sites<'a>(
             if !matches {
                 continue;
             }
-            out.push((
-                bid,
-                idx,
-                call_args(instr).unwrap_or(&[]),
-                instr_span(ir, instr),
-            ));
+            let (args, arg_names) = call_args(instr).unwrap_or((&[], &[]));
+            out.push((bid, idx, args, arg_names, instr_span(ir, instr)));
         }
     }
     out
 }
 
-/// A call instruction's argument list, for site indexing outside the
-/// match arm that already destructures it.
-fn call_args(instr: &Instruction) -> Option<&[Operand]> {
+/// A call instruction's argument list and its parallel keyword names, for
+/// site indexing outside the match arm that already destructures it. The
+/// name slice may be shorter than the argument slice; a missing entry is a
+/// positional argument.
+fn call_args(instr: &Instruction) -> Option<(&[Operand], &[String])> {
     match instr {
-        Instruction::CallStatic { args, .. } => Some(args.as_slice()),
-        Instruction::CallVirtual { args, .. } => Some(args.as_slice()),
+        Instruction::CallStatic {
+            args, arg_names, ..
+        } => Some((args.as_slice(), arg_names.as_slice())),
+        Instruction::CallVirtual {
+            args, arg_names, ..
+        } => Some((args.as_slice(), arg_names.as_slice())),
         _ => None,
     }
 }
@@ -330,6 +340,7 @@ fn requirement_holds(
     doms: Option<&DomSets>,
     val_info: &crate::analysis::value::ValueInfo,
     args: &[Operand],
+    arg_names: &[String],
     fn_segs: &[String],
     module_segs: &[String],
     scope: PolicyScope,
@@ -402,6 +413,24 @@ fn requirement_holds(
                     Operand::Var(v) => arg_has_key(ir, *v, keys),
                     _ => false,
                 })
+            }
+        }
+        PolicyRequirement::RequireNamedArgLiteral { name, values } => {
+            let Some(idx) = arg_names.iter().position(|n| n.eq_ignore_ascii_case(name)) else {
+                // The caller never set the flag: the violation the policy
+                // exists to catch.
+                return false;
+            };
+            match args
+                .get(idx)
+                .and_then(|a| extract_literal_string(a, ir, val_info))
+            {
+                // A provable literal must be one of the required values.
+                Some(s) => values.iter().any(|v| v.eq_ignore_ascii_case(&s)),
+                // Unresolvable value: literal-only proof, so not a
+                // violation. This is the conservative direction - it can
+                // miss `secure=flag`, never invent it.
+                None => true,
             }
         }
     }

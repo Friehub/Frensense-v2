@@ -12,7 +12,7 @@
 use crate::role_map::{
     is_predicate_guard, sink_role_for_label, PropagatorRule, SanitizerKind, SinkLabel,
 };
-use frensense_engine::analysis::taint::facts::LearnedFactEntry;
+use frensense_engine::analysis::taint::facts::{LearnedFactEntry, PolicyRequirement, PolicyScope};
 
 mod c;
 mod go;
@@ -58,6 +58,37 @@ pub(crate) struct LanguageVocab {
     pub propagators: &'static [PropagatorRule],
     pub session_roots: &'static [&'static str],
     pub route_patterns: &'static [&'static str],
+    /// Structural (non-dataflow) policies this language's vocabulary
+    /// installs: a call plus the argument conditions that make it a
+    /// violation. Emitted as bundle-shaped `Policy`/`PolicyScoped` facts, so
+    /// the checker evaluates them with the same code path a corpus bundle
+    /// uses - the language section only supplies data.
+    pub policies: &'static [PolicySpec],
+}
+
+/// One static policy: when `when_call` occurs, every requirement in
+/// `require` must hold, otherwise the call is a finding (an empty
+/// `require` means the call itself is the violation).
+pub(crate) struct PolicySpec {
+    pub rule: &'static str,
+    pub when_call: &'static str,
+    pub require: &'static [RequirementSpec],
+    pub message: &'static str,
+    pub severity: &'static str,
+    /// Only fire in files importing this package (`None` = unscoped).
+    pub package: Option<&'static str>,
+}
+
+/// Static form of a [`PolicyRequirement`]; owned strings are built at
+/// emission time so the tables stay `&'static`.
+pub(crate) enum RequirementSpec {
+    /// The named argument must be present and, when its value is a
+    /// provable literal, one of `values` (case-insensitive). See
+    /// [`PolicyRequirement::RequireNamedArgLiteral`].
+    RequireNamedArgLiteral {
+        name: &'static str,
+        values: &'static [&'static str],
+    },
 }
 
 /// Emit one language's provider sections from static tables - the pack's
@@ -173,6 +204,42 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
         entries.push(LearnedFactEntry::LanguageRoutePattern {
             language: language.clone(),
             pattern: (*pattern).to_string(),
+        });
+    }
+    // Structural policies: emitted as the same fact shapes a bundle uses,
+    // so the conclusion (which call, which flags) is data from the moment
+    // it is generated.
+    for p in v.policies {
+        let require: Vec<PolicyRequirement> = p
+            .require
+            .iter()
+            .map(|r| match r {
+                RequirementSpec::RequireNamedArgLiteral { name, values } => {
+                    PolicyRequirement::RequireNamedArgLiteral {
+                        name: (*name).to_string(),
+                        values: values.iter().map(|s| (*s).to_string()).collect(),
+                    }
+                }
+            })
+            .collect();
+        entries.push(match p.package {
+            Some(pkg) => LearnedFactEntry::PolicyScoped {
+                rule: p.rule.to_string(),
+                when_call: p.when_call.to_string(),
+                require,
+                scope: PolicyScope::Function,
+                message: p.message.to_string(),
+                severity: p.severity.to_string(),
+                package: pkg.to_string(),
+            },
+            None => LearnedFactEntry::Policy {
+                rule: p.rule.to_string(),
+                when_call: p.when_call.to_string(),
+                require,
+                scope: PolicyScope::Function,
+                message: p.message.to_string(),
+                severity: p.severity.to_string(),
+            },
         });
     }
     entries

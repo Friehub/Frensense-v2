@@ -114,6 +114,12 @@ fn classify_python(kind: &str) -> NodeRole {
         | "dictionary_pattern"
         | "return_type" => NodeRole::Parameters,
         "argument_list" | "generator_expression" => NodeRole::Arguments,
+        // Keyword arguments keep their name: `set_cookie("sid", "v",
+        // secure=False)` is not the same fact as a 3rd positional `False`.
+        "keyword_argument" => NodeRole::KeywordArgument {
+            name_field: "name".into(),
+            value_field: "value".into(),
+        },
         "class_definition" => NodeRole::ClassDef,
         // `not X` is a unary operator, not a pass-through binary one: the
         // binary lowering returns its single operand unchanged, which drops

@@ -324,11 +324,12 @@ pub fn generic_rule_advisory(
     (
         Severity::Warning,
         format!("Policy violation: {rule} ({function})"),
-        format!("{rule} at {file}:{line}, insecure cryptographic/configuration choice."),
-        format!(
-            "Replace the weak primitive in `{function}` with a modern alternative \
-             (bcrypt/argon2 for passwords, SHA-256+ for digests)."
-        ),
+        format!("{rule} at {file}:{line}"),
+        // Rule-neutral: an unknown rule may be a cookie flag, an allowlist
+        // shape, a bundle-authored misuse check. Prescribing a crypto
+        // primitive here told operators to "use bcrypt" for a missing
+        // Secure flag.
+        format!("Review the flagged call in `{function}` and enforce the condition `{rule}` requires."),
         "policy",
     )
 }

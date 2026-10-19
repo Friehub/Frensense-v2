@@ -25,6 +25,7 @@ pub mod leak;
 pub mod memory_summary;
 pub mod oob;
 pub mod policy;
+pub mod registry;
 pub mod schema_policy;
 pub mod uaf;
 pub mod weak_hash;
@@ -54,6 +55,7 @@ use crate::ir::function::FunctionIR;
 use rustc_hash::FxHashSet;
 
 pub use crate::analysis::taint::facts::Provenance;
+pub use registry::{CheckContext, CheckRegistry, CheckScope, NonDataflowCheck, default_registry};
 
 /// Last segment of a call reference: everything after the last `.`, then
 /// after the last `::` (Rust/C++ paths), so `security.hash`, `sha2::digest`
@@ -104,6 +106,18 @@ fn finding_key(f: &CheckerFinding) -> (String, String, usize) {
     )
 }
 
+/// Push a finding unless an earlier check already reported the same
+/// `(function, rule, span)` identity.
+fn push_unique(
+    all: &mut Vec<CheckerFinding>,
+    seen: &mut FxHashSet<(String, String, usize)>,
+    f: CheckerFinding,
+) {
+    if seen.insert(finding_key(&f)) {
+        all.push(f);
+    }
+}
+
 /// Run every registered check over every function, deduped and ordered by
 /// (function, span) so output is deterministic.
 ///
@@ -136,51 +150,53 @@ pub fn check_all_with_graph_scoped<'a>(
     prog: Option<&ProgramSvfg<'_>>,
     pkg_scope: Option<&policy::PackageScope<'_>>,
 ) -> Vec<CheckerFinding> {
+    let irs: Vec<&FunctionIR> = irs.into_iter().collect();
+    // One memory-summary registry per scan: program summaries are inferred
+    // from the whole IR set once, then shared by every memory check.
+    let summaries =
+        memory_summary::MemorySummaryRegistry::from_facts(facts).infer_program_summaries_into(&irs);
+    let registry = registry::default_registry();
+    let program_ctx = CheckContext {
+        irs: &irs,
+        current: None,
+        prog,
+        facts,
+        pkg_scope,
+        summaries: &summaries,
+    };
+
     let mut seen: FxHashSet<(String, String, usize)> = FxHashSet::default();
     let mut all = Vec::new();
-    let irs: Vec<&FunctionIR> = irs.into_iter().collect();
-    // Program-level rules run once over the whole IR set (they correlate
+
+    // Program-scoped checks run once over the whole IR set (they correlate
     // guards in one function with definitions in another).
-    for f in guard_bypass::check_allowlist_definitions(&irs, facts) {
-        let key = finding_key(&f);
-        if seen.insert(key) {
-            all.push(f);
+    for check in registry
+        .checks()
+        .filter(|c| c.scope() == CheckScope::Program)
+    {
+        for f in check.run(&program_ctx) {
+            push_unique(&mut all, &mut seen, f);
         }
     }
-    // Co-occurrence policies: function-scoped ones run per function,
-    // module-scoped ones run once over the whole scanned set. Legacy
-    // learned checks fire through the same evaluator after conversion.
-    for f in policy::check_program_scoped(&irs, facts, pkg_scope) {
-        let key = finding_key(&f);
-        if seen.insert(key) {
-            all.push(f);
-        }
-    }
-    let mem_summaries =
-        memory_summary::MemorySummaryRegistry::from_facts(facts).infer_program_summaries_into(&irs);
+
+    // Function-scoped checks are IR-major: every check on one function
+    // before moving to the next. Insertion order matters below the final
+    // stable sort for findings that share a (function, span) key.
     for ir in &irs {
-        let findings = weak_hash::check(ir, facts)
-            .into_iter()
-            .chain(guard_bypass::check(ir, facts))
-            .chain(guard_bypass::check_credentials(ir, facts))
-            .chain(schema_policy::check(ir, facts))
-            .chain(
-                match prog.and_then(|p| p.function_index(&ir.name).map(|fi| (p, fi))) {
-                    Some((p, fi)) => uaf::check_with_prog(fi, p, &mem_summaries),
-                    None => uaf::check_with_summaries(ir, &mem_summaries),
-                },
-            )
-            .chain(oob::check_with_summaries(ir, &mem_summaries, facts))
-            .chain(int_overflow::check(ir, &mem_summaries, facts))
-            .chain(leak::check(ir, &mem_summaries, facts))
-            .chain(learned::check(ir, facts));
-        for f in findings {
-            let key = finding_key(&f);
-            if seen.insert(key) {
-                all.push(f);
+        let ctx = CheckContext {
+            current: Some(*ir),
+            ..program_ctx
+        };
+        for check in registry
+            .checks()
+            .filter(|c| c.scope() == CheckScope::Function)
+        {
+            for f in check.run(&ctx) {
+                push_unique(&mut all, &mut seen, f);
             }
         }
     }
+
     all.sort_by_key(|f| {
         (
             f.function.clone(),

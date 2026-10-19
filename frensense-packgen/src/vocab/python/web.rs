@@ -10,6 +10,32 @@
 /// Request-parameter names for the web frameworks.
 pub(crate) static PY_REQUEST_PARAM_NAMES: &[&str] = &["request", "req", "r"];
 
+/// Structural policies for the web frameworks.
+///
+/// A cookie flag is a *named* argument: `set_cookie("k", "v", path="/",
+/// secure=False)` puts `secure` at slot 3, while `set_cookie("k", "v",
+/// secure=False)` puts it at slot 2. No positional slot rule is correct for
+/// both, which is why these key on the argument name the lowering records.
+/// Package-scoped: only `set_cookie` in a file importing Flask fires.
+pub(crate) static PY_POLICIES: &[super::super::PolicySpec] = &[super::super::PolicySpec {
+    rule: "insecure_cookie_flags",
+    when_call: "set_cookie",
+    require: &[
+        super::super::RequirementSpec::RequireNamedArgLiteral {
+            name: "secure",
+            values: &["true"],
+        },
+        super::super::RequirementSpec::RequireNamedArgLiteral {
+            name: "httponly",
+            values: &["true"],
+        },
+    ],
+    message:
+        "Cookie is set without the Secure and HttpOnly flags; session cookies must carry both.",
+    severity: "warning",
+    package: Some("flask"),
+}];
+
 /// Request-source patterns: which member paths carry untrusted input.
 /// Split by framework because `request.args` (Flask), `request.GET` (Django)
 /// and `request.query_params` (FastAPI) hit different receivers/objects.

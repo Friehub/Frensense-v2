@@ -118,6 +118,7 @@ pub(super) const C_VOCAB: LanguageVocab = LanguageVocab {
     propagators: C_PROPAGATORS,
     session_roots: &[],
     route_patterns: C_ROUTE_PATTERNS,
+    policies: &[],
 };
 
 pub(crate) fn vocab() -> &'static LanguageVocab {

@@ -386,6 +386,7 @@ pub(super) const RUST_VOCAB: LanguageVocab = LanguageVocab {
     propagators: RUST_PROPAGATORS,
     session_roots: &[],
     route_patterns: &[],
+    policies: &[],
 };
 
 pub(crate) fn vocab() -> &'static LanguageVocab {

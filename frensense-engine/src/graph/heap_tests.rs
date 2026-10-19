@@ -81,6 +81,7 @@ pub mod heap_flow_tests {
                 mem_in: mem_1,
                 func: "getSource".into(),
                 args: vec![],
+                arg_names: Vec::new(),
             },
         );
 
@@ -119,6 +120,7 @@ pub mod heap_flow_tests {
                 mem_in: mem_3,
                 func: "sink".into(),
                 args: vec![Operand::Var(v2)],
+                arg_names: Vec::new(),
             },
         );
 
@@ -174,6 +176,7 @@ pub mod heap_flow_tests {
                 mem_in: mem_1,
                 func: "getSource".into(),
                 args: vec![],
+                arg_names: Vec::new(),
             },
         );
 
@@ -225,6 +228,7 @@ pub mod heap_flow_tests {
                 mem_in: mem_4,
                 func: "sink".into(),
                 args: vec![Operand::Var(v2)],
+                arg_names: Vec::new(),
             },
         );
 
@@ -284,6 +288,7 @@ pub mod heap_flow_tests {
                     mem_in: mem_0,
                     func: "sink".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
         }
@@ -315,6 +320,7 @@ pub mod heap_flow_tests {
                     mem_in: mem_1,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
 
@@ -341,6 +347,7 @@ pub mod heap_flow_tests {
                     mem_in: mem_3,
                     func: "helper".into(),
                     args: vec![Operand::Var(obj)],
+                    arg_names: Vec::new(),
                 },
             );
         }
@@ -395,6 +402,7 @@ pub mod heap_flow_tests {
                     mem_in: mem_0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             // p.data = v1
@@ -438,6 +446,7 @@ pub mod heap_flow_tests {
                     mem_in: mem_1,
                     func: "fill".into(),
                     args: vec![Operand::Var(obj)],
+                    arg_names: Vec::new(),
                 },
             );
 
@@ -463,6 +472,7 @@ pub mod heap_flow_tests {
                     mem_in: mem_2,
                     func: "sink".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
         }
@@ -523,6 +533,7 @@ pub mod heap_flow_tests {
                     mem_in: mem_0,
                     func: "sink".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
         }
@@ -554,6 +565,7 @@ pub mod heap_flow_tests {
                     mem_in: mem_1,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
 
@@ -579,6 +591,7 @@ pub mod heap_flow_tests {
                     mem_in: mem_3,
                     func: "helper_fs".into(),
                     args: vec![Operand::Var(obj)],
+                    arg_names: Vec::new(),
                 },
             );
         }

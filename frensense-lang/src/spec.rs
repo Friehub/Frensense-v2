@@ -121,6 +121,17 @@ pub enum NodeRole {
     /// Argument list: `arguments` (JS/TS), `argument_list` (Python/Go/C),
     /// `token_tree` (Rust macros).
     Arguments,
+    /// A named call argument (`f(secure=False)`): Python `keyword_argument`.
+    /// Distinct from a plain expression so the IR can keep the argument's
+    /// *name* alongside its value - a policy that constrains one flag cannot
+    /// be expressed correctly by position when the caller may omit earlier
+    /// optional arguments.
+    KeywordArgument {
+        /// Field holding the argument name.
+        name_field: Cow<'static, str>,
+        /// Field holding the argument value expression.
+        value_field: Cow<'static, str>,
+    },
     /// Class / struct / enum / interface / trait definition.
     ClassDef,
     /// Binary expression: `a + b`, `x && y`.

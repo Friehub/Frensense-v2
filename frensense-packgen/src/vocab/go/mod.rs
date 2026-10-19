@@ -34,6 +34,7 @@ pub(crate) fn vocab() -> &'static LanguageVocab {
                 propagators: db::GO_PROPAGATORS,
                 session_roots: &[],
                 route_patterns: http::GO_ROUTE_PATTERNS,
+                policies: &[],
             }
         },
     };
