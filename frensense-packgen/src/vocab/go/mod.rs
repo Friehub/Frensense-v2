@@ -23,7 +23,7 @@ pub(crate) fn vocab() -> &'static LanguageVocab {
                 language: "go",
                 ambiguous_verbs: crate::data::BOOTSTRAP_AMBIGUOUS_VERBS,
                 global_only_sinks: &[],
-                package_scoped_sinks: &[],
+                package_scoped_sinks: db::GO_PACKAGE_SCOPED_SINKS,
                 sink_names: db::GO_SINK_NAMES,
                 sink_signatures: db::GO_SINK_SIGNATURES,
                 idor_sinks: &[],

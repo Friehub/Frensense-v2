@@ -48,6 +48,18 @@ export async function fine(email: string) {
 }
 "#;
 
+    /// Prisma's tagged-template form parameterizes the interpolations at the
+    /// driver: the legitimate shape, not a sink. Only the `Unsafe` variants
+    /// (plus `sql.raw`) take a buildable string. Declaring `$queryRaw` as a
+    /// scoped sink reintroduces the tagged-template false positive.
+    const TAGGED_TEMPLATE: &str = r#"
+import { PrismaClient } from '@prisma/client'
+const prisma = new PrismaClient()
+export async function fine(id: string) {
+  await prisma.$queryRaw`SELECT * FROM users WHERE id = ${id}`
+}
+"#;
+
     fn run(src: &str) -> Vec<crate::analysis::taint::engine::SinkFinding> {
         let files = vec![("test.ts".to_string(), src.to_string(), "ts".to_string())];
         let (config, facts) = seeded_tables(["ts"]);
@@ -83,6 +95,15 @@ export async function fine(email: string) {
         assert!(
             !has_raw_finding(&findings),
             "an origin from a different package must not inherit the scoped fact; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn scoped_sink_is_silent_on_tagged_template() {
+        let findings = run(TAGGED_TEMPLATE);
+        assert!(
+            !findings.iter().any(|f| f.sink.contains("queryRaw")),
+            "parameterized `$queryRaw` tagged template must stay silent; got {findings:?}"
         );
     }
 }

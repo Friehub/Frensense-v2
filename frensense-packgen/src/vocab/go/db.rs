@@ -80,6 +80,22 @@ pub(crate) static GO_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("debug", crate::role_map::SinkLabel::LogLeak),
 ];
 
+/// Package-scoped Go sinks: named AFTER import-origin resolution, not by
+/// bare call name. `net/http`'s package-level client functions lower to a
+/// receiver-root call (`http.Get`), and the transport method names collide
+/// with unrelated per-slot rules sharing the last segment - `sqlx`'s
+/// `db.Get(dest, query)` declares slot 1 only, which silently swallowed the
+/// SSRF at slot 0 of `http.Get(url)`. Declaring the transport entries under
+/// their origin gives the walker the all-args slot layout for the actual
+/// `net/http` package while `db.Get` keeps the sqlx rule. `(dotted call,
+/// package, label)`.
+pub(crate) static GO_PACKAGE_SCOPED_SINKS: &[(&str, &str, crate::role_map::SinkLabel)] = &[
+    ("http.Get", "net/http", crate::role_map::SinkLabel::Ssrf),
+    ("http.Post", "net/http", crate::role_map::SinkLabel::Ssrf),
+    ("http.Head", "net/http", crate::role_map::SinkLabel::Ssrf),
+    ("http.Do", "net/http", crate::role_map::SinkLabel::Ssrf),
+];
+
 /// Sanitizer classification for Go.
 pub(crate) fn go_classify_sanitizer(call: &str) -> Option<crate::role_map::SanitizerKind> {
     use super::super::call_last_segment;

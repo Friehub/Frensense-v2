@@ -426,18 +426,29 @@ pub(crate) fn sink_alert_with_facts(
             }
         }
     }
+    // Slot layout is a property of the CALLED API, not of the shared
+    // method name. A package-scoped fact (declared for the call's import
+    // origin) carries the correct slots; without this lookup the engine
+    // arms a call through its scoped fact (`is_sink_call_scoped`) but then
+    // applies whatever bare-name signature shares the method name. The
+    // Go case is concrete: `http.Get(url)` (slot 0) and `db.Get(&dest, sql)`
+    // (slot 1, sqlx) both lower to `Get`, and the bare entry silently
+    // dropped the SSRF finding. `sink_signature_scoped` falls back to the
+    // universal tables when no scoped entry applies, so behaviour for
+    // unresolved origins is unchanged.
+    let signature = facts.sink_signature_scoped(name, origin_package);
     // Receiver-taint rule: for a slot-restricted sink (dangerous_args
     // non-empty), a tainted RECEIVER is the object being read (the DB
     // handle, the request object), not data being consumed, no alert.
     // Only all-args sinks keep receiver taint dangerous.
     if slot == usize::MAX
-        && let Some(sig) = facts.sink_signature(name)
+        && let Some(sig) = signature
         && !sig.dangerous_args.is_empty()
     {
         return None;
     }
     // Sink-signature check: dangerous slot (or receiver) only.
-    if let Some(sig) = facts.sink_signature(name)
+    if let Some(sig) = signature
         && slot != usize::MAX
         && !sig.is_dangerous(slot)
     {

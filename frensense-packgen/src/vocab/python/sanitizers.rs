@@ -17,6 +17,12 @@ pub(crate) fn python_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
     match call.rsplit('.').next().unwrap_or(call) {
         // Numeric coercion
         "int" | "float" | "bool" | "abs" | "round" => Some(SanitizerKind::Full),
+        // Digit-only validity predicates. `uid.isdigit()` proves the value
+        // holds no SQL/HTML/path/shell metacharacter, so it is a full
+        // validator. The pack generator's `is*` guard-style heuristic
+        // (`is_predicate_guard`) then lets the guard map treat
+        // `if not uid.isdigit(): return` as a check on `uid`.
+        "isdigit" | "isnumeric" | "isdecimal" => Some(SanitizerKind::Full),
         // HTML escaping (stdlib)
         "escape" | "html_escape" | "cgi_escape" => Some(SanitizerKind::HtmlEscape),
         // Bleach, MarkupSafe
@@ -56,6 +62,9 @@ pub(crate) static PY_SANITIZER_NAMES: &[&str] = &[
     "int",
     "float",
     "bool",
+    "isdigit",
+    "isnumeric",
+    "isdecimal",
     "shlex.quote",
     "urllib.parse.quote",
     "html.escape",

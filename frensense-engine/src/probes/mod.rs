@@ -82,3 +82,4 @@ mod framework_ioc_tests;
 mod multi_lang_tests;
 mod path_sensitivity_tests;
 mod sanitizer_matrix_tests;
+mod sink_identity_tests;
