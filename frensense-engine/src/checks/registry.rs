@@ -261,6 +261,20 @@ impl NonDataflowCheck for LearnedChecks {
     }
 }
 
+/// Functions whose control flow has outgrown review (hygiene tier).
+struct FunctionComplexity;
+impl NonDataflowCheck for FunctionComplexity {
+    fn id(&self) -> &'static str {
+        "function_complexity"
+    }
+    fn scope(&self) -> CheckScope {
+        CheckScope::Function
+    }
+    fn run(&self, ctx: &CheckContext<'_>) -> Vec<CheckerFinding> {
+        super::health::check(ctx.ir())
+    }
+}
+
 /// Allowlist definitions that are too weak to contain a hostile URL.
 /// Program-scoped: correlates the definition with its call sites.
 struct AllowlistDefinitions;
@@ -310,6 +324,7 @@ pub fn default_registry() -> CheckRegistry {
         &IntegerOverflow,
         &MemoryLeak,
         &LearnedChecks,
+        &FunctionComplexity,
     ];
     CheckRegistry { checks: CHECKS }
 }
@@ -351,7 +366,7 @@ mod tests {
     /// `default_registry`, not an accident.
     #[test]
     fn default_registry_has_expected_size() {
-        assert_eq!(default_registry().len(), 11);
+        assert_eq!(default_registry().len(), 12);
         assert!(!default_registry().is_empty());
     }
 

@@ -267,6 +267,7 @@ pub fn checker_rule_cwe(rule: &str) -> Option<&'static str> {
         "policy_open_redirect" => "CWE-601",
         "cookie_secure_missing" => "CWE-614",
         "cookie_httponly_missing" => "CWE-1004",
+        "function_complexity" => "CWE-1121",
         _ => return None,
     })
 }
@@ -275,7 +276,7 @@ pub fn checker_rule_cwe(rule: &str) -> Option<&'static str> {
 #[must_use]
 pub fn checker_rule_tier(rule: &str) -> RuleTier {
     match rule {
-        "cookie_httponly_missing" => RuleTier::Hygiene,
+        "cookie_httponly_missing" | "function_complexity" => RuleTier::Hygiene,
         _ => RuleTier::Stable,
     }
 }
@@ -427,6 +428,15 @@ pub fn generic_rule_advisory(
     file: &str,
     line: u32,
 ) -> (Severity, String, String, String, &'static str) {
+    if rule == "function_complexity" {
+        return (
+            Severity::Warning,
+            format!("Function `{function}` is too complex to review safely"),
+            format!("Excessive branching in `{function}` ({file}:{line}) hides defects and invites append-only fixes"),
+            format!("Split `{function}` into smaller functions along its independent branches; do not add new branches to it."),
+            "health",
+        );
+    }
     (
         Severity::Warning,
         format!("Policy violation: {rule} ({function})"),
@@ -537,6 +547,11 @@ fn builtin_observation(rule: &str, params: &[(&'static str, String)]) -> Option<
         crate::rules::UNINITIALIZED_FREE if has("name") => {
             "`{name}` is freed without guaranteed initialization \
              (uninitialized pointer free). Initialize before use."
+        }
+        "function_complexity" if has("complexity") => {
+            "`{function}` has cyclomatic complexity {complexity} (limit {limit}) across \
+             {ops} operations. Extract independent branches into helper functions \
+             instead of adding more."
         }
         crate::rules::MEMORY_LEAK if has("alloc") => {
             "Memory leak: `{alloc}` result in `{function}` is never released, \

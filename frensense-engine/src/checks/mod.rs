@@ -20,6 +20,7 @@
 //! Line drawn: **built-in = how to look; learned = what to conclude.**
 
 pub mod guard_bypass;
+pub mod health;
 pub mod int_overflow;
 pub mod leak;
 pub mod memory_summary;
