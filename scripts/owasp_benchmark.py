@@ -132,6 +132,55 @@ def load_baseline_facts(path: str | Path) -> dict[str, dict[str, int]]:
     return facts
 
 
+def advisory_cwes(tags: list[str], tag_cwe: dict[str, str]) -> set[str]:
+    """CWE ids an advisory can be attributed to (empty set = unattributed)."""
+    out = set()
+    for t in tags:
+        c = norm_cwe(t) or tag_cwe.get(t)
+        if c:
+            out.add(c)
+    return out
+
+
+def classify(vul: bool, mode: str, case_cwe: str, adv_cwes: list[set[str]]) -> str:
+    n = len(adv_cwes)
+    attributed_hit = any(case_cwe in s for s in adv_cwes)
+    unattributed = sum(1 for s in adv_cwes if not s)
+    if mode == "any":
+        hit = n > 0
+    elif mode == "cwe":
+        hit = attributed_hit
+    else:  # conservative: unattributed findings never earn a TP, always cost a FP
+        hit = attributed_hit or (not vul and unattributed > 0)
+    if vul:
+        return "TP" if hit else "FN"
+    return "FP" if hit else "TN"
+
+
+def rates(d: dict) -> dict:
+    out = {}
+    for k, v in d.items():
+        tp, fp, fn, tn = (v.get(c, 0) for c in ("TP", "FP", "FN", "TN"))
+        tpr = tp / (tp + fn) if tp + fn else 0.0
+        fpr = fp / (fp + tn) if fp + tn else 0.0
+        out[k] = {
+            "TP": tp, "FP": fp, "FN": fn, "TN": tn, "ERR": v.get("ERR", 0),
+            "tpr": round(tpr, 3),
+            "fpr": round(fpr, 3),
+            "score": round(tpr - fpr, 3),
+        }
+    return out
+
+
+def tally(per_case: list[dict], field: str) -> dict:
+    by_cwe = defaultdict(lambda: defaultdict(int))
+    total = defaultdict(lambda: defaultdict(int))
+    for c in per_case:
+        by_cwe[c["cwe"]][c[field]] += 1
+        total["all"][c[field]] += 1
+    return {"total": rates(total)["all"], "by_cwe": dict(sorted(rates(by_cwe).items()))}
+
+
 def count_per_rule_tag(cases: dict[str, dict], results: list[dict]) -> dict[str, dict[str, int]]:
     """WI-74: per-rule scorer.
 
@@ -158,6 +207,394 @@ def count_per_rule_tag(cases: dict[str, dict], results: list[dict]) -> dict[str,
                     cls = "FN" if vul else "TN"
                 tally[t][cls] += 1
     return dict(tally)
+
+
+def rules_from_cases(cases: dict[str, dict], results: list[dict]) -> dict[str, dict[str, int]]:
+    """Per-rule verdicts: dedupe findings per case, then classify per tag."""
+    tally: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for r in results:
+        meta = cases[r["id"]]
+        seen = set()
+        for tags in r.get("tag_sets", []):
+            key = tuple(sorted(tags))
+            if key in seen:
+                continue
+            seen.add(key)
+            for t in tags:
+                if t in GENERIC_TAGS:
+                    continue
+                vul = meta["vul"]
+                cwe = meta["cwe"]
+                attributed_hit = any(cwe in s for s in tags)
+                if attributed_hit:
+                    cls = "TP" if vul else "FP"
+                else:
+                    cls = "FN" if vul else "TN"
+                tally[t][cls] += 1
+    return dict(tally)
+
+
+def score(results: list[dict], cases: dict[str, dict], mode: str,
+          tag_cwe: dict[str, str]) -> dict:
+    per_case = []
+    unattributed_tags: dict[str, int] = {}
+    advisories_total = unattributed_total = 0
+    for r in results:
+        meta = cases[r["id"]]
+        adv_cwes = [advisory_cwes(t, tag_cwe) for t in r.get("tag_sets", [])]
+        for tags, cwes in zip(r.get("tag_sets", []), adv_cwes):
+            advisories_total += 1
+            if not cwes:
+                unattributed_total += 1
+                for t in tags:
+                    unattributed_tags[t] = unattributed_tags.get(t, 0) + 1
+        if "error" in r:
+            cls = cls_any = "ERR"
+        else:
+            cls = classify(meta["vul"], mode, meta["cwe"], adv_cwes)
+            cls_any = classify(meta["vul"], "any", meta["cwe"], adv_cwes)
+        per_case.append({
+            "id": r["id"],
+            "cwe": meta["cwe"],
+            "lang": "py",
+            "expected": "vulnerable" if meta["vul"] else "safe",
+            "findings": r["findings"],
+            "cwes_found": sorted(set().union(*adv_cwes)),
+            "unattributed": sum(1 for s in adv_cwes if not s),
+            "class": cls,
+            "class_any": cls_any,
+            "rule_scores": count_per_rule_tag(cases, [r]),
+            **({"error": r["error"]} if "error" in r else {}),
+        })
+
+    main = tally(per_case, "class")
+    rule_tally = rules_from_cases(cases, results)
+    return {
+        "meta": {"match": mode, "tag_cwe_entries": len(tag_cwe)},
+        "total": main["total"],
+        "by_cwe": main["by_cwe"],
+        "legact_any": tally(per_case, "class_any"),
+        "attribution": {
+            "advisories": advisories_total,
+            "unattributed": unattributed_total,
+            "unattributed_tags": dict(sorted(unattributed_tags.items(), key=lambda kv: -kv[1])[:20]),
+        },
+        "rules": rule_tally,
+        "cases": per_case,
+    }
+
+
+def compare_to_baseline(cur: dict, base: dict, tpr_tol: float, fpr_tol: float) -> dict:
+    """Deltas vs a previous scorecard plus a list of regressions."""
+    diff = {"total": {}, "by_cwe": {}, "rules": {}, "regressions": []}
+    for k in ("tpr", "fpr", "score"):
+        diff["total"][k] = round(cur["total"][k] - base["total"].get(k, 0.0), 3)
+    if diff["total"]["fpr"] > fpr_tol + 1e-9:
+        diff["regressions"].append(
+            f"overall FPR rose {diff['total']['fpr']*100:+.1f} pp "
+            f"({base['total'].get('fpr', 0)*100:.1f}% -> {cur['total']['fpr']*100:.1f}%)")
+    for cwe, v in cur["by_cwe"].items():
+        b = base.get("by_cwe", {}).get(cwe)
+        if not b:
+            continue
+        dt = round(v["tpr"] - b["tpr"], 3)
+        diff["by_cwe"][cwe] = dt
+        if dt < -tpr_tol - 1e-9:
+            diff["regressions"].append(
+                f"{cwe} TPR fell {dt*100:+.1f} pp ({b['tpr']*100:.1f}% -> {v['tpr']*100:.1f}%)")
+    for rule, v in cur["rules"].items():
+        b = base.get("rules", {}).get(rule)
+        if not b:
+            continue
+        denom = v.get("TP") + v.get("FN")
+        dt = round(v["tpr"] - b["tpr"], 3) if denom > 0 else 0.0
+        diff["rules"][rule] = dt
+        if dt < -tpr_tol - 1e-9:
+            diff["regressions"].append(
+                f"{rule} TPR fell {dt*100:+.1f} pp ({b['tpr']*100:.1f}% -> {v['tpr']*100:.1f}%)")
+    if cur["total"]["ERR"] > base["total"].get("ERR", 0):
+        diff["regressions"].append(
+            f"scan errors rose ({base['total'].get('ERR', 0)} -> {cur['total']['ERR']})")
+    return diff
+
+
+def _pp(x: float | None) -> str:
+    return "n/a" if x is None else f"{x*100:+.1f} pp"
+
+
+def print_scorecard(s: dict, elapsed: float, diff: dict | None) -> None:
+    t = s["total"]
+    print(f"\n{'=' * 62}")
+    print(f"FRENESENSE on OWASP BenchmarkPython  ({t['TP'] + t['FP'] + t['FN'] + t['TN'] + t['ERR']} cases, {elapsed:.0f}s)")
+    print(f"{'=' * 62}")
+    print(f"match mode: {s['meta']['match']}")
+    print(f"TPR {t['tpr']*100:5.1f}%   FPR {t['fpr']*100:5.1f}%   SCORE (TPR-FPR) {t['score']*100:5.1f}%")
+    print(f"   TP {t['TP']:4d}   FP {t['FP']:4d}   FN {t['FN']:4d}   TN {t['TN']:4d}   ERR {t['ERR']:4d}")
+    if diff is not None:
+        print(f"vs baseline: TPR {_pp(diff['total']['tpr'])}  FPR {_pp(diff['total']['fpr'])}  "
+              f"score {_pp(diff['total']['score'])}")
+    print("\nPer-rule (category + CWE tags):")
+    for rule, v in sorted(s.get("rules", {}).items()):
+        tpr = v["tpr"] if (v.get("TP") + v.get("FN")) else 0.0
+        fpr = v["fpr"] if (v.get("FP") + v.get("TN")) else 0.0
+        print(f"  {rule:<20} TP {v['TP']:4d} FP {v['FP']:4d} FN {v['FN']:4d} TN {v['TN']:4d} "
+              f"TPR {tpr*100:5.1f}% FPR {fpr*100:5.1f}% score {round(tpr-fpr,3):+.3f}")
+
+
+def generate_markdown_report(s: dict, elapsed: float, binary_version: str,
+                             repo_commit: str, ctx: dict, diff: dict | None) -> str:
+    t = s["total"]
+    n = t["TP"] + t["FP"] + t["FN"] + t["TN"] + t["ERR"]
+    mode = s["meta"]["match"]
+    date_str = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
+    d_tot = diff["total"] if diff else {}
+
+    def delta(key):
+        return _pp(d_tot.get(key)) if diff else "n/a"
+
+    mode_note = {
+        "conservative": "findings count toward TP only when attributed to the case's CWE; "
+                        "unattributed findings on safe cases count as FP (lower bound on TPR, "
+                        "upper bound on FPR)",
+        "cwe": "findings count only when attributed to the case's CWE; unattributed findings "
+               "are ignored on both sides",
+        "any": "any finding in the file counts, whatever its class (overstates TPR)",
+    }[mode]
+
+    lines = [
+        "# Frensense Benchmark Report",
+        "",
+        "> Scorecard on **OWASP Benchmark for Python (v0.1)**, produced by `scripts/owasp_benchmark.py`.",
+        "> Run by the Frensense maintainers; not independently audited. Reproduce with the command below.",
+        "",
+        "## Benchmark Environment",
+        "",
+        f"- **Date**: `{date_str}`",
+        f"- **Engine Version**: `{binary_version}`",
+        f"- **Frensense Commit**: `{repo_commit}`",
+        f"- **Suite**: OWASP Benchmark for Python (v0.1, {n} test cases)",
+        f"- **Knowledge bundle**: {ctx['bundle']}",
+        f"- **Matching**: `{mode}`: {mode_note}",
+        f"- **Scan Time**: `{elapsed:.1f}s` wall-clock, {ctx['workers']} workers "
+        f"({elapsed/max(n,1)*1000:.1f} ms/case throughput)",
+        "",
+        "## Scorecard",
+        "",
+        "| Metric | Value | Δ vs baseline |",
+        "| :--- | :--- | :--- |",
+        f"| **Score (TPR - FPR)** | **{t['score']*100:.1f}%** | {delta('score')} |",
+        f"| **False Positive Rate (FPR)** | **{t['fpr']*100:.1f}%** | {delta('fpr')} |",
+        f"| **True Positive Rate (TPR)** | **{t['tpr']*100:.1f}%** | {delta('tpr')} |",
+        f"| **Cases Evaluated** | {n} | |",
+        f"| **True Positives (TP)** | `{t['TP']}` | |",
+        f"| **False Positives (FP)** | `{t['FP']}` | |",
+        f"| **False Negatives (FN)** | `{t['FN']}` | |",
+        f"| **True Negatives (TN)** | `{t['TN']}` | |",
+        f"| **Scan errors (excluded from rates)** | `{t['ERR']}` | |",
+        "",
+    ]
+
+    a = s["attribution"]
+    lines += [
+        "## Finding attribution",
+        "",
+        f"{a['advisories']} advisories in total; {a['unattributed']} carry no CWE the scorer can resolve. "
+        "Engine findings tagged since 0.7.1-beta resolve their CWE in the engine; anything still "
+        "unattributed is a sink class without a single mapping (or a pre-0.7.1 binary) and can be "
+        "extended with `--tag-cwe-map`.",
+        "",
+    ]
+    if a["unattributed_tags"]:
+        lines += ["| Tag on unattributed advisories | Count |", "| :--- | ---: |"]
+        lines += [f"| `{tag}` | {cnt} |" for tag, cnt in a["unattributed_tags"].items()]
+        lines.append("")
+
+    lines += [
+        "## Per-rule capability (category + CWE tags)",
+        "",
+        "| Rule | TPR | FPR | Score | Cases | Δ TPR |",
+        "| :--- | :---: | :---: | :---: | :---: | :---: |",
+    ]
+    for rule, v in sorted(s.get("rules", {}).items(), key=lambda kv: -(kv[1]["tpr"] - kv[1]["fpr"])):
+        tpr = v["tpr"] if (v.get("TP") + v.get("FN")) else 0.0
+        fpr = v["fpr"] if (v.get("FP") + v.get("TN")) else 0.0
+        d = _pp(diff["rules"].get(rule)) if diff else "n/a"
+        lines.append(
+            f"| `{rule}` | {tpr*100:.1f}% | {fpr*100:.1f}% | "
+            f"**{round(tpr-fpr,3)*100:.1f}%** | {v['TP']+v['FP']+v['FN']+v['TN']} | {d} |"
+        )
+
+    if diff is not None and diff["regressions"]:
+        lines += ["", "## Regressions vs baseline", ""]
+        lines += [f"- {r}" for r in diff["regressions"]]
+
+    lines.extend([
+        "",
+        "## Reproduction Command",
+        "",
+        "```bash",
+        "# 1. Clone frensense and build release binary",
+        "git clone https://github.com/Friehub/frensense-v2.git",
+        "cd frensense-v2 && cargo build --release",
+        "",
+        "# 2. Run the reproduction runner",
+        "./scripts/reproduce_benchmark.sh",
+        "```",
+        "",
+        "---",
+        "*(Report generated automatically by `scripts/owasp_benchmark.py`)*",
+    ])
+    return "\n".join(lines)
+
+
+def publish_github_gist(description: str, files: dict[str, str], public: bool = True) -> str | None:
+    """Publish report files to GitHub Gist using GITHUB_TOKEN or GH_TOKEN."""
+    import urllib.request
+    import urllib.error
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if not token:
+        print("[WARN] Neither GITHUB_TOKEN nor GH_TOKEN is set. Cannot auto-publish Gist.", file=sys.stderr)
+        print("       Set export GITHUB_TOKEN=... to enable automatic Gist upload.", file=sys.stderr)
+        return None
+    url = "https://api.github.com/gists"
+    payload = {
+        "description": description,
+        "public": public,
+        "files": {fname: {"content": content} for fname, content in files.items()},
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "User-Agent": "Frensense-Benchmark-Reporter",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data.get("html_url")
+    except urllib.error.HTTPError as e:
+        err_msg = e.read().decode("utf-8")
+        print(f"[ERROR] Failed to create GitHub Gist: HTTP {e.code} - {err_msg}", file=sys.stderr)
+        return None
+    except Exception as e:
+        print(f"[ERROR] Failed to create GitHub Gist: {e}", file=sys.stderr)
+        return None
+
+
+def resolve_binary(bin_arg: str | None) -> Path | None:
+    if bin_arg:
+        p = Path(bin_arg)
+        if p.exists():
+            return p
+    # Look in common local release/debug locations
+    repo_root = Path(__file__).resolve().parent.parent
+    for candidate in [
+        repo_root / "target" / "release" / "frensense",
+        repo_root / "target" / "debug" / "frensense",
+    ]:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    # Look in PATH
+    import shutil
+    which = shutil.which("frensense")
+    if which:
+        return Path(which)
+    return None
+
+
+def describe_bundle(bundle: Path | None, testcode: Path) -> tuple[str, dict | None]:
+    """Human description of the knowledge bundle in effect, plus the
+    subprocess environment that makes a 'bare' run actually bare.
+
+    The engine auto-discovers `frensense-corpus.frc` in the scanned root and
+    honours FRENSENSE_CORPUS_BUNDLE, so a run without --bundle is only bare if
+    neither is present.
+    """
+    if bundle is not None:
+        digest = hashlib.sha256(bundle.read_bytes()).hexdigest()[:12]
+        return f"`{bundle.name}` (sha256 `{digest}`)\n", None
+    env = {k: v for k, v in os.environ.items() if k != "FRENSENSE_CORPUS_BUNDLE"}
+    ambient = [
+        p for p in (testcode / "frensense-corpus.frc",
+                    testcode.parent / "frensense-corpus.frc",
+                    Path.cwd() / "frensense-corpus.frc")
+        if p.exists()
+    ]
+    if ambient:
+        print(f"[WARN] auto-discoverable bundle found: {ambient[0]}. "
+              "This run may not be bare; remove it or pass --bundle explicitly.", file=sys.stderr)
+        return f"**none passed, but `{ambient[0]}` is auto-discoverable; run may not be bare**", env
+    return "none (bare engine; `FRENSENSE_CORPUS_BUNDLE` cleared)\n", env
+
+
+def load_cases(csv_path: Path, testcode: Path) -> list[dict]:
+    """Load ground truth: expectedresults CSV (name, category,
+    real_vulnerability, cwe) plus the testcode directory of .py cases."""
+    cases = []
+    with open(csv_path) as fh:
+        for row in csv.reader(fh):
+            if not row or row[0].startswith("#"):
+                continue
+            name = row[0]
+            vul = row[2].strip().lower() == "true"
+            raw = f"CWE-{row[3].strip()}"
+            cwe = norm_cwe(raw) or raw
+            f = testcode / f"{name}.py"
+            if f.exists():
+                cases.append({"file": f, "vul": vul, "cwe": cwe})
+    return cases
+
+
+def norm_cwe(value: str) -> str | None:
+    """'CWE-022' / 'cwe-22' -> 'CWE-22'; None if not a CWE id."""
+    m = CWE_RE.match(value.strip())
+    return f"CWE-{int(m.group(1))}" if m else None
+
+
+def load_tag_cwe_map(path: str | None) -> dict[str, str]:
+    mapping = dict(DEFAULT_TAG_CWE)
+    if path:
+        with open(path) as fh:
+            for tag, cwe in json.load(fh).items():
+                n = norm_cwe(str(cwe))
+                if n is None:
+                    raise ValueError(f"--tag-cwe-map: {tag!r} -> {cwe!r} is not a CWE id")
+                mapping[tag] = n
+    return mapping
+
+
+def scan_case(binary: Path, case: dict, bundle: Path | None = None,
+              env: dict | None = None) -> dict:
+    """Scan one case file in isolation (own process: no cross-case state)."""
+    cid = case["file"].stem
+    try:
+        cmd = [str(binary), str(case["file"])]
+        if bundle is not None:
+            cmd += ["--corpus-bundle", str(bundle)]
+        cmd += ["--json"]
+        proc = subprocess.run(
+            cmd,
+            capture_output=True, text=True, timeout=120, env=env,
+        )
+        # 0 = clean run; 1 = findings under --strict / baseline regression.
+        # Anything else (2 = engine error, negative = killed by signal) is a
+        # failed scan, not a clean file.
+        if proc.returncode not in (0, 1):
+            raise RuntimeError(f"exit code {proc.returncode}: {proc.stderr.strip()[-200:]}")
+        data = json.loads(proc.stdout) if proc.stdout.strip() else []
+        advisories = data if isinstance(data, list) else data.get("advisories", [])
+        if not isinstance(advisories, list):
+            raise ValueError("unexpected JSON shape")
+        tag_sets = [list(a.get("tags", [])) if isinstance(a, dict) else [] for a in advisories]
+        return {"id": cid, "findings": len(advisories), "tag_sets": tag_sets}
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, RuntimeError,
+            ValueError, OSError) as e:
+        return {"id": cid, "findings": 0, "tag_sets": [], "error": str(e)}
 
 
 def main() -> None:
