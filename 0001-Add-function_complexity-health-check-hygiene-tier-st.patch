@@ -1,0 +1,284 @@
+From b675d907d6e91e3c900345a6efbcc3dc7ad11284 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 20 Oct 2026 10:42:24 +0100
+Subject: [PATCH] Add function_complexity health check (hygiene tier, strict
+ profile only)
+
+First structural-health rule on the NonDataflowCheck seam: McCabe
+cyclomatic complexity over the IR CFG, reported above 25. Prose lives in
+frensense-lang (observation template + advisory), tier is Hygiene so it is
+hidden by default and recommended, tagged CWE-1121.
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01WXdJSaa3WNUF8BLnB2jrTy
+---
+ frensense-engine/src/checks/health.rs       | 85 +++++++++++++++++++++
+ frensense-engine/src/checks/health_tests.rs | 58 ++++++++++++++
+ frensense-engine/src/checks/mod.rs          |  1 +
+ frensense-engine/src/checks/registry.rs     | 17 ++++-
+ frensense-lang/src/severity.rs              | 17 ++++-
+ 5 files changed, 176 insertions(+), 2 deletions(-)
+ create mode 100644 frensense-engine/src/checks/health.rs
+ create mode 100644 frensense-engine/src/checks/health_tests.rs
+
+diff --git a/frensense-engine/src/checks/health.rs b/frensense-engine/src/checks/health.rs
+new file mode 100644
+index 0000000..3af611e
+--- /dev/null
++++ b/frensense-engine/src/checks/health.rs
+@@ -0,0 +1,85 @@
++// SPDX-License-Identifier: GPL-3.0-only
++// Copyright (c) 2024-2026 Friehub. All rights reserved.
++// Commercial use requires a separate license: https://friehub.com/licensing
++
++//! Structural health: functions whose control flow has outgrown review.
++//!
++//! This is the first "algorithm class" check that is not a security proof:
++//! it measures the lowered IR instead of matching vocabulary, so it needs
++//! no library or framework names and works for every language the
++//! providers lower. Findings are `Hygiene` tier (see
++//! `frensense_lang::severity::checker_rule_tier`), which keeps them out of
++//! the default and recommended profiles.
++//!
++//! Metric: McCabe cyclomatic complexity over the IR control-flow graph,
++//! `1 + (two-way branches) + (switch arms)`. Straight-line code and
++//! unconditional jumps add nothing, so the number is stable across
++//! providers that lower the same source differently.
++
++use crate::checks::{CheckerFinding, Provenance};
++use crate::ir::function::{FunctionIR, Terminator};
++
++/// Rule id emitted by this check.
++pub const FUNCTION_COMPLEXITY: &str = "function_complexity";
++
++/// Complexity above which a function is reported. 25 is deliberately high:
++/// the first goal is to surface the outliers, not to police every
++/// function.
++pub const MAX_COMPLEXITY: usize = 25;
++
++/// Cyclomatic complexity of one lowered function.
++pub fn cyclomatic_complexity(ir: &FunctionIR) -> usize {
++    let decisions: usize = ir
++        .blocks
++        .values()
++        .map(|b| match &b.terminator {
++            Terminator::Branch { .. } => 1,
++            Terminator::Switch { cases, .. } => cases.len(),
++            _ => 0,
++        })
++        .sum();
++    1 + decisions
++}
++
++/// Number of IR instructions, a size proxy that is independent of
++/// formatting.
++pub fn instruction_count(ir: &FunctionIR) -> usize {
++    ir.blocks.values().map(|b| b.instructions.len()).sum()
++}
++
++/// Report `ir` when its complexity exceeds `max`.
++pub fn check_with_limit(ir: &FunctionIR, max: usize) -> Vec<CheckerFinding> {
++    let complexity = cyclomatic_complexity(ir);
++    if complexity <= max {
++        return Vec::new();
++    }
++    // Anchor at the earliest known source byte of the function so the
++    // advisory lands at the top of the body.
++    let span = ir
++        .var_metadata
++        .values()
++        .filter_map(|m| m.byte_range)
++        .min_by_key(|r| r.0);
++    vec![CheckerFinding {
++        provenance: Provenance::Spec,
++        function: ir.name.clone(),
++        rule: FUNCTION_COMPLEXITY.to_string(),
++        message: String::new(),
++        params: vec![
++            ("complexity", complexity.to_string()),
++            ("limit", max.to_string()),
++            ("ops", instruction_count(ir).to_string()),
++        ],
++        span,
++        severity: "low".to_string(),
++    }]
++}
++
++/// Default-threshold entry point used by the registry.
++pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
++    check_with_limit(ir, MAX_COMPLEXITY)
++}
++
++#[cfg(test)]
++#[path = "health_tests.rs"]
++mod tests;
+diff --git a/frensense-engine/src/checks/health_tests.rs b/frensense-engine/src/checks/health_tests.rs
+new file mode 100644
+index 0000000..8dc246c
+--- /dev/null
++++ b/frensense-engine/src/checks/health_tests.rs
+@@ -0,0 +1,58 @@
++// SPDX-License-Identifier: GPL-3.0-only
++// Copyright (c) 2024-2026 Friehub. All rights reserved.
++// Commercial use requires a separate license: https://friehub.com/licensing
++
++//! Tests for the structural-health (function complexity) check.
++
++use super::*;
++use crate::harness::lower_source;
++
++fn branchy(n: usize) -> String {
++    let mut s = String::from("def f(x):\n    t = 0\n");
++    for i in 0..n {
++        s.push_str("    if x == ");
++        s.push_str(&i.to_string());
++        s.push_str(":\n        t += 1\n");
++    }
++    s.push_str("    return t\n");
++    s
++}
++
++fn complexity_of(src: &str, name: &str) -> usize {
++    let fns = lower_source("t.py", src, "py").unwrap();
++    let ir = fns.values().find(|f| f.name.ends_with(name)).unwrap();
++    cyclomatic_complexity(ir)
++}
++
++#[test]
++fn straight_line_code_has_complexity_one() {
++    assert_eq!(
++        complexity_of("def f(x):\n    y = x + 1\n    return y\n", "f"),
++        1
++    );
++}
++
++#[test]
++fn each_decision_adds_one() {
++    assert_eq!(complexity_of(&branchy(3), "f"), 4);
++    assert_eq!(complexity_of(&branchy(10), "f"), 11);
++}
++
++#[test]
++fn only_outliers_are_reported() {
++    let small = lower_source("t.py", &branchy(5), "py").unwrap();
++    let big = lower_source("t.py", &branchy(30), "py").unwrap();
++    assert!(small.values().all(|ir| check(ir).is_empty()));
++    let found: Vec<_> = big.values().flat_map(check).collect();
++    assert_eq!(found.len(), 1);
++    assert_eq!(found[0].rule, FUNCTION_COMPLEXITY);
++    assert!(found[0].params.contains(&("complexity", "31".to_string())));
++}
++
++#[test]
++fn limit_is_a_parameter_not_a_constant() {
++    let fns = lower_source("t.py", &branchy(5), "py").unwrap();
++    let ir = fns.values().find(|f| f.name.ends_with('f')).unwrap();
++    assert!(check_with_limit(ir, 3).len() == 1);
++    assert!(check_with_limit(ir, 6).is_empty());
++}
+diff --git a/frensense-engine/src/checks/mod.rs b/frensense-engine/src/checks/mod.rs
+index bd373b5..f26dde3 100644
+--- a/frensense-engine/src/checks/mod.rs
++++ b/frensense-engine/src/checks/mod.rs
+@@ -20,6 +20,7 @@
+ //! Line drawn: **built-in = how to look; learned = what to conclude.**
+ 
+ pub mod guard_bypass;
++pub mod health;
+ pub mod int_overflow;
+ pub mod leak;
+ pub mod memory_summary;
+diff --git a/frensense-engine/src/checks/registry.rs b/frensense-engine/src/checks/registry.rs
+index b3e4b0c..a512b19 100644
+--- a/frensense-engine/src/checks/registry.rs
++++ b/frensense-engine/src/checks/registry.rs
+@@ -261,6 +261,20 @@ impl NonDataflowCheck for LearnedChecks {
+     }
+ }
+ 
++/// Functions whose control flow has outgrown review (hygiene tier).
++struct FunctionComplexity;
++impl NonDataflowCheck for FunctionComplexity {
++    fn id(&self) -> &'static str {
++        "function_complexity"
++    }
++    fn scope(&self) -> CheckScope {
++        CheckScope::Function
++    }
++    fn run(&self, ctx: &CheckContext<'_>) -> Vec<CheckerFinding> {
++        super::health::check(ctx.ir())
++    }
++}
++
+ /// Allowlist definitions that are too weak to contain a hostile URL.
+ /// Program-scoped: correlates the definition with its call sites.
+ struct AllowlistDefinitions;
+@@ -310,6 +324,7 @@ pub fn default_registry() -> CheckRegistry {
+         &IntegerOverflow,
+         &MemoryLeak,
+         &LearnedChecks,
++        &FunctionComplexity,
+     ];
+     CheckRegistry { checks: CHECKS }
+ }
+@@ -351,7 +366,7 @@ mod tests {
+     /// `default_registry`, not an accident.
+     #[test]
+     fn default_registry_has_expected_size() {
+-        assert_eq!(default_registry().len(), 11);
++        assert_eq!(default_registry().len(), 12);
+         assert!(!default_registry().is_empty());
+     }
+ 
+diff --git a/frensense-lang/src/severity.rs b/frensense-lang/src/severity.rs
+index b4e0921..6bf44fb 100644
+--- a/frensense-lang/src/severity.rs
++++ b/frensense-lang/src/severity.rs
+@@ -267,6 +267,7 @@ pub fn checker_rule_cwe(rule: &str) -> Option<&'static str> {
+         "policy_open_redirect" => "CWE-601",
+         "cookie_secure_missing" => "CWE-614",
+         "cookie_httponly_missing" => "CWE-1004",
++        "function_complexity" => "CWE-1121",
+         _ => return None,
+     })
+ }
+@@ -275,7 +276,7 @@ pub fn checker_rule_cwe(rule: &str) -> Option<&'static str> {
+ #[must_use]
+ pub fn checker_rule_tier(rule: &str) -> RuleTier {
+     match rule {
+-        "cookie_httponly_missing" => RuleTier::Hygiene,
++        "cookie_httponly_missing" | "function_complexity" => RuleTier::Hygiene,
+         _ => RuleTier::Stable,
+     }
+ }
+@@ -427,6 +428,15 @@ pub fn generic_rule_advisory(
+     file: &str,
+     line: u32,
+ ) -> (Severity, String, String, String, &'static str) {
++    if rule == "function_complexity" {
++        return (
++            Severity::Warning,
++            format!("Function `{function}` is too complex to review safely"),
++            format!("Excessive branching in `{function}` ({file}:{line}) hides defects and invites append-only fixes"),
++            format!("Split `{function}` into smaller functions along its independent branches; do not add new branches to it."),
++            "health",
++        );
++    }
+     (
+         Severity::Warning,
+         format!("Policy violation: {rule} ({function})"),
+@@ -538,6 +548,11 @@ fn builtin_observation(rule: &str, params: &[(&'static str, String)]) -> Option<
+             "`{name}` is freed without guaranteed initialization \
+              (uninitialized pointer free). Initialize before use."
+         }
++        "function_complexity" if has("complexity") => {
++            "`{function}` has cyclomatic complexity {complexity} (limit {limit}) across \
++             {ops} operations. Extract independent branches into helper functions \
++             instead of adding more."
++        }
+         crate::rules::MEMORY_LEAK if has("alloc") => {
+             "Memory leak: `{alloc}` result in `{function}` is never released, \
+              returned, or stored before the function returns"
+-- 
+2.43.0
+
