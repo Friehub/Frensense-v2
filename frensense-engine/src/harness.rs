@@ -348,6 +348,7 @@ fn lower_one(
         }
     }
     let mut ir = SSABuilder::new(ctx.ir).build();
+    ir.language = spec.name().to_string();
     ir.entry_guards = spec
         .decorator_guard_calls(fn_node, source)
         .into_iter()
@@ -381,7 +382,9 @@ fn lower_static(
 ) -> FunctionIR {
     let mut ctx = LoweringContext::new_with_facts(spec, source, name.to_string(), facts);
     ctx.visit_node(value_node);
-    SSABuilder::new(ctx.ir).build()
+    let mut ir = SSABuilder::new(ctx.ir).build();
+    ir.language = spec.name().to_string();
+    ir
 }
 
 fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &str) {
@@ -483,10 +486,32 @@ fn extractor_binding<'t>(pattern: tree_sitter::Node<'t>) -> Option<tree_sitter::
 /// mutability (`&mut Foo`), keep the path before the generic arguments
 /// (`web::Query<P>` → `web::Query`), drop whitespace.
 fn normalize_type_path(raw: &str) -> String {
+    // The borrow marker is PRESERVED: framework request extractors are
+    // consumed by value (`Path<P>`, `web::Query<Q>`, `Json<B>`), while a
+    // borrowed type is the language's own value (`&Path` is `std::path::Path`).
+    // Dropping `&` made them indistinguishable, so every helper taking
+    // `&Path` was treated as an axum extractor and became a taint source.
+    let borrowed = raw.trim_start().starts_with('&');
     let t = raw.trim();
-    let t = t.trim_start_matches('&').trim_start_matches("mut").trim();
+    let t = t.trim_start_matches('&').trim();
+    // Lifetime parameter: `&'a Path` -> `Path`.
+    let t = t
+        .strip_prefix('\'')
+        .map_or(t, |rest| match rest.find(char::is_whitespace) {
+            Some(i) => rest[i..].trim(),
+            None => rest,
+        });
+    let t = t.trim_start_matches("mut").trim();
     let t = t.split('<').next().unwrap_or(t);
-    t.chars().filter(|c| !c.is_whitespace()).collect()
+    let path: String = t.chars().filter(|c| !c.is_whitespace()).collect();
+    if borrowed {
+        let mut owned = String::with_capacity(path.len() + 1);
+        owned.push('&');
+        owned.push_str(&path);
+        owned
+    } else {
+        path
+    }
 }
 
 /// Walk a C declarator chain to find the leaf `identifier`.

@@ -219,7 +219,9 @@ impl<'a> ContextSensitiveTaintEngine<'a> {
             let mut keys: Vec<NodeKey> = fe.svfg.nodes.keys().copied().collect();
             keys.sort_by_key(|k| (k.block.0, k.instr_idx, k.var.0));
             for k in keys {
-                if is_source(fe.ir, self.config, &k) && mark(&mut self.tainted, fi, k, ROOT_CTX) {
+                if is_source(fe.ir, self.config, &facts, &k)
+                    && mark(&mut self.tainted, fi, k, ROOT_CTX)
+                {
                     queue.push_back((fi, k, ROOT_CTX));
                 }
             }
@@ -228,7 +230,14 @@ impl<'a> ContextSensitiveTaintEngine<'a> {
         while let Some((fi, cur, ctx)) = queue.pop_front() {
             let fe = &self.prog.functions[fi];
 
-            if let Some(alert) = sink_alert_with_facts(fe.ir, self.config, &facts, &cur, None) {
+            if let Some(alert) = sink_alert_with_facts(
+                fe.ir,
+                self.config,
+                &facts,
+                &cur,
+                None,
+                (!fe.ir.language.is_empty()).then_some(fe.ir.language.as_str()),
+            ) {
                 let ca = ContextualAlert {
                     alert,
                     context: ctx,

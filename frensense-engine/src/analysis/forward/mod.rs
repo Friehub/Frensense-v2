@@ -282,7 +282,7 @@ impl<'a> InterproceduralTaintEngine<'a> {
             let mut keys: Vec<NodeKey> = fe.svfg.nodes.keys().copied().collect();
             keys.sort_by_key(|k| (k.block.0, k.instr_idx, k.var.0));
             for k in keys {
-                if is_source(fe.ir, self.config, &k) {
+                if is_source(fe.ir, self.config, &self.facts, &k) {
                     self.tainted.insert((fi, k));
                     queue.push_back((fi, k));
                 }
@@ -293,8 +293,14 @@ impl<'a> InterproceduralTaintEngine<'a> {
             let fe = &self.prog.functions[fi];
 
             // Sink check at every visited node.
-            if let Some(alert) = sink_alert_with_facts(fe.ir, self.config, &self.facts, &cur, None)
-                && !self.alerts.contains(&alert)
+            if let Some(alert) = sink_alert_with_facts(
+                fe.ir,
+                self.config,
+                &self.facts,
+                &cur,
+                None,
+                (!fe.ir.language.is_empty()).then_some(fe.ir.language.as_str()),
+            ) && !self.alerts.contains(&alert)
             {
                 self.alerts.push(alert);
             }

@@ -133,16 +133,38 @@ pub fn apply_language_entries(
             continue;
         };
         // Build this language's contribution in a fresh temp table, exactly
-        // like a per-spec seed merge, then merge it in: the
-        // merge's last-wins/widens rules resolve cross-language collisions
-        // the same way `tables_from_exts` merges per-spec tables.
+        // like a per-spec seed merge, then install it. The wildcard group is
+        // genuinely language-agnostic and merges into the shared name space;
+        // every other group is filed under its own language key, because a
+        // bare call name is not portable across languages (Rust
+        // `File::create` vs a JS `prisma.model.create`).
         let mut c = TaintConfig::default();
         let mut f = FactTable::default();
         install_language_group(&mut c, &mut f, group);
-        config.sources.extend(c.sources);
-        config.sinks.extend(c.sinks);
         config.sanitizers.extend(c.sanitizers);
-        facts.merge(&f);
+        if lang == "*" {
+            config.sources.extend(c.sources);
+            config.sinks.extend(c.sinks);
+            facts.merge(&f);
+        } else {
+            // Sources are language-keyed too: `input` is caller data in
+            // TypeScript and an unrelated local in Rust, so a shared set
+            // would seed taint from names that mean nothing in the file
+            // being scanned.
+            facts
+                .lang_sources
+                .entry(lang.to_string())
+                .or_default()
+                .extend(c.sources);
+            facts.merge_language(lang, &f);
+            // Everything except the sink signatures stays language-agnostic
+            // bookkeeping (receiver roots, ambiguous verbs, session roots,
+            // IDOR keys, propagators): those are name-keyed hints, not sink
+            // arming, and the sink lookup above already scopes by language.
+            let mut rest = f;
+            rest.sink_signatures.clear();
+            facts.merge(&rest);
+        }
     }
 }
 

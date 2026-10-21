@@ -8,8 +8,46 @@ use super::*;
 // Shared IR predicates (same semantics as the single-function engine)
 // ---------------------------------------------------------------------------
 
+/// The source vocabulary visible at one call site: the language-agnostic
+/// `TaintConfig` set plus the call site's own language section.
+///
+/// Source facts are declared per language (TypeScript's `req`/`input`
+/// parameter names, Rust's `std::env::var`, ...) and a bare name is not
+/// portable between them: `input` is caller data in TypeScript and an
+/// unrelated local in Rust. Sharing one set across a mixed-language scan
+/// seeds taint from names that mean nothing in the file being analyzed.
+pub(crate) struct SourceScope<'a> {
+    universal: &'a rustc_hash::FxHashSet<String>,
+    language: Option<&'a rustc_hash::FxHashSet<String>>,
+}
+
+impl<'a> SourceScope<'a> {
+    pub(crate) fn for_ir(config: &'a TaintConfig, facts: &'a FactTable, ir: &FunctionIR) -> Self {
+        Self {
+            universal: &config.sources,
+            language: facts.language_sources(&ir.language),
+        }
+    }
+
+    pub(crate) fn contains(&self, name: &str) -> bool {
+        self.universal.contains(name) || self.language.is_some_and(|set| set.contains(name))
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &'a String> {
+        self.universal
+            .iter()
+            .chain(self.language.into_iter().flatten())
+    }
+}
+
 /// True if the node is a definition whose instruction is a configured source.
-pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) -> bool {
+pub(crate) fn is_source(
+    ir: &FunctionIR,
+    config: &TaintConfig,
+    facts: &FactTable,
+    key: &NodeKey,
+) -> bool {
+    let sources = SourceScope::for_ir(config, facts, ir);
     let NodeKey {
         block,
         instr_idx: Some(idx),
@@ -33,12 +71,12 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
         // pack's source vocabulary while the mechanism stays name-agnostic.
         if let Some(meta) = ir.var_metadata.get(&var) {
             if let Some(name) = &meta.source_name
-                && config.sources.contains(name)
+                && sources.contains(name)
             {
                 return true;
             }
             return meta.type_name.as_deref().is_some_and(|ty| {
-                source_path_matches(config, ty, ty.split("::").next().unwrap_or(ty))
+                source_path_matches(&sources, ty, ty.split("::").next().unwrap_or(ty))
             });
         }
         return false;
@@ -48,7 +86,17 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
             func,
             dest: Some(d),
             ..
-        } => config.sources.contains(func) && !config.sinks.contains(func) && *d == var,
+        } => {
+            sources.contains(func)
+                && !config.sinks.contains(func)
+                && !facts.is_sink_call_scoped(
+                    func,
+                    None,
+                    None,
+                    (!ir.language.is_empty()).then_some(ir.language.as_str()),
+                )
+                && *d == var
+        }
         Instruction::CallVirtual {
             method,
             dest: Some(d),
@@ -61,7 +109,7 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
             // full member path `receiver.method` against dotted source
             // facts first, then the bare method name (same over-approximate
             // last-segment semantics as sinks).
-            if config.sources.contains(method) {
+            if sources.contains(method) {
                 return true;
             }
             if let Operand::Var(r) = receiver
@@ -83,7 +131,7 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
                 // reach, and the bare-root widening suppression would
                 // then correctly refuse to re-widen `request` over its
                 // granular children.
-                return source_path_matches(config, &path, root);
+                return source_path_matches(&sources, &path, root);
             }
             false
         }
@@ -99,9 +147,9 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
             crate::dbg_trace!(
                 crate::debug_flags::DebugFlags::get().is_source,
                 "[is_source] path={path:?} hit={}",
-                config.sources.contains(&path)
+                sources.contains(&path)
             );
-            source_path_matches(config, &path, root)
+            source_path_matches(&sources, &path, root)
         }
         _ => false,
     }
@@ -156,9 +204,9 @@ pub(crate) fn member_access_path(ir: &FunctionIR, mut base: VarId, last_field: &
 /// (The previous `sources.contains(root)` clause was redundant with the
 /// prefix rule for dotted paths and would defeat this suppression, so it is
 /// not carried over; dot-less paths hit `sources.contains(path)` exactly.)
-pub(crate) fn source_path_matches(config: &TaintConfig, path: &str, root: &str) -> bool {
-    config.sources.contains(path)
-        || config.sources.iter().any(|s| {
+pub(crate) fn source_path_matches(sources: &SourceScope<'_>, path: &str, root: &str) -> bool {
+    sources.contains(path)
+        || sources.iter().any(|s| {
             if !path.starts_with(s.as_str()) || path.as_bytes().get(s.len()) != Some(&b'.') {
                 return false;
             }
@@ -168,8 +216,7 @@ pub(crate) fn source_path_matches(config: &TaintConfig, path: &str, root: &str) 
             }
             // Whole-value root registration: live only when no granular
             // field rules exist for that root.
-            !config
-                .sources
+            !sources
                 .iter()
                 .any(|g| g.starts_with(root) && g.as_bytes().get(root.len()) == Some(&b'.'))
         })
@@ -367,6 +414,7 @@ pub(crate) fn sink_alert_with_facts(
     facts: &FactTable,
     key: &NodeKey,
     origin_package: Option<&str>,
+    language: Option<&str>,
 ) -> Option<SinkAlert> {
     let NodeKey {
         block,
@@ -383,7 +431,7 @@ pub(crate) fn sink_alert_with_facts(
     let slot_and_name = match &b.instructions[idx] {
         Instruction::CallStatic { func, args, .. }
             if config.sinks.contains(func)
-                || facts.is_sink_call_scoped(func, None, origin_package) =>
+                || facts.is_sink_call_scoped(func, None, origin_package, language) =>
         {
             args.iter()
                 .position(|a| *a == Operand::Var(var))
@@ -399,7 +447,7 @@ pub(crate) fn sink_alert_with_facts(
                 Operand::Var(r) => FactTable::receiver_root(ir, *r),
                 _ => None,
             };
-            facts.is_sink_call_scoped(method, root.as_deref(), origin_package)
+            facts.is_sink_call_scoped(method, root.as_deref(), origin_package, language)
         } =>
         {
             if receiver == &Operand::Var(var) {
@@ -424,12 +472,11 @@ pub(crate) fn sink_alert_with_facts(
     // pattern, so a blanket rule would suppress `pool.query(sql)`, a real
     // sink, because the sink name matches a source-pattern segment.
     if slot == usize::MAX {
-        if is_source(ir, config, key) {
+        if is_source(ir, config, facts, key) {
             return None;
         }
         {
-            let is_source_accessor = config
-                .sources
+            let is_source_accessor = SourceScope::for_ir(config, facts, ir)
                 .iter()
                 .any(|s| s.rsplit('.').next() == Some(name));
             if is_source_accessor {
@@ -447,7 +494,7 @@ pub(crate) fn sink_alert_with_facts(
     // dropped the SSRF finding. `sink_signature_scoped` falls back to the
     // universal tables when no scoped entry applies, so behaviour for
     // unresolved origins is unchanged.
-    let signature = facts.sink_signature_scoped(name, origin_package);
+    let signature = facts.sink_signature_scoped(name, origin_package, language);
     // Receiver-taint rule: for a slot-restricted sink (dangerous_args
     // non-empty), a tainted RECEIVER is the object being read (the DB
     // handle, the request object), not data being consumed, no alert.
@@ -472,8 +519,10 @@ pub(crate) fn sink_alert_with_facts(
     // parameterized clauses (`{ where: { id: taint } }`), non-identity object
     // fields and bare scalars are not provable access-control violations and
     // are not reported at all (zero-FP: structurally unprovable findings
-    // never fire).
-    if let Some(sig) = facts.sink_signature(name)
+    // never fire). The signature must be the same language-scoped one the
+    // match used: reading the shared table here would miss a language-keyed
+    // IDOR fact (a TypeScript `update`) and emit every write it guards.
+    if let Some(sig) = signature
         && slot != usize::MAX
         && !sig.idor_keys.is_empty()
         && !arg_is_idor_shape(ir, var, &sig.idor_keys)
@@ -485,7 +534,7 @@ pub(crate) fn sink_alert_with_facts(
     // driver parameterizes object values. Reported with the Idor class so
     // consumers rank it below Critical. (Non-identity shapes at these sinks
     // never reach here - the emission gate above returned already.)
-    let class = if let Some(sig) = facts.sink_signature(name)
+    let class = if let Some(sig) = signature
         && !sig.idor_keys.is_empty()
         && slot != usize::MAX
         && arg_is_idor_shape(ir, var, &sig.idor_keys)

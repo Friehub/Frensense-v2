@@ -82,6 +82,21 @@ impl SinkSignature {
     pub fn is_binding(&self, slot: usize) -> bool {
         self.binding_args_safe && !self.is_dangerous(slot)
     }
+
+    /// Does this signature carry any API knowledge at all? A blanket
+    /// signature is what [`SinkSignature::all_args`] produces: every slot
+    /// dangerous, no binding channel, no identity-payload keys, no
+    /// global-only marking. It is the "this name is a sink, nothing else is
+    /// known" placeholder (`FactTable::from_config` seeds one per configured
+    /// sink), so it must never outrank a fact that knows the call's slots,
+    /// exactly like the merge rule that keeps an all-args entry from
+    /// widening a slot-restricted one.
+    pub fn is_blanket(&self) -> bool {
+        self.dangerous_args.is_empty()
+            && !self.binding_args_safe
+            && self.idor_keys.is_empty()
+            && !self.global_only
+    }
 }
 
 /// Sanitizer-kind label for non-guard sanitizers: one dialect across every

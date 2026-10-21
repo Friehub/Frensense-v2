@@ -33,6 +33,8 @@ pub mod graph;
 pub mod harness;
 pub mod ir;
 #[cfg(test)]
+mod language_scope_tests;
+#[cfg(test)]
 mod package_scoped_sanitizer_tests;
 #[cfg(test)]
 mod package_scoped_sink_tests;
@@ -41,6 +43,8 @@ mod probes;
 #[cfg(test)]
 mod regression_gate_tests;
 pub mod scan;
+#[cfg(test)]
+mod type_source_tests;
 
 /// Opaque identifier for a source file within a single analysis session.
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]

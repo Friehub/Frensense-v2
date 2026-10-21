@@ -399,8 +399,10 @@ struct ExploreState {
 pub(crate) fn source_description(
     ir: &FunctionIR,
     config: &TaintConfig,
+    facts: &FactTable,
     key: &NodeKey,
 ) -> Option<String> {
+    let sources = crate::analysis::forward::SourceScope::for_ir(config, facts, ir);
     let NodeKey {
         block,
         instr_idx: Some(idx),
@@ -411,19 +413,31 @@ pub(crate) fn source_description(
     };
     let b = ir.blocks.get(&block)?;
     if idx >= b.instructions.len() {
-        // Parameter sentinel: the source is the parameter's own name.
-        return ir
-            .var_metadata
-            .get(&var)
-            .and_then(|m| m.source_name.clone())
-            .filter(|n| config.sources.contains(n));
+        // Parameter sentinel. The source is the parameter's own name when
+        // that name is registered; when it was matched by its TYPE instead
+        // (`Path(q): Path<P>`, `*http.Request`), the name is all we can
+        // report - returning `None` used to render the origin as
+        // "unknown origin", which read like an engine bug.
+        let meta = ir.var_metadata.get(&var)?;
+        if let Some(name) = meta.source_name.clone()
+            && sources.contains(&name)
+        {
+            return Some(name);
+        }
+        let ty = meta.type_name.clone()?;
+        let matched = crate::analysis::forward::predicates::source_path_matches(
+            &sources,
+            &ty,
+            ty.split("::").next().unwrap_or(&ty),
+        );
+        return matched.then(|| meta.source_name.clone().unwrap_or(ty));
     }
     match &b.instructions[idx] {
         Instruction::CallStatic {
             func,
             dest: Some(d),
             ..
-        } if config.sources.contains(func) && *d == var => Some(func.clone()),
+        } if sources.contains(func) && *d == var => Some(func.clone()),
         Instruction::CallVirtual {
             method,
             dest: Some(d),
@@ -433,15 +447,15 @@ pub(crate) fn source_description(
             // Module-qualified calls (`random.randint(...)`) lower as
             // CallVirtual: prefer the full `receiver.method` path (dotted
             // source facts), fall back to the bare method name.
-            if config.sources.contains(method) {
+            if sources.contains(method) {
                 return Some(method.clone());
             }
             if let Operand::Var(r) = receiver
                 && let Some(root) = crate::analysis::taint::facts::FactTable::receiver_root(ir, *r)
             {
                 let path = format!("{root}.{method}");
-                if config.sources.contains(&path)
-                    || config.sources.iter().any(|s| {
+                if sources.contains(&path)
+                    || sources.iter().any(|s| {
                         path.starts_with(s.as_str()) && path.as_bytes().get(s.len()) == Some(&b'.')
                     })
                 {
@@ -453,7 +467,7 @@ pub(crate) fn source_description(
         Instruction::LoadField { base, field, .. } => {
             let path = member_access_path(ir, *base, field);
             let root = path.split('.').next().unwrap_or("");
-            if source_path_matches(config, &path, root) {
+            if source_path_matches(&sources, &path, root) {
                 Some(path)
             } else {
                 None

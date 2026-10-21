@@ -46,6 +46,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine bug, absent rule, harness artifact, unexplained), producing a
   reproducible `--json-out` scorecard and per-case repro files.
 
+#### Flow Traces & Rule Lookup
+- **Flow steps name what the developer wrote**: taint-path steps are rendered
+  from the source text at their byte range (`reads `resp.data``,
+  `String(req.query.q)`) instead of IR temporaries (`flows through v11`), and
+  function names lose their `file::` prefix. A step with no readable span falls
+  back to the field or value description, never to an SSA number.
+- **The origin step has a location**: the `source:` step now carries the byte
+  range of the value it names (falling back to the parameter's declaration for
+  entry points), so SARIF's first `codeFlow` step is a real region instead of
+  `location: null`, and the origin is no longer printed twice (the walked
+  def/use pair above it is dropped).
+- **`frensense explain <rule-id>`**: prints a built-in rule's id, title, CWE
+  links, tier, why and fix from its rule card; with no id it lists every rule.
+  Unknown ids exit `2` instead of guessing.
+- **`explain` describes bundle-learned rules too**: a learned policy or check
+  has no card by design - its knowledge is the trigger, requirements and
+  message the bundle taught - so `frensense explain <id> -b <bundle>` renders
+  that data straight from the bundle (and from the embedded default pack),
+  with no invented CWE. `--list-rules -b <bundle>` lists the bundle's rule
+  ids alongside the built-ins, and unknown ids say to pass `-b`.
+- **`explain` no longer squats on a path of the same name**: `frensense
+  explain` scans a directory literally named `explain`, a rule id wins over a
+  same-named path, and the flag forms `--list-rules` / `--explain-rule <id>`
+  are always unambiguous.
+- **`mcp`, `watch` and `bundle` resolve same-named paths the same way**: a
+  repo containing `mcp/`, `watch/` or `bundle/` stays scannable with the bare
+  token — `frensense mcp` scans `./mcp`, and the server still starts via
+  `frensense --mcp`. Arguments only the subcommand understands keep it
+  claimed (`frensense watch <path>`, `frensense bundle <corpus> [out.frc]`),
+  only argv[1] is a subcommand slot (`frensense . mcp` scans both paths), and
+  `watch` no longer strips every `watch` token from the line — only its own.
+  `lsp` is deliberately still literal: editors run it non-interactively, where
+  silently scanning an `lsp/` directory would break the editor rather than
+  present an ambiguity a human can resolve.
+- **Borrowed Rust types are not request extractors**: the type-named source
+  matcher strips the `&` when normalizing a parameter type, so `fn load(root:
+  &Path)` matched axum's `Path` extractor and every helper that reads a file
+  from a borrowed path looked attacker-controlled. The borrow marker is kept
+  (`&Path` is `std::path::Path`), which removes that false-discovery class -
+  including the path-traversal finding on Frensense's own bundle loader -
+  while by-value extractors (`Path<T>`) still fire.
+
+- **`--diff-only` reports only findings the diff introduced**: the gate still
+  scans each changed file whole (a change can make an old line reachable), but
+  a finding whose span touches no added line predates the diff and is
+  suppressed with a count, instead of failing the gate for a bug this change
+  never touched. Pre-existing debt belongs to the baseline
+  (`--emit-baseline` / `--compare-baseline`), not to the diff gate.
+
+#### Reported Identity & Triage
+- **Stable rule ids on every finding**: findings report under a stable id
+  (`taint.sql-injection`, `check.weak-hash`, `policy.<id>`) instead of the
+  message text, so baselines, suppression files and trend reports keep pointing
+  at the same rule when the wording changes. SARIF emits one rule per id with
+  its CWE `external/cwe/*` tags, help URI and `security-severity`, and the JSON
+  report carries a `cwe` array per finding.
+- **Rule cards are the single source of rule prose**: one card per sink label
+  and built-in checker rule (`frensense_lang::rule_card`) holds the id, title,
+  CWE list, why and fix, and `taint_cwe` / `checker_rule_cwe` resolve through
+  them, so no built-in rule can ship without a CWE and the terminal, SARIF and
+  JSON surfaces cannot drift. Sinks that name no class fall back to the broad
+  parent CWE (74 injection, 20 improper input validation) instead of guessing a
+  child class.
+- **No more "untrusted data reached something" findings**: a flow whose sink
+  resolves to a fallback card (unknown label, role that pins no class) is no
+  longer reported at all - it named no class to fix, suppress or trend, and
+  those were the bulk of the noise burying real flows. `--explain` lists such
+  sinks as silent instead, and a corpus family that does know the class teaches
+  it as a label on the sink fact.
+- **Code frame in the terminal report**: findings print the offending line (and
+  the line above it) with a caret under the flagged call, plus the rule id,
+  CWE and class-specific why/fix, replacing the repeated
+  Details/Impact/Remediation block.
+
 #### Language Facts
 - **CWE-94 tagging for Code Execution**: `eval`, `exec`, and `compile` sinks now
   carry CWE-94 (Code Injection). The mapping previously matched a dead arm - the
@@ -71,8 +145,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   All foreign entries are removed; each table now contains only APIs that
   exist in its own language. Default pack 93,036 -> 82,697 bytes. OWASP score
   unchanged (25.9%).
+- **Provider facts are language-scoped, not just language-sourced**: removing
+  foreign *entries* was not enough, because the install merged every language's
+  vocabulary into one name-keyed table (`apply_language_entries` built a
+  per-language temp table and then merged it last-wins). Any scan that contained
+  two languages shared one name space: adding a single `.rs` file to a
+  TypeScript package took the scan from 6 findings to 40, every one of them a
+  `prisma.order.create(...)` / `catalog.output(...)` / `logger.log(...)` call in
+  `.ts` files armed by Rust's `File::create`, `Command::output` and `log`
+  macros. The mirror error existed on the source side: Go's `http.ResponseWriter`
+  parameter name `w` seeded taint in TypeScript files, and TypeScript's `input`
+  did the same in Rust. Sink signatures (`lang_sink_signatures`) and source
+  vocabulary (`lang_sources`) are now keyed by `(language, call)` / `language`,
+  `FunctionIR` carries the language it was lowered from, and every match site
+  (backward walk, forward engine, sink-alert predicates) passes its own
+  language; the shared table keeps only genuinely language-agnostic knowledge
+  (`"*"` pack group, bundle facts, hand-built configs). A blanket all-args
+  placeholder seeded from `TaintConfig::sinks` never shadows the language's own
+  slot/identity knowledge. Measured on a mixed TS/Rust/Python/Go repo: 78 -> 26
+  advisories (52 removed, 0 added); each language still reports its own flows.
+  Two probes that had been passing through the leak were corrected: `probe_57`
+  (return-object-field) used a local named `w` and is now an explicit
+  `Blind spot:` (a callee-allocated container's field has no cross-function heap
+  edge), and the two-phase heap test now hands the engine its fact table.
 
 #### Engine
+- **Provider facts are language-scoped** (see *Language Facts* above):
+  `FunctionIR::language`, `FactTable::lang_sink_signatures` / `lang_sources`,
+  and language-aware `is_sink_call_scoped` / `sink_signature_for_language` /
+  `SourceScope`. The scoping rule is the second half of the merge-safety rule
+  (all-args never widens slot-restricted): a fact that knows a call's slots
+  beats a blanket name-only placeholder, whatever lane it sits in.
 - **Propagator install is consistently last-wins**: duplicate `join`/`Join`
   propagator entries (a string/array method and a path-builder sharing one bare
   call key) resolved by order-dependent accident. The install used first-wins

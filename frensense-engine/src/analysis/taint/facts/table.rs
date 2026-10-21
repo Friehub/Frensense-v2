@@ -17,6 +17,35 @@ pub struct FactTable {
     /// By call name. Absent = default "all args dangerous" for configured
     /// sinks.
     pub sink_signatures: FxHashMap<String, SinkSignature>,
+    /// Language-keyed sink signatures: `language -> call -> signature`.
+    ///
+    /// The default pack declares its provider vocabulary per language, and a
+    /// bare call name is not portable between them: Rust's `File::create`
+    /// and a JavaScript `prisma.order.create(...)` share the last segment
+    /// `create`, so installing both into one name-keyed map makes the Rust
+    /// fact fire on the TypeScript call. Measured on a real repo: a single
+    /// `.rs` file in a TypeScript-only package took the scan from 6 findings
+    /// to 40, all of them `create`/`output` calls in `.ts` files.
+    ///
+    /// Facts therefore stay under the language that declared them, and
+    /// matching consults the call site's language first
+    /// ([`FactTable::sink_signature_for_language`]). [`sink_signatures`]
+    /// keeps only genuinely language-agnostic knowledge (`"*"` pack group,
+    /// bundle facts, hand-built configs).
+    ///
+    /// [`sink_signatures`]: FactTable::sink_signatures
+    pub lang_sink_signatures: FxHashMap<String, FxHashMap<String, SinkSignature>>,
+    /// Language-keyed taint sources: `language -> patterns`.
+    ///
+    /// The source mirror of [`lang_sink_signatures`]: conventional parameter
+    /// names (`req`, `input`, ...) and framework source patterns are declared
+    /// per language, so a JavaScript-only name must not seed taint in a Rust
+    /// file. `input` is a request source in TypeScript and an unrelated local
+    /// in Rust; sharing one set made `info!(..)` a source for every Rust
+    /// `tokio::spawn` call in the same repo.
+    ///
+    /// [`lang_sink_signatures`]: FactTable::lang_sink_signatures
+    pub lang_sources: FxHashMap<String, FxHashSet<String>>,
     pub sanitizer_facts: FxHashMap<String, SanitizerFact>,
     /// Scoped sink signatures: (package, call_name) -> SinkSignature.
     pub scoped_sink_signatures: FxHashMap<(String, String), SinkSignature>,
@@ -213,6 +242,97 @@ impl FactTable {
     /// a slot-restricted signature is strictly more specific knowledge, so an
     /// all-args merge (e.g. another language spec declaring the same bare
     /// call name) must not widen it back to "everything dangerous".
+    /// Merge another table's language-keyed section under `language`.
+    ///
+    /// Used by [`apply_language_entries`](crate::analysis::taint::facts::apply_language_entries)
+    /// to install one pack language group: the group is built in a fresh
+    /// table (exactly like the pre-scoping per-spec seed merge) and then
+    /// filed under its own language instead of the shared name space, so
+    /// cross-language key collisions can no longer resolve last-merge-wins.
+    /// The signature-widening rule is the same one [`Self::merge`] applies.
+    pub fn merge_language(&mut self, language: &str, other: &FactTable) {
+        let slot = self
+            .lang_sink_signatures
+            .entry(language.to_string())
+            .or_default();
+        for (k, v) in &other.sink_signatures {
+            let widens = v.dangerous_args.is_empty()
+                && !v.binding_args_safe
+                && slot
+                    .get(k)
+                    .map(|cur| !cur.dangerous_args.is_empty() || cur.binding_args_safe)
+                    .unwrap_or(false);
+            if widens {
+                continue;
+            }
+            slot.insert(k.clone(), v.clone());
+        }
+    }
+
+    /// The source vocabulary declared for `language`, if any.
+    pub fn language_sources(&self, language: &str) -> Option<&FxHashSet<String>> {
+        self.lang_sources.get(language)
+    }
+
+    /// Sink signature for `call` in the language it was written in.
+    ///
+    /// Precedence: the language-agnostic lane first (a consumer bundle and
+    /// the `"*"` pack group are the last seeding layer, so they win over a
+    /// language section), then the call site's own language - except that a
+    /// blanket all-args placeholder ([`SinkSignature::is_blanket`], what
+    /// `TaintConfig::sinks` seeds for every configured name) never shadows
+    /// the language's own entry, which knows the call's dangerous slots and
+    /// identity-payload keys. A qualified callee
+    /// (`std::fs::read_to_string`) also matches shorter declared shapes
+    /// through its `::` suffixes, exact matches first - the same rule
+    /// [`FactTable::sink_signature`] applies.
+    ///
+    /// `language: None` is the legacy "no call-site context" form: it
+    /// over-approximates across every installed language, which is why the
+    /// real scan path always passes the IR's language.
+    pub fn sink_signature_for_language(
+        &self,
+        call: &str,
+        language: Option<&str>,
+    ) -> Option<&SinkSignature> {
+        let universal = Self::lookup_sink_shape(&|c: &str| self.sink_signatures.get(c), call);
+        let scoped = match language {
+            Some(language) => self
+                .lang_sink_signatures
+                .get(language)
+                .and_then(|table| Self::lookup_sink_shape(&|c: &str| table.get(c), call)),
+            None => self
+                .lang_sink_signatures
+                .values()
+                .find_map(|table| Self::lookup_sink_shape(&|c: &str| table.get(c), call)),
+        };
+        match (universal, scoped) {
+            (Some(u), Some(l)) if u.is_blanket() => Some(l),
+            (Some(u), _) => Some(u),
+            (None, scoped) => scoped,
+        }
+    }
+
+    /// Exact-then-`::`-suffix lookup over one signature source.
+    fn lookup_sink_shape<'a>(
+        lookup: &dyn Fn(&str) -> Option<&'a SinkSignature>,
+        call: &str,
+    ) -> Option<&'a SinkSignature> {
+        if let Some(sig) = lookup(call) {
+            return Some(sig);
+        }
+        if call.contains("::") {
+            let parts: Vec<&str> = call.split("::").collect();
+            for i in 1..parts.len() {
+                let suffix = parts[i..].join("::");
+                if let Some(sig) = lookup(&suffix) {
+                    return Some(sig);
+                }
+            }
+        }
+        None
+    }
+
     pub fn merge(&mut self, other: &FactTable) {
         for (k, v) in &other.sink_signatures {
             let widens = v.dangerous_args.is_empty()
@@ -229,6 +349,18 @@ impl FactTable {
         }
         for (k, v) in &other.sanitizer_facts {
             self.sanitizer_facts.insert(k.clone(), v.clone());
+        }
+        for (lang, section) in &other.lang_sink_signatures {
+            let slot = self.lang_sink_signatures.entry(lang.clone()).or_default();
+            for (k, v) in section {
+                slot.insert(k.clone(), v.clone());
+            }
+        }
+        for (lang, section) in &other.lang_sources {
+            self.lang_sources
+                .entry(lang.clone())
+                .or_default()
+                .extend(section.iter().cloned());
         }
         for (k, v) in &other.scoped_sink_signatures {
             let widens = self

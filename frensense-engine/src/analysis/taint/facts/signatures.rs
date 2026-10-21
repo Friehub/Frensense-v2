@@ -51,21 +51,16 @@ impl FactTable {
         Some(segments.join("."))
     }
 
-    /// Signature for a sink call; `None` if the call is not a configured sink.
+    /// Signature for a sink call, without a call site's language context;
+    /// `None` if the call is not a declared sink in any language.
+    ///
+    /// This is the "no call site" accessor (bundler candidate checks, table
+    /// assertions): it takes the language-agnostic lane, then over-
+    /// approximates across every installed language. The scan path always
+    /// has an IR and must use [`Self::sink_signature_for_language`] with its
+    /// language instead, or a Rust fact would arm a TypeScript call.
     pub fn sink_signature(&self, call: &str) -> Option<&SinkSignature> {
-        if let Some(sig) = self.sink_signatures.get(call) {
-            return Some(sig);
-        }
-        if call.contains("::") {
-            let parts: Vec<&str> = call.split("::").collect();
-            for i in 1..parts.len() {
-                let suffix = parts[i..].join("::");
-                if let Some(sig) = self.sink_signatures.get(&suffix) {
-                    return Some(sig);
-                }
-            }
-        }
-        None
+        self.sink_signature_for_language(call, None)
     }
 
     /// Role for a sink call, receiver-aware.
@@ -79,26 +74,12 @@ impl FactTable {
         last: &str,
         receiver_root: Option<&str>,
     ) -> Option<crate::analysis::taint::role::SinkRole> {
-        if let Some(root) = receiver_root
-            && let Some(role) = self
-                .receiver_roles
-                .get(&(root.to_string(), last.to_string()))
-        {
-            return Some(*role);
-        }
-        self.sink_signature(last).map(|s| s.role)
+        self.role_for_call_scoped(last, receiver_root, None, None)
     }
 
     /// Semantic label slug for a sink call, receiver-aware.
     pub fn label_for_call(&self, last: &str, receiver_root: Option<&str>) -> Option<String> {
-        if let Some(root) = receiver_root
-            && let Some(slug) = self
-                .receiver_labels
-                .get(&(root.to_string(), last.to_string()))
-        {
-            return Some(slug.clone());
-        }
-        self.sink_signature(last).and_then(|s| s.label.clone())
+        self.label_for_call_scoped(last, receiver_root, None, None)
     }
 
     /// Sink signature for a call, package-aware.
@@ -115,6 +96,7 @@ impl FactTable {
         &self,
         call: &str,
         origin_package: Option<&str>,
+        language: Option<&str>,
     ) -> Option<&SinkSignature> {
         if let Some(pkg) = origin_package {
             if let Some(sig) = self
@@ -125,30 +107,20 @@ impl FactTable {
             }
             let is_package_scoped = self.scoped_sink_signatures.keys().any(|(_, c)| c == call);
             if is_package_scoped {
-                // Known package origin mismatch: do not fall back to other packages' scoped sinks
-                return self.sink_signatures.get(call);
+                // Known package origin mismatch: do not fall back to other
+                // packages' scoped sinks, only the caller's own language and
+                // the language-agnostic facts.
+                return self.sink_signature_for_language(call, language);
             }
         }
-        // Origin unknown: universal facts only (same rule as sanitizers
-        // — a package-scoped fact applies only under a confirmed origin).
-        // Scope-separated callees (`std::fs::read_to_string`) fall back
-        // through their `::` suffixes exactly like [`Self::sink_signature`],
-        // so a qualified call matches the bare callable entry when no
-        // qualified shape was declared (WI-11); exact matches keep precedence.
-        if let Some(sig) = self.sink_signatures.get(call) {
-            return Some(sig);
-        }
-        if call.contains("::") {
-            let parts: Vec<&str> = call.split("::").collect();
-            for i in 1..parts.len() {
-                let suffix = parts[i..].join("::");
-                if let Some(sig) = self.sink_signatures.get(&suffix) {
-                    return Some(sig);
-                }
-            }
-            return None;
-        }
-        self.sink_signatures.get(call)
+        // Origin unknown: universal + this language's facts only (same rule
+        // as sanitizers - a package-scoped fact applies only under a
+        // confirmed origin). Scope-separated callees
+        // (`std::fs::read_to_string`) fall back through their `::` suffixes
+        // exactly like [`Self::sink_signature`], so a qualified call matches
+        // the bare callable entry when no qualified shape was declared
+        // (WI-11); exact matches keep precedence.
+        self.sink_signature_for_language(call, language)
     }
 
     /// Role for a sink call, receiver-aware and package-aware.
@@ -161,6 +133,7 @@ impl FactTable {
         last: &str,
         receiver_root: Option<&str>,
         origin_package: Option<&str>,
+        language: Option<&str>,
     ) -> Option<crate::analysis::taint::role::SinkRole> {
         if let Some(pkg) = origin_package
             && let Some(sig) = self
@@ -169,7 +142,15 @@ impl FactTable {
         {
             return Some(sig.role);
         }
-        self.role_for_call(last, receiver_root)
+        if let Some(root) = receiver_root
+            && let Some(role) = self
+                .receiver_roles
+                .get(&(root.to_string(), last.to_string()))
+        {
+            return Some(*role);
+        }
+        self.sink_signature_for_language(last, language)
+            .map(|s| s.role)
     }
 
     /// Semantic label slug for a sink call, receiver- and package-aware.
@@ -178,6 +159,7 @@ impl FactTable {
         last: &str,
         receiver_root: Option<&str>,
         origin_package: Option<&str>,
+        language: Option<&str>,
     ) -> Option<String> {
         if let Some(pkg) = origin_package
             && let Some(sig) = self
@@ -187,7 +169,15 @@ impl FactTable {
         {
             return Some(label);
         }
-        self.label_for_call(last, receiver_root)
+        if let Some(root) = receiver_root
+            && let Some(slug) = self
+                .receiver_labels
+                .get(&(root.to_string(), last.to_string()))
+        {
+            return Some(slug.clone());
+        }
+        self.sink_signature_for_language(last, language)
+            .and_then(|s| s.label.clone())
     }
 
     /// Sanitizer fact for a call, package-aware.
@@ -245,6 +235,7 @@ impl FactTable {
         last: &str,
         receiver_root: Option<&str>,
         origin_package: Option<&str>,
+        language: Option<&str>,
     ) -> bool {
         if !self.verb_sinks.contains(last) {
             // Ordinary sink: presence in the signature table decides, with
@@ -253,7 +244,7 @@ impl FactTable {
             // (`engine.eval(x)`) matches just once its origin resolves to a
             // known package — an unrelated receiver's method must never
             // inherit a global builtin's semantics.
-            if let Some(sig) = self.sink_signature_scoped(last, origin_package) {
+            if let Some(sig) = self.sink_signature_scoped(last, origin_package, language) {
                 if sig.global_only && receiver_root.is_some() && origin_package.is_none() {
                     return false;
                 }
@@ -301,7 +292,7 @@ impl FactTable {
     ///   client, `m.get(t)` on an arbitrary Map is never a sink, while
     ///   `got.get(taint)` is.
     pub fn is_sink_call(&self, last: &str, receiver_root: Option<&str>) -> bool {
-        self.is_sink_call_scoped(last, receiver_root, None)
+        self.is_sink_call_scoped(last, receiver_root, None, None)
     }
 
     /// Walk a receiver var to the root of its member-access chain via the

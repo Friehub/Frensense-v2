@@ -104,6 +104,7 @@ impl TaintPath {
     pub(crate) fn new(
         chain: Vec<(String, FunctionIR, NodeKey, PathStep)>,
         source_desc: Option<String>,
+        source_span: Option<(String, (usize, usize))>,
         fn_file: &FxHashMap<String, String>,
     ) -> Self {
         let mut steps = Vec::with_capacity(chain.len() + 1);
@@ -111,7 +112,10 @@ impl TaintPath {
         steps.push(PathStep::Source {
             description: source_desc.unwrap_or_else(|| "unknown origin".into()),
         });
-        spans.push(None);
+        // The origin carries a location like every other step: a flow whose
+        // first hop is unlocatable cannot be opened in a SARIF viewer, and
+        // clients render step 1 as a bare string.
+        spans.push(source_span);
         // The chain is already source→sink; keep it (reversing it here used
         // to render flows sink→source, the "step 2 is the sink" bug).
         for (fname, ir, key, step) in chain.iter() {
@@ -220,6 +224,14 @@ pub fn dedup_by_shape(paths: &[TaintPath]) -> Vec<usize> {
     let mut kept: Vec<usize> = best.into_values().collect();
     kept.sort_unstable();
     kept
+}
+
+/// Location of a node: the instruction's span, or the declaring site of its
+/// value. Parameter sentinels carry no instruction, so without the fallback
+/// an origin that is a function parameter has no location at all and SARIF
+/// renders its first step as `location: null`.
+fn span_with_decl(ir: &FunctionIR, key: &NodeKey) -> Option<(usize, usize)> {
+    span_of(ir, key).or_else(|| ir.var_metadata.get(&key.var).and_then(|m| m.byte_range))
 }
 
 /// Byte range of the instruction (or param sentinel) a node points at.
@@ -362,7 +374,18 @@ impl<'a> BackwardTaintEngine<'a> {
         // just before the sink argument. The sink node itself is not a step:
         // the finding already reports it.
         let Some((sf, skey)) = source_node else {
-            return TaintPath::new(chain, source_desc, &self.fn_file);
+            return TaintPath::new(chain, source_desc, None, &self.fn_file);
+        };
+        let source_span = {
+            let ir = self.prog.functions[sf].ir;
+            span_with_decl(ir, &skey).map(|r| {
+                let file = self
+                    .fn_file
+                    .get(&ir.name)
+                    .cloned()
+                    .unwrap_or_else(|| ir.name.clone());
+                (file, r)
+            })
         };
         let mut cur = (sf, skey);
         for _ in 0..self.current_parents.len() + 1 {
@@ -375,6 +398,17 @@ impl<'a> BackwardTaintEngine<'a> {
                 None => break,
             }
         }
-        TaintPath::new(chain, source_desc, &self.fn_file)
+        // The leading walk nodes ARE the origin: the chain starts at the
+        // source node, and its def/use pair each restates step 1 at the same
+        // byte range. The Source step now carries that location, so drop the
+        // echoes instead of printing the origin two or three times.
+        let origin = source_span.as_ref().map(|(_, r)| *r);
+        while let Some((_, ir, key, _)) = chain.first() {
+            if span_with_decl(ir, key) != origin {
+                break;
+            }
+            chain.remove(0);
+        }
+        TaintPath::new(chain, source_desc, source_span, &self.fn_file)
     }
 }

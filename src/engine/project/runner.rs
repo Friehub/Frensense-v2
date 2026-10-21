@@ -371,11 +371,31 @@ fn advisory_from_checker(
     }
     // Built-in classification tag: the rule registry's CWE, unless the
     // bundle overlay already stamped one (corpus-authored id wins).
-    if let Some(cwe) = frensense_lang::severity::checker_rule_cwe(&c.rule)
-        && !advisory.tags.iter().any(|t| t == cwe)
+    let card = frensense_lang::rule_card::checker_card(&c.rule);
+    if !advisory.tags.iter().any(|t| t.starts_with("CWE-"))
+        && let Some(card) = card
     {
-        advisory.tags.push(cwe.to_string());
+        advisory
+            .tags
+            .extend(card.cwe.iter().map(|w| (*w).to_string()));
     }
+    // Rules with a card but no language-registry entry fall back to the
+    // generic "Policy violation: <id>" prose; the card replaces it with
+    // the class name and class-specific advice.
+    if let Some(card) = card
+        && advisory.title.starts_with("Policy violation:")
+    {
+        advisory.title = card.title.to_string();
+        advisory.impact = card.why.to_string();
+        advisory.improvement = card.fix.to_string();
+    }
+    advisory.rule_id = match card {
+        Some(card) => card.id.to_string(),
+        None => format!(
+            "policy.{}",
+            c.rule.trim_start_matches("policy_").replace('_', "-")
+        ),
+    };
     advisory.requires_human = false;
     advisory.fingerprint = stable_fingerprint(&[file, &c.rule, &c.function]);
     advisory
@@ -405,13 +425,19 @@ fn advisory_from_finding(
             frensense_lang::severity::TaintClass::Injection
         }
     };
-    let (severity, title) = frensense_lang::severity::taint_advisory(
+    let (severity, _generic_title) = frensense_lang::severity::taint_advisory(
         class,
         f.role.default_level(),
         class_tag,
         &f.sink,
         src,
     );
+    let card = frensense_lang::rule_card::taint_card(
+        f.label.as_deref(),
+        f.role,
+        matches!(class, frensense_lang::severity::TaintClass::Idor),
+    );
+    let title = format!("{}: `{src}` reaches `{}`", card.title, f.sink);
     // Human-facing path: compacted (adjacent def/use duplicates collapsed,
     // bare SSA hops merged) so the rendered flow is readable; the raw path
     // still feeds shape-based dedup above. Always materialized: those steps
@@ -420,20 +446,12 @@ fn advisory_from_finding(
     // TEXT observation embeds the path only under `--show-flows`, keeping
     // the clean text report terse.
     let rendered_path = f.path.compacted();
+    let flow_summary = format!("`{src}` flows to `{}` (argument {}).", f.sink, f.arg_slot);
     let observation = if show_flows {
         let flow = crate::reporter::render_taint_path(&rendered_path);
-        format!(
-            "Tainted value from `{src}` flows to sink `{}` (argument {}) in function `{}`.\nTaint path:\n{}",
-            f.sink,
-            f.arg_slot,
-            f.function,
-            flow.trim_end()
-        )
+        format!("{flow_summary}\nTaint path:\n{}", flow.trim_end())
     } else {
-        format!(
-            "Tainted value from `{src}` flows to sink `{}` (argument {}) in function `{}`.",
-            f.sink, f.arg_slot, f.function
-        )
+        flow_summary
     };
     let mut advisory = Advisory::bare(title, severity, file_id, path, observation)
         .with_confidence(1.0)
@@ -441,14 +459,9 @@ fn advisory_from_finding(
         .with_column(column)
         .with_content(f.function.clone())
         .with_enclosing_symbol(f.function.clone())
-        .with_impact(format!(
-            "Unsanitized data from `{src}` reaches the `{}` sink at {}:{}.",
-            f.sink, file, line
-        ))
-        .with_improvement(format!(
-            "Sanitize `{src}` before it reaches `{}` in `{}`.",
-            f.sink, f.function
-        ))
+        .with_impact(card.why)
+        .with_improvement(card.fix)
+        .with_rule_id(card.id)
         .with_tags(["taint", class_tag]);
     if let Some(lbl) = f.label.as_deref() {
         advisory.tags.push(lbl.to_string());
@@ -458,13 +471,12 @@ fn advisory_from_finding(
     if let Some(pattern) = bundle_advisories.get(&f.sink) {
         apply_bundle_pattern(&mut advisory, pattern);
     }
-    // Built-in classification tag: role+label pin the CWE precisely;
-    // skip when the bundle overlay already stamped one (corpus-authored
-    // id wins over the built-in guess).
-    if let Some(cwe) = frensense_lang::severity::taint_cwe(f.role, f.label.as_deref())
-        && !advisory.tags.iter().any(|t| t == cwe)
-    {
-        advisory.tags.push(cwe.to_string());
+    // Built-in classification: the rule card's CWEs, unless the bundle
+    // overlay already stamped one (corpus-authored id wins).
+    if !advisory.tags.iter().any(|t| t.starts_with("CWE-")) {
+        advisory
+            .tags
+            .extend(card.cwe.iter().map(|w| (*w).to_string()));
     }
     advisory.requires_human = false;
     // Taint path steps (source→sink) for SARIF codeFlows / rich clients,
@@ -477,7 +489,7 @@ fn advisory_from_finding(
             .zip(rendered_path.spans.iter())
             .map(|(step, span)| {
                 (
-                    crate::reporter::describe_path_step(step),
+                    crate::reporter::describe_step(step, span.as_ref()),
                     span.as_ref()
                         .map(|(file, (start, _))| (file.clone(), *start)),
                 )
@@ -660,6 +672,24 @@ mod checker_observation_tests {
         Engine::new().run(&dir.join(file)).expect("scan")
     }
 
+    /// The origin step carries its location into the advisory, so SARIF's
+    /// first codeFlow step is a real region rather than `location: null`.
+    #[test]
+    fn taint_steps_locate_the_origin() {
+        let advisories = scan_temp(
+            "origin",
+            "app.py",
+            "import os\nfrom flask import request\n\ndef run():\n    os.system(request.args['c'])\n",
+        );
+        let a = advisories
+            .iter()
+            .find(|a| a.rule_id.starts_with("taint."))
+            .expect("taint finding");
+        let (desc, location) = a.taint_steps.first().expect("origin step");
+        assert!(desc.starts_with("source:"), "{desc}");
+        assert!(location.is_some(), "origin step has no location: {desc}");
+    }
+
     #[test]
     fn bare_weak_hash_renders_lang_observation() {
         let advisories = scan_temp(
@@ -673,7 +703,8 @@ mod checker_observation_tests {
             "Weak hash function `md5`, not acceptable for passwords or security-sensitive \
              digests (use bcrypt/argon2/scrypt or SHA-256+)"
         );
-        assert_eq!(advisories[0].title, "Policy violation: weak_hash (digest)");
+        assert_eq!(advisories[0].title, "Weak hash function");
+        assert_eq!(advisories[0].rule_id, "check.weak-hash");
         assert_eq!(
             advisories[0].tags,
             ["checker", "weak_hash", "policy", "CWE-328"]
@@ -718,6 +749,32 @@ mod checker_observation_tests {
             "Credential `hash` call receives a plaintext password, password storage \
              must use a memory-hard KDF (bcrypt/argon2/scrypt), not a fast digest \
              wrapper."
+        );
+    }
+
+    #[test]
+    fn taint_finding_carries_stable_rule_id_cwe_and_card_advice() {
+        let advisories = scan_temp(
+            "taint-card",
+            "app.py",
+            "import os\nfrom flask import request\n\ndef run():\n    os.system(request.args['c'])\n",
+        );
+        let a = advisories
+            .iter()
+            .find(|a| a.rule_id.starts_with("taint."))
+            .expect("taint finding");
+        assert_eq!(a.rule_id, "taint.command-injection");
+        assert_eq!(a.cwe(), ["CWE-78"]);
+        assert!(a.title.starts_with("OS command injection: "), "{}", a.title);
+        assert!(
+            a.improvement.contains("without a shell"),
+            "{}",
+            a.improvement
+        );
+        assert!(
+            !a.rule_id.contains(' ') && !a.rule_id.contains('`'),
+            "rule id must not contain finding text: {}",
+            a.rule_id
         );
     }
 }

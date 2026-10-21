@@ -56,6 +56,12 @@ pub struct Advisory {
     pub original_content: String,
     pub enclosing_symbol: Option<String>,
     pub fingerprint: String,
+    /// Stable rule id (`taint.sql-injection`, `check.weak-hash`,
+    /// `policy.<id>`). Never finding-specific text: reporters group,
+    /// suppress and trend by this. Empty only for advisories built outside
+    /// the engine; use [`Advisory::rule_id`] for a guaranteed value.
+    #[serde(default)]
+    pub rule_id: String,
     pub requires_human: bool,
     pub tags: Vec<String>,
     /// Precision tier governing profile filtering.
@@ -94,11 +100,49 @@ impl Advisory {
             original_content: String::new(),
             enclosing_symbol: None,
             fingerprint: String::new(),
+            rule_id: String::new(),
             requires_human: true,
             tags: Vec::new(),
             tier: RuleTier::Stable,
             taint_steps: Vec::new(),
         }
+    }
+
+    pub fn with_rule_id(mut self, id: impl Into<String>) -> Self {
+        self.rule_id = id.into();
+        self
+    }
+
+    /// The rule id, or a lowercase-kebab id derived from the title when
+    /// the producer did not set one, so reporters never emit finding text
+    /// as an id.
+    #[must_use]
+    pub fn rule_id(&self) -> String {
+        if !self.rule_id.is_empty() {
+            return self.rule_id.clone();
+        }
+        let mut slug = String::new();
+        for ch in self.title.chars() {
+            if ch.is_ascii_alphanumeric() {
+                slug.push(ch.to_ascii_lowercase());
+            } else if !slug.ends_with('-') && !slug.is_empty() {
+                slug.push('-');
+            }
+            if slug.len() >= 48 {
+                break;
+            }
+        }
+        format!("policy.{}", slug.trim_end_matches('-'))
+    }
+
+    /// CWE ids carried in the tags, in order (`CWE-89`).
+    #[must_use]
+    pub fn cwe(&self) -> Vec<&str> {
+        self.tags
+            .iter()
+            .map(String::as_str)
+            .filter(|t| t.starts_with("CWE-"))
+            .collect()
     }
 
     pub fn with_tier(mut self, tier: RuleTier) -> Self {

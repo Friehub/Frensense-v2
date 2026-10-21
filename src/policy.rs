@@ -16,20 +16,38 @@
 //! [`crate::explain`].
 
 use crate::{Advisory, Profile, RuleTier, Severity};
-use frensense_engine::analysis::taint::engine::{BackwardVerdict, SinkFinding};
+use frensense_engine::analysis::taint::engine::{BackwardVerdict, FindingClass, SinkFinding};
+use frensense_lang::rule_card;
 use std::collections::BTreeMap;
 
 /// Engine output that becomes an advisory: a vulnerable verdict on a
-/// dangerous sink slot (sink-signature aware).
+/// dangerous sink slot (sink-signature aware), whose sink names a
+/// vulnerability class.
 ///
 /// `alert` is `None` exactly when the slot is a safe channel - the engine
 /// already evaluated per-slot danger (`jwt.verify(token, secret)` slot 1 =
 /// secret, `query(sql, params)` slot 1+ = binding channel). A
 /// [`BackwardVerdict::Vulnerable`] verdict on a non-dangerous slot must
 /// not become an advisory.
+///
+/// The class comes from the rule card the finding reports under (see
+/// [`frensense_lang::rule_card`]). A sink whose label is unknown and whose
+/// role pins no class resolves to a fallback card ("untrusted data reaches
+/// a sensitive operation"), which tells the reader only that tainted data
+/// went somewhere: nothing to fix, suppress or trend. Those findings are
+/// dropped here, so no surface (CLI, MCP, LSP, SARIF) reports them and
+/// `--explain` lists the sink as silent instead.
 #[must_use]
 pub fn reports_finding(f: &SinkFinding) -> bool {
-    f.verdict == BackwardVerdict::Vulnerable && f.alert.is_some()
+    if f.verdict != BackwardVerdict::Vulnerable || f.alert.is_none() {
+        return false;
+    }
+    !rule_card::taint_card(
+        f.label.as_deref(),
+        f.role,
+        matches!(f.finding_class, FindingClass::Idor),
+    )
+    .is_generic()
 }
 
 /// Apply the reporting floor: drop advisories below `min_confidence` or
@@ -78,7 +96,92 @@ pub fn apply_with_profile(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use frensense_engine::analysis::forward::predicates::SinkAlert;
+    use frensense_lang::severity::SinkRole;
     use std::path::Path;
+
+    fn finding(
+        label: Option<&str>,
+        role: SinkRole,
+        class: FindingClass,
+        verdict: BackwardVerdict,
+    ) -> SinkFinding {
+        SinkFinding::builder()
+            .function("handler")
+            .sink("count")
+            .verdict(verdict)
+            .finding_class(class)
+            .role(role)
+            .label(label.map(str::to_string))
+            .alert(Some(SinkAlert {
+                sink: "count".to_string(),
+                slot: 0,
+                function: "handler".to_string(),
+                class,
+            }))
+            .build()
+    }
+
+    #[test]
+    fn unclassified_sink_class_is_not_reported() {
+        // No label, no role that pins a class: the report would only say
+        // "untrusted data reaches a sensitive operation".
+        assert!(!reports_finding(&finding(
+            None,
+            SinkRole::Other,
+            FindingClass::Injection,
+            BackwardVerdict::Vulnerable,
+        )));
+        assert!(!reports_finding(&finding(
+            Some("other"),
+            SinkRole::Other,
+            FindingClass::Injection,
+            BackwardVerdict::Vulnerable,
+        )));
+        // Bare Execution spans command/SQL/code: generic "injection".
+        assert!(!reports_finding(&finding(
+            None,
+            SinkRole::Execution,
+            FindingClass::Injection,
+            BackwardVerdict::Vulnerable,
+        )));
+    }
+
+    #[test]
+    fn classified_sinks_still_report() {
+        for (label, role) in [
+            (Some("ssrf"), SinkRole::Execution),
+            (Some("traversal"), SinkRole::Resource),
+            (None, SinkRole::Xss),
+        ] {
+            assert!(
+                reports_finding(&finding(
+                    label,
+                    role,
+                    FindingClass::Injection,
+                    BackwardVerdict::Vulnerable,
+                )),
+                "{label:?}/{role:?} names a class and must report"
+            );
+        }
+        // Idor is its own class (CWE-639) even without a sink label.
+        assert!(reports_finding(&finding(
+            None,
+            SinkRole::Other,
+            FindingClass::Idor,
+            BackwardVerdict::Vulnerable,
+        )));
+    }
+
+    #[test]
+    fn verdict_and_alert_still_gate_first() {
+        assert!(!reports_finding(&finding(
+            Some("sql"),
+            SinkRole::Execution,
+            FindingClass::Injection,
+            BackwardVerdict::Unknown,
+        )));
+    }
 
     fn mock_advisory(tier: RuleTier, severity: Severity) -> Advisory {
         Advisory::bare(

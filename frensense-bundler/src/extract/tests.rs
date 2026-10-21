@@ -1006,9 +1006,11 @@ export function badSearch (req: any) {
     fn builtin_table_is_slot_aware() {
         let (_, table) = builtin();
 
+        // Sink facts are language-keyed: look the slot rules up for the
+        // language that declared them, not through the shared name space.
         let q = table
-            .sink_signature("query")
-            .expect("query must be a known sink");
+            .sink_signature_for_language("query", Some("typescript"))
+            .expect("query must be a known TypeScript sink");
         assert!(q.is_dangerous(0), "SQL string slot is dangerous");
         assert!(
             !q.is_dangerous(1),
@@ -1017,8 +1019,8 @@ export function badSearch (req: any) {
         assert!(q.is_binding(1));
 
         let d = table
-            .sink_signature("decrypt")
-            .expect("decrypt must be a known sink");
+            .sink_signature_for_language("decrypt", Some("typescript"))
+            .expect("decrypt must be a known TypeScript sink");
         assert!(d.is_dangerous(0), "ciphertext slot is dangerous");
         assert!(!d.is_dangerous(1), "key slot must not alert");
     }

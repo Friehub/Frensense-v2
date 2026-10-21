@@ -281,6 +281,7 @@
 
 pub mod providers;
 pub mod registry;
+pub mod rule_card;
 pub mod rules;
 pub mod severity;
 pub mod spec;

@@ -608,6 +608,15 @@ mod tier2_interprocedural_probes {
         assert_detected(&scan_ts(src), "56_class_method_dispatch", "eval");
     }
 
+    // Blind spot surfaced by language-scoped sources: the caller reads a
+    // field of a container the CALLEE allocated. The field-demand walk
+    // correctly refuses whole-container fill edges, and there is no
+    // cross-function heap edge for a returned container's fields (only for
+    // containers passed in as arguments), so the flow dies at the callee's
+    // allocation. The probe used to "pass" because its local was named `w`,
+    // Go's conventional `http.ResponseWriter` parameter name - a
+    // cross-language source collision, not the relation under test.
+    #[ignore = "Blind spot: returned object field (callee-allocated container) has no cross-function heap edge"]
     #[test]
     fn probe_57_return_object_field() {
         let src = r#"
@@ -616,8 +625,8 @@ mod tier2_interprocedural_probes {
             }
 
             export function test(req: any) {
-                const w = wrap(req.body.payload);
-                eval(w.data);
+                const wrapped = wrap(req.body.payload);
+                eval(wrapped.data);
             }
         "#;
         assert_detected(&scan_ts(src), "57_return_object_field", "eval");

@@ -74,7 +74,18 @@ pub fn explain_silent(loc: &LocatedFinding) -> Option<ExplainRecord> {
         return None;
     }
     let f = &loc.finding;
-    let (verdict, reason) = if f.verdict == BackwardVerdict::Vulnerable {
+    let (verdict, reason) = if f.verdict == BackwardVerdict::Vulnerable && f.alert.is_some() {
+        // Vulnerable on a dangerous slot, but the sink resolves to a
+        // fallback rule card: it names no vulnerability class, so the
+        // reporting policy drops it (nothing to fix, suppress or trend).
+        (
+            "unclassified".to_string(),
+            format!(
+                "taint reaches `{}` but the sink names no vulnerability class, so no advisory is reported",
+                f.sink
+            ),
+        )
+    } else if f.verdict == BackwardVerdict::Vulnerable {
         // Vulnerable but alert is None: the flow landed in a safe channel.
         (
             "safe-channel".to_string(),
@@ -123,6 +134,9 @@ mod explain_tests {
                 .verdict(verdict)
                 .finding_class(FindingClass::Injection)
                 .role(SinkRole::Execution)
+                // A class the sink names: unlabeled Execution resolves to the
+                // generic card and would never be reported.
+                .label(Some("command".to_string()))
                 .path(TaintPath::default())
                 .cut_reasons(cuts)
                 .build(),
@@ -142,6 +156,28 @@ mod explain_tests {
         });
         let l = loc(BackwardVerdict::Vulnerable, alert, Vec::new());
         assert!(explain_silent(&l).is_none());
+    }
+
+    #[test]
+    fn unclassified_vulnerable_sink_is_explained() {
+        let mut l = loc(
+            BackwardVerdict::Vulnerable,
+            Some(SinkAlert {
+                sink: "exec".to_string(),
+                slot: 0,
+                function: "handler".to_string(),
+                class: FindingClass::Injection,
+            }),
+            Vec::new(),
+        );
+        l.finding.label = None;
+        let rec = explain_silent(&l).expect("record");
+        assert_eq!(rec.verdict, "unclassified");
+        assert!(
+            rec.reason.contains("names no vulnerability class"),
+            "{}",
+            rec.reason
+        );
     }
 
     #[test]

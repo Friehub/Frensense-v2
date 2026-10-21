@@ -57,6 +57,45 @@ pub enum SinkLabel {
 }
 
 impl SinkLabel {
+    #[cfg(test)]
+    /// Every label, for coverage tests (each must resolve a rule card with
+    /// a CWE; see `rule_card_coverage`).
+    pub const ALL: &'static [SinkLabel] = &[
+        Self::CodeExecution,
+        Self::SqlInjection,
+        Self::NoSqlInjection,
+        Self::CommandInjection,
+        Self::PathTraversal,
+        Self::Ssrf,
+        Self::OpenRedirect,
+        Self::Xss,
+        Self::XssDom,
+        Self::XssReflected,
+        Self::HeaderInjection,
+        Self::CookiePoisoning,
+        Self::ContentTypeInjection,
+        Self::StorageWrite,
+        Self::LogLeak,
+        Self::ResponseLeak,
+        Self::CredentialLeak,
+        Self::TemplateSsti,
+        Self::UnsafeDeserialize,
+        Self::LdapInjection,
+        Self::XpathInjection,
+        Self::PrototypePollution,
+        Self::Toctou,
+        Self::GraphqlInjection,
+        Self::Xxe,
+        Self::Jwt,
+        Self::JwtWeakAlgorithm,
+        Self::JwtUnsafeDecode,
+        Self::UnsafeMemory,
+        Self::BufferOverflow,
+        Self::FormatString,
+        Self::Regex,
+        Self::Unknown,
+    ];
+
     #[must_use]
     pub fn slug(&self) -> &'static str {
         match self {
@@ -168,4 +207,29 @@ pub fn is_predicate_guard(name: &str, kind: Option<&SanitizerKind>) -> bool {
         || name == "test"
         || name == "isValid"
         || name.starts_with("is")
+}
+
+#[cfg(test)]
+mod rule_card_coverage {
+    use super::*;
+
+    /// Every sink label must resolve to a card with a CWE, and the card
+    /// must be the label's own (not the generic fallback) except for
+    /// `Unknown`, which is the generic class by definition.
+    #[test]
+    fn every_sink_label_has_its_own_card_with_a_cwe() {
+        for l in SinkLabel::ALL {
+            let role = sink_role_for_label(*l);
+            let card = frensense_lang::rule_card::taint_card(Some(l.slug()), role, false);
+            assert!(!card.cwe.is_empty(), "{l:?}: no CWE");
+            if *l != SinkLabel::Unknown {
+                assert_ne!(
+                    card.id,
+                    "taint.untrusted-data",
+                    "{l:?} (slug {}) fell through to the generic card",
+                    l.slug()
+                );
+            }
+        }
+    }
 }

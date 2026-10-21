@@ -5,6 +5,7 @@
 #[cfg(test)]
 #[path = "baseline_tests.rs"]
 mod baseline_tests;
+pub mod git;
 pub mod options;
 pub mod reporting;
 pub mod watch;

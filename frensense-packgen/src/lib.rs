@@ -658,26 +658,53 @@ mod tests {
             let mut facts = FactTable::default();
             apply_language_entries(&mut config, &mut facts, &entries, &[lang]);
 
+            // Provider vocabulary is language-keyed, never flat: a bare call
+            // name is not portable between languages (`create` is a Rust
+            // `File::create` and a JS `prisma.model.create`), so the install
+            // must leave the language-agnostic config empty and file the
+            // values under this language only.
+            assert!(
+                config.sources.is_empty() && config.sinks.is_empty(),
+                "pack install must not publish {lang}'s sources/sinks to the shared name space"
+            );
+
             let expected_sources: std::collections::BTreeSet<String> = v
                 .source_patterns
                 .iter()
                 .chain(v.request_param_names.iter())
                 .map(|p| (*p).to_string())
                 .collect();
-            let actual_sources: std::collections::BTreeSet<String> =
-                config.sources.iter().cloned().collect();
+            let actual_sources: std::collections::BTreeSet<String> = facts
+                .language_sources(lang)
+                .map(|s| s.iter().cloned().collect())
+                .unwrap_or_default();
             assert_eq!(
                 actual_sources, expected_sources,
                 "sources differ for {lang}"
             );
 
+            // Every declared unqualified name shape owns a last-segment key
+            // in the language section: role names, per-slot rules and IDOR
+            // finders. Package-scoped framework sinks are keyed by
+            // `(package, call)` instead - they never arm a bare name.
             let expected_sinks: std::collections::BTreeSet<String> = v
                 .sink_names
                 .iter()
-                .map(|(call, _)| call.rsplit('.').next().unwrap_or(call).to_string())
+                .map(|(call, _)| *call)
+                .chain(v.sink_signatures.iter().map(|(call, _, _)| *call))
+                .chain(v.idor_sinks.iter().map(|(call, _)| *call))
+                .map(|call| call.rsplit('.').next().unwrap_or(call).to_string())
                 .collect();
-            let actual_sinks: std::collections::BTreeSet<String> =
-                config.sinks.iter().cloned().collect();
+            let actual_sinks: std::collections::BTreeSet<String> = facts
+                .lang_sink_signatures
+                .get(lang)
+                .map(|section| {
+                    section
+                        .keys()
+                        .map(|call| call.rsplit('.').next().unwrap_or(call).to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
             assert_eq!(actual_sinks, expected_sinks, "sinks differ for {lang}");
 
             let expected_sanitizers: std::collections::BTreeSet<String> =
@@ -690,8 +717,11 @@ mod tests {
             );
 
             assert!(
-                !facts.sink_signatures.is_empty(),
-                "pack install must populate sink_signatures for {lang}"
+                facts
+                    .lang_sink_signatures
+                    .get(lang)
+                    .is_some_and(|s| !s.is_empty()),
+                "pack install must populate the {lang} sink signatures"
             );
             assert!(
                 !facts.sanitizer_facts.is_empty(),

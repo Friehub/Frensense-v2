@@ -12,6 +12,151 @@ use frensense::engine::Engine;
 use frensense::{FRENSENSE_VERSION, Result};
 use frensense_engine::analysis::taint::facts::LearnedFactEntry;
 
+/// Tokens of an `explain` invocation: the rule id (if any), the bundle
+/// path (if any), and whether the rule index was requested. Pure so the
+/// subcommand/flag resolution is testable without a filesystem.
+///
+/// Both spellings parse alike: the subcommand form (`frensense explain
+/// <rule-id> -b <bundle>`) and the flag form (`--explain-rule <id>` /
+/// `--list-rules`), which cannot collide with a scan path.
+#[derive(Debug, PartialEq)]
+struct ExplainArgs {
+    id: Option<String>,
+    bundle: Option<std::path::PathBuf>,
+    list: bool,
+}
+
+fn parse_explain_args(args: &[String]) -> ExplainArgs {
+    let subcommand = args.get(1).map(String::as_str) == Some("explain");
+    let mut out = ExplainArgs {
+        id: None,
+        bundle: None,
+        list: args.iter().any(|a| a == "--list-rules"),
+    };
+    // Skip the program name, and the `explain` token in subcommand form;
+    // a positional is only an id there - a plain scan's path is not.
+    let start = if subcommand { 2 } else { 1 };
+    let mut it = args.iter().skip(start);
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "-b" | "--bundle" | "--corpus-bundle" => {
+                if let Some(val) = it.next()
+                    && out.bundle.is_none()
+                {
+                    out.bundle = Some(std::path::PathBuf::from(val));
+                }
+            }
+            "--explain-rule" => {
+                if out.id.is_none()
+                    && let Some(val) = it.next()
+                {
+                    out.id = Some(val.clone());
+                }
+            }
+            "--list-rules" => {}
+            other if subcommand && !other.starts_with('-') && out.id.is_none() => {
+                out.id = Some(other.to_string());
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Outcome of `frensense explain ...` argument handling.
+enum ExplainOutcome {
+    /// Not an explain invocation: continue with normal option parsing.
+    NotApplicable,
+    /// Explained (or listed) rules; done.
+    Handled,
+    /// `explain` resolved to a filesystem path (a directory literally named
+    /// `explain`, or an unknown-rule argument that names a real path):
+    /// rescan with these arguments instead.
+    ScanInstead(Vec<String>),
+}
+
+/// `frensense explain [<rule-id>]`, plus the flag forms `--list-rules` and
+/// `--explain-rule <id>` (unambiguous even when a path named `explain`
+/// exists). `-b <bundle>` (also `--bundle`/`--corpus-bundle`) teaches
+/// `explain` the bundle's learned and policy rules, which have no built-in
+/// card by design - their knowledge lives in the bundle, so the bundle is
+/// their documentation. Unknown ids exit 2: they are typed by hand and a
+/// silent fallback would report confidence in a rule that does not exist.
+///
+/// Subcommand resolution: a rule id wins over a same-named path (paths can
+/// be disambiguated with `./`); with no rule id, a path literally named
+/// `explain` wins and gets scanned, and the rule index stays reachable via
+/// `--list-rules`.
+fn handle_explain_command(args: &[String]) -> ExplainOutcome {
+    let parsed = parse_explain_args(args);
+    let subcommand = args.get(1).map(String::as_str) == Some("explain");
+    let flag_form = args
+        .iter()
+        .any(|a| a == "--list-rules" || a == "--explain-rule");
+    if !subcommand && !flag_form {
+        return ExplainOutcome::NotApplicable;
+    }
+
+    // The bundle (user-supplied) documents learned rules; the embedded
+    // default pack documents the ones every scan already ships with.
+    let loaded = match parsed.bundle.as_deref() {
+        None => None,
+        Some(path) => {
+            let bytes = std::fs::read(path)
+                .map_err(|e| format!("failed to read bundle {}: {e}", path.display()));
+            match bytes.and_then(|b| frensense_bundler::format::load_bundle(&b)) {
+                Ok(loaded) => Some(loaded),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    std::process::exit(2);
+                }
+            }
+        }
+    };
+    let mut sources: Vec<(&str, &frensense_bundler::format::LoadedBundle)> = vec![(
+        "built-in vocabulary",
+        frensense_bundler::format::default_pack(),
+    )];
+    if let Some(bundle) = &loaded {
+        sources.push(("this bundle", bundle));
+    }
+
+    let Some(id) = parsed.id else {
+        // Bare `explain`: a path with that name is a scan target, unless an
+        // explicit flag asked for the index.
+        if subcommand && !parsed.list && std::path::Path::new("explain").exists() {
+            return ExplainOutcome::NotApplicable;
+        }
+        let mut text = frensense::cli::reporting::rule_index();
+        if let Some(bundle) = &loaded {
+            text.push_str(&frensense::cli::reporting::bundle_rule_index(bundle));
+        }
+        println!("{text}");
+        return ExplainOutcome::Handled;
+    };
+
+    if let Some(text) = frensense::cli::reporting::explain_rule(&id) {
+        println!("{text}");
+        return ExplainOutcome::Handled;
+    }
+    if let Some(text) = frensense::cli::reporting::explain_learned_rule(&id, &sources) {
+        println!("{text}");
+        return ExplainOutcome::Handled;
+    }
+    // An unknown id that names a real path is a scan target, not a rule.
+    if !flag_form && std::path::Path::new(&id).exists() {
+        let mut rescanned = vec![args[0].clone()];
+        rescanned.extend(args.iter().skip(2).cloned());
+        return ExplainOutcome::ScanInstead(rescanned);
+    }
+    eprintln!("Error: unknown rule id `{id}`");
+    eprintln!("Run `frensense explain` to list every built-in rule.");
+    if parsed.bundle.is_none() {
+        eprintln!("Bundle-learned rules need their bundle: add `-b <file.frc>`.");
+    }
+    std::process::exit(2);
+}
+
 fn print_help() {
     println!("Frensense v{FRENSENSE_VERSION}, deterministic dataflow security scanner.");
     println!();
@@ -31,6 +176,20 @@ fn print_help() {
     println!(
         "       frensense lsp                               Run the Language Server Protocol (LSP) server"
     );
+    println!(
+        "       frensense explain [<rule-id>]               Describe a built-in rule (no id: list them all)"
+    );
+    println!(
+        "       frensense --mcp                             Run the MCP server (unambiguous form)"
+    );
+    println!();
+    println!("Paths vs subcommands:");
+    println!("  A path named like a subcommand wins: `frensense mcp` scans ./mcp when it exists");
+    println!(
+        "  (`frensense --mcp` starts the server), `frensense watch` scans ./watch (`frensense"
+    );
+    println!("  watch <path>` watches), and `frensense bundle` scans ./bundle (`frensense bundle");
+    println!("  <corpus> [out.frc]` compiles). `lsp` is always the server - editors run it.");
     println!();
     println!("Options:");
     println!("  -o, --output <file>        Write report to file (text, json, sarif, or github)");
@@ -53,7 +212,9 @@ fn print_help() {
     println!(
         "  -b, --bundle <file>        .frc rules bundle (download: https://frensense.friehub.cloud/bundles)"
     );
-    println!("  --diff-only                Only scan files changed since the last git commit");
+    println!(
+        "  --diff-only                Only report findings on lines changed since the last git commit"
+    );
     println!("  --emit-baseline <file>     Save current findings as a baseline");
     println!("  --compare-baseline <file>  Fail on new findings vs. baseline");
     println!(
@@ -302,6 +463,43 @@ fn handle_bundle_command(args: &[String]) -> Result<bool> {
     }
 }
 
+/// Which entry point argv describes.
+#[derive(Debug, PartialEq, Eq)]
+enum Mode {
+    Scan,
+    Mcp,
+    Lsp,
+    Watch,
+    Bundle,
+}
+
+/// Resolve argv[1] to a mode. A subcommand token yields to a path of the
+/// same name: a repo can legitimately contain `watch/`, `bundle/` or `mcp/`,
+/// and `frensense explain` already resolves that way (a known id wins, else
+/// an existing path scans). Arguments that only the subcommand understands
+/// keep it claimed (`frensense watch src`, `frensense bundle corpus/`), and
+/// `--mcp` is the unambiguous form of the argument-less server mode.
+///
+/// `lsp` stays literal on purpose: editor integrations run `frensense lsp`
+/// non-interactively, where silently scanning a `lsp/` directory would break
+/// the editor rather than present an ambiguity a human can resolve.
+///
+/// `path_exists` is injected so the rule is testable without a filesystem.
+fn resolve_mode(args: &[String], path_exists: &dyn Fn(&str) -> bool) -> Mode {
+    if args.iter().any(|a| a == "--mcp") {
+        return Mode::Mcp;
+    }
+    let token = args.get(1).map(String::as_str);
+    let extra = args.len() > 2;
+    match token {
+        Some("mcp") if !path_exists("mcp") => Mode::Mcp,
+        Some("lsp") => Mode::Lsp,
+        Some("watch") if extra || !path_exists("watch") => Mode::Watch,
+        Some("bundle") if extra || !path_exists("bundle") => Mode::Bundle,
+        _ => Mode::Scan,
+    }
+}
+
 fn handle_early_args(args: &[String]) -> bool {
     if args.len() < 2 || args.iter().any(|a| a == "--help" || a == "-h") {
         print_help();
@@ -440,32 +638,35 @@ fn run_lsp() -> Result<()> {
 
 fn main() -> Result<()> {
     frensense_engine::debug_flags::DebugFlags::install_from(std::env::var_os);
-    let args: Vec<String> = std::env::args().collect();
+    let mut args: Vec<String> = std::env::args().collect();
     if handle_early_args(&args) {
         return Ok(());
     }
 
-    if handle_bundle_command(&args)? {
-        return Ok(());
+    match resolve_mode(&args, &|p| std::path::Path::new(p).exists()) {
+        Mode::Mcp => return run_mcp(),
+        Mode::Lsp => return run_lsp(),
+        Mode::Watch => {
+            // Drop only the `watch` token (argv[1]): a path named `watch`
+            // later in the line is a real watch target.
+            let mut watch_args = args.clone();
+            watch_args.remove(1);
+            return run_watch(watch_args);
+        }
+        Mode::Bundle => {
+            if handle_bundle_command(&args)? {
+                return Ok(());
+            }
+        }
+        Mode::Scan => {}
     }
 
-    // Watch subcommand: poll-loop delivery mode, everything else shared
-    // with the one-shot path (same options, same engine config).
-    if args.iter().any(|a| a == "watch") {
-        return run_watch(
-            args.iter()
-                .filter(|a| a.as_str() != "watch")
-                .cloned()
-                .collect::<Vec<_>>(),
-        );
-    }
-
-    if args.iter().any(|a| a == "mcp") {
-        return run_mcp();
-    }
-
-    if args.iter().any(|a| a == "lsp") {
-        return run_lsp();
+    match handle_explain_command(&args) {
+        ExplainOutcome::NotApplicable => {}
+        ExplainOutcome::Handled => return Ok(()),
+        ExplainOutcome::ScanInstead(rescanned) => {
+            args = rescanned;
+        }
     }
 
     let options = match parse_options(&args) {
@@ -518,26 +719,14 @@ fn main() -> Result<()> {
         } else {
             input_path.parent().unwrap_or(&input_path).to_path_buf()
         };
-        let output = std::process::Command::new("git")
-            .args(["diff", "--name-only", "HEAD"])
-            .current_dir(&repo_dir)
-            .output()
-            .map_err(|e| frensense::FrensenseError::Config(format!("git diff failed: {e}")))?;
-        if !output.status.success() {
-            return Err(frensense::FrensenseError::Config(format!(
-                "git diff failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
-        }
-        let diff_files: Vec<std::path::PathBuf> = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(|l| repo_dir.join(l))
-            .filter(|p| frensense::parser::is_supported(p))
-            .collect();
+        let diff_files = frensense::cli::git::changed_scan_files(&repo_dir)
+            .map_err(frensense::FrensenseError::Config)?;
         if diff_files.is_empty() {
             eprintln!("No changed files to scan.");
             Vec::new()
         } else {
+            let added = frensense::cli::git::added_lines(&repo_dir)
+                .map_err(frensense::FrensenseError::Config)?;
             eprintln!(
                 "Diff-only: scanning {} changed file(s)...",
                 diff_files.len()
@@ -560,7 +749,22 @@ fn main() -> Result<()> {
                     }
                 }
             }
-            all
+            // The gate answers one question - did THIS change introduce a
+            // finding? Whole files are scanned (a change can make an old
+            // line reachable), but a finding whose span touches no added
+            // line predates the diff: it belongs to the baseline
+            // (--compare-baseline), not to this gate.
+            let (on_diff, pre_existing): (Vec<_>, Vec<_>) = all.into_iter().partition(|a| {
+                (a.line..=a.end_line.max(a.line))
+                    .any(|ln| frensense::cli::git::is_added(&added, &repo_dir, &a.file_path, ln))
+            });
+            if !pre_existing.is_empty() {
+                eprintln!(
+                    "Diff-only: suppressed {} pre-existing finding(s) at unchanged lines (run without --diff-only to see them).",
+                    pre_existing.len()
+                );
+            }
+            on_diff
         }
     } else {
         // Scan every positional input path; findings merge across them.
@@ -605,7 +809,105 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_bundle_args;
+    use super::{Mode, parse_bundle_args, parse_explain_args, resolve_mode};
+
+    fn argv(rest: &[&str]) -> Vec<String> {
+        std::iter::once("frensense".to_string())
+            .chain(rest.iter().map(|s| s.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn explain_subcommand_parses_id_and_bundle() {
+        let parsed = parse_explain_args(&argv(&[
+            "explain",
+            "policy.redirect-challenge",
+            "-b",
+            "learned.frc",
+        ]));
+        assert_eq!(
+            parsed.id.as_deref(),
+            Some("policy.redirect-challenge"),
+            "{parsed:?}"
+        );
+        assert_eq!(
+            parsed.bundle.as_deref(),
+            Some(std::path::Path::new("learned.frc")),
+            "{parsed:?}"
+        );
+        assert!(!parsed.list, "{parsed:?}");
+    }
+
+    #[test]
+    fn explain_flag_forms_parse_without_the_subcommand() {
+        let rule = parse_explain_args(&argv(&["--explain-rule", "taint.sql-injection"]));
+        assert_eq!(rule.id.as_deref(), Some("taint.sql-injection"), "{rule:?}");
+        let list = parse_explain_args(&argv(&["--list-rules", "-b", "x.frc"]));
+        assert!(list.list, "{list:?}");
+        assert_eq!(list.bundle.as_deref(), Some(std::path::Path::new("x.frc")));
+    }
+
+    #[test]
+    fn explain_bare_and_non_explain_args_parse_empty() {
+        let bare = parse_explain_args(&argv(&["explain"]));
+        assert_eq!(bare.id, None, "{bare:?}");
+        assert!(!bare.list, "{bare:?}");
+        let scan = parse_explain_args(&argv(&[".", "--strict"]));
+        // A scan path after the program name is not an explain id: the
+        // subcommand slot (argv[1]) is where ids are read from.
+        assert_eq!(scan.id, None, "{scan:?}");
+    }
+
+    #[test]
+    fn subcommands_yield_to_a_same_named_path() {
+        let mcp = argv(&["mcp"]);
+        assert_eq!(resolve_mode(&mcp, &|_| false), Mode::Mcp);
+        assert_eq!(resolve_mode(&mcp, &|p| p == "mcp"), Mode::Scan);
+
+        let watch = argv(&["watch"]);
+        assert_eq!(resolve_mode(&watch, &|_| false), Mode::Watch);
+        assert_eq!(resolve_mode(&watch, &|p| p == "watch"), Mode::Scan);
+
+        let bundle = argv(&["bundle"]);
+        assert_eq!(resolve_mode(&bundle, &|_| false), Mode::Bundle);
+        assert_eq!(resolve_mode(&bundle, &|p| p == "bundle"), Mode::Scan);
+    }
+
+    #[test]
+    fn subcommand_arguments_keep_the_subcommand_claimed() {
+        // `watch <path>` and `bundle <corpus>` can only mean the subcommand,
+        // whatever paths exist.
+        assert_eq!(
+            resolve_mode(&argv(&["watch", "src"]), &|p| p == "watch"),
+            Mode::Watch
+        );
+        assert_eq!(
+            resolve_mode(&argv(&["bundle", "corpus/"]), &|p| p == "bundle"),
+            Mode::Bundle
+        );
+        assert_eq!(
+            resolve_mode(&argv(&["bundle", "info", "x.frc"]), &|p| p == "bundle"),
+            Mode::Bundle
+        );
+    }
+
+    #[test]
+    fn mcp_flag_is_the_unambiguous_server_form() {
+        assert_eq!(resolve_mode(&argv(&["--mcp"]), &|p| p == "mcp"), Mode::Mcp);
+    }
+
+    #[test]
+    fn tokens_outside_the_subcommand_slot_are_paths() {
+        // Only argv[1] names a subcommand; `frensense . mcp` scans both.
+        assert_eq!(resolve_mode(&argv(&[".", "mcp"]), &|_| true), Mode::Scan);
+        assert_eq!(resolve_mode(&argv(&["src/mcp"]), &|_| false), Mode::Scan);
+        assert_eq!(resolve_mode(&argv(&["."]), &|_| true), Mode::Scan);
+    }
+
+    #[test]
+    fn lsp_stays_literal_for_editor_integrations() {
+        assert_eq!(resolve_mode(&argv(&["lsp"]), &|_| true), Mode::Lsp);
+    }
 
     fn args(rest: &[&str]) -> Vec<String> {
         std::iter::once("frensense".to_string())

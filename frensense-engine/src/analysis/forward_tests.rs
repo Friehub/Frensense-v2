@@ -1251,6 +1251,12 @@ function handler(ctx) {
         }
     }
 
+    /// Empty fact table: these fixtures declare their whole source
+    /// vocabulary in the `TaintConfig` (the language-agnostic lane).
+    fn facts() -> crate::analysis::taint::facts::FactTable {
+        crate::analysis::taint::facts::FactTable::default()
+    }
+
     /// Whole-value root registration ("ctx") must not leak into fields when
     /// the config also declares granular rules for that root ("ctx.state"):
     /// undeclared subtrees like `ctx.env.SECRET` stay clean.
@@ -1259,15 +1265,15 @@ function handler(ctx) {
         let ir = sample_ir();
         let cfg = config(&["ctx", "ctx.state"]);
         assert!(
-            is_source(&ir, &cfg, &node_for(&ir, "ctx.state.user")),
+            is_source(&ir, &cfg, &facts(), &node_for(&ir, "ctx.state.user")),
             "dotted source rule stays live"
         );
         assert!(
-            !is_source(&ir, &cfg, &node_for(&ir, "ctx.env.SECRET")),
+            !is_source(&ir, &cfg, &facts(), &node_for(&ir, "ctx.env.SECRET")),
             "whole-value root must not cover undeclared fields when granular rules exist"
         );
         assert!(
-            !is_source(&ir, &cfg, &node_for(&ir, "ctx.request.body")),
+            !is_source(&ir, &cfg, &facts(), &node_for(&ir, "ctx.request.body")),
             "undeclared subtree under a suppressed root is not a source"
         );
     }
@@ -1278,8 +1284,18 @@ function handler(ctx) {
     fn whole_value_root_covers_subtree_without_granular_rules() {
         let ir = sample_ir();
         let cfg = config(&["ctx"]);
-        assert!(is_source(&ir, &cfg, &node_for(&ir, "ctx.env.SECRET")));
-        assert!(is_source(&ir, &cfg, &node_for(&ir, "ctx.state.user")));
+        assert!(is_source(
+            &ir,
+            &cfg,
+            &facts(),
+            &node_for(&ir, "ctx.env.SECRET")
+        ));
+        assert!(is_source(
+            &ir,
+            &cfg,
+            &facts(),
+            &node_for(&ir, "ctx.state.user")
+        ));
     }
 
     /// Spec acceptance: granular-only config keeps prefix-subtree matching
@@ -1288,8 +1304,18 @@ function handler(ctx) {
     fn spec_acceptance_granular_only_config() {
         let ir = sample_ir();
         let cfg = config(&["ctx.request"]);
-        assert!(is_source(&ir, &cfg, &node_for(&ir, "ctx.request.body")));
-        assert!(!is_source(&ir, &cfg, &node_for(&ir, "ctx.env.SECRET")));
+        assert!(is_source(
+            &ir,
+            &cfg,
+            &facts(),
+            &node_for(&ir, "ctx.request.body")
+        ));
+        assert!(!is_source(
+            &ir,
+            &cfg,
+            &facts(),
+            &node_for(&ir, "ctx.env.SECRET")
+        ));
     }
 
     /// The alert-text resolver must agree with `is_source` on the same
@@ -1303,15 +1329,15 @@ function handler(ctx) {
         let cfg = config(&["ctx", "ctx.state"]);
         let user = node_for(&ir, "ctx.state.user");
         assert_eq!(
-            source_description(&ir, &cfg, &user).as_deref(),
+            source_description(&ir, &cfg, &facts(), &user).as_deref(),
             Some("ctx.state.user"),
             "declared dotted rule describes itself"
         );
         let secret = node_for(&ir, "ctx.env.SECRET");
         assert!(
-            source_description(&ir, &cfg, &secret).is_none(),
+            source_description(&ir, &cfg, &facts(), &secret).is_none(),
             "suppressed root yields no description"
         );
-        assert!(!is_source(&ir, &cfg, &secret));
+        assert!(!is_source(&ir, &cfg, &facts(), &secret));
     }
 }

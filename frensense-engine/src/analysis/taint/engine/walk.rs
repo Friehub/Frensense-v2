@@ -594,13 +594,21 @@ impl<'a> BackwardTaintEngine<'a> {
             })
             .or_else(|| factory_origin.clone());
         let origin_package = origin_owned.as_deref();
-        if !self
-            .facts
-            .is_sink_call_scoped(effective_name, receiver_root.as_deref(), origin_package)
-            && !self
-                .facts
-                .is_sink_call_scoped(name, receiver_root.as_deref(), origin_package)
-        {
+        // The call site's own language: sink facts are language-keyed, so a
+        // Rust `File::create` signature must not arm a TypeScript `create`
+        // call in the same mixed-language scan.
+        let language = (!ir.language.is_empty()).then_some(ir.language.as_str());
+        if !self.facts.is_sink_call_scoped(
+            effective_name,
+            receiver_root.as_deref(),
+            origin_package,
+            language,
+        ) && !self.facts.is_sink_call_scoped(
+            name,
+            receiver_root.as_deref(),
+            origin_package,
+            language,
+        ) {
             return;
         }
         // Receiver-aware role: `kv.put(t)` resolves Storage (dotted
@@ -609,19 +617,35 @@ impl<'a> BackwardTaintEngine<'a> {
         // matching above.
         let role = self
             .facts
-            .role_for_call_scoped(effective_name, receiver_root.as_deref(), origin_package)
+            .role_for_call_scoped(
+                effective_name,
+                receiver_root.as_deref(),
+                origin_package,
+                language,
+            )
             .or_else(|| {
-                self.facts
-                    .role_for_call_scoped(name, receiver_root.as_deref(), origin_package)
+                self.facts.role_for_call_scoped(
+                    name,
+                    receiver_root.as_deref(),
+                    origin_package,
+                    language,
+                )
             })
             .unwrap_or_default();
-        let label = self
-            .facts
-            .label_for_call_scoped(effective_name, receiver_root.as_deref(), origin_package)
-            .or_else(|| {
-                self.facts
-                    .label_for_call_scoped(name, receiver_root.as_deref(), origin_package)
-            });
+        let label = self.facts.label_for_call_scoped(
+            effective_name,
+            receiver_root.as_deref(),
+            origin_package,
+            language,
+        );
+        let label = label.or_else(|| {
+            self.facts.label_for_call_scoped(
+                name,
+                receiver_root.as_deref(),
+                origin_package,
+                language,
+            )
+        });
         // Engine purity: every fact-declared sink is explored and reported
         // when tainted data reaches it, regardless of role. Severity policy
         // (Response/Validation rank at `info`) is lang-declared ranking
@@ -647,9 +671,14 @@ impl<'a> BackwardTaintEngine<'a> {
         self.stats.sink_args_explored += triplets.len();
 
         for (arg_slot, var, arg_node) in triplets {
-            let Some(alert_info) =
-                sink_alert_with_facts(ir, self.config, &self.facts, &arg_node, origin_package)
-            else {
+            let Some(alert_info) = sink_alert_with_facts(
+                ir,
+                self.config,
+                &self.facts,
+                &arg_node,
+                origin_package,
+                language,
+            ) else {
                 continue;
             };
             let finding_class = alert_info.class;
@@ -840,11 +869,11 @@ impl<'a> BackwardTaintEngine<'a> {
             }
 
             // Stop: source reached, vulnerable path confirmed.
-            if is_source(ir, self.config, &cur) {
+            if is_source(ir, self.config, &self.facts, &cur) {
                 state.saw_source = true;
                 if state.source_node.is_none() {
                     state.source_node = Some((cf, cur));
-                    state.source_desc = source_description(ir, self.config, &cur);
+                    state.source_desc = source_description(ir, self.config, &self.facts, &cur);
                 }
                 continue;
             }

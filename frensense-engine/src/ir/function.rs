@@ -298,6 +298,14 @@ pub struct FunctionIR {
     pub blocks: FxHashMap<BlockId, BasicBlock>,
     pub entry_block: BlockId,
     pub var_metadata: FxHashMap<VarId, VarMetadata>,
+    /// Language key this IR was lowered from (`spec.name()`: `"typescript"`,
+    /// `"rust"`, ...). Sink and sanitizer facts are language-keyed, so every
+    /// call site must know its own language: without this, a Rust
+    /// `File::create` signature would fire on a JavaScript `prisma.create`
+    /// in the same mixed-language scan. Empty when the IR was built by hand
+    /// (synthetic test IRs) or decoded from legacy data.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub language: String,
     /// Program name of the innermost enclosing extracted function, when this
     /// function was extracted from a nested position (None for module scope).
     /// Closure edges resolve free variables through this lexical chain.
@@ -329,6 +337,7 @@ impl FunctionIR {
             blocks,
             entry_block: entry_id,
             var_metadata: FxHashMap::default(),
+            language: String::new(),
             enclosing_fn: None,
             entry_guards: Vec::new(),
             next_var_id: 1,

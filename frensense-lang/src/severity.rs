@@ -217,59 +217,27 @@ impl SinkRole {
 }
 
 /// CWE id for a taint finding, resolved from the sink's role and its
-/// semantic label slug. Both are known precisely at emit time; the role
-/// alone is not (`Execution` spans code, command, SQL/LDAP injection
-/// and deserialization), so a pair that pins no single class returns
-/// `None`: an honest gap beats a mis-tagged id.
+/// semantic label slug through [`crate::rule_card`]. Both are known
+/// precisely at emit time; the role alone is not (`Execution` spans code,
+/// command, SQL/LDAP injection and deserialization), so a pair that pins no
+/// single class resolves to the broad parent CWE (74 or 20), never to a
+/// guessed child class.
 #[must_use]
 pub fn taint_cwe(role: SinkRole, label: Option<&str>) -> Option<&'static str> {
-    match (role, label) {
-        (SinkRole::Xss, _) => Some("CWE-79"),
-        (SinkRole::Response, Some("redirect")) => Some("CWE-601"),
-        // OpenRedirect sinks serialize under the Resource role with the
-        // "redirect" label (role_map maps OpenRedirect -> Resource); the
-        // Response arm above is the header/response-channel redirect.
-        (SinkRole::Resource, Some("redirect")) => Some("CWE-601"),
-        (SinkRole::Resource, Some("traversal")) => Some("CWE-22"),
-        (SinkRole::Execution, Some("sql")) => Some("CWE-89"),
-        (SinkRole::Execution, Some("nosql")) => Some("CWE-947"),
-        (SinkRole::Execution, Some("ldap")) => Some("CWE-90"),
-        (SinkRole::Execution, Some("command")) => Some("CWE-78"),
-        (SinkRole::Execution, Some("deserialize")) => Some("CWE-502"),
-        (SinkRole::Execution, Some("eval")) => Some("CWE-94"),
-        // CodeExecution sinks (eval/exec/compile) serialize the slug
-        // "execution"; it is distinct from the bare-Execution role (no
-        // label), which spans command/SQL/code and stays None.
-        (SinkRole::Execution, Some("execution")) => Some("CWE-94"),
-        (SinkRole::Execution, Some("ssrf")) => Some("CWE-918"),
-        _ => None,
-    }
+    crate::rule_card::taint_card(label, role, false)
+        .cwe
+        .first()
+        .copied()
 }
 
-/// CWE id for a built-in checker rule id. Memory-safety rules map to
-/// their canonical CWEs; crypto-policy rules map where the class is
-/// unambiguous. Learned bundle rule ids and guard/policy rules with no
-/// single class return `None` - the bundle pattern overlay carries the
-/// corpus-authored CWE for those.
+/// CWE id for a built-in checker rule id, resolved through
+/// [`crate::rule_card::checker_card`] so the card table stays the one place
+/// a built-in rule is described. Learned bundle rule ids and user policy
+/// rules have no card and return `None` - the bundle pattern overlay carries
+/// the corpus-authored CWE for those.
 #[must_use]
 pub fn checker_rule_cwe(rule: &str) -> Option<&'static str> {
-    Some(match rule {
-        "weak_hash" | crate::rules::WEAK_HASH_WRAPPER | "learned_broken_hash_func" => "CWE-328",
-        "weak_rsa_key_size" => "CWE-326",
-        crate::rules::USE_AFTER_FREE => "CWE-416",
-        crate::rules::DOUBLE_FREE => "CWE-415",
-        crate::rules::UNINITIALIZED_FREE => "CWE-908",
-        crate::rules::BUFFER_OVERFLOW => "CWE-120",
-        crate::rules::OUT_OF_BOUNDS_READ => "CWE-125",
-        crate::rules::OUT_OF_BOUNDS_ACCESS => "CWE-787",
-        crate::rules::INTEGER_OVERFLOW_ALLOC => "CWE-190",
-        crate::rules::MEMORY_LEAK => "CWE-401",
-        "policy_open_redirect" => "CWE-601",
-        "cookie_secure_missing" => "CWE-614",
-        "cookie_httponly_missing" => "CWE-1004",
-        "function_complexity" => "CWE-1121",
-        _ => return None,
-    })
+    crate::rule_card::checker_card(rule).and_then(|c| c.cwe.first().copied())
 }
 
 /// Precision tier for a built-in checker or policy rule id.
@@ -901,21 +869,18 @@ mod cwe_mapping_tests {
         );
     }
 
+    /// Unlabeled sinks never ship without a CWE: they resolve to the broad
+    /// parent class (CWE-74 injection for execution sinks, CWE-20 improper
+    /// input validation otherwise) instead of guessing a specific child
+    /// class. Both are fallback cards, so such findings are not reported at
+    /// all (see `crate::policy::reports_finding`).
     #[test]
-    fn ambiguous_roles_stay_untagged() {
-        assert_eq!(
-            taint_cwe(SinkRole::Execution, None),
-            None,
-            "bare execution spans command/SQL/code injection"
-        );
-        assert_eq!(
-            taint_cwe(SinkRole::Resource, None),
-            None,
-            "resource spans traversal and IDOR-class queries"
-        );
-        assert_eq!(taint_cwe(SinkRole::Storage, None), None);
-        assert_eq!(taint_cwe(SinkRole::Validation, None), None);
-        assert_eq!(taint_cwe(SinkRole::Other, None), None);
+    fn unlabeled_roles_resolve_to_broad_parent_cwe() {
+        assert_eq!(taint_cwe(SinkRole::Execution, None), Some("CWE-74"));
+        assert_eq!(taint_cwe(SinkRole::Resource, None), Some("CWE-20"));
+        assert_eq!(taint_cwe(SinkRole::Storage, None), Some("CWE-20"));
+        assert_eq!(taint_cwe(SinkRole::Validation, None), Some("CWE-20"));
+        assert_eq!(taint_cwe(SinkRole::Other, None), Some("CWE-20"));
     }
 
     #[test]
