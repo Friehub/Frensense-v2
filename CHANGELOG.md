@@ -202,6 +202,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Minified JavaScript is skipped by content**: a single-line bundle with no
   filename hint was lowered as ordinary source, producing findings no one
   can act on.
+- **The last two name-based guesses in the engine are pack facts**: the
+  engine no longer assumes a call named `prepare*` creates a bound-parameter
+  statement handle, or that a literal `false` argument disclaims security use
+  of a weak digest. `HintKind::PreparedStatementPrefix` and
+  `HintKind::WeakHashDisclaimer` carry those vocabularies in the default pack
+  (and in any bundle that teaches them), so a new driver's factory spelling
+  or a codebase's own disclaimer token is taught rather than compiled in. An
+  empty set recognises nothing, so a config that teaches nothing never
+  suppresses a flow. Behaviour is unchanged on the measured corpora (OWASP
+  BenchmarkPython: TPR 38.1% / FPR 7.1%; 92 real-repo findings either side
+  of the refactor).
 - **Branch-arm-assigned variables survive the merge**: variables assigned only
   inside a `match`/`switch` arm were dropped from the environment at the branch
   merge (`env.pop` without hoisting), so a value defined in one arm and consumed

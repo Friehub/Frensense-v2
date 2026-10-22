@@ -411,6 +411,17 @@ pub enum HintKind {
     /// intended use, not a policy violation). Appended last: bundles
     /// encode the variant position.
     KdfReceiver,
+    /// [`FactTable::prepared_statement_prefixes`]: a call whose last segment
+    /// starts with one of these prefixes creates a bound-parameter statement
+    /// handle (`Prepare`, `prepareStatement`, `prepare_cached`), so the
+    /// handle's later arguments are bindings rather than SQL. Appended last:
+    /// bundles encode the variant position.
+    PreparedStatementPrefix,
+    /// [`FactTable::weak_hash_disclaimer_tokens`]: an argument token that
+    /// disclaims security use of a weak digest - a literal `false` flag
+    /// marking the digest as a checksum or cache key. Appended last: bundles
+    /// encode the variant position.
+    WeakHashDisclaimer,
 }
 
 /// Syntactic grammar features that can be dynamically learned or configured via bundle facts.

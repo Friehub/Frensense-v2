@@ -675,6 +675,8 @@ impl LearnedFactEntry {
                     HintKind::JwtAlgorithm => &mut table.jwt_algorithm_hints,
                     HintKind::CredentialContext => &mut table.credential_context_hints,
                     HintKind::KdfReceiver => &mut table.kdf_receiver_hints,
+                    HintKind::PreparedStatementPrefix => &mut table.prepared_statement_prefixes,
+                    HintKind::WeakHashDisclaimer => &mut table.weak_hash_disclaimer_tokens,
                 };
                 set.extend(values.iter().cloned());
             }

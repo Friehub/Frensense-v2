@@ -50,6 +50,32 @@ export function hashPassword (clearTextPassword: string): string {
         );
     }
 
+    /// The disclaimer token is pack knowledge: a literal `false` flag marks
+    /// the digest as a checksum and silences the rule only while the pack
+    /// declares that token. Dropping the fact makes the same call fire
+    /// again, which keeps the vocabulary out of the engine.
+    #[test]
+    fn disclaimer_token_is_pack_taught() {
+        let src = r#"
+import { md5 } from 'crypto'
+export function cacheKey (data: string): string {
+  return md5(data, false)
+}
+"#;
+        let findings = check(src);
+        assert!(
+            !findings.iter().any(|(_, r)| *r == "weak_hash"),
+            "a checksum flag disclaims security use, got {findings:?}"
+        );
+        let (_, mut facts) = crate::analysis::taint::facts::seeded_tables(["ts"]);
+        facts.weak_hash_disclaimer_tokens.clear();
+        let findings = check_with(src, &facts);
+        assert!(
+            findings.iter().any(|(_, r)| *r == "weak_hash"),
+            "without the fact the call is a weak-hash finding again, got {findings:?}"
+        );
+    }
+
     /// SHA-256 is acceptable, no weak_hash finding.
     #[test]
     fn strong_hash_sha256_does_not_fire() {

@@ -73,6 +73,14 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
             data::BOOTSTRAP_CREDENTIAL_CONTEXT_HINTS,
         ),
         (HintKind::KdfReceiver, data::BOOTSTRAP_KDF_RECEIVER_HINTS),
+        (
+            HintKind::PreparedStatementPrefix,
+            data::BOOTSTRAP_PREPARED_STATEMENT_PREFIXES,
+        ),
+        (
+            HintKind::WeakHashDisclaimer,
+            data::BOOTSTRAP_WEAK_HASH_DISCLAIMERS,
+        ),
     ] {
         entries.push(LearnedFactEntry::Hints {
             kind,

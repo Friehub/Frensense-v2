@@ -33,6 +33,21 @@ pub static BOOTSTRAP_CREDENTIAL_SINKS: &[&str] =
 /// Receiver-name fragments of password-hashing libraries: a credential
 /// passed to `bcrypt.hash`, `argon2.hash`, `password_hash.hash` (pwdlib),
 /// `pwd_context.hash` (passlib) is the intended KDF use.
+/// Lowercase name prefixes of calls that create a bound-parameter statement
+/// handle: the handle then executes text fixed at creation, so the arguments
+/// of its later calls are bindings, not SQL. Prefix matching covers the
+/// driver spellings - `Prepare`, `PrepareContext`, `prepareStatement`,
+/// `prepare_cached`, `prepare_typed`, `prepareQuery` - without the engine
+/// hardcoding any of them. A corpus bundle can extend the set for a driver
+/// the pack does not know.
+pub static BOOTSTRAP_PREPARED_STATEMENT_PREFIXES: &[&str] = &["prepare"];
+
+/// Lowercase argument tokens that disclaim security use of a weak digest:
+/// `has_md5(data, false)` marks the digest as a checksum or cache key rather
+/// than credential protection, so it is not a weak-hash policy violation.
+/// Only trailing positions count (slot 0 is the data being hashed).
+pub static BOOTSTRAP_WEAK_HASH_DISCLAIMERS: &[&str] = &["false"];
+
 pub static BOOTSTRAP_KDF_RECEIVER_HINTS: &[&str] = &[
     "bcrypt",
     "argon",

@@ -109,6 +109,20 @@ pub fn check_function(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding>
 
 /// Resolve an argument operand to its string-literal value: direct literal,
 /// or a var whose lattice value is a provable string constant.
+/// The argument's literal token (a bool rendered as `true`/`false`, or a
+/// stripped string literal), lowercased: the form a pack-declared disclaimer
+/// takes.
+fn disclaimer_token(arg: &Operand, values: &crate::analysis::value::ValueInfo) -> Option<String> {
+    match arg {
+        Operand::BoolLiteral(b) => Some(if *b { "true" } else { "false" }.to_string()),
+        Operand::Var(v) => match values.const_bool(*v) {
+            Some(b) => Some(if b { "true" } else { "false" }.to_string()),
+            None => arg_str_literal(arg, values).map(str::to_ascii_lowercase),
+        },
+        other => arg_str_literal(other, values).map(str::to_ascii_lowercase),
+    }
+}
+
 fn arg_str_literal<'a>(
     arg: &'a Operand,
     values: &'a crate::analysis::value::ValueInfo,
@@ -210,18 +224,21 @@ fn check_call(
         }
     }
 
-    // A weak-primitive call that carries an explicit `false` flag argument
-    // is the caller disclaiming security use (a keyword flag marking the
+    // A weak-primitive call that carries an explicit disclaimer argument is
+    // the caller disclaiming security use (`has_md5(data, false)` marks the
     // digest as a checksum / cache key): not a credential or integrity
     // policy violation.
-    // Languages lower a bare `false` / `False` token either as a bool
-    // operand or as the literal text; slot 0 is the data being hashed, so
-    // only the trailing flag positions count.
-    let disclaims_security = args.iter().skip(1).any(|a| match a {
-        Operand::BoolLiteral(b) => !*b,
-        Operand::Var(v) if values.const_bool(*v) == Some(false) => true,
-        other => arg_str_literal(other, values).is_some_and(|t| t.eq_ignore_ascii_case("false")),
-    });
+    //
+    // Which tokens disclaim is pack knowledge
+    // ([`FactTable::weak_hash_disclaimer_tokens`]); the engine supplies only
+    // the mechanism - slot 0 is the data being hashed, so a disclaimer is
+    // looked for among the trailing flag positions, and languages lower a
+    // bare `false` either as a bool operand or as literal text.
+    let disclaims_security = !facts.weak_hash_disclaimer_tokens.is_empty()
+        && args.iter().skip(1).any(|a| {
+            disclaimer_token(a, values)
+                .is_some_and(|t| facts.weak_hash_disclaimer_tokens.contains(&t))
+        });
     for rule in &facts.weak_hash_rules {
         if disclaims_security {
             break;

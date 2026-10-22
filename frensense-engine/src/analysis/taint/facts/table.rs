@@ -101,6 +101,19 @@ pub struct FactTable {
     pub credential_context_hints: FxHashSet<String>,
     /// Receiver-name fragments of password-hashing libraries.
     pub kdf_receiver_hints: FxHashSet<String>,
+    /// Lowercase name prefixes of calls that create a bound-parameter
+    /// statement handle (`Prepare`, `prepareStatement`, `prepare_cached`).
+    ///
+    /// A handle from one of these factories executes text that was fixed
+    /// when it was created, so the arguments of its later calls are bindings,
+    /// not SQL. Which factory names exist is pack knowledge; the engine only
+    /// walks the def chain and matches the prefix against this set.
+    pub prepared_statement_prefixes: FxHashSet<String>,
+    /// Argument tokens (lowercase) that disclaim security use of a weak
+    /// digest: a literal `false` flag in a non-payload position marks the
+    /// digest as a checksum or cache key, not as credential protection.
+    /// Pack knowledge; the engine only decides which positions are flags.
+    pub weak_hash_disclaimer_tokens: FxHashSet<String>,
     /// Weak-hash policy rules (default-pack-seeded).
     pub weak_hash_rules: Vec<WeakPrimitiveRule>,
     /// Corpus-extendable allocation-size overflow rules (CWE-190 -> CWE-680;
@@ -502,6 +515,10 @@ impl FactTable {
             .extend(other.credential_context_hints.iter().cloned());
         self.kdf_receiver_hints
             .extend(other.kdf_receiver_hints.iter().cloned());
+        self.prepared_statement_prefixes
+            .extend(other.prepared_statement_prefixes.iter().cloned());
+        self.weak_hash_disclaimer_tokens
+            .extend(other.weak_hash_disclaimer_tokens.iter().cloned());
         for r in &other.weak_hash_rules {
             if !self.weak_hash_rules.contains(r) {
                 self.weak_hash_rules.push(r.clone());

@@ -483,7 +483,7 @@ pub(crate) fn sink_alert_with_facts(
             receiver: Operand::Var(r),
             ..
         } = &b.instructions[idx]
-        && receiver_is_prepared_handle(ir, *r)
+        && receiver_is_prepared_handle(ir, *r, facts)
     {
         return None;
     }
@@ -859,10 +859,24 @@ pub(crate) fn idor_suppressed_by_auth_guard(
     false
 }
 
-/// True when `var` is (an alias or tuple field of) the result of a call whose
-/// name says it prepares a statement: the handle then executes fixed text
-/// and its call arguments are bindings.
-fn receiver_is_prepared_handle(ir: &FunctionIR, var: crate::ir::function::VarId) -> bool {
+/// True when `var` is (an alias or tuple field of) the result of a call the
+/// pack declares a statement factory: the handle then executes text fixed at
+/// creation, and its call arguments are bindings.
+///
+/// Which names prepare a statement is pack knowledge
+/// ([`FactTable::prepared_statement_prefixes`], taught by the default pack or
+/// a bundle); the engine only walks the def chain and matches the prefix. An
+/// empty set recognises nothing, so a config that teaches nothing never
+/// suppresses a flow.
+fn receiver_is_prepared_handle(
+    ir: &FunctionIR,
+    var: crate::ir::function::VarId,
+    facts: &FactTable,
+) -> bool {
+    let prefixes = &facts.prepared_statement_prefixes;
+    if prefixes.is_empty() {
+        return false;
+    }
     let mut cur = var;
     for _ in 0..6 {
         let mut next = None;
@@ -890,7 +904,8 @@ fn receiver_is_prepared_handle(ir: &FunctionIR, var: crate::ir::function::VarId)
                         ..
                     } if *d == cur => {
                         let seg = method.rsplit('.').next().unwrap_or(method);
-                        return seg.to_ascii_lowercase().starts_with("prepare");
+                        let seg = seg.to_ascii_lowercase();
+                        return prefixes.iter().any(|p| seg.starts_with(p.as_str()));
                     }
                     _ => {}
                 }

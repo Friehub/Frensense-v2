@@ -18,6 +18,20 @@ fn run(ext: &str, path: &str, src: &str) -> ScanResult {
     )
 }
 
+fn run_with(
+    ext: &str,
+    path: &str,
+    src: &str,
+    facts: &crate::analysis::taint::facts::FactTable,
+) -> ScanResult {
+    let (config, _) = seeded_tables([ext]);
+    scan(
+        &[(path.to_string(), src.to_string(), ext.to_string())],
+        &config,
+        facts,
+    )
+}
+
 fn vulnerable(res: &ScanResult, sink: &str) -> bool {
     res.located
         .iter()
@@ -81,6 +95,46 @@ func h(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 }
 "#;
     assert!(!vulnerable(&run("go", "app/g.go", src), "Exec"));
+}
+
+#[test]
+fn prepared_statement_suppression_is_pack_taught() {
+    // The same program as `prepared_statement_arguments_are_bindings`: the
+    // handle counts as a prepared statement only because the pack declares
+    // the factory prefix. Remove the fact and the call is judged as SQL
+    // again - which is what makes the factory name pack knowledge instead of
+    // engine vocabulary.
+    let src = r#"
+package main
+
+import (
+	"database/sql"
+	"net/http"
+)
+
+func h(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	uid := r.URL.Query().Get("u")
+	stmt, err := db.Prepare("UPDATE sessions SET u = ? WHERE k = ?")
+	if err != nil {
+		return
+	}
+	_, err = stmt.Exec(uid, "k")
+}
+"#;
+    let (_, mut facts) = seeded_tables(["go"]);
+    assert!(
+        !facts.prepared_statement_prefixes.is_empty(),
+        "the default pack teaches the prepared-statement factory prefix"
+    );
+    assert!(!vulnerable(
+        &run_with("go", "app/g.go", src, &facts),
+        "Exec"
+    ));
+    facts.prepared_statement_prefixes.clear();
+    assert!(
+        vulnerable(&run_with("go", "app/g.go", src, &facts), "Exec"),
+        "without the fact the handle's arguments are not binding-typed"
+    );
 }
 
 #[test]
