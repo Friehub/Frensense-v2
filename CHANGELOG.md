@@ -90,31 +90,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never touched. Pre-existing debt belongs to the baseline
   (`--emit-baseline` / `--compare-baseline`), not to the diff gate.
 
-#### Reported Identity & Triage
-- **Stable rule ids on every finding**: findings report under a stable id
-  (`taint.sql-injection`, `check.weak-hash`, `policy.<id>`) instead of the
-  message text, so baselines, suppression files and trend reports keep pointing
-  at the same rule when the wording changes. SARIF emits one rule per id with
-  its CWE `external/cwe/*` tags, help URI and `security-severity`, and the JSON
-  report carries a `cwe` array per finding.
-- **Rule cards are the single source of rule prose**: one card per sink label
-  and built-in checker rule (`frensense_lang::rule_card`) holds the id, title,
-  CWE list, why and fix, and `taint_cwe` / `checker_rule_cwe` resolve through
-  them, so no built-in rule can ship without a CWE and the terminal, SARIF and
-  JSON surfaces cannot drift. Sinks that name no class fall back to the broad
-  parent CWE (74 injection, 20 improper input validation) instead of guessing a
-  child class.
-- **No more "untrusted data reached something" findings**: a flow whose sink
-  resolves to a fallback card (unknown label, role that pins no class) is no
-  longer reported at all - it named no class to fix, suppress or trend, and
-  those were the bulk of the noise burying real flows. `--explain` lists such
-  sinks as silent instead, and a corpus family that does know the class teaches
-  it as a label on the sink fact.
-- **Code frame in the terminal report**: findings print the offending line (and
-  the line above it) with a caret under the flagged call, plus the rule id,
-  CWE and class-specific why/fix, replacing the repeated
-  Details/Impact/Remediation block.
-
 #### Language Facts
 - **CWE-94 tagging for Code Execution**: `eval`, `exec`, and `compile` sinks now
   carry CWE-94 (Code Injection). The mapping previously matched a dead arm - the
@@ -123,6 +98,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CWE-601 tagging for Open Redirect**: `redirect`-labelled Resource-role sinks
   now carry CWE-601 (URL Redirection to Untrusted Site). CWE-601 class TPR moves
   from 0% to 61.5%.
+
+#### Version Identity & Artifact Contracts (Phase 6)
+
+- **`frensense --version --json` and `frensense bundle info --json`** now expose a machine-readable build identity: engine version, bundle format, fact-vocabulary fingerprint, default-pack BLAKE3 digest, and report-schema version. The release workflow asserts on `frensense --version --json` before tagging and stamps the identity into the annotated tag.
+- **Bundle format v7** (`frensense-bundler` `BUNDLE_VERSION` 6 → 7): `.frc` envelopes now record the writing engine's fact-vocabulary fingerprint (`BundleHeader::vocabulary`, checked strictly on load), an optional coarse engine range (`requires_engine`), and the writing engine version (`built_by_engine`, diagnostics only). v6-and-earlier bundles are still loadable (`is_legacy()`); a v7 bundle built for a newer vocabulary is refused by name at the version gate before any payload decode. See `frensense-bundler/src/format/frc.rs`.
+- **Fact-vocabulary fingerprint** (`frensense-engine::analysis::taint::facts::FACT_VOCABULARY_FINGERPRINT`, currently `0x4994_27a8_ed94_e470`): a reproducible FNV-1a over the ordered serialized vocabulary (hint kinds + `LearnedFactEntry` variants). New fact variants are compile-enforced (`HintKind::index` / `LearnedFactEntry::wire_index` exhaustive matches), and a ratchet test fails until `FACT_VOCABULARY_FINGERPRINT` is updated — which is the cue to bump `BUNDLE_VERSION` and regenerate the default pack.
+- **Format contract ratified** in `docs/FORMATS.md` (single table of every artifact version and its bump rule) and enforced by `scripts/format-ratchet.py` (fails if the vocabulary fingerprint moves without a `BUNDLE_VERSION` bump and a changelog note).
+- **Regenerated embedded default pack** (`frensense-bundler/assets/frensense-default.frc`) under the v7 envelope so it carries its fact-vocabulary fingerprint.
 
 ### Fixed
 

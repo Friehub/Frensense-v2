@@ -672,13 +672,21 @@ mod tests {
     use frensense_engine::analysis::taint::facts::{PolicyFact, PolicyScope};
 
     /// Hand-craft an `.frc` envelope around `payload` at a chosen version.
+    ///
+    /// The header shape follows the version (4 fields at v6, 7 at v7) so the
+    /// *reader's* branching is what the test exercises, and the version field
+    /// is then patched so a `BUNDLE_VERSION + 1` envelope really is newer than
+    /// anything this build knows.
     fn raw_bundle(version: u32, payload: &[u8]) -> Vec<u8> {
-        let header = BundleHeader {
-            magic: *BUNDLE_MAGIC,
-            version,
-            pattern_count: 0,
-            checksum: *blake3::hash(payload).as_bytes(),
-        };
+        if version < crate::format::BUNDLE_VERSION {
+            return crate::format::frc::write_legacy_envelope(version, payload);
+        }
+        let mut header = BundleHeader::current(0, *blake3::hash(payload).as_bytes());
+        // Stamp the *requested* version, not the current one. When the caller
+        // asks for "newer than this engine knows", `current()` would stamp
+        // `BUNDLE_VERSION` and the gate would never fire.
+        header.version = version;
+        assert_eq!(header.magic, *BUNDLE_MAGIC);
         let header_bytes = bincode::serialize(&header).expect("header serializes");
         let mut bytes = (header_bytes.len() as u32).to_le_bytes().to_vec();
         bytes.extend_from_slice(&header_bytes);
@@ -775,9 +783,11 @@ mod tests {
                 package: Some("checkout-lib".to_string()),
             })],
         };
-        let bytes = write_bundle(&payload, 0).expect("v6 write");
-        let loaded = load_bundle(&bytes).expect("v6 bundle loads");
-        assert_eq!(loaded.header.version, 6);
+        // `write_bundle` always stamps the current envelope version; a v6
+        // payload is a valid *payload* under it (v7 only widens the header).
+        let bytes = write_bundle(&payload, 0).expect("write");
+        let loaded = load_bundle(&bytes).expect("bundle loads");
+        assert_eq!(loaded.header.version, crate::format::BUNDLE_VERSION);
         assert_eq!(loaded.learned_facts.len(), 1);
         let LearnedFactEntry::Sink {
             call,
@@ -808,7 +818,7 @@ mod tests {
         assert!(err.contains("Unsupported bundle version"), "{err}");
         assert!(
             err.contains(&format!(
-                "engine supports {}",
+                "this engine supports up to {}",
                 crate::format::BUNDLE_VERSION
             )),
             "{err}"

@@ -24,6 +24,13 @@
 //!   program graph", shared by the scanner, e2e drivers, and the bundler.
 //! * [`scan`], the stable query API: files + config + facts → findings.
 
+/// The engine crate version as published. Bundles record this as
+/// `built_by_engine`; the compatibility decision itself is made on
+/// [`analysis::taint::facts::fact_vocabulary_fingerprint`], because the
+/// serialized vocabulary (not the crate number) is what decides whether a
+/// bundle can be decoded.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub mod analysis;
 pub mod checks;
 #[cfg(test)]

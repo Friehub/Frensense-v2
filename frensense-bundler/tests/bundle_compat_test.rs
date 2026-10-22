@@ -20,7 +20,7 @@
 //! `format/frc.rs`, regenerate a fresh fixture from the new asset, and update
 //! the committed `.frc` under `tests/fixtures/`. The failure here is the alarm.
 
-use frensense_bundler::format::{load_bundle, BUNDLE_VERSION};
+use frensense_bundler::format::{load_bundle, BUNDLE_VERSION, MIN_SUPPORTED_VERSION};
 
 /// The 0.7.0 default-pack asset, committed as a frozen wire-format sample.
 const FIXTURE_0_7_0: &[u8] = include_bytes!("fixtures/frc-v6-frensense-0.7.0.frc");
@@ -34,8 +34,13 @@ fn legacy_0_7_0_bundle_still_loads() {
         loaded.header.version, 6,
         "fixture is a v6 bundle; BUNDLE_VERSION has moved on"
     );
-    assert_eq!(
-        loaded.header.version, BUNDLE_VERSION,
+    // The fixture must stay within the *supported range*, not match the
+    // current version exactly: v7 deliberately keeps v6-and-earlier envelopes
+    // loadable (they carry no vocabulary fingerprint, so they load marked
+    // legacy). An exact-equality assertion here would forbid the one-directional
+    // compatibility the format guarantees.
+    assert!(
+        (MIN_SUPPORTED_VERSION..=BUNDLE_VERSION).contains(&loaded.header.version),
         "fixture version must stay within the supported range"
     );
     assert!(

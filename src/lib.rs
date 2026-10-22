@@ -10,6 +10,7 @@
 pub mod cli;
 pub mod engine;
 pub mod explain;
+pub mod identity;
 pub mod lsp;
 pub mod mcp;
 pub mod parser;
@@ -24,6 +25,15 @@ use thiserror::Error;
 pub use frensense_engine::FileId;
 
 pub const FRENSENSE_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Version of the *report* schema - the JSON/SARIF envelope this CLI emits.
+///
+/// Distinct from the engine's fact-vocabulary fingerprint and the bundler's
+/// `BUNDLE_VERSION`: those govern `.frc` bundles; this governs the shape of
+/// `--format json` / `--format sarif` output. Bump it whenever a field is
+/// renamed, removed, or changes type in any emitted report. The golden
+/// fixtures in `tests/` move with it so a silent shape change fails CI.
+pub const REPORT_SCHEMA_VERSION: u32 = 1;
 
 /// Advisory severity ranking - declared in `frensense-lang` alongside the
 /// per-language rule registries; re-exported here so every reporter surface

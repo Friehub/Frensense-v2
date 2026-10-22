@@ -110,6 +110,13 @@ impl Reporter {
                         "name": "Frensense",
                         "version": crate::FRENSENSE_VERSION,
                         "informationUri": "https://friehub.com/frensense",
+                        // Producer identity: which engine, fact vocabulary and
+                        // default pack produced these findings. Lives under
+                        // `properties` so it rides along without changing any
+                        // required SARIF field.
+                        "properties": {
+                            "frensense": crate::identity::producer()
+                        },
                         "rules": rules_list
                     }
                 },
@@ -729,6 +736,23 @@ mod sarif_line_mapping_tests {
         let results = run["results"].as_array().expect("results");
         assert!(results.iter().all(|r| r["ruleId"] == "taint.sql-injection"));
         assert!(results.iter().all(|r| r["ruleIndex"] == 0));
+    }
+
+    #[test]
+    fn sarif_carries_producer_identity_block() {
+        let sarif = Reporter::to_sarif(&[rule_advisory("a")], Path::new("."));
+        let driver = &sarif["runs"][0]["tool"]["driver"];
+        let f = &driver["properties"]["frensense"];
+        assert_eq!(f["name"], "frensense");
+        assert_eq!(f["version"], crate::FRENSENSE_VERSION);
+        assert_eq!(f["report_schema"], crate::REPORT_SCHEMA_VERSION);
+        // The fingerprint is a 0x-prefixed 16-hex token, matching identity().
+        let fp = f["fact_vocabulary_fingerprint"]
+            .as_str()
+            .expect("fingerprint");
+        assert!(fp.starts_with("0x") && fp.len() == 18, "{fp}");
+        let digest = f["default_pack_blake3"].as_str().expect("digest");
+        assert_eq!(digest.len(), 64, "{digest}");
     }
 
     #[test]

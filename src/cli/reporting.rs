@@ -68,6 +68,23 @@ pub fn print_scan_summary(
     println!("========================================================================");
 }
 
+/// The JSON report envelope: `schema_version` + `producer` identity block,
+/// then the finding payload.
+///
+/// Extracted so the shape is testable (and golden-assertable) without a
+/// filesystem. Bump [`crate::REPORT_SCHEMA_VERSION`] when a key here is
+/// renamed, removed, or changes type.
+#[must_use]
+pub fn json_report(advisories: &[Advisory]) -> serde_json::Value {
+    serde_json::json!({
+        "schema_version": crate::REPORT_SCHEMA_VERSION,
+        "producer": crate::identity::producer(),
+        "clean": advisories.is_empty(),
+        "advisory_count": advisories.len(),
+        "advisories": advisories,
+    })
+}
+
 /// Print results in the requested format.
 ///
 /// If `output_path` is provided, writes the formatted report to that destination
@@ -84,12 +101,7 @@ pub fn print_results(
 ) -> Result<()> {
     match format {
         "json" => {
-            let wrapper = serde_json::json!({
-                "clean": advisories.is_empty(),
-                "advisory_count": advisories.len(),
-                "advisories": advisories,
-            });
-            let rendered = serde_json::to_string_pretty(&wrapper)
+            let rendered = serde_json::to_string_pretty(&json_report(advisories))
                 .map_err(|e| FrensenseError::Config(format!("JSON error: {e}")))?;
             if let Some(out) = output_path {
                 std::fs::write(out, rendered).map_err(|e| {
@@ -853,6 +865,54 @@ mod explain_rule_tests {
     }
 }
 
+/// Golden shape of the JSON report envelope: the `schema_version` and
+/// `producer` identity block are asserted field-by-field so a silent change
+/// (a rename, a dropped key, a type change) fails here until
+/// `REPORT_SCHEMA_VERSION` and this test move together.
+#[cfg(test)]
+mod json_report_schema_tests {
+    use super::json_report;
+    use crate::Advisory;
+    use std::path::Path;
+
+    fn adv() -> Advisory {
+        Advisory::bare(
+            "SQL injection",
+            crate::Severity::Critical,
+            crate::FileId(0),
+            Path::new("app.py"),
+            "obs",
+        )
+    }
+
+    #[test]
+    fn envelope_carries_schema_version_and_producer() {
+        let report = json_report(&[adv()]);
+        assert_eq!(report["schema_version"], crate::REPORT_SCHEMA_VERSION);
+        assert_eq!(report["clean"], false);
+        assert_eq!(report["advisory_count"], 1);
+        assert_eq!(report["advisories"].as_array().unwrap().len(), 1);
+
+        let p = &report["producer"];
+        assert_eq!(p["name"], "frensense");
+        assert_eq!(p["version"], crate::FRENSENSE_VERSION);
+        assert_eq!(p["report_schema"], crate::REPORT_SCHEMA_VERSION);
+        let fp = p["fact_vocabulary_fingerprint"].as_str().unwrap();
+        assert!(fp.starts_with("0x") && fp.len() == 18, "{fp}");
+        assert_eq!(p["default_pack_blake3"].as_str().unwrap().len(), 64);
+    }
+
+    #[test]
+    fn clean_report_still_has_the_envelope() {
+        let report = json_report(&[]);
+        assert_eq!(report["clean"], true);
+        assert_eq!(report["advisory_count"], 0);
+        // The producer block is present even with no findings - a consumer
+        // can always attribute the report.
+        assert!(report["producer"]["version"].is_string());
+    }
+}
+
 #[cfg(test)]
 mod explain_learned_rule_tests {
     use super::{bundle_rule_index, explain_learned_rule};
@@ -871,6 +931,10 @@ mod explain_learned_rule_tests {
                 version: 6,
                 pattern_count: 1,
                 checksum: [0; 32],
+                // v6 header: pre-Phase-6, so no compatibility metadata.
+                vocabulary: None,
+                requires_engine: None,
+                built_by_engine: None,
             },
             patterns: vec![frensense_bundler::format::BundlePattern {
                 id: "family-sqli".to_string(),

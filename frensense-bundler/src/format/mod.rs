@@ -12,9 +12,12 @@ mod default_pack;
 mod frc;
 mod types;
 
-pub use default_pack::{default_bundle_bytes, default_pack, is_pack_memory_builtin};
+pub use default_pack::{
+    default_bundle_bytes, default_pack, default_pack_blake3_hex, is_pack_memory_builtin,
+};
 pub use frc::{
-    read_bundle, read_bundle_parts, write_bundle, BundleHeader, BUNDLE_MAGIC, BUNDLE_VERSION,
+    check_engine_compatibility, read_bundle, read_bundle_parts, write_bundle, write_bundle_pinned,
+    BundleHeader, EngineRequirement, BUNDLE_MAGIC, BUNDLE_VERSION, MIN_SUPPORTED_VERSION,
 };
 pub use types::{
     load_bundle, BundlePattern, BundlePayload, BundlePayloadV5, BundlePayloadV6, LoadedBundle,

@@ -424,6 +424,64 @@ pub enum HintKind {
     WeakHashDisclaimer,
 }
 
+impl HintKind {
+    /// Every variant, in wire order. `.frc` bundles encode the variant
+    /// *position*, so this list is the serialization contract: appending a
+    /// variant changes
+    /// [`fact_vocabulary_fingerprint`](super::fact_vocabulary_fingerprint)
+    /// and therefore invalidates every bundle built before the change
+    /// (rebuild the bundle, or keep the engine that built it).
+    pub const ALL: [HintKind; 10] = [
+        HintKind::UrlParam,
+        HintKind::UrlArg,
+        HintKind::UrlLiteral,
+        HintKind::SecurityContext,
+        HintKind::AuthGuard,
+        HintKind::JwtAlgorithm,
+        HintKind::CredentialContext,
+        HintKind::KdfReceiver,
+        HintKind::PreparedStatementPrefix,
+        HintKind::WeakHashDisclaimer,
+    ];
+
+    /// Wire discriminant of this variant. Exhaustive on purpose: adding a
+    /// variant is a compile error here, which is the reminder to append it
+    /// to [`Self::ALL`] (the ratchet test fails until it is).
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            HintKind::UrlParam => 0,
+            HintKind::UrlArg => 1,
+            HintKind::UrlLiteral => 2,
+            HintKind::SecurityContext => 3,
+            HintKind::AuthGuard => 4,
+            HintKind::JwtAlgorithm => 5,
+            HintKind::CredentialContext => 6,
+            HintKind::KdfReceiver => 7,
+            HintKind::PreparedStatementPrefix => 8,
+            HintKind::WeakHashDisclaimer => 9,
+        }
+    }
+
+    /// Stable name used in the vocabulary fingerprint and in diagnostics.
+    /// Renaming a variant is a wire change too: the fingerprint catches it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            HintKind::UrlParam => "url_param",
+            HintKind::UrlArg => "url_arg",
+            HintKind::UrlLiteral => "url_literal",
+            HintKind::SecurityContext => "security_context",
+            HintKind::AuthGuard => "auth_guard",
+            HintKind::JwtAlgorithm => "jwt_algorithm",
+            HintKind::CredentialContext => "credential_context",
+            HintKind::KdfReceiver => "kdf_receiver",
+            HintKind::PreparedStatementPrefix => "prepared_statement_prefix",
+            HintKind::WeakHashDisclaimer => "weak_hash_disclaimer",
+        }
+    }
+}
+
 /// Syntactic grammar features that can be dynamically learned or configured via bundle facts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]

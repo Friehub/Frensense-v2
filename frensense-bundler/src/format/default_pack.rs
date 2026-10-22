@@ -37,6 +37,17 @@ pub fn default_bundle_bytes() -> &'static [u8] {
     include_bytes!("../../assets/frensense-default.frc")
 }
 
+/// BLAKE3 digest of the committed default pack, hex-encoded.
+///
+/// Part of the build identity (`--version --json`): two builds that claim
+/// the same engine version but embed different packs are different
+/// artifacts, and this is how a consumer or the release pipeline tells
+/// them apart.
+#[must_use]
+pub fn default_pack_blake3_hex() -> String {
+    blake3::hash(default_bundle_bytes()).to_hex().to_string()
+}
+
 /// The embedded default pack, parsed once. Panics only if the committed
 /// asset is stale or corrupt - the drift test in this module keeps that
 /// from reaching a release.

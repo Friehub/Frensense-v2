@@ -165,7 +165,7 @@ fn print_help() {
         "       frensense bundle [<corpus_dir>] [output.frc] [-c/-o]  Compile corpus pairs into a .frc bundle"
     );
     println!(
-        "       frensense bundle info <file.frc>             Inspect metadata and facts of a .frc bundle"
+        "       frensense bundle info <file.frc> [--json]    Inspect metadata and facts of a .frc bundle"
     );
     println!(
         "       frensense watch [path] [options]            Re-scan on file changes, print new findings"
@@ -231,7 +231,9 @@ fn print_help() {
         "  --explain                  Also print every silent sink argument and why the engine stayed quiet (stderr)"
     );
     println!("  -h, --help                 Print this help");
-    println!("  -v, --version              Print version");
+    println!(
+        "  -v, --version              Print version (add --json for machine-readable identity)"
+    );
     println!();
     println!("Rule Bundles (.frc):");
     println!("  Community and commercial rule bundles: https://frensense.friehub.cloud/bundles");
@@ -284,7 +286,18 @@ fn print_bundle_help() {
     );
 }
 
-fn print_bundle_info(bundle_path: &std::path::Path) -> std::result::Result<(), String> {
+/// Fact-category counts for the bundle-info display.
+struct FactCounts {
+    sources: usize,
+    sinks: usize,
+    sanitizers: usize,
+    policies: usize,
+    checks: usize,
+    memory_contracts: usize,
+    other: usize,
+}
+
+fn print_bundle_info(bundle_path: &std::path::Path, json: bool) -> std::result::Result<(), String> {
     let bytes = std::fs::read(bundle_path)
         .map_err(|e| format!("failed to read bundle {}: {e}", bundle_path.display()))?;
     let loaded = frensense_bundler::format::load_bundle(&bytes)
@@ -298,34 +311,86 @@ fn print_bundle_info(bundle_path: &std::path::Path) -> std::result::Result<(), S
         .map(|b| format!("{b:02x}"))
         .collect();
 
-    let mut sources = 0;
-    let mut sinks = 0;
-    let mut sanitizers = 0;
-    let mut policies = 0;
-    let mut checks = 0;
-    let mut memory_contracts = 0;
-    let mut other = 0;
+    let mut counts = FactCounts {
+        sources: 0,
+        sinks: 0,
+        sanitizers: 0,
+        policies: 0,
+        checks: 0,
+        memory_contracts: 0,
+        other: 0,
+    };
 
     for fact in &loaded.learned_facts {
         match fact {
             LearnedFactEntry::Source { .. } | LearnedFactEntry::LanguageSource { .. } => {
-                sources += 1
+                counts.sources += 1
             }
             LearnedFactEntry::Sink { .. }
             | LearnedFactEntry::LanguageSink { .. }
-            | LearnedFactEntry::LanguageSinkSlots { .. } => sinks += 1,
+            | LearnedFactEntry::LanguageSinkSlots { .. } => counts.sinks += 1,
             LearnedFactEntry::Sanitizer { .. } | LearnedFactEntry::LanguageSanitizer { .. } => {
-                sanitizers += 1
+                counts.sanitizers += 1
             }
             LearnedFactEntry::Policy { .. } | LearnedFactEntry::PolicyScoped { .. } => {
-                policies += 1
+                counts.policies += 1
             }
-            LearnedFactEntry::Check { .. } => checks += 1,
+            LearnedFactEntry::Check { .. } => counts.checks += 1,
             LearnedFactEntry::MemoryContract { .. }
             | LearnedFactEntry::Allocator { .. }
-            | LearnedFactEntry::Deallocator { .. } => memory_contracts += 1,
-            _ => other += 1,
+            | LearnedFactEntry::Deallocator { .. } => counts.memory_contracts += 1,
+            _ => counts.other += 1,
         }
+    }
+
+    if json {
+        // The `--json` envelope mirrors the header's compatibility fields so
+        // corpus tooling can assert on them without parsing prose. The
+        // `engine` block names what *this* binary would check the bundle
+        // against, so a diff between the two is a stale-bundle signal.
+        let obj = serde_json::json!({
+            "schema_version": frensense::REPORT_SCHEMA_VERSION,
+            "path": bundle_path.display().to_string(),
+            "magic": magic_str,
+            "format_version": loaded.header.version,
+            "legacy": loaded.header.is_legacy(),
+            "payload_bytes": bytes.len(),
+            "blake3_checksum": checksum_hex,
+            "pattern_count": loaded.patterns.len(),
+            "learned_facts": {
+                "total": loaded.learned_facts.len(),
+                "taint_sources": counts.sources,
+                "taint_sinks": counts.sinks,
+                "sanitizers": counts.sanitizers,
+                "co_occurrence": counts.policies,
+                "checks": counts.checks,
+                "memory_contracts": counts.memory_contracts,
+                "other": counts.other,
+            },
+            "authored_policies": loaded.policy_pack.len(),
+            "vocabulary": loaded.header.vocabulary.map(|v| format!("{v:#018x}")),
+            "requires_engine": loaded.header.requires_engine.map(|r| r.to_string()),
+            "built_by_engine": loaded.header.built_by_engine,
+            "engine": {
+                "version": frensense::FRENSENSE_VERSION,
+                "bundle_format": frensense_bundler::format::BUNDLE_VERSION,
+                "fact_vocabulary": format!(
+                    "{:#018x}",
+                    frensense_engine::analysis::taint::facts::FACT_VOCABULARY_FINGERPRINT
+                ),
+            },
+            "patterns": loaded.patterns.iter().map(|pat| serde_json::json!({
+                "id": pat.id,
+                "cwe": pat.cwe,
+                "severity": pat.severity,
+                "rules": pat.rules,
+            })).collect::<Vec<_>>(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&obj).map_err(|e| format!("JSON error: {e}"))?
+        );
+        return Ok(());
     }
 
     println!("============================= Bundle Details =============================");
@@ -334,18 +399,27 @@ fn print_bundle_info(bundle_path: &std::path::Path) -> std::result::Result<(), S
     println!("Format Version:     v{}", loaded.header.version);
     println!("Payload Size:       {} bytes", bytes.len());
     println!("BLAKE3 Checksum:    {checksum_hex}");
+    if let Some(vocab) = loaded.header.vocabulary {
+        println!("Fact Vocabulary:    {vocab:#018x}");
+    }
+    if let Some(req) = loaded.header.requires_engine {
+        println!("Requires Engine:    frensense {req}");
+    }
+    if let Some(built) = &loaded.header.built_by_engine {
+        println!("Built By Engine:    frensense {built}");
+    }
     println!("Pattern Count:      {}", loaded.patterns.len());
     println!("Learned Facts:      {}", loaded.learned_facts.len());
-    println!("  - Taint Sources:  {sources}");
-    println!("  - Taint Sinks:    {sinks}");
-    println!("  - Sanitizers:     {sanitizers}");
-    println!("  - Co-occurrence:  {policies}");
-    println!("  - Checks:         {checks}");
-    if memory_contracts > 0 {
-        println!("  - Memory Facts:   {memory_contracts}");
+    println!("  - Taint Sources:  {}", counts.sources);
+    println!("  - Taint Sinks:    {}", counts.sinks);
+    println!("  - Sanitizers:     {}", counts.sanitizers);
+    println!("  - Co-occurrence:  {}", counts.policies);
+    println!("  - Checks:         {}", counts.checks);
+    if counts.memory_contracts > 0 {
+        println!("  - Memory Facts:   {}", counts.memory_contracts);
     }
-    if other > 0 {
-        println!("  - Other Facts:    {other}");
+    if counts.other > 0 {
+        println!("  - Other Facts:    {}", counts.other);
     }
     if !loaded.policy_pack.is_empty() {
         println!("Authored Policies:  {}", loaded.policy_pack.len());
@@ -435,18 +509,26 @@ fn handle_bundle_command(args: &[String]) -> Result<bool> {
         {
             println!("Frensense Bundle Inspector: inspect metadata and facts of a .frc bundle.");
             println!();
-            println!("Usage: frensense bundle info <file.frc>");
+            println!("Usage: frensense bundle info <file.frc> [--json]");
             std::process::exit(0);
         }
-        let bundle_path = match args.get(3) {
-            Some(p) => std::path::PathBuf::from(p),
+        // `--json` may appear anywhere after `info`; the first non-flag arg
+        // is the bundle path.
+        let json = args.iter().skip(3).any(|a| a == "--json");
+        let bundle_path = args
+            .iter()
+            .skip(3)
+            .find(|a| !a.starts_with('-'))
+            .map(std::path::PathBuf::from);
+        let bundle_path = match bundle_path {
+            Some(p) => p,
             None => {
                 eprintln!("Error: missing bundle file path");
-                eprintln!("Usage: frensense bundle info <file.frc>");
+                eprintln!("Usage: frensense bundle info <file.frc> [--json]");
                 std::process::exit(2);
             }
         };
-        if let Err(e) = print_bundle_info(&bundle_path) {
+        if let Err(e) = print_bundle_info(&bundle_path, json) {
             eprintln!("Bundle inspection error: {e}");
             std::process::exit(1);
         }
@@ -516,7 +598,19 @@ fn handle_early_args(args: &[String]) -> bool {
         std::process::exit(0);
     }
     if args.iter().any(|a| a == "--version" || a == "-v") {
-        println!("frensense {FRENSENSE_VERSION}");
+        // `--version --json` emits the full machine-readable identity
+        // surface (engine version, bundle format, fact-vocabulary
+        // fingerprint, default-pack digest, report schema) that release
+        // scripts and report producers assert against.
+        if args.iter().any(|a| a == "--json") {
+            let identity = frensense::identity::identity();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&identity).expect("identity serializes to JSON")
+            );
+        } else {
+            println!("frensense {FRENSENSE_VERSION}");
+        }
         std::process::exit(0);
     }
     false

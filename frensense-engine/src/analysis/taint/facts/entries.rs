@@ -309,6 +309,115 @@ pub enum LearnedFactEntry {
 }
 
 impl LearnedFactEntry {
+    /// Variant names in wire order: the serialization contract for `.frc`
+    /// bundles (bincode writes the variant index first). Appending a
+    /// variant changes
+    /// [`fact_vocabulary_fingerprint`](super::fact_vocabulary_fingerprint),
+    /// which invalidates every bundle built against the old vocabulary -
+    /// that is the point: a bundle that uses a variant an older binary does
+    /// not know must be rebuilt instead of misdecoded.
+    ///
+    /// The ratchet test in `vocabulary.rs` fails if this list and
+    /// [`Self::wire_index`] disagree, so a new variant cannot arrive
+    /// silently.
+    pub const VARIANT_TAGS: [&'static str; 42] = [
+        "source",
+        "sink",
+        "sanitizer",
+        "policy",
+        "check",
+        "memory_contract",
+        "weak_crypto",
+        "guard_bypass",
+        "schema_policy",
+        "grammar_role",
+        "grammar_feature",
+        "allocator",
+        "deallocator",
+        "idor_finder_sink",
+        "idor_key",
+        "propagator",
+        "guard_denylist_pattern",
+        "integer_overflow_rule",
+        "hints",
+        "weak_primitive_rule",
+        "insecure_config_rule",
+        "key_size_rule",
+        "suspicious_hash_wrappers",
+        "buffer_builtin",
+        "language_sink",
+        "language_sink_slots",
+        "language_idor_sink",
+        "language_source",
+        "language_sanitizer",
+        "language_propagator",
+        "language_session_root",
+        "language_route_pattern",
+        "stack_allocators",
+        "collection_constructors",
+        "schema_describe_methods",
+        "null_tokens",
+        "session_accessors",
+        "receiver_params",
+        "language_ambiguous_verbs",
+        "policy_scoped",
+        "language_sink_global_only",
+        "integer_overflow_unbounded_rule",
+    ];
+
+    /// Wire index of this variant. Exhaustive on purpose: adding a variant
+    /// is a compile error here, which is the reminder to append its tag to
+    /// [`Self::VARIANT_TAGS`] (the ratchet test fails until it is).
+    #[must_use]
+    pub fn wire_index(&self) -> usize {
+        match self {
+            LearnedFactEntry::Source { .. } => 0,
+            LearnedFactEntry::Sink { .. } => 1,
+            LearnedFactEntry::Sanitizer { .. } => 2,
+            LearnedFactEntry::Policy { .. } => 3,
+            LearnedFactEntry::Check { .. } => 4,
+            LearnedFactEntry::MemoryContract { .. } => 5,
+            LearnedFactEntry::WeakCrypto(_) => 6,
+            LearnedFactEntry::GuardBypass(_) => 7,
+            LearnedFactEntry::SchemaPolicy(_) => 8,
+            LearnedFactEntry::GrammarRole { .. } => 9,
+            LearnedFactEntry::GrammarFeature { .. } => 10,
+            LearnedFactEntry::Allocator { .. } => 11,
+            LearnedFactEntry::Deallocator { .. } => 12,
+            LearnedFactEntry::IdorFinderSink { .. } => 13,
+            LearnedFactEntry::IdorKey { .. } => 14,
+            LearnedFactEntry::Propagator { .. } => 15,
+            LearnedFactEntry::GuardDenylistPattern { .. } => 16,
+            LearnedFactEntry::IntegerOverflowRule { .. } => 17,
+            LearnedFactEntry::Hints { .. } => 18,
+            LearnedFactEntry::WeakPrimitiveRule { .. } => 19,
+            LearnedFactEntry::InsecureConfigRule { .. } => 20,
+            LearnedFactEntry::KeySizeRule { .. } => 21,
+            LearnedFactEntry::SuspiciousHashWrappers { .. } => 22,
+            LearnedFactEntry::BufferBuiltin { .. } => 23,
+            LearnedFactEntry::LanguageSink { .. } => 24,
+            LearnedFactEntry::LanguageSinkSlots { .. } => 25,
+            LearnedFactEntry::LanguageIdorSink { .. } => 26,
+            LearnedFactEntry::LanguageSource { .. } => 27,
+            LearnedFactEntry::LanguageSanitizer { .. } => 28,
+            LearnedFactEntry::LanguagePropagator { .. } => 29,
+            LearnedFactEntry::LanguageSessionRoot { .. } => 30,
+            LearnedFactEntry::LanguageRoutePattern { .. } => 31,
+            LearnedFactEntry::StackAllocators { .. } => 32,
+            LearnedFactEntry::CollectionConstructors { .. } => 33,
+            LearnedFactEntry::SchemaDescribeMethods { .. } => 34,
+            LearnedFactEntry::NullTokens { .. } => 35,
+            LearnedFactEntry::SessionAccessors { .. } => 36,
+            LearnedFactEntry::ReceiverParams { .. } => 37,
+            LearnedFactEntry::LanguageAmbiguousVerbs { .. } => 38,
+            LearnedFactEntry::PolicyScoped { .. } => 39,
+            LearnedFactEntry::LanguageSinkGlobalOnly { .. } => 40,
+            LearnedFactEntry::IntegerOverflowUnboundedRule { .. } => 41,
+        }
+    }
+}
+
+impl LearnedFactEntry {
     /// Finding identities this fact's scanner output is keyed by: checker
     /// rule ids and learned sink call names. The bundle-advisory join
     /// (`BundlePattern::rules`) goes through this, so a family's

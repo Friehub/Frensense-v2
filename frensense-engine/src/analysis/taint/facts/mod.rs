@@ -41,6 +41,7 @@ pub mod entries;
 pub mod kinds;
 pub mod signatures;
 pub mod table;
+pub mod vocabulary;
 
 #[cfg(test)]
 mod tests;
@@ -53,6 +54,7 @@ pub use config::*;
 pub use entries::*;
 pub use kinds::*;
 pub use table::*;
+pub use vocabulary::*;
 
 /// The shipped default-pack fact table exactly as every consumer sees it
 /// ([`LearnedFactEntry`]s -> [`FactTable`] under [`Provenance::Spec`]).
