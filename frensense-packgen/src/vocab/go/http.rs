@@ -8,7 +8,10 @@
 
 /// Conventional request-parameter source patterns for Go frameworks.
 /// `r` = *http.Request (net/http), `c` = *gin.Context (Gin), `c` = echo.Context (Echo).
-pub(crate) static GO_REQUEST_PARAM_NAMES: &[&str] = &["r", "req", "c", "ctx", "w"];
+/// `r`, `c`, `ctx` and `w` are generic Go names (receivers, contexts, the
+/// response writer): the request-carrying members are dotted source
+/// patterns (`r.URL.Query`, `r.FormValue`, `c.Param`, ...).
+pub(crate) static GO_REQUEST_PARAM_NAMES: &[&str] = &["req"];
 
 /// Request-source patterns: which member paths carry untrusted input.
 /// Split by framework because `c.Param` (Gin) and `c.Params` (Fiber)

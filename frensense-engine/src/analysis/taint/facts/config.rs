@@ -190,6 +190,20 @@ fn install_language_group(
         .flatten()
         .map(String::as_str)
         .collect();
+    // Names this language declares as plain (undotted) sinks. A dotted
+    // entry whose last segment is NOT among them is receiver-qualified by
+    // construction (`yaml.load`, `res.send`): collapsing it to the bare
+    // last segment must not turn every `.load()` / `.send()` in the
+    // program into a sink, so those last segments are verb-gated too.
+    let bare_sink_names: Vec<&str> = group
+        .iter()
+        .filter_map(|e| match e {
+            LearnedFactEntry::LanguageSink { call, .. } if !call.contains('.') => {
+                Some(call.as_str())
+            }
+            _ => None,
+        })
+        .collect();
     for e in group {
         match e {
             LearnedFactEntry::LanguageSinkGlobalOnly { call, .. } => {
@@ -253,7 +267,13 @@ fn install_language_group(
                             .entry(last.to_string())
                             .or_default()
                             .insert(root.to_string());
-                        if ambiguous.contains(&last) {
+                        // A last segment this language never declares bare
+                        // is receiver-qualified by construction
+                        // (`yaml.load`, `res.send`): collapsing it to the
+                        // bare segment must not turn every `.load()` /
+                        // `.send()` in the program into a sink, so it is
+                        // verb-gated as well as root-gated.
+                        if ambiguous.contains(&last) || !bare_sink_names.contains(&last) {
                             facts.verb_sinks.insert(last.to_string());
                             facts.client_roots.insert(root.to_string());
                         }

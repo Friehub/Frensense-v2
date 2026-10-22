@@ -72,6 +72,7 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
             HintKind::CredentialContext,
             data::BOOTSTRAP_CREDENTIAL_CONTEXT_HINTS,
         ),
+        (HintKind::KdfReceiver, data::BOOTSTRAP_KDF_RECEIVER_HINTS),
     ] {
         entries.push(LearnedFactEntry::Hints {
             kind,
@@ -807,13 +808,26 @@ mod tests {
             // entries arm (root, verb) pairs AND a bare ambiguous sink
             // name arms verb-gating on itself (an unqualified bare verb
             // matches nothing by name alone - `is_sink_call_scoped`).
+            // A name is receiver-gated when either it is a declared
+            // ambiguous verb, or this language never declares it bare: a
+            // dotted declaration publishes a bare shadow of its last
+            // segment, and a shadow with no bare declaration behind it
+            // (`yaml.load`, `res.send`) must not arm every receiver in the
+            // program by name alone.
+            let bare_names: std::collections::BTreeSet<&str> = v
+                .sink_names
+                .iter()
+                .filter(|(call, _)| !call.contains('.'))
+                .map(|(call, _)| *call)
+                .collect();
+            let gated = |call: &str| {
+                let last = call.rsplit('.').next().unwrap_or(call);
+                v.ambiguous_verbs.contains(&last) || !bare_names.contains(last)
+            };
             let expected_verbs: std::collections::BTreeSet<String> = v
                 .sink_names
                 .iter()
-                .filter(|(call, _)| {
-                    let last = call.rsplit('.').next().unwrap_or(call);
-                    v.ambiguous_verbs.contains(&last)
-                })
+                .filter(|(call, _)| gated(call))
                 .map(|(call, _)| call.rsplit('.').next().unwrap_or(call).to_string())
                 .collect();
             let expected_roots: std::collections::BTreeSet<String> = v
@@ -821,7 +835,7 @@ mod tests {
                 .iter()
                 .filter(|(call, _)| {
                     let last = call.rsplit('.').next().unwrap_or(call);
-                    last != *call && v.ambiguous_verbs.contains(&last)
+                    last != *call && gated(call)
                 })
                 .map(|(call, _)| call.split('.').next().unwrap_or(call).to_string())
                 .collect();

@@ -23,14 +23,27 @@ pub static BOOTSTRAP_CONTAINMENT_CALLEES: &[&str] = &["includes", "indexOf", "co
 
 /// Credential-setting call names (last segment): functions whose argument
 /// is a plaintext password by convention.
-pub static BOOTSTRAP_CREDENTIAL_SINKS: &[&str] = &[
-    "hash",
-    "hashPassword",
-    "hashpw",
-    "setPassword",
-    "set_password",
-    "setSecret",
-    "set_secret",
+///
+/// Not listed: `hashpw` (bcrypt's own KDF entry point) and the
+/// `set_password` / `setPassword` setters (they delegate to the framework's
+/// hasher; the policy question belongs to the hasher, not the setter).
+pub static BOOTSTRAP_CREDENTIAL_SINKS: &[&str] =
+    &["hash", "hashPassword", "setSecret", "set_secret"];
+
+/// Receiver-name fragments of password-hashing libraries: a credential
+/// passed to `bcrypt.hash`, `argon2.hash`, `password_hash.hash` (pwdlib),
+/// `pwd_context.hash` (passlib) is the intended KDF use.
+pub static BOOTSTRAP_KDF_RECEIVER_HINTS: &[&str] = &[
+    "bcrypt",
+    "argon",
+    "scrypt",
+    "pbkdf",
+    "passlib",
+    "pwdlib",
+    "pwd_context",
+    "password_hash",
+    "passwordhasher",
+    "password_hasher",
 ];
 
 /// Credential parameter names (source_name of the arg var) that mark a
@@ -423,4 +436,25 @@ pub static BOOTSTRAP_AMBIGUOUS_VERBS: &[&str] = &[
     "distinct",
     "remove",
     "prepare",
+    // Receiver-gated (bare-name FP class, measured on real repos): these
+    // are everyday method names (`ws.send`, `response.status()`,
+    // `", ".join(..)`, `buf.write`, `Object.extend`). A call counts as a
+    // sink only on a receiver root named by a dotted entry
+    // (`res.write`, `os.path.join`, `_.merge`, ...).
+    // Capitalised forms (Go) and `Do`: `cache.Get(ctx, key)` shares the
+    // name with `http.Get(url)`; the dotted `http.Get` entries qualify it.
+    "Get",
+    "Post",
+    "Do",
+    "send",
+    "write",
+    "read",
+    "join",
+    "status",
+    "merge",
+    "extend",
+    "defaults",
+    "mixin",
+    "assign",
+    "load",
 ];

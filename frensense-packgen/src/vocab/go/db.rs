@@ -18,6 +18,9 @@ pub(crate) static GO_SINK_SIGNATURES: &[(&str, &[usize], bool)] = &[
     ("QueryRow", &[0], true),
     ("QueryContext", &[0], true),
     ("Exec", &[0], true),
+    // http.NewRequest(method, url, body): only the URL is an SSRF vector; the
+    // body argument is payload.
+    ("NewRequest", &[1], false),
     ("ExecContext", &[0], true),
     ("Prepare", &[0], true),
     ("PrepareContext", &[0], true),
@@ -36,12 +39,9 @@ pub(crate) static GO_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("exec", crate::role_map::SinkLabel::CommandInjection),
     ("Exec", crate::role_map::SinkLabel::CommandInjection),
     ("Command", crate::role_map::SinkLabel::CommandInjection),
-    ("Run", crate::role_map::SinkLabel::CommandInjection),
-    ("Output", crate::role_map::SinkLabel::CommandInjection),
-    (
-        "CombinedOutput",
-        crate::role_map::SinkLabel::CommandInjection,
-    ),
+    // `Run` / `Output` / `CombinedOutput` take no arguments (their
+    // receiver is the already-built command); `exec.Command(name, args...)`
+    // is the sink, and bare `Run` also names graph-database drivers.
     // SQL Injection
     ("Query", crate::role_map::SinkLabel::SqlInjection),
     ("QueryRow", crate::role_map::SinkLabel::SqlInjection),

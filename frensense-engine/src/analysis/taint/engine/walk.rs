@@ -657,16 +657,19 @@ impl<'a> BackwardTaintEngine<'a> {
         // Rust `File::create` signature must not arm a TypeScript `create`
         // call in the same mixed-language scan.
         let language = (!ir.language.is_empty()).then_some(ir.language.as_str());
-        if !self.facts.is_sink_call_scoped(
+        let has_receiver = recv_var.is_some();
+        if !self.facts.is_recv_sink_call_scoped(
             effective_name,
             receiver_root.as_deref(),
             origin_package,
             language,
-        ) && !self.facts.is_sink_call_scoped(
+            has_receiver,
+        ) && !self.facts.is_recv_sink_call_scoped(
             name,
             receiver_root.as_deref(),
             origin_package,
             language,
+            has_receiver,
         ) {
             return;
         }

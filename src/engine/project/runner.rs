@@ -51,49 +51,18 @@ impl Engine {
             files.push((p.to_string_lossy().into_owned(), content, ext));
         }
 
-        // Built-in config + fact table from the language specs present.
-        let (mut config, mut facts) = build_spec_tables(&files);
-
-        // Default pack (D1/5.2): spec knowledge re-shipped as an embedded
-        // .frc, merged with Spec provenance between the spec seed and the
-        // consumer bundle so bundle facts still win (spec -> pack ->
-        // consumer, last-wins).
-        let pack_entries = frensense_bundler::format::default_pack()
-            .learned_facts
-            .as_slice();
-        facts.merge(&fact_table_from_entries_with(
-            pack_entries,
-            Provenance::Spec,
-        ));
-        // Phase 6.2: the pack's language-keyed sections install into config
-        // and facts together, filtered to the scanned languages, at the
-        // same pack layer. Since Phase 6.2d the spec seed carries none of
-        // this provider knowledge, so this install is its sole source. Must
-        // run before the consumer bundle merge so Learned facts still win.
-        let scanned_langs = languages_for_exts(files.iter().map(|(_, _, ext)| ext.as_str()));
-        apply_language_entries(&mut config, &mut facts, pack_entries, &scanned_langs);
-
-        // Merge learned facts from the .frc bundle, if any, and index the
-        // bundle's per-family advisory patterns by the finding identities
-        // they apply to (`BundlePattern::rules`) for the advisory path.
+        // Consumer bundle (if any): loaded once; its advisory patterns are
+        // indexed by the finding identities they apply to
+        // (`BundlePattern::rules`) and its learned facts are installed per
+        // language group below.
         let mut bundle_advisories: rustc_hash::FxHashMap<
             String,
             frensense_bundler::format::BundlePattern,
         > = rustc_hash::FxHashMap::default();
+        let mut loaded_bundle = None;
         if let Some(bundle_bytes) = self.load_bundle_bytes(root)? {
             match frensense_bundler::format::load_bundle(bundle_bytes) {
                 Ok(loaded) => {
-                    // Consumer-bundle language sections install through
-                    // apply_language_entries filtered to scanned languages
-                    // before bare merge so Learned facts still win over Spec
-                    // and foreign-language bundle facts do not leak.
-                    apply_language_entries(
-                        &mut config,
-                        &mut facts,
-                        &loaded.learned_facts,
-                        &scanned_langs,
-                    );
-                    facts.merge(&fact_table_from_entries(&loaded.learned_facts));
                     for pattern in &loaded.patterns {
                         for rule in &pattern.rules {
                             bundle_advisories
@@ -101,6 +70,7 @@ impl Engine {
                                 .or_insert_with(|| pattern.clone());
                         }
                     }
+                    loaded_bundle = Some(loaded);
                 }
                 Err(e) => {
                     tracing::warn!("failed to load corpus bundle: {e}");
@@ -108,13 +78,61 @@ impl Engine {
             }
         }
 
-        // Bundle-learned source patterns widen the taint config: the bundle
-        // teaches new framework sources without touching the built-in tables.
-        for pattern in facts.source_patterns() {
-            config.sources.insert(pattern.to_string());
+        // One scan per language family. Sink, source and sanitizer
+        // vocabularies are keyed by bare names (`create`, `run`, `context`),
+        // so merging every language's tables into one config made Rust's
+        // `File::create` a sink for every TypeScript `.create(...)` and a JS
+        // parameter named `context` a source in Go. Flows never cross a
+        // language boundary in the IR (there is no FFI model), so
+        // partitioning loses nothing. JavaScript and TypeScript share one
+        // family because they import each other.
+        let mut groups: std::collections::BTreeMap<&'static str, Vec<(String, String, String)>> =
+            std::collections::BTreeMap::new();
+        for f in &files {
+            if let Some(spec) = frensense_lang::spec_for_ext(&f.2) {
+                let family = match spec.name() {
+                    "javascript" | "typescript" => "javascript",
+                    other => other,
+                };
+                groups.entry(family).or_default().push(f.clone());
+            }
         }
-
-        let result = scan::scan(&files, &config, &facts);
+        let pack_entries = frensense_bundler::format::default_pack()
+            .learned_facts
+            .as_slice();
+        let mut result = scan::ScanResult::default();
+        for group in groups.values() {
+            // Built-in config + fact table from the language spec present.
+            let (mut config, mut facts) = build_spec_tables(group);
+            // Default pack (D1/5.2): spec knowledge re-shipped as an
+            // embedded .frc, merged with Spec provenance between the spec
+            // seed and the consumer bundle so bundle facts still win.
+            facts.merge(&fact_table_from_entries_with(
+                pack_entries,
+                Provenance::Spec,
+            ));
+            let scanned_langs = languages_for_exts(group.iter().map(|(_, _, ext)| ext.as_str()));
+            apply_language_entries(&mut config, &mut facts, pack_entries, &scanned_langs);
+            if let Some(loaded) = &loaded_bundle {
+                apply_language_entries(
+                    &mut config,
+                    &mut facts,
+                    &loaded.learned_facts,
+                    &scanned_langs,
+                );
+                facts.merge(&fact_table_from_entries(&loaded.learned_facts));
+            }
+            // Bundle-learned source patterns widen the taint config.
+            for pattern in facts.source_patterns() {
+                config.sources.insert(pattern.to_string());
+            }
+            let part = scan::scan(group, &config, &facts);
+            result.findings.extend(part.findings);
+            result.located.extend(part.located);
+            result.located_checker.extend(part.located_checker);
+            result.checker.extend(part.checker);
+            result.errors.extend(part.errors);
+        }
         for err in &result.errors {
             tracing::warn!("scan error: {err}");
         }

@@ -29,6 +29,8 @@ pub mod checks;
 #[cfg(test)]
 mod dataflow_probes_tests;
 pub mod debug_flags;
+#[cfg(test)]
+mod fp_regression_tests;
 pub mod graph;
 pub mod harness;
 pub mod ir;

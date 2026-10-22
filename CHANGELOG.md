@@ -184,6 +184,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   JS) and a duplicate JS `toString` are removed, with a packgen regression test
   asserting no duplicate propagator keys per language. OWASP score unchanged
   (25.9%).
+- **Bare last segments stopped arming unrelated receivers**: a sink
+  declared under a module (`pickle.loads`, `subprocess.run`, `yaml.load`)
+  publishes a bare shadow of its last segment because the walker matches a
+  virtual call by method name, and that shadow used to arm every receiver in
+  the program - `json.loads` inherited unsafe deserialization, `f.read(n)`
+  inherited path traversal, `Workflow.run` inherited command injection. The
+  fact table now records which roots a qualified declaration named
+  (`receiver_qualified_sinks`) and which names a language declares bare
+  (`bare_sink_names`); a name that is only ever declared qualified arms only
+  under its own root or import origin, and a name a language never declares
+  bare is verb-gated as well. Measured on four real repositories: 111 -> 93
+  findings, every removed finding reviewed as a false positive, OWASP
+  BenchmarkPython score unchanged (TPR 38.1%, FPR 7.1%), and the Juice Shop
+  scan 3x faster (167s -> 54s) because the call graph no longer fabricates
+  same-named interprocedural edges.
+- **Minified JavaScript is skipped by content**: a single-line bundle with no
+  filename hint was lowered as ordinary source, producing findings no one
+  can act on.
 - **Branch-arm-assigned variables survive the merge**: variables assigned only
   inside a `match`/`switch` arm were dropped from the environment at the branch
   merge (`env.pop` without hoisting), so a value defined in one arm and consumed

@@ -430,8 +430,14 @@ pub(crate) fn sink_alert_with_facts(
     }
     let slot_and_name = match &b.instructions[idx] {
         Instruction::CallStatic { func, args, .. }
-            if facts.is_sink_call_scoped(func, None, origin_package, language)
-                || (config.sinks.contains(func) && !facts.is_receiver_qualified_only(func)) =>
+            if facts.sink_name_armed(
+                &config.sinks,
+                func,
+                None,
+                origin_package,
+                language,
+                false,
+            ) =>
         {
             args.iter()
                 .position(|a| *a == Operand::Var(var))
@@ -447,8 +453,14 @@ pub(crate) fn sink_alert_with_facts(
                 Operand::Var(r) => FactTable::receiver_root(ir, *r),
                 _ => None,
             };
-            facts.is_sink_call_scoped(method, root.as_deref(), origin_package, language)
-                || (config.sinks.contains(method) && !facts.is_receiver_qualified_only(method))
+            facts.sink_name_armed(
+                &config.sinks,
+                method,
+                root.as_deref(),
+                origin_package,
+                language,
+                true,
+            )
         } =>
         {
             if receiver == &Operand::Var(var) {
@@ -462,6 +474,19 @@ pub(crate) fn sink_alert_with_facts(
         _ => None,
     };
     let (slot, name) = slot_and_name?;
+    // Arguments to a call on a prepared statement are bound parameters: the
+    // statement text was fixed when the handle was created, so `stmt.Exec(a,
+    // b)` carries values, not SQL. The creating call (`db.Prepare(query)`)
+    // is judged on its own.
+    if slot != usize::MAX
+        && let Instruction::CallVirtual {
+            receiver: Operand::Var(r),
+            ..
+        } = &b.instructions[idx]
+        && receiver_is_prepared_handle(ir, *r)
+    {
+        return None;
+    }
     // Source-accessor precedence (RECEIVER-TAINT ALERTS ONLY): when the
     // alert comes from a tainted *receiver* and the method name is the last
     // segment of a configured dotted source pattern, the call READS taint
@@ -829,6 +854,51 @@ pub(crate) fn idor_suppressed_by_auth_guard(
             || exit_reachable_avoiding(ir, *false_block, sink_block)
         {
             return true;
+        }
+    }
+    false
+}
+
+/// True when `var` is (an alias or tuple field of) the result of a call whose
+/// name says it prepares a statement: the handle then executes fixed text
+/// and its call arguments are bindings.
+fn receiver_is_prepared_handle(ir: &FunctionIR, var: crate::ir::function::VarId) -> bool {
+    let mut cur = var;
+    for _ in 0..6 {
+        let mut next = None;
+        for blk in ir.blocks.values() {
+            for instr in &blk.instructions {
+                match instr {
+                    Instruction::Assign {
+                        dest,
+                        src: Operand::Var(s),
+                        ..
+                    } if *dest == cur => next = Some(*s),
+                    Instruction::ExtractValue {
+                        dest,
+                        tuple: Operand::Var(t),
+                        ..
+                    } if *dest == cur => next = Some(*t),
+                    Instruction::CallVirtual {
+                        dest: Some(d),
+                        method,
+                        ..
+                    }
+                    | Instruction::CallStatic {
+                        dest: Some(d),
+                        func: method,
+                        ..
+                    } if *d == cur => {
+                        let seg = method.rsplit('.').next().unwrap_or(method);
+                        return seg.to_ascii_lowercase().starts_with("prepare");
+                    }
+                    _ => {}
+                }
+            }
+        }
+        match next {
+            Some(n) => cur = n,
+            None => return false,
         }
     }
     false

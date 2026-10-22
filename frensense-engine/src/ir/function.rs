@@ -402,6 +402,26 @@ impl FunctionIR {
         }
     }
 
+    /// The receiver operand of the virtual call whose result is `var`, if
+    /// any: lets a chained call (`conn.cursor().execute(..)`) resolve to
+    /// the root of its receiver chain.
+    pub(crate) fn call_receiver_def(&self, var: VarId) -> Option<VarId> {
+        for b in self.blocks.values() {
+            for instr in &b.instructions {
+                if let Instruction::CallVirtual {
+                    dest: Some(d),
+                    receiver: Operand::Var(r),
+                    ..
+                } = instr
+                    && *d == var
+                {
+                    return Some(*r);
+                }
+            }
+        }
+        None
+    }
+
     /// The `LoadField` instruction defining `var`, if any (first match - IR
     /// is SSA-shaped): returns the base var and the loaded field. Shared
     /// walk step for member-access path reconstruction.

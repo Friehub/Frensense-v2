@@ -82,6 +82,23 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
                     .unwrap_or(false),
                 _ => false,
             });
+            // A containment test against a literal that is not URL-shaped
+            // (`url.includes('?')`, `path.indexOf('/')`) checks for a
+            // character, not an allowlisted origin. A URL-shaped literal
+            // (`includes('https://trusted.example')`) is the vulnerable
+            // shape and stays in scope.
+            let literal_only =
+                !args.is_empty() && args.iter().all(|a| !matches!(a, Operand::Var(_)));
+            let urlish_literal = args.iter().any(|a| match a {
+                Operand::StringLiteral(t) => facts
+                    .url_literal_hints
+                    .iter()
+                    .any(|h| t.to_ascii_lowercase().contains(h.as_str())),
+                _ => false,
+            });
+            if literal_only && !urlish_literal {
+                continue;
+            }
             if has_url_param && (recv_is_url || arg_is_urlish) {
                 // The containment result must actually decide control flow
                 // (feed a branch/switch condition or a returned predicate).
@@ -218,6 +235,26 @@ fn dest_of(instr: &Instruction) -> Option<VarId> {
 /// wrapped implementation is acceptable is exactly what corpus facts
 /// (wrapper→primitive mappings) refine.
 pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
+    check_credentials_in(ir, facts, &[])
+}
+
+/// [`check_credentials`] with the scanned program's functions in view. A
+/// call that resolves to a function the program itself defines
+/// (`HashPassword(pw)` wrapping a KDF) is not judged at the call site: the
+/// wrapper's own body is checked on its own, and that is where a weak
+/// primitive would show.
+pub fn check_credentials_in(
+    ir: &FunctionIR,
+    facts: &FactTable,
+    program: &[&FunctionIR],
+) -> Vec<CheckerFinding> {
+    let defined: rustc_hash::FxHashSet<&str> = program
+        .iter()
+        .map(|f| {
+            let n = f.name.as_str();
+            n.rsplit(['.', ':']).next().unwrap_or(n)
+        })
+        .collect();
     let mut findings = Vec::new();
     for block in ir.blocks.values() {
         for instr in &block.instructions {
@@ -237,6 +274,30 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
             let Some(mut cred_prov) = facts.credential_sink(seg) else {
                 continue;
             };
+            if defined.contains(seg) && !matches!(instr, Instruction::CallVirtual { .. }) {
+                continue;
+            }
+            // A credential hashed through a password-hashing library
+            // (`bcrypt.hash(pw)`, `password_hash.hash(pw)`) is the intended
+            // use; the library name is on the call's receiver or in a
+            // dotted callee path.
+            let recv_root = match instr {
+                Instruction::CallVirtual {
+                    receiver: Operand::Var(r),
+                    ..
+                } => FactTable::receiver_root(ir, *r),
+                _ => callee.split('.').next().map(str::to_string),
+            };
+            if let Some(root) = recv_root {
+                let root = root.to_ascii_lowercase();
+                if facts
+                    .kdf_receiver_hints
+                    .iter()
+                    .any(|h| root.contains(h.as_str()))
+                {
+                    continue;
+                }
+            }
             let cred_arg = args.iter().any(|a| match a {
                 Operand::Var(v) => ir
                     .var_metadata

@@ -242,7 +242,9 @@ pub(super) static RUST_PROPAGATORS: &[PropagatorRule] = &[
 pub(super) static RUST_REQUEST_PARAM_NAMES: &[&str] =
     // Axum/Actix: parameter names matter less than types; type-based
     // detection via classify_param_taint is the primary mechanism.
-    &["req", "request"];
+    // Only type-based extractors are sources; a request handle is not one
+    // (`req.rocket()`, `req.limits()`). Its data accessors are patterns.
+    &[];
 
 pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     // SQL Injection
@@ -276,9 +278,6 @@ pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ),
     ("arg", crate::role_map::SinkLabel::CommandInjection),
     ("args", crate::role_map::SinkLabel::CommandInjection),
-    ("status", crate::role_map::SinkLabel::CommandInjection),
-    ("output", crate::role_map::SinkLabel::CommandInjection),
-    ("spawn", crate::role_map::SinkLabel::CommandInjection),
     ("exec", crate::role_map::SinkLabel::CommandInjection),
     // Path Traversal
     ("read", crate::role_map::SinkLabel::PathTraversal),
@@ -294,6 +293,44 @@ pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("post", crate::role_map::SinkLabel::Ssrf),
     ("send", crate::role_map::SinkLabel::Ssrf),
     ("request", crate::role_map::SinkLabel::Ssrf),
+    ("client.get", crate::role_map::SinkLabel::Ssrf),
+    ("client.post", crate::role_map::SinkLabel::Ssrf),
+    ("client.put", crate::role_map::SinkLabel::Ssrf),
+    ("client.patch", crate::role_map::SinkLabel::Ssrf),
+    ("client.head", crate::role_map::SinkLabel::Ssrf),
+    ("client.request", crate::role_map::SinkLabel::Ssrf),
+    ("http_client.get", crate::role_map::SinkLabel::Ssrf),
+    ("http_client.post", crate::role_map::SinkLabel::Ssrf),
+    ("http_client.put", crate::role_map::SinkLabel::Ssrf),
+    ("http_client.patch", crate::role_map::SinkLabel::Ssrf),
+    ("http_client.head", crate::role_map::SinkLabel::Ssrf),
+    ("http_client.request", crate::role_map::SinkLabel::Ssrf),
+    ("httpclient.get", crate::role_map::SinkLabel::Ssrf),
+    ("httpclient.post", crate::role_map::SinkLabel::Ssrf),
+    ("httpclient.put", crate::role_map::SinkLabel::Ssrf),
+    ("httpclient.patch", crate::role_map::SinkLabel::Ssrf),
+    ("httpclient.head", crate::role_map::SinkLabel::Ssrf),
+    ("httpclient.request", crate::role_map::SinkLabel::Ssrf),
+    ("reqwest.get", crate::role_map::SinkLabel::Ssrf),
+    ("reqwest.post", crate::role_map::SinkLabel::Ssrf),
+    ("reqwest.put", crate::role_map::SinkLabel::Ssrf),
+    ("reqwest.patch", crate::role_map::SinkLabel::Ssrf),
+    ("reqwest.head", crate::role_map::SinkLabel::Ssrf),
+    ("reqwest.request", crate::role_map::SinkLabel::Ssrf),
+    ("http.get", crate::role_map::SinkLabel::Ssrf),
+    ("http.post", crate::role_map::SinkLabel::Ssrf),
+    ("http.put", crate::role_map::SinkLabel::Ssrf),
+    ("http.patch", crate::role_map::SinkLabel::Ssrf),
+    ("http.head", crate::role_map::SinkLabel::Ssrf),
+    ("http.request", crate::role_map::SinkLabel::Ssrf),
+    ("agent.get", crate::role_map::SinkLabel::Ssrf),
+    ("agent.post", crate::role_map::SinkLabel::Ssrf),
+    ("agent.put", crate::role_map::SinkLabel::Ssrf),
+    ("agent.patch", crate::role_map::SinkLabel::Ssrf),
+    ("agent.head", crate::role_map::SinkLabel::Ssrf),
+    ("agent.request", crate::role_map::SinkLabel::Ssrf),
+    ("fs::read", crate::role_map::SinkLabel::PathTraversal),
+    ("fs::write", crate::role_map::SinkLabel::PathTraversal),
     // Open Redirect
     ("redirect", crate::role_map::SinkLabel::OpenRedirect),
     // Reflected XSS: `axum::response::Html(body)` writes the body into the
@@ -354,6 +391,13 @@ pub(super) static RUST_SOURCE_PATTERNS: &[&str] = &[
     "web::Path",
     "web::Query",
     "web::Form",
+    "req.headers",
+    "req.uri",
+    "req.query_string",
+    "req.match_info",
+    "req.cookie",
+    "request.headers",
+    "request.uri",
     // Environment
     "std::env::var",
     "env::var",

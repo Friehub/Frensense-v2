@@ -19,9 +19,14 @@ use super::LanguageVocab;
 
 /// The conventional request-parameter source names, formerly
 /// `spec_ts.rs::request_param_names` (both specs emitted them).
-static REQUEST_PARAM_NAMES: &[&str] = &[
-    "req", "request", "ctx", "context", "event", "c", "e", "r", "input", "args", "parent", "info",
-];
+///
+/// Only names that denote an HTTP request object stay. `ctx`, `c`, `event`,
+/// `context`, `r`, `e`, `input`, `args`, `parent` and `info` are generic
+/// parameter names (rpc contexts, minified single letters, callback
+/// payloads); marking them tainted fired on every library that uses them.
+/// Their request-carrying members are covered by the dotted source
+/// patterns (`ctx.request.body`, `c.req.query`, `event.body`, ...).
+static REQUEST_PARAM_NAMES: &[&str] = &["req", "request"];
 
 /// The route-registration call shapes, formerly
 /// `spec_ts.rs::route_registration_patterns` (both specs emitted them).

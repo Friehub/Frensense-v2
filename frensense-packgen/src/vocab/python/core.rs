@@ -42,6 +42,13 @@ pub(crate) static PY_CORE_SINKS: &[(&str, SinkLabel)] = &[
     ("db.execute", SinkLabel::SqlInjection),
     ("cnx.execute", SinkLabel::SqlInjection),
     ("session.execute", SinkLabel::SqlInjection),
+    ("sqlite3.execute", SinkLabel::SqlInjection),
+    ("sqlite3.executescript", SinkLabel::SqlInjection),
+    ("psycopg2.execute", SinkLabel::SqlInjection),
+    ("psycopg.execute", SinkLabel::SqlInjection),
+    ("pymysql.execute", SinkLabel::SqlInjection),
+    ("MySQLdb.execute", SinkLabel::SqlInjection),
+    ("pyodbc.execute", SinkLabel::SqlInjection),
     ("cur.executemany", SinkLabel::SqlInjection),
     ("cursor.executemany", SinkLabel::SqlInjection),
     ("con.executemany", SinkLabel::SqlInjection),
@@ -72,6 +79,12 @@ pub(crate) static PY_CORE_SINKS: &[(&str, SinkLabel)] = &[
     ("os.unlink", SinkLabel::PathTraversal),
     ("os.stat", SinkLabel::PathTraversal),
     ("os.access", SinkLabel::PathTraversal),
+    // Path CONSTRUCTORS: a tainted segment only matters where the joined
+    // path reaches `open`, so these arm only under their own module. There
+    // is no bare `join` entry - `str.join`, `pathlib.joinpath` and every
+    // unrelated `.join(...)` share the name.
+    ("os.path.join", SinkLabel::PathTraversal),
+    ("posixpath.join", SinkLabel::PathTraversal),
     // ── Unsafe Deserialization ──
     // Qualified: `pickle.loads` is unsafe deserialization while
     // `json.loads` is a safe JSON parser. The bare `loads`/`load`
@@ -82,6 +95,18 @@ pub(crate) static PY_CORE_SINKS: &[(&str, SinkLabel)] = &[
     ("yaml.load", SinkLabel::UnsafeDeserialize),
     ("marshal.loads", SinkLabel::UnsafeDeserialize),
     ("shelve.open", SinkLabel::UnsafeDeserialize),
+    // No bare `loads` / `load`: `json.loads` and every signed-token
+    // serializer share those names. The unsafe loaders are named by module.
+    ("cPickle.loads", SinkLabel::UnsafeDeserialize),
+    ("cPickle.load", SinkLabel::UnsafeDeserialize),
+    ("_pickle.loads", SinkLabel::UnsafeDeserialize),
+    ("dill.loads", SinkLabel::UnsafeDeserialize),
+    ("dill.load", SinkLabel::UnsafeDeserialize),
+    ("cloudpickle.loads", SinkLabel::UnsafeDeserialize),
+    ("marshal.load", SinkLabel::UnsafeDeserialize),
+    ("jsonpickle.decode", SinkLabel::UnsafeDeserialize),
+    ("yaml.unsafe_load", SinkLabel::UnsafeDeserialize),
+    ("yaml.load_all", SinkLabel::UnsafeDeserialize),
     // ── Log Leak ──
     ("log", SinkLabel::LogLeak),
     ("error", SinkLabel::LogLeak),

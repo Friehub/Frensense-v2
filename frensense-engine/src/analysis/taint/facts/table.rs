@@ -99,6 +99,8 @@ pub struct FactTable {
     pub jwt_algorithm_hints: FxHashSet<String>,
     /// Credential-context name hints (default-pack-seeded).
     pub credential_context_hints: FxHashSet<String>,
+    /// Receiver-name fragments of password-hashing libraries.
+    pub kdf_receiver_hints: FxHashSet<String>,
     /// Weak-hash policy rules (default-pack-seeded).
     pub weak_hash_rules: Vec<WeakPrimitiveRule>,
     /// Corpus-extendable allocation-size overflow rules (CWE-190 -> CWE-680;
@@ -498,6 +500,8 @@ impl FactTable {
             .extend(other.jwt_algorithm_hints.iter().cloned());
         self.credential_context_hints
             .extend(other.credential_context_hints.iter().cloned());
+        self.kdf_receiver_hints
+            .extend(other.kdf_receiver_hints.iter().cloned());
         for r in &other.weak_hash_rules {
             if !self.weak_hash_rules.contains(r) {
                 self.weak_hash_rules.push(r.clone());

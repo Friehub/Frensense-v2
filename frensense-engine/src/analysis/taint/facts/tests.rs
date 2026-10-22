@@ -304,10 +304,18 @@ fn spec_drives_policy_vocabulary() {
             "{callee} must be a containment callee"
         );
     }
-    for sink in ["hash", "hashPassword", "setPassword"] {
+    for sink in ["hash", "hashPassword", "setSecret"] {
         assert!(
             t.credential_sinks.contains_key(sink),
             "{sink} must be a credential sink"
+        );
+    }
+    // Setters delegate to the framework hasher; the policy question belongs
+    // to the hasher, so they are not credential sinks themselves.
+    for setter in ["setPassword", "set_password", "hashpw"] {
+        assert!(
+            !t.credential_sinks.contains_key(setter),
+            "{setter} must not be a credential sink"
         );
     }
     assert!(t.credential_params.contains_key("password"));

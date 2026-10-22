@@ -164,14 +164,23 @@ pub fn open_target(input: String) {
             "TypeScript must not inherit Rust's create"
         );
 
+        // `req.query` is a TypeScript request accessor; a Rust parameter is
+        // never named that. (The bare name `input` used to stand here, but
+        // it is no longer a JavaScript request-parameter source: every
+        // variable called `input` was treated as attacker data, a
+        // false-discovery class the pack dropped. The language-separation
+        // guarantee needs a name that is unambiguously language-specific.)
         let ts_sources = facts
             .language_sources("typescript")
             .expect("TypeScript source section");
-        assert!(ts_sources.contains("input"), "ts sources: {ts_sources:?}");
+        assert!(
+            ts_sources.contains("req.query"),
+            "ts sources: {ts_sources:?}"
+        );
         assert!(
             !facts
                 .language_sources("rust")
-                .is_some_and(|s| s.contains("input")),
+                .is_some_and(|s| s.contains("req.query")),
             "Rust must not inherit TypeScript's request-parameter names"
         );
     }

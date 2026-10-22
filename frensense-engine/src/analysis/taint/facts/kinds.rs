@@ -406,6 +406,11 @@ pub enum HintKind {
     /// [`FactTable::credential_context_hints`]: an enclosing name marks
     /// credential context.
     CredentialContext,
+    /// [`FactTable::kdf_receiver_hints`]: a receiver whose name marks a
+    /// password-hashing library (a credential hashed through it is the
+    /// intended use, not a policy violation). Appended last: bundles
+    /// encode the variant position.
+    KdfReceiver,
 }
 
 /// Syntactic grammar features that can be dynamically learned or configured via bundle facts.

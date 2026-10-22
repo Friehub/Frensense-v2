@@ -107,12 +107,10 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("hget", crate::role_map::SinkLabel::NoSqlInjection),
     ("hset", crate::role_map::SinkLabel::NoSqlInjection),
     ("del", crate::role_map::SinkLabel::NoSqlInjection),
-    ("keys", crate::role_map::SinkLabel::NoSqlInjection),
     ("deepMerge", crate::role_map::SinkLabel::PrototypePollution),
     ("merge", crate::role_map::SinkLabel::PrototypePollution),
     ("defaults", crate::role_map::SinkLabel::PrototypePollution),
     ("extend", crate::role_map::SinkLabel::PrototypePollution),
-    ("assign", crate::role_map::SinkLabel::PrototypePollution),
     ("deepExtend", crate::role_map::SinkLabel::PrototypePollution),
     ("mixin", crate::role_map::SinkLabel::PrototypePollution),
     ("cloneDeep", crate::role_map::SinkLabel::PrototypePollution),
@@ -149,8 +147,6 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("Function", crate::role_map::SinkLabel::CodeExecution),
     ("RegExp", crate::role_map::SinkLabel::Regex),
     ("RegExp.compile", crate::role_map::SinkLabel::Regex),
-    ("setTimeout", crate::role_map::SinkLabel::CodeExecution),
-    ("setInterval", crate::role_map::SinkLabel::CodeExecution),
     ("runInNewContext", crate::role_map::SinkLabel::CodeExecution),
     (
         "runInThisContext",
@@ -269,8 +265,35 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
         crate::role_map::SinkLabel::TemplateSsti,
     ),
     // Insecure Deserialization
-    ("serialize", crate::role_map::SinkLabel::UnsafeDeserialize),
-    ("deserialize", crate::role_map::SinkLabel::UnsafeDeserialize),
+    // `serialize` / `deserialize` are ordinary method names (every RPC
+    // transformer has them); node-serialize's RCE entry point is
+    // `unserialize`.
+    ("unserialize", crate::role_map::SinkLabel::UnsafeDeserialize),
+    (
+        "node-serialize.unserialize",
+        crate::role_map::SinkLabel::UnsafeDeserialize,
+    ),
+    // Qualified forms of receiver-gated verbs (see BOOTSTRAP_AMBIGUOUS_VERBS).
+    ("res.write", crate::role_map::SinkLabel::XssDom),
+    ("response.write", crate::role_map::SinkLabel::XssDom),
+    ("document.write", crate::role_map::SinkLabel::XssDom),
+    ("reply.send", crate::role_map::SinkLabel::XssReflected),
+    ("response.send", crate::role_map::SinkLabel::XssReflected),
+    ("_.merge", crate::role_map::SinkLabel::PrototypePollution),
+    (
+        "lodash.merge",
+        crate::role_map::SinkLabel::PrototypePollution,
+    ),
+    (
+        "_.defaultsDeep",
+        crate::role_map::SinkLabel::PrototypePollution,
+    ),
+    ("_.extend", crate::role_map::SinkLabel::PrototypePollution),
+    ("$.extend", crate::role_map::SinkLabel::PrototypePollution),
+    (
+        "jQuery.extend",
+        crate::role_map::SinkLabel::PrototypePollution,
+    ),
     ("yaml.load", crate::role_map::SinkLabel::UnsafeDeserialize),
     (
         "js-yaml.load",
@@ -483,6 +506,9 @@ pub(super) static JS_SINK_SIGNATURES: &[(&str, &[usize], bool)] = &[
     // keys keep all-args signatures. Measured on 11 local repos: 192 of
     // 263 HTTP-callee findings taint arg1/arg2 or the receiver of a
     // constant-URL call; the destination-URL findings (slot 0) still fire.
+    // jwt.sign(payload, secret, opts): the payload is data by design; a
+    // tainted SECRET (slot 1) is the injectable position.
+    ("jwt.sign", &[1], false),
     ("fetch", &[0], false),   // fetch(url, init) - init = method/headers/body
     ("post", &[0], false),    // client.post(url, data, config)
     ("patch", &[0], false),   // client.patch(url, data, config)
@@ -592,6 +618,22 @@ pub(super) static JS_SOURCE_PATTERNS: &[&str] = &[
     "event.body",
     "event.queryStringParameters",
     "event.pathParameters",
+    // h3 / Nuxt / Nitro request accessors (the handler's `event` parameter
+    // itself is no longer a blanket source).
+    "getQuery",
+    "getValidatedQuery",
+    "readBody",
+    "readValidatedBody",
+    "readRawBody",
+    "readFormData",
+    "readMultipartFormData",
+    "getCookie",
+    "parseCookies",
+    "getRouterParam",
+    "getRouterParams",
+    "getHeader",
+    "getHeaders",
+    "getRequestURL",
     // NOTE: `process.env` deliberately NOT a source: env vars are
     // developer-controlled config, not attacker input. Treating them as
     // sources was the largest FP class in the Juice Shop baseline.

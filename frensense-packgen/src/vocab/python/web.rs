@@ -8,7 +8,7 @@
 //! web-framework vocabulary.
 
 /// Request-parameter names for the web frameworks.
-pub(crate) static PY_REQUEST_PARAM_NAMES: &[&str] = &["request", "req", "r"];
+pub(crate) static PY_REQUEST_PARAM_NAMES: &[&str] = &["request", "req"];
 
 /// Structural policies for the web frameworks.
 ///
@@ -78,7 +78,6 @@ pub(crate) static PY_SOURCE_PATTERNS: &[&str] = &[
     // FastAPI - parameter names recognised via classify_param_taint, listed
     // here for motif matching
     "Query",
-    "Path",
     "Body",
     "Form",
     "Header",

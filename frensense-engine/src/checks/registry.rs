@@ -164,7 +164,7 @@ impl NonDataflowCheck for CredentialLeak {
         CheckScope::Function
     }
     fn run(&self, ctx: &CheckContext<'_>) -> Vec<CheckerFinding> {
-        super::guard_bypass::check_credentials(ctx.ir(), ctx.facts)
+        super::guard_bypass::check_credentials_in(ctx.ir(), ctx.facts, ctx.irs)
     }
 }
 

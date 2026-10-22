@@ -210,7 +210,22 @@ fn check_call(
         }
     }
 
+    // A weak-primitive call that carries an explicit `false` flag argument
+    // is the caller disclaiming security use (a keyword flag marking the
+    // digest as a checksum / cache key): not a credential or integrity
+    // policy violation.
+    // Languages lower a bare `false` / `False` token either as a bool
+    // operand or as the literal text; slot 0 is the data being hashed, so
+    // only the trailing flag positions count.
+    let disclaims_security = args.iter().skip(1).any(|a| match a {
+        Operand::BoolLiteral(b) => !*b,
+        Operand::Var(v) if values.const_bool(*v) == Some(false) => true,
+        other => arg_str_literal(other, values).is_some_and(|t| t.eq_ignore_ascii_case("false")),
+    });
     for rule in &facts.weak_hash_rules {
+        if disclaims_security {
+            break;
+        }
         let provenance = Provenance::Spec;
         // Selector shape: `createHash('md5')`. Rules with
         // `requires_credential_context` fire only inside credential-named

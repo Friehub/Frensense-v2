@@ -335,6 +335,51 @@ impl FactTable {
         false
     }
 
+    /// [`Self::is_sink_call_scoped`] for a call that HAS a receiver
+    /// expression. When that receiver's root cannot be resolved (a chained
+    /// call result such as `req.limits().get(..)`, or `a.route(..).post(h)`)
+    /// a gated verb must not match by name alone: only an import origin
+    /// that names a client package arms it. A bare call (`exec(code)`,
+    /// no receiver) keeps the unqualified semantics.
+    pub fn is_recv_sink_call_scoped(
+        &self,
+        last: &str,
+        receiver_root: Option<&str>,
+        origin_package: Option<&str>,
+        language: Option<&str>,
+        has_receiver: bool,
+    ) -> bool {
+        if has_receiver && receiver_root.is_none() && self.verb_sinks.contains(last) {
+            return origin_package.is_some_and(|pkg| self.client_roots.contains(pkg));
+        }
+        self.is_sink_call_scoped(last, receiver_root, origin_package, language)
+    }
+
+    /// Flat-name or scoped sink check. The flat `config.sinks` set keeps
+    /// every sink's last segment, including the ambiguous verbs and the
+    /// receiver-qualified shadows that receiver gating exists for, so a
+    /// bare `contains` must not arm either on its own.
+    pub fn sink_name_armed(
+        &self,
+        flat_sinks: &rustc_hash::FxHashSet<String>,
+        name: &str,
+        receiver_root: Option<&str>,
+        origin_package: Option<&str>,
+        language: Option<&str>,
+        has_receiver: bool,
+    ) -> bool {
+        (flat_sinks.contains(name)
+            && !self.verb_sinks.contains(name)
+            && !self.is_receiver_qualified_only(name))
+            || self.is_recv_sink_call_scoped(
+                name,
+                receiver_root,
+                origin_package,
+                language,
+                has_receiver,
+            )
+    }
+
     /// Receiver-aware sink check for virtual calls. `last` is the method
     /// name; `receiver_root` the first segment of the receiver's access
     /// path (e.g. `got` for `got.get(url)`), `None` when unresolvable.
@@ -363,7 +408,10 @@ impl FactTable {
             {
                 return Some(name.split('.').next().unwrap_or(name).to_string());
             }
-            cur = ir.loadfield_def(cur)?.0;
+            cur = match ir.loadfield_def(cur) {
+                Some((base, _)) => base,
+                None => ir.call_receiver_def(cur)?,
+            };
         }
         None
     }

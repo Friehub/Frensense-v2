@@ -54,6 +54,7 @@ pub fn collect_files(root: &Path, language_filter: Option<&Vec<&'static str>>) -
         .filter(|e| e.file_type().is_file())
         .map(|e| e.path().to_path_buf())
         .filter(|p| crate::parser::is_supported(p))
+        .filter(|p| !looks_minified(p))
         // Test classification is relative to the scan root: a project that
         // happens to live under a `tests/` path component (an absolute
         // path such as /ci/tests/app, or a root the user pointed at
@@ -69,6 +70,26 @@ pub fn collect_files(root: &Path, language_filter: Option<&Vec<&'static str>>) -
             }
         })
         .collect()
+}
+
+/// True for JavaScript that was machine-compacted: a file that is not named
+/// `.min.js` can still be a vendored bundle. Its single-letter identifiers
+/// (`c`, `e`) and thousands-of-characters lines match nothing a reviewer can
+/// act on, and every finding in one is noise. Real source averages well under
+/// 100 bytes per line; compacted output is far above 300.
+fn looks_minified(path: &Path) -> bool {
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    if !matches!(ext, "js" | "mjs" | "cjs") {
+        return false;
+    }
+    let Ok(text) = std::fs::read(path) else {
+        return false;
+    };
+    if text.len() < 2_000 {
+        return false;
+    }
+    let lines = text.iter().filter(|&&b| b == b'\n').count() + 1;
+    text.len() / lines > 300
 }
 
 #[must_use]
