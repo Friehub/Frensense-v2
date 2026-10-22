@@ -198,10 +198,17 @@ fn print_help() {
     println!(
         "  --github                   GitHub Actions annotations (::error/::warning/::notice)"
     );
+    println!("                             (alias: --github-annotations)");
     println!("  -f, --format <format>      Report format: text, json, sarif, github");
     println!("  --strict                   Exit with code 1 if any findings");
     println!(
         "  -s, --severity <level>     Minimum severity: critical, warning, info (default: warning)"
+    );
+    println!(
+        "  -p, --profile <profile>    Precision profile: default, recommended, strict (default: default)"
+    );
+    println!(
+        "                             strict also reports hygiene rules such as function complexity"
     );
     // Generated from the lang registry so help, docs and MCP descriptions
     // agree on one list (WI-56); see `frensense::parser::language_names_help`.
@@ -219,6 +226,9 @@ fn print_help() {
     println!("  --compare-baseline <file>  Fail on new findings vs. baseline");
     println!(
         "  --show-flows               Also embed the source->sink taint flow in text output (JSON/SARIF always carry the path)"
+    );
+    println!(
+        "  --explain                  Also print every silent sink argument and why the engine stayed quiet (stderr)"
     );
     println!("  -h, --help                 Print this help");
     println!("  -v, --version              Print version");

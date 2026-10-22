@@ -114,7 +114,7 @@ pub fn format_watch_finding(adv: &Advisory) -> String {
         crate::Severity::Info => "INFO",
     };
     format!(
-        "[{sev}] {} ({}:{}) — {}",
+        "[{sev}] {} ({}:{}) :: {}",
         adv.title, adv.file_path, adv.line, adv.observation
     )
 }
