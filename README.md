@@ -20,11 +20,12 @@
 <br />
 
 Frensense is a static application security testing (SAST) engine that detects
-vulnerabilities by combining compiler-grade dataflow analysis with a learned
-builds an AST, def-use chains, and a program dependence graph for your code,
-then runs taint analysis to verify whether untrusted data can actually reach a
-dangerous sink. Every finding carries the concrete source-to-sink path with
-file positions, so code scanning output points at the exact line to fix.
+vulnerabilities by combining compiler-grade dataflow analysis with learned
+knowledge. It builds an AST, def-use chains, and a program dependence graph for
+your code, then runs taint analysis to verify whether untrusted data can
+actually reach a dangerous sink. Every finding carries the concrete
+source-to-sink path with file positions, so code scanning output points at the
+exact line to fix.
 
 
 
@@ -89,6 +90,10 @@ frensense watch .
 
 # GitHub Actions annotations: findings render on the PR's Files Changed tab
 frensense . --github
+
+# Precision profile: default, recommended, strict
+# (strict adds hygiene rules such as function complexity and all experimental rules)
+frensense . --profile strict
 ```
 
 The engine auto-discovers a `frensense-corpus.frc` in the project root, or you
@@ -109,26 +114,28 @@ Download pre-compiled rule bundles and their cryptographic verification datashee
   - Deep web framework modeling (Express, Next.js, Django, FastAPI, Spring).
   - Advanced systems security & memory safety (C/C++ interprocedural ownership contracts, UAF, uninitialized pointer leaks).
   - Specialized industry compliance (Fintech, Cloud Infrastructure, Healthcare).
-  - Rigorous Zero False-Positive guarantee (100% TPR / 0.0% FPR) verified against held-out blind test suites.
+  - Measured zero false positives (100% TPR / 0.0% FPR) on held-out blind test suites.
 
 ### Auditable Capability Datasheets
 Every rule bundle ships with a signed **CWE Capability Datasheet** (`CWE_DATASHEET.md` and `cwe_datasheet.json`) detailing:
 - Exact CWE classifications and vulnerability descriptions.
 - Real-world ground-truth CVE reproductions.
-- Benchmark verification status (100.0% TPR, 0.00% FPR).
+- Measured benchmark status (100.0% TPR, 0.00% FPR).
 - Execution latency and peak RSS memory requirements.
 
 ### One binary, every surface
 
-The `frensense` crate ships a single binary with everything built in. The
-CLI, the MCP server for AI agents, and the LSP server for editors are
-subcommands of the same binary:
+The `frensense` crate ships a single binary with everything built in. Every
+consumer surface is a subcommand of the same binary:
 
 | command | consumer | transport |
 |---|---|---|
 | `frensense [path]` | humans, CI | files/exit code |
+| `frensense watch [path]` | humans (edit loop) | re-scan stream on file changes |
 | `frensense mcp` | AI agents (Claude, Cursor, Zed, …) | JSON-RPC over stdio |
 | `frensense lsp` | editors (VS Code, Neovim, …) | LSP over stdio |
+| `frensense bundle` | corpus authors | compiles twin examples into a .frc |
+| `frensense explain [rule-id]` | humans, AI agents | plain-text rule reference |
 
 `cargo install frensense`, `npm install -g @friehub/frensense`, or a release binary
 gives you all of them. They share one analysis engine, one
@@ -151,13 +158,13 @@ same stable ID.
 
 ## Languages
 
-| Language | Parser | Compiler Mode |
-|----------|--------|---------------|
-| TypeScript / JavaScript / TSX | Tree-sitter | Oxc (`--use-compiler`) |
-| Python | Tree-sitter | - |
-| Go | Tree-sitter | - |
-| Rust | Tree-sitter | rust-analyzer HIR (`--use-compiler`) |
-| C | Tree-sitter | - |
+| Language | Parser |
+|----------|--------|
+| TypeScript / JavaScript / TSX | Tree-sitter |
+| Python | Tree-sitter |
+| Go | Tree-sitter |
+| Rust | Tree-sitter |
+| C | Tree-sitter |
 
 ## MCP Integration (AI Agents)
 
