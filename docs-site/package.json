@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vitepress dev",
+    "prebuild": "python3 ../scripts/blog_provenance.py check",
     "build": "vitepress build",
     "preview": "vitepress preview"
   },

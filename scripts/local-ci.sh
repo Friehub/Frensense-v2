@@ -24,6 +24,11 @@ echo -e "\n${BLUE}[1/5] Engine purity ratchet (debt must not grow)...${NC}"
 python3 scripts/purity-ratchet.py
 echo -e "${GREEN}OK Purity debt within baseline${NC}"
 
+# 1b. Blog provenance gate (ci.yml `qa` job): version-pinned claims, fresh audits
+echo -e "\n${BLUE}[1b] Blog provenance gate (--strict)...${NC}"
+python3 scripts/blog_provenance.py check --strict
+echo -e "${GREEN}OK Blog claims version-pinned and fresh${NC}"
+
 # 2. Style (ci.yml `qa` job)
 echo -e "\n${BLUE}[2/5] Enforcing style (rustfmt)...${NC}"
 cargo fmt --all -- --check

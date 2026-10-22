@@ -1,14 +1,23 @@
 ---
-title: "Inside Frensense 0.7.0: Package-Aware Dataflow, Compiler Purity, and Zero-Bleed Static Analysis"
+written-against-version: 0.7.0
+fact-checked: "2026-10-22"
+source-revision: d6cfd3f-dirty
+title: "Inside Frensense 0.7.0: Package-Aware Dataflow, Compiler Purity, and Replay-Verified Static Analysis"
 date: 2026-10-11
-description: A deep technical dive into Frensense 0.7.0 - solving cross-framework false positives with package-scoped facts, decoupling AST vocabularies into pure compiler IR, and enforcing held-out replay verification.
+description: A deep technical dive into Frensense 0.7.0 - solving cross-framework false positives with package-scoped facts, decoupling AST vocabularies into pure compiler IR, and enforcing replay verification over the bundle's own corpus.
 ---
 
-# Inside Frensense 0.7.0: Package-Aware Dataflow, Compiler Purity, and Zero-Bleed Static Analysis
+> **Provenance.** Written against Frensense 0.7.0; fact-checked on source
+> rev `d6cfd3f` (0.8.0-beta). Mechanism references:
+> `frensense-engine/src/analysis/taint/facts/entries.rs`,
+> `analysis/taint/facts/table.rs`, `walk.rs` (package binding),
+> `purity-ratchet` in `scripts/`.
+
+# Inside Frensense 0.7.0: Package-Aware Dataflow, Compiler Purity, and Replay-Verified Static Analysis
 
 Modern software development is defined by dense, multi-framework ecosystems. A single full-stack monorepo regularly combines a Next.js or React frontend, an Express or Hono microservice, an ORM like Prisma or TypeORM, and real-time transports like Socket.io.
 
-For traditional static application security testing (SAST), this polyglot density is catastrophic. Traditional static analyzers rely heavily on call-site name matching or brittle syntax queries. When an analyzer searches for database injection or command execution, it flags any method invocation named `.query()`, `.send()`, or `.emit()`. 
+For pattern-based analyzers, this polyglot density is where unscoped rules bleed. When the analyzer's pattern fires on a bare method name, a database-injection rule keyed on `.query()` can also fire on a harmless client library that exposes a method with the same shape. Deep tools mitigate this in different ways (CodeQL through typed and sanitized modeling of library APIs, Semgrep through framework-specific rule engineering); Frensense 0.7.0 attacks it structurally with **package-scoped facts**.
 
 The consequence is **Cross-Framework Bleed**: an aggressive rule tailored for a backend ORM fires on harmless UI components, utility helpers, or unrelated client libraries. Security teams are inundated with false positive noise, developers lose trust in the scanner, and legitimate vulnerabilities are lost in the backlog.
 
@@ -53,26 +62,29 @@ The header serves two purposes:
 
 ### Bundle Format v6 Serialization
 
-In `frensense-bundler`, Format v6 extends the binary `LearnedFactEntry` schema to store package provenance:
+In `frensense-bundler`, Format v6 extends the binary `LearnedFactEntry` schema to store package provenance. The real schema (as shipped in `frensense-engine/src/analysis/taint/facts/entries.rs`):
 
 ```rust
 pub enum LearnedFactEntry {
-    Sink {
-        call: String,
-        arg_index: usize,
-        cwe: u32,
-        severity: Severity,
-        package: Option<String>, // Package-scoped provenance
-    },
     Source {
         pattern: String,
+        package: Option<String>, // package-scoped provenance
+    },
+    Sink {
+        call: String,
         package: Option<String>,
+        /// Dangerous argument slots; empty = all slots dangerous.
+        dangerous_args: BTreeSet<usize>,
+        /// Whether non-dangerous slots are safe binding channels.
+        binding_args_safe: bool,
     },
     Sanitizer {
         call: String,
         package: Option<String>,
+        kind: String,
+        guard_style: bool,
     },
-    // ...
+    // ... 13 subsystems total, see docs/TEACHABILITY.md
 }
 ```
 
@@ -99,7 +111,9 @@ Taint Engine Dataflow Query
       └── NO  ──► Universal primitive: Evaluate dataflow path
 ```
 
-If a file does not import or instantiate the declared framework (such as `@prisma/client` or `prisma`), the rule is quarantined. This blast-radius quarantine guarantees that backend rules never trigger false positive advisories on frontend codebases (such as Next.js or React), achieving **Zero Cross-Framework Bleed**.
+If a file does not import or instantiate the declared framework (such as `@prisma/client` or `prisma`), the rule is not consulted for that file. This blast-radius quarantine keeps backend rules from triggering advisories on frontend codebases such as Next.js or React.
+
+**One caveat, measured honestly:** package binding is keyed per file in multi-file scans. A *single-file* CLI run (`frensense foo.ts`) currently applies that file's package imports as a blanket default for the scan, so package-scoped rules can arm on code paths in that file they would not match in a full-tree run. Track `ROADMAP.md` (single-file package fallback) for the fix; in CI you get the full-tree behavior.
 
 ---
 
@@ -120,16 +134,17 @@ family_directory/
 ### The Separation Between Training and Evaluation
 
 - **Training Pair (`_positive`, `_negative`)**: The bundler compiler lowers both files to intermediate representation (IR), computes the AST and control-flow delta, and extracts candidate facts (sinks, sources, sanitizers, or policies).
-- **Held-Out Pair (`_heldout_positive`, `_heldout_negative`)**: The candidate fact is immediately subjected to an automated replay test on held-out files that were *never seen during fact extraction*. The held-out files introduce realistic engineering variance: renamed symbols, parameter wrapping, async boundaries, and alternate control-flow structures.
+- **Held-Out Pair (`_heldout_positive`, `_heldout_negative`)**: Files carrying the `_heldout_` infix are excluded from fact extraction, so what is learned comes from the training pair alone. After a bundle is built, scanning these files (never seen during extraction) checks whether the learned fact generalizes across realistic engineering variance: renamed symbols, parameter wrapping, async boundaries, and alternate control-flow structures.
 
 ### The Replay Gate
 
-Before any `.frc` bundle is emitted, `frensense-bundler` executes a strict replay verification gate. A candidate fact is rejected if it fails either of two mathematical criteria:
+Before any `.frc` bundle is emitted, `frensense-bundler` executes a replay verification gate over the training pair. A candidate fact is installed into a fresh engine instance and:
 
-$$\text{True Positive Rate (TPR)} = 100\% \quad \text{across positive and held-out positive fixtures}$$
-$$\text{False Positive Rate (FPR)} = 0.00\% \quad \text{across negative and held-out negative fixtures}$$
+- the positive case must trigger the expected alert,
+- the negative case must stay silent,
+- no other family in the corpus may regress its existing verdict,
 
-If a candidate fact causes a single false alarm on a safe held-out fixture, it is quarantined and discarded at build time. This ensures that every fact distributed to production environments generalizes robustly across real-world codebases.
+on pain of the candidate being discarded at build time. Held-out files (the `_heldout_` variants above) are deliberately **excluded from learning** while the bundler runs, so they can be scanned afterward as independent evidence of generalization - they are a verification harness (`test_bundles.sh`), not a gate inside the bundler itself. Two independent families voting for the same call upgrades a fact from `provisional` to `confirmed`.
 
 ---
 
@@ -137,14 +152,15 @@ If a candidate fact causes a single false alarm on a safe held-out fixture, it i
 
 In earlier preview releases, like many traditional analyzers, `frensense-engine` contained remnant language-specific vocabulary tables, route regexes, and AST node strings. 
 
-In Frensense 0.7.0, we completed a total **Engine Purity Refactor**:
+In Frensense 0.7.0, we completed an **Engine Purity Refactor**, enforced mechanically by the CI ratchet (`scripts/purity-ratchet.py`) rather than by convention:
 
-1. **Zero Language Knowledge in Engine Core**: All language provider vocabularies, AST node classifications, route decorators, and framework hints were eradicated from `frensense-engine`. The core analysis engine operates exclusively over:
+1. **Language knowledge out of the engine core**: the engine operates exclusively over:
    - Abstract compiler Intermediate Representation (IR).
    - Static Single Assignment (SSA) memory variables.
    - Steensgaard points-to equivalence classes.
    - The Sparse Value-Flow Graph (SVFG).
    - Data-driven `FactTable` facts.
+   The ratchet counts the remaining debt classes and fails CI if any grows; a small amount of known residual debt exists and is tracked in `ROADMAP.md` rather than hidden (e.g., a handful of hardcoded identifier short-circuits in the checks layer).
 2. **Standalone `frensense-packgen` Compiler**: We extracted all language grammatical knowledge into a dedicated compiler crate, `frensense-packgen`. It extracts language provider vocabularies (JavaScript, TypeScript, Python, Go, Rust, C) and emits standalone binary `.frc` packs.
 3. **13 Teachable Security Dimensions**: The engine can be taught entirely through `.frc` bundles across 13 distinct security dimensions-including custom taint sources, sinks, sanitizers, propagators, memory allocators, memory deallocators, IDOR verbs, weak crypto algorithms, schema policy builders, and argument literal constraints-with zero engine recompilation.
 
@@ -176,7 +192,7 @@ Frensense 0.7.0 incorporates an interval value lattice supporting constant propa
 ### Role-Qualified Sanitizers
 A common static analysis vulnerability is the "sanitizer collapse": an HTML sanitizer (such as `escapeHtml`) being treated as a universal sanitizer that clears SQL injection or command injection. 
 
-In 0.7.0, sanitizers are qualified by `SinkRole` and labels (`defeats_role_and_label`). An HTML encoding sanitizer can defeat cross-site scripting sinks, but will never clear a database query or shell execution sink.
+In 0.7.0, sanitizers can be qualified: a bundle can scope a sanitizer so it stays where the corpus proves it belongs (same package/receiver discipline as sinks). Where a bundle supplies qualification, an HTML-encoding sanitizer does not clear a database-query sink; where no bundle supplies qualification, the sanitizer fact applies within the universe that bundle was verified against. (Roadmap item: per-role slot semantics for sanitizers are not yet enforced everywhere in the walk - `SanitizerFact.sanitizes_args` currently defaults to "all args + result" when unset; see `ROADMAP.md`.)
 
 ---
 
@@ -259,7 +275,7 @@ Frensense 0.7.0 marks the transition from heuristic pattern scanning to compiler
 | Capability | Legacy / Traditional SAST | Frensense 0.7.0 |
 |---|---|---|
 | **Multi-Framework Scoping** | Global function name matching; frequent cross-framework bleed | **Format v6 Package Scoping**: Module provenance tracking with blast-radius quarantine |
-| **Rule Generalization** | Brittle regexes; frequent overfitting to training samples | **4-File Held-Out Contract**: 100% TPR / 0.00% FPR gate on unseen held-out fixtures |
+| **Rule Generalization** | Brittle regexes; frequent overfitting to training samples | **Replay-verified facts**: pos/neg separation enforced at build time, with `_heldout_` variants excluded from learning for afterward generalization checks |
 | **Engine Architecture** | Hardcoded language vocabularies and AST node kinds in engine | **Pure Compiler IR**: Zero hardcoded language strings; dynamic 13-dimension learning |
 | **Control Flow & Guards** | Textual call checks; blind to branching and loop exits | **Dominator CDG & Value Lattice**: Predicate feed verification and branch narrowing |
 | **Developer Ergonomics** | Opaque finding codes; fragile line-based triage baselines | **Compiler Diagnostics & Semantic IDs**: `rustc`-style traces with stable fingerprinting |
