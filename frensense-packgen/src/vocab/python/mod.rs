@@ -36,9 +36,12 @@ pub(crate) fn vocab() -> &'static LanguageVocab {
         LanguageVocab {
             language: "python",
             ambiguous_verbs: crate::data::BOOTSTRAP_AMBIGUOUS_VERBS,
-            // `eval` is a global builtin: a receiver-qualified call on an
-            // unqualified receiver is not the builtin (WI-12).
-            global_only_sinks: &["eval"],
+            // Python builtins: the bare name IS the API, and a
+            // receiver-qualified call on an unrelated receiver is not the
+            // builtin (WI-12). `eval`/`exec`/`compile`/`open` are the
+            // language's own functions; `x.eval(t)`, `x.open(t)` are
+            // ordinary methods on somebody else's object.
+            global_only_sinks: &["eval", "compile", "open"],
             package_scoped_sinks: &[],
             sink_names: sink_names.as_slice(),
             sink_signatures: db::PY_SINK_SIGNATURES,

@@ -89,5 +89,6 @@ mod financial_enterprise_tests;
 mod framework_ioc_tests;
 mod multi_lang_tests;
 mod path_sensitivity_tests;
+mod receiver_qualification_tests;
 mod sanitizer_matrix_tests;
 mod sink_identity_tests;

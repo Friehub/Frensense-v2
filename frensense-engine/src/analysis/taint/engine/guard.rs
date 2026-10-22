@@ -177,6 +177,29 @@ impl GuardMap {
                 _ => continue,
             };
             let Some(cond_var) = cond_var else { continue };
+            // Direct truthiness rejection: exactly one arm of this branch
+            // exits (`if (!t) { ...; return; }` / `if (t) { return; } ...`).
+            // A variable referenced directly in the condition - the
+            // condition var itself, or one reached through a `!` chain
+            // only - has been validated by the author's rejection test on
+            // the surviving arm: whatever reaches the dominated blocks
+            // passed the check (falsy/typeof-narrowed values are exactly
+            // what these guards reject). Without this, early-return
+            // validation on the value itself is invisible to the walk -
+            // only recognized sanitizer/predicate CALLS cut - which is
+            // the mre05 truthy/type-guard false-positive class.
+            let true_exits = exits(true_block);
+            let false_exits = false_block != true_block && exits(false_block);
+            let direct_safe = if true_exits && !false_exits {
+                Some(false_block)
+            } else if false_exits && !true_exits {
+                Some(true_block)
+            } else {
+                None
+            };
+            if let Some(safe) = direct_safe {
+                guards.entry(cond_var).or_default().push(safe);
+            }
             // Hop 0..3 up the def chain from the condition, tracking polarity/sense.
             let mut frontier = vec![(cond_var, true)];
             for _hop in 0..3 {
@@ -210,6 +233,11 @@ impl GuardMap {
                             } else {
                                 *sense
                             };
+                            // `!`-chain member: part of the direct rejection
+                            // test, validated on the surviving arm.
+                            if let Some(safe) = direct_safe {
+                                guards.entry(*u).or_default().push(safe);
+                            }
                             next.push((*u, new_sense));
                         }
                         Instruction::BinaryOp { op, lhs, rhs, .. } => {

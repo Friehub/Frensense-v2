@@ -430,8 +430,8 @@ pub(crate) fn sink_alert_with_facts(
     }
     let slot_and_name = match &b.instructions[idx] {
         Instruction::CallStatic { func, args, .. }
-            if config.sinks.contains(func)
-                || facts.is_sink_call_scoped(func, None, origin_package, language) =>
+            if facts.is_sink_call_scoped(func, None, origin_package, language)
+                || (config.sinks.contains(func) && !facts.is_receiver_qualified_only(func)) =>
         {
             args.iter()
                 .position(|a| *a == Operand::Var(var))
@@ -442,12 +442,13 @@ pub(crate) fn sink_alert_with_facts(
             args,
             receiver,
             ..
-        } if config.sinks.contains(method) || {
+        } if {
             let root = match receiver {
                 Operand::Var(r) => FactTable::receiver_root(ir, *r),
                 _ => None,
             };
             facts.is_sink_call_scoped(method, root.as_deref(), origin_package, language)
+                || (config.sinks.contains(method) && !facts.is_receiver_qualified_only(method))
         } =>
         {
             if receiver == &Operand::Var(var) {

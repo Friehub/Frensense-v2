@@ -200,13 +200,16 @@ def count_per_rule_tag(cases: dict[str, dict], results: list[dict]) -> dict[str,
                     continue
                 vul = meta["vul"]
                 cwe = meta["cwe"]
-                attributed_hit = any(cwe in s for s in tags)
+                attributed_hit = cwe in tags
                 if attributed_hit:
                     cls = "TP" if vul else "FP"
                 else:
                     cls = "FN" if vul else "TN"
                 tally[t][cls] += 1
-    return dict(tally)
+    return {
+        rule: {k: counts.get(k, 0) for k in ("TP", "FP", "FN", "TN")}
+        for rule, counts in tally.items()
+    }
 
 
 def rules_from_cases(cases: dict[str, dict], results: list[dict]) -> dict[str, dict[str, int]]:
@@ -225,13 +228,16 @@ def rules_from_cases(cases: dict[str, dict], results: list[dict]) -> dict[str, d
                     continue
                 vul = meta["vul"]
                 cwe = meta["cwe"]
-                attributed_hit = any(cwe in s for s in tags)
+                attributed_hit = cwe in tags
                 if attributed_hit:
                     cls = "TP" if vul else "FP"
                 else:
                     cls = "FN" if vul else "TN"
                 tally[t][cls] += 1
-    return dict(tally)
+    return {
+        rule: {k: counts.get(k, 0) for k in ("TP", "FP", "FN", "TN")}
+        for rule, counts in tally.items()
+    }
 
 
 def score(results: list[dict], cases: dict[str, dict], mode: str,
@@ -268,7 +274,9 @@ def score(results: list[dict], cases: dict[str, dict], mode: str,
         })
 
     main = tally(per_case, "class")
-    rule_tally = rules_from_cases(cases, results)
+    # Rates-shaped (TP/FP/FN/TN + tpr/fpr/score): the report printers and the
+    # baseline comparison all read those keys off the per-rule entries.
+    rule_tally = rates(rules_from_cases(cases, results))
     return {
         "meta": {"match": mode, "tag_cwe_entries": len(tag_cwe)},
         "total": main["total"],
@@ -753,3 +761,7 @@ def main() -> None:
         sys.exit(3)
     if diff is not None and diff["regressions"] and args.fail_on_regression:
         sys.exit(4)
+
+
+if __name__ == "__main__":
+    main()

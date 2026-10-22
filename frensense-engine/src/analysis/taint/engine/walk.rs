@@ -247,13 +247,34 @@ impl<'a> BackwardTaintEngine<'a> {
                 .and_then(|m| m.source_name.clone());
             if let Some(root) = root {
                 for f in &self.prog.functions {
-                    if f.name == root && self.fn_file.get(&f.name).map(|s| s.as_str()) == Some(file)
+                    if (f.name == root
+                        || f.name
+                            .strip_suffix(root.as_str())
+                            .is_some_and(|p| p.ends_with(':')))
+                        && self.fn_file.get(&f.name).map(|s| s.as_str()) == Some(file)
                     {
                         for b in f.ir.blocks.values() {
                             for instr in &b.instructions {
-                                if let Instruction::CallStatic { func, .. } = instr {
-                                    let last = func.rsplit('.').next().unwrap_or(func);
-                                    candidate.get_or_insert_with(|| last.to_string());
+                                match instr {
+                                    Instruction::CallStatic { func, .. } => {
+                                        let last = func.rsplit('.').next().unwrap_or(func);
+                                        candidate.get_or_insert_with(|| last.to_string());
+                                    }
+                                    // Factory wrappers at module scope too:
+                                    // `const client = axios.create(...)`
+                                    // lowers as CallVirtual, and the module-
+                                    // scope path only matched CallStatic,
+                                    // losing the factory origin (mre01).
+                                    Instruction::CallVirtual {
+                                        method,
+                                        receiver: Operand::Var(cr),
+                                        ..
+                                    } if method == "create" || method == "extend" => {
+                                        if let Some(root) = FactTable::receiver_root(f.ir, *cr) {
+                                            candidate.get_or_insert(root);
+                                        }
+                                    }
+                                    _ => {}
                                 }
                             }
                         }
@@ -448,11 +469,49 @@ impl<'a> BackwardTaintEngine<'a> {
             Some(Operand::Var(r)) => Some(*r),
             _ => None,
         };
+        // Factory-resolved receiver roots must clear the same bar the
+        // sink matcher applies: the root is a declared client (client_roots),
+        // it carries a dotted entry for THIS method (receiver_roles), or it
+        // names a package carrying package-scoped sink facts
+        // (scoped_sink_signatures - the `axios.get` family lives here and
+        // populates neither of the other two sets). Gating factories on
+        // client_roots alone rejected `const client = axios.create(...)` ->
+        // `client.get(...)` even though `axios.get` is a declared sink
+        // (mre01 instance-alias false negative): the receiver resolved to
+        // its own source name ("client") and the sink stayed suppressed.
+        let factory_root_arms = |root: &str| {
+            self.facts.client_roots.contains(root)
+                || self
+                    .facts
+                    .receiver_roles
+                    .contains_key(&(root.to_string(), name.to_string()))
+                || self
+                    .facts
+                    .scoped_sink_signatures
+                    .keys()
+                    .any(|(pkg, _)| pkg == root)
+        };
         let receiver_root = match receiver {
             Some(Operand::Var(r)) => {
                 let direct = FactTable::receiver_root(ir, *r);
                 if let Some(ref d) = direct {
-                    if self.facts.client_roots.contains(d) {
+                    // Name-collision guard: a variable merely *named* like a
+                    // declared client root (a factory instance called
+                    // `client`) must not short-circuit before the factory
+                    // fallback - for a verb sink whose (root, method) pair is
+                    // not declared, the direct name cannot arm the call, so
+                    // fall through to import/factory resolution (which may
+                    // recover the real root, e.g. `axios` from
+                    // `axios.create(...)`) and only then default to `direct`
+                    // (`resolved.or(direct)` below keeps the old result when
+                    // nothing resolves). mre01 instance-alias false negative.
+                    if self.facts.client_roots.contains(d)
+                        && (!self.facts.verb_sinks.contains(name)
+                            || self
+                                .facts
+                                .receiver_roles
+                                .contains_key(&(d.clone(), name.to_string())))
+                    {
                         direct
                     } else {
                         // Check if d was imported as a package namespace (e.g. import cp from "child_process")
@@ -495,7 +554,7 @@ impl<'a> BackwardTaintEngine<'a> {
                                             && (method == "create" || method == "extend") =>
                                         {
                                             if let Some(cr_root) = FactTable::receiver_root(ir, *cr)
-                                                && self.facts.client_roots.contains(&cr_root)
+                                                && factory_root_arms(&cr_root)
                                             {
                                                 resolved = Some(cr_root);
                                             }
@@ -509,7 +568,7 @@ impl<'a> BackwardTaintEngine<'a> {
                                                 || func.ends_with(".extend")) =>
                                         {
                                             if let Some(prefix) = func.split('.').next()
-                                                && self.facts.client_roots.contains(prefix)
+                                                && factory_root_arms(prefix)
                                             {
                                                 resolved = Some(prefix.to_string());
                                             }
@@ -536,7 +595,7 @@ impl<'a> BackwardTaintEngine<'a> {
                                                     && (method == "create" || method == "extend")
                                                     && let Some(cr_root) =
                                                         FactTable::receiver_root(f.ir, *cr)
-                                                    && self.facts.client_roots.contains(&cr_root)
+                                                    && factory_root_arms(&cr_root)
                                                 {
                                                     resolved = Some(cr_root);
                                                     break;

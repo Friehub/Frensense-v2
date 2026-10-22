@@ -243,24 +243,41 @@ fn install_language_group(
                                 .entry((root.to_string(), last.to_string()))
                                 .or_insert_with(|| s.clone());
                         }
+                        // The bare shadow this declaration publishes is a
+                        // shadow of a QUALIFIED sink: it must arm only
+                        // under the root the declaration named, or every
+                        // receiver in the program inherits the library's
+                        // semantics (`json.loads` from `pickle.loads`).
+                        facts
+                            .receiver_qualified_sinks
+                            .entry(last.to_string())
+                            .or_default()
+                            .insert(root.to_string());
                         if ambiguous.contains(&last) {
                             facts.verb_sinks.insert(last.to_string());
                             facts.client_roots.insert(root.to_string());
                         }
                     }
-                } else if ambiguous.contains(&last) {
-                    // Bare ambiguous verb with no dotted client entry in
-                    // this pack: still arm verb-gating so the name only
-                    // counts as a sink on a *qualified* receiver (see
-                    // is_sink_call_scoped). Without this, `execute`,
-                    // `aggregate`, `delete` ... sink any receiver in the
-                    // program (RecipeExecutor.execute, Prisma
-                    // db.trade.aggregate, array helpers, ...) - measured
-                    // 10+ false-positive advisories on one live TS repo.
-                    // Client roots must still come from dotted entries,
-                    // which is exactly the point: an unqualified bare
-                    // verb matches nothing by name alone.
-                    facts.verb_sinks.insert(last.to_string());
+                } else {
+                    // A bare declaration is the receiver-agnostic form: the
+                    // name is the language builtin's own (`eval`, `exec`,
+                    // `open`). It keeps matching any receiver, so it is
+                    // NOT receiver-gated.
+                    facts.bare_sink_names.insert(last.to_string());
+                    if ambiguous.contains(&last) {
+                        // Bare ambiguous verb with no dotted client entry in
+                        // this pack: still arm verb-gating so the name only
+                        // counts as a sink on a *qualified* receiver (see
+                        // is_sink_call_scoped). Without this, `execute`,
+                        // `aggregate`, `delete` ... sink any receiver in the
+                        // program (RecipeExecutor.execute, Prisma
+                        // db.trade.aggregate, array helpers, ...) - measured
+                        // 10+ false-positive advisories on one live TS repo.
+                        // Client roots must still come from dotted entries,
+                        // which is exactly the point: an unqualified bare
+                        // verb matches nothing by name alone.
+                        facts.verb_sinks.insert(last.to_string());
+                    }
                 }
             }
             LearnedFactEntry::LanguageSinkSlots {

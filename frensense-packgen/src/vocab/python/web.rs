@@ -114,14 +114,23 @@ pub(crate) static PY_WEB_SINKS: &[(&str, crate::role_map::SinkLabel)] = &[
     ("httpx.get", crate::role_map::SinkLabel::Ssrf),
     ("httpx.post", crate::role_map::SinkLabel::Ssrf),
     ("urllib.request.urlopen", crate::role_map::SinkLabel::Ssrf),
-    // Open Redirect
-    ("redirect", crate::role_map::SinkLabel::OpenRedirect),
-    // XSS (reflected)
-    ("make_response", crate::role_map::SinkLabel::XssReflected),
-    // Template SSTI
-    ("render_template", crate::role_map::SinkLabel::TemplateSsti),
+    // Open Redirect - declared under the framework that owns it. A bare
+    // `redirect(url)` is an ordinary method on an unrelated object; the
+    // bare declaration made every one of them an open-redirect finding.
+    ("flask.redirect", crate::role_map::SinkLabel::OpenRedirect),
+    // XSS (reflected): the TEMPLATE call is the sink, not the response
+    // builder. `flask.make_response(body)` constructs a Response from a
+    // body it is handed - it does not reflect untrusted input into a
+    // document - so it is not a reflected-XSS sink.
+    // Template SSTI - declared under the framework that owns them. The
+    // template NAME is the dangerous slot (see the per-slot signature),
+    // and the call only counts as a sink inside a Flask program.
     (
-        "render_template_string",
+        "flask.render_template",
+        crate::role_map::SinkLabel::TemplateSsti,
+    ),
+    (
+        "flask.render_template_string",
         crate::role_map::SinkLabel::TemplateSsti,
     ),
     ("from_string", crate::role_map::SinkLabel::TemplateSsti),

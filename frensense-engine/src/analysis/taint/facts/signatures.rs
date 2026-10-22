@@ -248,6 +248,19 @@ impl FactTable {
                 if sig.global_only && receiver_root.is_some() && origin_package.is_none() {
                     return false;
                 }
+                // A name that is only ever declared QUALIFIED arms only
+                // under the receiver root (or import origin) its
+                // declaration named. A dotted declaration publishes a bare
+                // shadow of its last segment (the walker matches a virtual
+                // call by method name), and that shadow must not arm an
+                // unrelated receiver: `json.loads(t)` is a safe JSON
+                // parser, not `pickle.loads`; `client.urlopen(t)` is not
+                // `urllib.request.urlopen`.
+                if self.is_receiver_qualified_only(last)
+                    && !self.qualified_receiver_matches(last, receiver_root, origin_package)
+                {
+                    return false;
+                }
                 return true;
             }
             return false;
@@ -280,6 +293,46 @@ impl FactTable {
                 }
             }
         }
+    }
+
+    /// Is `last` a sink name that is only ever declared under a receiver
+    /// root? Such a name must not arm on an unrelated receiver.
+    ///
+    /// A name declared bare (the language builtin's own name) is not
+    /// receiver-gated; a name that only ever appeared in a dotted
+    /// declaration is.
+    pub fn is_receiver_qualified_only(&self, last: &str) -> bool {
+        !self.bare_sink_names.contains(last) && self.receiver_qualified_sinks.contains_key(last)
+    }
+
+    /// Does the call site's receiver root (or import origin) name one of
+    /// the roots declared for `last`?
+    ///
+    /// A receiver root matches when it IS a declared root. An import
+    /// origin matches when it IS a declared root or lives under it
+    /// (`urllib.request` under the declared root `urllib`).
+    pub fn qualified_receiver_matches(
+        &self,
+        last: &str,
+        receiver_root: Option<&str>,
+        origin_package: Option<&str>,
+    ) -> bool {
+        let Some(roots) = self.receiver_qualified_sinks.get(last) else {
+            return false;
+        };
+        if let Some(root) = receiver_root
+            && roots.contains(root)
+        {
+            return true;
+        }
+        if let Some(origin) = origin_package {
+            return roots.iter().any(|r| {
+                origin == r
+                    || (origin.starts_with(r.as_str())
+                        && origin.as_bytes().get(r.len()) == Some(&b'.'))
+            });
+        }
+        false
     }
 
     /// Receiver-aware sink check for virtual calls. `last` is the method

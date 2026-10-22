@@ -14,17 +14,25 @@ use crate::role_map::SinkLabel;
 /// non-web frameworks.
 pub(crate) static PY_CORE_SINKS: &[(&str, SinkLabel)] = &[
     // ── Code Execution ──
+    // Python builtins: the bare name IS the API. A receiver-qualified
+    // call (`engine.eval(x)`) is a different method entirely, so these
+    // are marked `global_only` in the language vocabulary.
     ("eval", SinkLabel::CodeExecution),
     ("exec", SinkLabel::CodeExecution),
     ("compile", SinkLabel::CodeExecution),
     // ── Command Injection ──
-    ("system", SinkLabel::CommandInjection),
-    ("popen", SinkLabel::CommandInjection),
-    ("call", SinkLabel::CommandInjection),
-    ("run", SinkLabel::CommandInjection),
-    ("check_output", SinkLabel::CommandInjection),
-    ("Popen", SinkLabel::CommandInjection),
-    ("execfile", SinkLabel::CommandInjection),
+    // Declared under the module that owns the API. A bare `system` /
+    // `run` / `popen` / `call` is an ordinary method on an unrelated
+    // object (`Workflow.run`, `RuleSystem.popen`, `Handler.call`), and
+    // the bare declaration made every one of them a command-injection
+    // finding in any Python file.
+    ("os.system", SinkLabel::CommandInjection),
+    ("os.popen", SinkLabel::CommandInjection),
+    ("subprocess.call", SinkLabel::CommandInjection),
+    ("subprocess.run", SinkLabel::CommandInjection),
+    ("subprocess.check_output", SinkLabel::CommandInjection),
+    ("subprocess.Popen", SinkLabel::CommandInjection),
+    ("pty.spawn", SinkLabel::CommandInjection),
     // ── SQL Injection (DB-API + ORM) ──
     ("cur.execute", SinkLabel::SqlInjection),
     ("cursor.execute", SinkLabel::SqlInjection),
@@ -53,23 +61,27 @@ pub(crate) static PY_CORE_SINKS: &[(&str, SinkLabel)] = &[
     ("extra", SinkLabel::SqlInjection),
     ("prepare", SinkLabel::SqlInjection),
     // ── Path Traversal ──
+    // `open(path)` is Python's path sink. `read`/`write` are file-HANDLE
+    // methods - `f.read(n)` reads FROM the handle, `f.write(data)` writes
+    // data TO it - so neither takes a path, and a tainted handle or a
+    // tainted payload is not path traversal. `join` is a path
+    // CONSTRUCTOR: a tainted segment only matters where the joined path
+    // reaches `open`. Declaring them bare turned every `.read(...)` and
+    // `.write(...)` in a program into a path-traversal finding.
     ("open", SinkLabel::PathTraversal),
-    ("read", SinkLabel::PathTraversal),
-    ("write", SinkLabel::PathTraversal),
-    ("join", SinkLabel::PathTraversal),
-    ("unlink", SinkLabel::PathTraversal),
-    ("stat", SinkLabel::PathTraversal),
-    ("access", SinkLabel::PathTraversal),
-    // ── XSS (reflected) ──
-    ("make_response", SinkLabel::XssReflected),
+    ("os.unlink", SinkLabel::PathTraversal),
+    ("os.stat", SinkLabel::PathTraversal),
+    ("os.access", SinkLabel::PathTraversal),
     // ── Unsafe Deserialization ──
+    // Qualified: `pickle.loads` is unsafe deserialization while
+    // `json.loads` is a safe JSON parser. The bare `loads`/`load`
+    // declarations made every JSON parse in a program an
+    // unsafe-deserialization finding.
     ("pickle.loads", SinkLabel::UnsafeDeserialize),
     ("pickle.load", SinkLabel::UnsafeDeserialize),
     ("yaml.load", SinkLabel::UnsafeDeserialize),
     ("marshal.loads", SinkLabel::UnsafeDeserialize),
     ("shelve.open", SinkLabel::UnsafeDeserialize),
-    ("loads", SinkLabel::UnsafeDeserialize),
-    ("load", SinkLabel::UnsafeDeserialize),
     // ── Log Leak ──
     ("log", SinkLabel::LogLeak),
     ("error", SinkLabel::LogLeak),

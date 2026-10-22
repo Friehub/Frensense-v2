@@ -133,6 +133,32 @@ pub struct FactTable {
     pub receiver_roles: FxHashMap<(String, String), crate::analysis::taint::role::SinkRole>,
     /// Receiver-specific label slugs: (receiver_root, method) -> label slug.
     pub receiver_labels: FxHashMap<(String, String), String>,
+    /// Last segments that are ONLY sinks under a declared receiver root:
+    /// `last -> declared roots`.
+    ///
+    /// A dotted declaration (`pickle.loads`, `urllib.request.urlopen`)
+    /// publishes a bare shadow of its last segment, because the walker
+    /// matches a virtual call by method name and cannot see the module the
+    /// method was reached through. Without this map the shadow is
+    /// receiver-agnostic: `json.loads(t)` inherited unsafe-deserialization
+    /// semantics from `pickle.loads`, and `client.urlopen(t)` inherited
+    /// SSRF from `urllib.request.urlopen`.
+    ///
+    /// The map turns "declared qualified" into an engine-enforced
+    /// requirement: a name listed here arms only under a receiver root (or
+    /// an import origin) the declaration named. The engine stays
+    /// mechanism-only - which roots qualify which name is pack/bundle
+    /// knowledge, not engine vocabulary.
+    pub receiver_qualified_sinks: FxHashMap<String, FxHashSet<String>>,
+    /// Last segments declared BARE (a declaration with no dot in it).
+    ///
+    /// A bare declaration is the receiver-agnostic form: it is the
+    /// language builtin's own name (`eval`, `exec`, `open`). A name that
+    /// is only ever declared qualified is gated by
+    /// [`receiver_qualified_sinks`]; a name declared bare is not - it keeps
+    /// matching any receiver, which is correct for a builtin and wrong for
+    /// a library function.
+    pub bare_sink_names: FxHashSet<String>,
     /// Receiver roots of trusted session stores (`authenticatedUsers`):
     /// `store.get(token)` returns a server-issued session object or
     /// undefined, values read off the result are not attacker-controlled
@@ -511,6 +537,19 @@ impl FactTable {
         // receiver-aware sets.
         self.verb_sinks.extend(other.verb_sinks.iter().cloned());
         self.client_roots.extend(other.client_roots.iter().cloned());
+        // Receiver-qualification bookkeeping accumulates like the other
+        // receiver-aware sets: two merged specs can declare different
+        // roots for the same method, and both must survive.
+        for (k, roots) in &other.receiver_qualified_sinks {
+            self.receiver_qualified_sinks
+                .entry(k.clone())
+                .or_default()
+                .extend(roots.iter().cloned());
+        }
+        // A bare declaration wins over a qualified one for the same name:
+        // the bare form is the receiver-agnostic one.
+        self.bare_sink_names
+            .extend(other.bare_sink_names.iter().cloned());
         // Receiver-specific roles accumulate like the other receiver-aware
         // sets: two merged specs can declare different dotted roots for the
         // same method, and both disambiguation rules must survive.
