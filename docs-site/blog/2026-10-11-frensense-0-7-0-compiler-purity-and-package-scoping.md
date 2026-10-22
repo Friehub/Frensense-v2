@@ -1,7 +1,7 @@
 ---
 written-against-version: 0.7.0
 fact-checked: "2026-10-22"
-source-revision: d6cfd3f-dirty
+source-revision: 87d2b7e-dirty
 title: "Inside Frensense 0.7.0: Package-Aware Dataflow, Compiler Purity, and Replay-Verified Static Analysis"
 date: 2026-10-11
 description: A deep technical dive into Frensense 0.7.0 - solving cross-framework false positives with package-scoped facts, decoupling AST vocabularies into pure compiler IR, and enforcing replay verification over the bundle's own corpus.

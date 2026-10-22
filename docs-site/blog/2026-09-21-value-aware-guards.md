@@ -1,7 +1,7 @@
 ---
 written-against-version: 0.7.1-preview.1
 fact-checked: "2026-10-22"
-source-revision: d6cfd3f-dirty
+source-revision: 87d2b7e-dirty
 title: "Proving guards, not guessing them"
 date: 2026-09-21
 description: Guard validation used to be textual, a call with the right name near the sink. The value lattice changed that - and has limits we state here.

@@ -1,7 +1,7 @@
 ---
 written-against-version: 0.7.0
 fact-checked: "2026-10-22"
-source-revision: d6cfd3f-dirty
+source-revision: 87d2b7e-dirty
 title: "Teaching a Static Analyzer Like a Human: Learning Detection from Twin Examples"
 date: 2026-09-29
 description: How Frensense replaced fragile pattern rules and hardcoded engine updates with a compiler that learns security vulnerabilities directly from positive and negative examples - and how every fact must prove itself before it ships.
