@@ -43,6 +43,10 @@ pub struct CliOptions {
     /// Precision profile: default (stable), recommended (stable + beta),
     /// or strict (all tiers, including hygiene and experimental).
     pub profile: crate::Profile,
+    /// Report code hygiene rules (e.g. function complexity) under any profile.
+    pub enable_hygiene: bool,
+    /// Maximum cyclomatic complexity ceiling before emitting function_complexity.
+    pub max_complexity: Option<usize>,
 }
 
 /// Parse CLI arguments into structured scan options.
@@ -61,6 +65,8 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
         explain: false,
         show_flows: false,
         profile: crate::Profile::Default,
+        enable_hygiene: false,
+        max_complexity: None,
     };
 
     let mut i = 1;
@@ -99,6 +105,18 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
             "--diff-only" => options.diff_only = true,
             "--explain" => options.explain = true,
             "--show-flows" => options.show_flows = true,
+            "--hygiene" => options.enable_hygiene = true,
+            "--max-complexity" => {
+                let val = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                let n = val.parse::<usize>().map_err(|_| {
+                    format!("invalid value for {arg}: '{val}' must be a positive integer")
+                })?;
+                options.max_complexity = Some(n);
+                options.enable_hygiene = true;
+                i += 1;
+            }
             "-p" | "--profile" => {
                 let val = args
                     .get(i + 1)
@@ -307,5 +325,31 @@ mod tests {
         let err = parse_options(&to_args(&["--profile", "invalid", "Cargo.toml"]))
             .expect_err("should reject");
         assert!(err.contains("unknown profile 'invalid'"));
+    }
+
+    #[test]
+    fn hygiene_flag_parses() {
+        let opts = parse_options(&to_args(&["--hygiene"])).expect("parse");
+        assert!(opts.enable_hygiene);
+        assert_eq!(opts.max_complexity, None);
+
+        let opts = parse_options(&to_args(&["Cargo.toml"])).expect("parse");
+        assert!(!opts.enable_hygiene);
+    }
+
+    #[test]
+    fn max_complexity_flag_parses() {
+        let opts = parse_options(&to_args(&["--max-complexity", "15"])).expect("parse");
+        assert_eq!(opts.max_complexity, Some(15));
+        assert!(
+            opts.enable_hygiene,
+            "setting max-complexity should automatically enable hygiene"
+        );
+
+        let err = parse_options(&to_args(&["--max-complexity"])).expect_err("should reject");
+        assert!(err.contains("missing value for --max-complexity"));
+
+        let err = parse_options(&to_args(&["--max-complexity", "abc"])).expect_err("should reject");
+        assert!(err.contains("must be a positive integer"));
     }
 }

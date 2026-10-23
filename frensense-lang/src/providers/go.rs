@@ -15,7 +15,10 @@
 
 use tree_sitter::Node;
 
-use crate::spec::{node_text, Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin};
+use crate::spec::{
+    node_text, Export, Import, ItemKind, LanguageSpec, ModuleItem, NodeRole, PackageCategory,
+    TaintOrigin, Visibility,
+};
 
 // ── AST classification ────────────────────────────────────────────────────────
 
@@ -368,6 +371,24 @@ impl LanguageSpec for GoSpec {
         extract_go_imports(root, source)
     }
 
+    fn extract_exports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Export> {
+        go_module_items(root, source)
+            .into_iter()
+            .filter(|item| item.visibility == Visibility::Public)
+            .map(|item| Export {
+                exported_name: item.name.clone(),
+                local_name: item.name,
+                from_module: None,
+                visibility: item.visibility,
+                kind: item.kind,
+            })
+            .collect()
+    }
+
+    fn extract_module_items<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<ModuleItem> {
+        go_module_items(root, source)
+    }
+
     fn symbol_query(&self) -> Option<&'static str> {
         Some(GO_SYMBOL_QUERY)
     }
@@ -392,4 +413,80 @@ impl LanguageSpec for GoSpec {
         // route-registration patterns and the call analysis.
         false
     }
+}
+
+// ── Module surface ────────────────────────────────────────────────────────────
+
+/// Every package-level declaration.
+///
+/// Go's visibility rule is the identifier's first rune: an uppercase name is
+/// exported from the package, anything else is not. There is no
+/// crate-internal form, so the answer is always Public or Private.
+fn go_module_items(root: Node<'_>, source: &str) -> Vec<ModuleItem> {
+    let mut items = Vec::new();
+    for i in 0..root.named_child_count() {
+        let Some(child) = root.named_child(i) else {
+            continue;
+        };
+        match child.kind() {
+            "function_declaration" | "method_declaration" => {
+                push_go_item(child, ItemKind::Function, source, &mut items);
+            }
+            "type_declaration" => {
+                for j in 0..child.named_child_count() {
+                    let Some(spec) = child.named_child(j) else {
+                        continue;
+                    };
+                    if matches!(spec.kind(), "type_spec" | "type_alias") {
+                        push_go_item(spec, ItemKind::Type, source, &mut items);
+                    }
+                }
+            }
+            "var_declaration" | "const_declaration" => {
+                let kind = if child.kind() == "var_declaration" {
+                    ItemKind::Variable
+                } else {
+                    ItemKind::Constant
+                };
+                for j in 0..child.named_child_count() {
+                    let Some(spec) = child.named_child(j) else {
+                        continue;
+                    };
+                    if !matches!(spec.kind(), "var_spec" | "const_spec") {
+                        continue;
+                    }
+                    // A spec may bind several names: `var a, b int`.
+                    for k in 0..spec.named_child_count() {
+                        if let Some(name) = spec.named_child(k) {
+                            if name.kind() == "identifier" {
+                                push_go_named(name, kind, source, &mut items);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    items
+}
+
+fn push_go_item(node: Node<'_>, kind: ItemKind, source: &str, out: &mut Vec<ModuleItem>) {
+    if let Some(name) = node.child_by_field_name("name") {
+        push_go_named(name, kind, source, out);
+    }
+}
+
+fn push_go_named(name: Node<'_>, kind: ItemKind, source: &str, out: &mut Vec<ModuleItem>) {
+    let text = node_text(name, source);
+    let visibility = if text.chars().next().is_some_and(|c| c.is_uppercase()) {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
+    out.push(ModuleItem {
+        name: text.to_owned(),
+        kind,
+        visibility,
+    });
 }

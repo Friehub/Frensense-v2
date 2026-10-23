@@ -250,6 +250,9 @@ pub struct FactTable {
     /// (`GuardDenylistPattern`, Phase 6.5) and bundle-learned
     /// (`GuardDenylistPattern`).
     pub guard_denylist_patterns: Vec<String>,
+    /// Optional cyclomatic complexity limit override for `FunctionComplexity` check.
+    /// When None, defaults to `health::MAX_COMPLEXITY` (25).
+    pub max_complexity: Option<usize>,
 }
 
 impl FactTable {
@@ -638,6 +641,9 @@ impl FactTable {
             if !self.guard_denylist_patterns.contains(p) {
                 self.guard_denylist_patterns.push(p.clone());
             }
+        }
+        if other.max_complexity.is_some() {
+            self.max_complexity = other.max_complexity;
         }
     }
 

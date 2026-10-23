@@ -168,6 +168,9 @@ fn print_help() {
         "       frensense bundle info <file.frc> [--json]    Inspect metadata and facts of a .frc bundle"
     );
     println!(
+        "       frensense lint <corpus_dir> [--strict] [--json]    Lint corpus families before they are bundled"
+    );
+    println!(
         "       frensense watch [path] [options]            Re-scan on file changes, print new findings"
     );
     println!(
@@ -189,7 +192,10 @@ fn print_help() {
         "  (`frensense --mcp` starts the server), `frensense watch` scans ./watch (`frensense"
     );
     println!("  watch <path>` watches), and `frensense bundle` scans ./bundle (`frensense bundle");
-    println!("  <corpus> [out.frc]` compiles). `lsp` is always the server - editors run it.");
+    println!(
+        "  <corpus> [out.frc]` compiles). `frensense lint` scans ./lint (`frensense lint <corpus>"
+    );
+    println!("  [options]` lints). `lsp` is always the server - editors run it.");
     println!();
     println!("Options:");
     println!("  -o, --output <file>        Write report to file (text, json, sarif, or github)");
@@ -209,6 +215,12 @@ fn print_help() {
     );
     println!(
         "                             strict also reports hygiene rules such as function complexity"
+    );
+    println!(
+        "  --hygiene                  Report code hygiene and health rules (e.g. function complexity) under any profile"
+    );
+    println!(
+        "  --max-complexity <n>       Maximum cyclomatic complexity ceiling before emitting function_complexity (default: 25)"
     );
     // Generated from the lang registry so help, docs and MCP descriptions
     // agree on one list (WI-56); see `frensense::parser::language_names_help`.
@@ -563,14 +575,16 @@ enum Mode {
     Lsp,
     Watch,
     Bundle,
+    Lint,
 }
 
 /// Resolve argv[1] to a mode. A subcommand token yields to a path of the
-/// same name: a repo can legitimately contain `watch/`, `bundle/` or `mcp/`,
-/// and `frensense explain` already resolves that way (a known id wins, else
-/// an existing path scans). Arguments that only the subcommand understands
-/// keep it claimed (`frensense watch src`, `frensense bundle corpus/`), and
-/// `--mcp` is the unambiguous form of the argument-less server mode.
+/// same name: a repo can legitimately contain `watch/`, `bundle/`, `lint/`
+/// or `mcp/`, and `frensense explain` already resolves that way (a known id
+/// wins, else an existing path scans). Arguments that only the subcommand
+/// understands keep it claimed (`frensense watch src`, `frensense bundle
+/// corpus/`, `frensense lint corpus/`), and `--mcp` is the unambiguous form
+/// of the argument-less server mode.
 ///
 /// `lsp` stays literal on purpose: editor integrations run `frensense lsp`
 /// non-interactively, where silently scanning a `lsp/` directory would break
@@ -588,12 +602,25 @@ fn resolve_mode(args: &[String], path_exists: &dyn Fn(&str) -> bool) -> Mode {
         Some("lsp") => Mode::Lsp,
         Some("watch") if extra || !path_exists("watch") => Mode::Watch,
         Some("bundle") if extra || !path_exists("bundle") => Mode::Bundle,
+        Some("lint") if extra || !path_exists("lint") => Mode::Lint,
         _ => Mode::Scan,
     }
 }
 
+/// Does argv[1] name a subcommand that prints its own `--help`?
+///
+/// `lint` does: corpus curation has its own flags (--classes, --strict,
+/// --json, ...), and the scan help would hide all of them.
+fn subcommand_owns_help(args: &[String]) -> bool {
+    args.get(1).map(String::as_str) == Some("lint")
+}
+
 fn handle_early_args(args: &[String]) -> bool {
-    if args.len() < 2 || args.iter().any(|a| a == "--help" || a == "-h") {
+    if args.len() < 2 {
+        print_help();
+        std::process::exit(0);
+    }
+    if !subcommand_owns_help(args) && args.iter().any(|a| a == "--help" || a == "-h") {
         print_help();
         std::process::exit(0);
     }
@@ -639,6 +666,9 @@ fn run_watch(args: Vec<String>) -> Result<()> {
         .map(|exts| exts.to_vec());
     let corpus_bundle = options.corpus_bundle_path.clone();
     let severity = options.severity_filter;
+    let profile = options.profile;
+    let enable_hygiene = options.enable_hygiene;
+    let max_complexity = options.max_complexity;
 
     // Stop-file: polled by a detached thread, lets scripts/tests end the
     // loop deterministically without signaling machinery. SIGINT keeps the
@@ -670,6 +700,9 @@ fn run_watch(args: Vec<String>) -> Result<()> {
                 engine.set_corpus_bundle_path(p.clone());
             }
             engine.set_severity_filter(severity);
+            engine.set_profile(profile);
+            engine.set_enable_hygiene(enable_hygiene);
+            engine.set_max_complexity(max_complexity);
             engine
         },
         |engine, path| engine.run(path),
@@ -762,6 +795,11 @@ fn main() -> Result<()> {
                 return Ok(());
             }
         }
+        // Corpus curation surface: the lint is implemented once, in
+        // `frensense-bundler`, and this binary is the only one distributed
+        // to users - so the shipped CLI forwards to the same entry point the
+        // gate script and CI run, exit code included.
+        Mode::Lint => std::process::exit(frensense_bundler::lint::cli(&args[2..])),
         Mode::Scan => {}
     }
 
@@ -812,6 +850,8 @@ fn main() -> Result<()> {
     }
     engine.set_severity_filter(options.severity_filter);
     engine.set_profile(options.profile);
+    engine.set_enable_hygiene(options.enable_hygiene);
+    engine.set_max_complexity(options.max_complexity);
     engine.set_explain(options.explain);
     engine.set_show_flows(options.show_flows);
 
@@ -843,6 +883,8 @@ fn main() -> Result<()> {
                     e2.set_corpus_bundle_path(path.clone());
                 }
                 e2.set_profile(options.profile);
+                e2.set_enable_hygiene(options.enable_hygiene);
+                e2.set_max_complexity(options.max_complexity);
                 e2.set_explain(options.explain);
                 e2.set_show_flows(options.show_flows);
                 all.extend(e2.run(f)?);
@@ -975,6 +1017,33 @@ mod tests {
         let bundle = argv(&["bundle"]);
         assert_eq!(resolve_mode(&bundle, &|_| false), Mode::Bundle);
         assert_eq!(resolve_mode(&bundle, &|p| p == "bundle"), Mode::Scan);
+
+        let lint = argv(&["lint"]);
+        assert_eq!(resolve_mode(&lint, &|_| false), Mode::Lint);
+        assert_eq!(resolve_mode(&lint, &|p| p == "lint"), Mode::Scan);
+    }
+
+    #[test]
+    fn lint_arguments_keep_the_subcommand_claimed() {
+        // `lint <corpus>` and `lint --help` can only mean the subcommand: a
+        // directory named `lint` must not swallow the curation surface.
+        assert_eq!(
+            resolve_mode(&argv(&["lint", "corpus/targets"]), &|p| p == "lint"),
+            Mode::Lint
+        );
+        assert_eq!(
+            resolve_mode(&argv(&["lint", "--help"]), &|p| p == "lint"),
+            Mode::Lint
+        );
+    }
+
+    #[test]
+    fn lint_help_is_not_swallowed_by_the_scan_help() {
+        // The early `--help` intercept must let `lint --help` through, or the
+        // curation flags stay undiscoverable.
+        assert!(super::subcommand_owns_help(&argv(&["lint", "--help"])));
+        assert!(!super::subcommand_owns_help(&argv(&["bundle", "--help"])));
+        assert!(!super::subcommand_owns_help(&argv(&["--help"])));
     }
 
     #[test]

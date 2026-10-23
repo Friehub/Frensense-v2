@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Code Hygiene & Complexity Controls
+- **`--hygiene` flag**: enables code hygiene and structural health rules (such
+  as `function_complexity`, CWE-1121) under any profile without requiring
+  `--profile strict`. Polyglot developers running `--profile default` or
+  `--profile recommended` can now monitor structural code health without
+  surfacing unproven experimental rules.
+- **`--max-complexity <n>` flag**: configures the cyclomatic complexity ceiling
+  (default: 25) for the `function_complexity` check directly from the command
+  line. Setting `--max-complexity` automatically enables hygiene rules so
+  findings are never silently suppressed. Preserves Frensense's zero-config,
+  language-agnostic architecture without introducing TOML configuration files.
+
 #### CLI Diagnostics
 - **`--explain` flag**: surfaces *where the engine stayed silent*. Every explored
   sink argument that did not become an advisory is recorded with the reason the
@@ -40,6 +52,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   minimal variants and classifies each cause into a bucket (knowledge gap,
   engine bug, absent rule, harness artifact, unexplained), producing a
   reproducible `--json-out` scorecard and per-case repro files.
+
+#### Corpus Lint (`frensense lint`)
+- **`frensense lint <corpus>`**: a corpus pre-flight on the shipped binary (the
+  same entry point as `frensense-bundler lint`), so curators need one
+  executable. It exits `0` when the corpus is acceptable, `1` when any error
+  (or any warning under `--strict`) is found, and `2` on a usage error. The path
+  rule matches `watch` and `bundle`: `frensense lint` scans a directory named
+  `./lint` when one exists, and `frensense lint <dir>` is always the subcommand;
+  `lint` owns its own `--help` because the global help intercept would otherwise
+  print scan flags and hide the curation flags.
+- **What it checks**: file layout and naming (missing or orphaned twins,
+  incomplete held-out pairs, cross-language stem collisions), the `[frensense]`
+  metadata block (required keys, unknown-key suggestions, duplicate keys,
+  placeholder prose, severity/CWE/cvss syntax), the class registry
+  (`bug_classes.json`: unknown class ids get a nearest-match hint, and every CWE
+  must belong to the declared class), provenance (`source:` form, CVE/GHSA/RUSTSEC
+  ids must exist in the offline advisory index and agree with the CWE),
+  cross-family diversity (near-duplicate call sets, structural clones, families
+  that teach identical or subset facts), and the family's declared `purpose:`
+  against what the bare engine actually does with the pair.
+- **`PU004`: a family that would teach nothing now says so, with the reason**.
+  A pair can satisfy every layout, metadata and purpose check and still
+  contribute no fact: the declared premise holds (knowledge with a silent
+  positive, precision with a noisy negative), yet the only facts it proposes do
+  not separate its own twins, so the replay gate publishes nothing and the
+  bundle scans both files exactly as the bare engine did. Lint now trials each
+  proposed fact against the family the way the gate's vote does and reports the
+  closest candidate with the engine verdict that sank it - e.g. `none of its 2
+  proposed fact(s) separates the pair; closest is sink:rawQuery
+  (positive_alerts=true, negative_alerts=true): the positive alerts but so does
+  the negative`. It also names the opposite case (the fact changes no verdict)
+  and the no-candidate case (the twins differ in no learnable source, sink,
+  sanitizer, guard or check call). Anchors are exempt, and the warning only
+  fires where the declared purpose's premise is actually true, so a family never
+  gets both PU001/PU003 and PU004 for the same mistake.
+- **Flags**: `--classes <file>`, `--advisories <file>`, `--strict`,
+  `--require-heldout`, `--no-gate` (skip the scan-based purpose and
+  teachability checks), `--dup-threshold <0..1>`, `--json`, `--coverage`
+  (class x language coverage counting only error-free families).
+- **`scripts/corpus-lint.sh`** runs the CLI over an authored corpus and is wired
+  into the local gate (`./scripts/local-ci.sh`) and the CI corpus step, so a
+  corpus that fails curation fails the build before a bundle is produced.
 
 #### Flow Traces & Rule Lookup
 - **Flow steps name what the developer wrote**: taint-path steps are rendered
@@ -89,6 +143,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   suppressed with a count, instead of failing the gate for a bug this change
   never touched. Pre-existing debt belongs to the baseline
   (`--emit-baseline` / `--compare-baseline`), not to the diff gate.
+
+#### Reported Identity & Triage
+- **Stable rule ids on every finding**: findings report under a stable id
+  (`taint.sql-injection`, `check.weak-hash`, `policy.<id>`) instead of the
+  message text, so baselines, suppression files and trend reports keep pointing
+  at the same rule when the wording changes. SARIF emits one rule per id with
+  its CWE `external/cwe/*` tags, help URI and `security-severity`, and the JSON
+  report carries a `cwe` array per finding.
+- **Rule cards are the single source of rule prose**: one card per sink label
+  and built-in checker rule (`frensense_lang::rule_card`) holds the id, title,
+  CWE list, why and fix, and `taint_cwe` / `checker_rule_cwe` resolve through
+  them, so no built-in rule can ship without a CWE and the terminal, SARIF and
+  JSON surfaces cannot drift. Sinks that name no class fall back to the broad
+  parent CWE (74 injection, 20 improper input validation) instead of guessing a
+  child class.
+- **No more "untrusted data reached something" findings**: a flow whose sink
+  resolves to a fallback card (unknown label, role that pins no class) is no
+  longer reported at all - it named no class to fix, suppress or trend, and
+  those were the bulk of the noise burying real flows. `--explain` lists such
+  sinks as silent instead, and a corpus family that does know the class teaches
+  it as a label on the sink fact.
+- **Code frame in the terminal report**: findings print the offending line (and
+  the line above it) with a caret under the flagged call, plus the rule id,
+  CWE and class-specific why/fix, replacing the repeated
+  Details/Impact/Remediation block.
 
 #### Language Facts
 - **CWE-94 tagging for Code Execution**: `eval`, `exec`, and `compile` sinks now

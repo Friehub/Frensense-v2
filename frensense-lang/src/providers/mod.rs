@@ -6,3 +6,7 @@ pub mod go;
 pub mod javascript;
 pub mod python;
 pub mod rust_lang;
+
+#[cfg(test)]
+#[path = "module_surface_tests.rs"]
+mod module_surface_tests;

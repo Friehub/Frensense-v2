@@ -66,6 +66,9 @@ jobs:
       - name: Default pack drift check (packgen --check)
         run: cargo run -p frensense-packgen -- --check
 
+      - name: Corpus lint (families must be teachable)
+        run: ./scripts/corpus-lint.sh
+
       - name: Lint (Clippy, warnings are errors)
         run: cargo clippy --all-features --all-targets -- -D warnings
 

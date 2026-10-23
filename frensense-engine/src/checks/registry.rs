@@ -271,7 +271,11 @@ impl NonDataflowCheck for FunctionComplexity {
         CheckScope::Function
     }
     fn run(&self, ctx: &CheckContext<'_>) -> Vec<CheckerFinding> {
-        super::health::check(ctx.ir())
+        let max = ctx
+            .facts
+            .max_complexity
+            .unwrap_or(super::health::MAX_COMPLEXITY);
+        super::health::check_with_limit(ctx.ir(), max)
     }
 }
 

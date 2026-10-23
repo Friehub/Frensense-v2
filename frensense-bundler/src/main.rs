@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 const USAGE: &str = "\
 Usage: frensense-bundler [<corpus_dir>] [<output.frc>] [options]
+       frensense-bundler lint <corpus_dir> [lint options]   (see `lint --help`)
 
 Options:
   -c, --corpus <dir>   Corpus directory (default: <workspace>/corpus/targets)
@@ -84,6 +85,9 @@ fn main() {
     let workspace_root = manifest_dir.parent().unwrap();
 
     let args: Vec<String> = env::args().collect();
+    if args.get(1).map(String::as_str) == Some("lint") {
+        std::process::exit(frensense_bundler::lint::cli(&args[2..]));
+    }
     let (corpus_dir, output_path) = match parse_args(
         &args,
         workspace_root.join("corpus").join("targets"),

@@ -126,6 +126,7 @@ impl Engine {
             for pattern in facts.source_patterns() {
                 config.sources.insert(pattern.to_string());
             }
+            facts.max_complexity = self.max_complexity;
             let part = scan::scan(group, &config, &facts);
             result.findings.extend(part.findings);
             result.located.extend(part.located);
@@ -211,11 +212,12 @@ impl Engine {
             ));
         }
 
-        let (surviving, hidden) = crate::policy::apply_with_profile(
+        let (surviving, hidden) = crate::policy::apply_with_profile_and_hygiene(
             advisories,
             self.min_confidence,
             self.severity_filter,
             self.profile,
+            self.enable_hygiene,
         );
         for (tier, count) in hidden {
             *self.hidden_by_tier.entry(tier).or_insert(0) += count;

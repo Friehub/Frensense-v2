@@ -221,7 +221,7 @@ pub struct Import {
 }
 
 /// A parsed export or re-export as extracted by [`LanguageSpec::extract_exports`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Export {
     /// The exported symbol name (the name visible to importers).
     pub exported_name: String,
@@ -230,6 +230,42 @@ pub struct Export {
     /// If this is a re-export from another module (e.g. `export { x as y } from "./foo"`),
     /// the source module package / path. None for local exports.
     pub from_module: Option<String>,
+    /// Written visibility of the export.
+    pub visibility: Visibility,
+    /// Declaration kind of the exported symbol.
+    pub kind: ItemKind,
+}
+
+/// Written or inferred visibility of a declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum Visibility {
+    Public,
+    Internal,
+    Private,
+}
+
+/// The syntactic or semantic kind of a module-level declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ItemKind {
+    Function,
+    Constant,
+    Variable,
+    Class,
+    Enum,
+    Interface,
+    Type,
+    Module,
+    Struct,
+    Trait,
+    Other,
+}
+
+/// A top-level item declared in a module.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ModuleItem {
+    pub name: String,
+    pub kind: ItemKind,
+    pub visibility: Visibility,
 }
 
 // ── The trait ─────────────────────────────────────────────────────────────────
@@ -472,6 +508,11 @@ pub trait LanguageSpec: Send + Sync + 'static {
 
     /// Walk `root` and return all exports and re-exports found in the file.
     fn extract_exports<'tree>(&self, _root: Node<'tree>, _source: &str) -> Vec<Export> {
+        Vec::new()
+    }
+
+    /// Walk `root` and return all top-level module items (declarations) in the file.
+    fn extract_module_items<'tree>(&self, _root: Node<'tree>, _source: &str) -> Vec<ModuleItem> {
         Vec::new()
     }
 

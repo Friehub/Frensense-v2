@@ -24,6 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### Code Hygiene & Complexity Controls
+- **`--hygiene` flag**: enables code hygiene and structural health rules (such
+  as `function_complexity`, CWE-1121) under any profile without requiring
+  `--profile strict`. Polyglot developers running `--profile default` or
+  `--profile recommended` can now monitor structural code health without
+  surfacing unproven experimental rules.
+- **`--max-complexity <n>` flag**: configures the cyclomatic complexity ceiling
+  (default: 25) for the `function_complexity` check directly from the command
+  line. Setting `--max-complexity` automatically enables hygiene rules so
+  findings are never silently suppressed. Preserves Frensense's zero-config,
+  language-agnostic architecture without introducing TOML configuration files.
+
 #### CLI Diagnostics
 - **`--explain` flag**: surfaces *where the engine stayed silent*. Every explored
   sink argument that did not become an advisory is recorded with the reason the
@@ -45,6 +57,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   minimal variants and classifies each cause into a bucket (knowledge gap,
   engine bug, absent rule, harness artifact, unexplained), producing a
   reproducible `--json-out` scorecard and per-case repro files.
+
+#### Corpus Lint (`frensense lint`)
+- **`frensense lint <corpus>`**: a corpus pre-flight on the shipped binary (the
+  same entry point as `frensense-bundler lint`), so curators need one
+  executable. It exits `0` when the corpus is acceptable, `1` when any error
+  (or any warning under `--strict`) is found, and `2` on a usage error. The path
+  rule matches `watch` and `bundle`: `frensense lint` scans a directory named
+  `./lint` when one exists, and `frensense lint <dir>` is always the subcommand;
+  `lint` owns its own `--help` because the global help intercept would otherwise
+  print scan flags and hide the curation flags.
+- **What it checks**: file layout and naming (missing or orphaned twins,
+  incomplete held-out pairs, cross-language stem collisions), the `[frensense]`
+  metadata block (required keys, unknown-key suggestions, duplicate keys,
+  placeholder prose, severity/CWE/cvss syntax), the class registry
+  (`bug_classes.json`: unknown class ids get a nearest-match hint, and every CWE
+  must belong to the declared class), provenance (`source:` form, CVE/GHSA/RUSTSEC
+  ids must exist in the offline advisory index and agree with the CWE),
+  cross-family diversity (near-duplicate call sets, structural clones, families
+  that teach identical or subset facts), and the family's declared `purpose:`
+  against what the bare engine actually does with the pair.
+- **`PU004`: a family that would teach nothing now says so, with the reason**.
+  A pair can satisfy every layout, metadata and purpose check and still
+  contribute no fact: the declared premise holds (knowledge with a silent
+  positive, precision with a noisy negative), yet the only facts it proposes do
+  not separate its own twins, so the replay gate publishes nothing and the
+  bundle scans both files exactly as the bare engine did. Lint now trials each
+  proposed fact against the family the way the gate's vote does and reports the
+  closest candidate with the engine verdict that sank it - e.g. `none of its 2
+  proposed fact(s) separates the pair; closest is sink:rawQuery
+  (positive_alerts=true, negative_alerts=true): the positive alerts but so does
+  the negative`. It also names the opposite case (the fact changes no verdict)
+  and the no-candidate case (the twins differ in no learnable source, sink,
+  sanitizer, guard or check call). Anchors are exempt, and the warning only
+  fires where the declared purpose's premise is actually true, so a family never
+  gets both PU001/PU003 and PU004 for the same mistake.
+- **Flags**: `--classes <file>`, `--advisories <file>`, `--strict`,
+  `--require-heldout`, `--no-gate` (skip the scan-based purpose and
+  teachability checks), `--dup-threshold <0..1>`, `--json`, `--coverage`
+  (class x language coverage counting only error-free families).
+- **`scripts/corpus-lint.sh`** runs the CLI over an authored corpus and is wired
+  into the local gate (`./scripts/local-ci.sh`) and the CI corpus step, so a
+  corpus that fails curation fails the build before a bundle is produced.
 
 #### Flow Traces & Rule Lookup
 - **Flow steps name what the developer wrote**: taint-path steps are rendered
@@ -129,6 +183,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now carry CWE-601 (URL Redirection to Untrusted Site). CWE-601 class TPR moves
   from 0% to 61.5%.
 
+#### Version Identity & Artifact Contracts (Phase 6)
+
+- **`frensense --version --json` and `frensense bundle info --json`** now expose a machine-readable build identity: engine version, bundle format, fact-vocabulary fingerprint, default-pack BLAKE3 digest, and report-schema version. The release workflow asserts on `frensense --version --json` before tagging and stamps the identity into the annotated tag.
+- **Bundle format v7** (`frensense-bundler` `BUNDLE_VERSION` 6 → 7): `.frc` envelopes now record the writing engine's fact-vocabulary fingerprint (`BundleHeader::vocabulary`, checked strictly on load), an optional coarse engine range (`requires_engine`), and the writing engine version (`built_by_engine`, diagnostics only). v6-and-earlier bundles are still loadable (`is_legacy()`); a v7 bundle built for a newer vocabulary is refused by name at the version gate before any payload decode. See `frensense-bundler/src/format/frc.rs`.
+- **Fact-vocabulary fingerprint** (`frensense-engine::analysis::taint::facts::FACT_VOCABULARY_FINGERPRINT`, currently `0x4994_27a8_ed94_e470`): a reproducible FNV-1a over the ordered serialized vocabulary (hint kinds + `LearnedFactEntry` variants). New fact variants are compile-enforced (`HintKind::index` / `LearnedFactEntry::wire_index` exhaustive matches), and a ratchet test fails until `FACT_VOCABULARY_FINGERPRINT` is updated — which is the cue to bump `BUNDLE_VERSION` and regenerate the default pack.
+- **Format contract ratified** in `docs/FORMATS.md` (single table of every artifact version and its bump rule) and enforced by `scripts/format-ratchet.py` (fails if the vocabulary fingerprint moves without a `BUNDLE_VERSION` bump and a changelog note).
+- **Regenerated embedded default pack** (`frensense-bundler/assets/frensense-default.frc`) under the v7 envelope so it carries its fact-vocabulary fingerprint.
+
 ### Fixed
 
 #### Language Facts
@@ -189,6 +251,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   JS) and a duplicate JS `toString` are removed, with a packgen regression test
   asserting no duplicate propagator keys per language. OWASP score unchanged
   (25.9%).
+- **Bare last segments stopped arming unrelated receivers**: a sink
+  declared under a module (`pickle.loads`, `subprocess.run`, `yaml.load`)
+  publishes a bare shadow of its last segment because the walker matches a
+  virtual call by method name, and that shadow used to arm every receiver in
+  the program - `json.loads` inherited unsafe deserialization, `f.read(n)`
+  inherited path traversal, `Workflow.run` inherited command injection. The
+  fact table now records which roots a qualified declaration named
+  (`receiver_qualified_sinks`) and which names a language declares bare
+  (`bare_sink_names`); a name that is only ever declared qualified arms only
+  under its own root or import origin, and a name a language never declares
+  bare is verb-gated as well. Measured on four real repositories: 111 -> 93
+  findings, every removed finding reviewed as a false positive, OWASP
+  BenchmarkPython score unchanged (TPR 38.1%, FPR 7.1%), and the Juice Shop
+  scan 3x faster (167s -> 54s) because the call graph no longer fabricates
+  same-named interprocedural edges.
+- **Minified JavaScript is skipped by content**: a single-line bundle with no
+  filename hint was lowered as ordinary source, producing findings no one
+  can act on.
+- **The last two name-based guesses in the engine are pack facts**: the
+  engine no longer assumes a call named `prepare*` creates a bound-parameter
+  statement handle, or that a literal `false` argument disclaims security use
+  of a weak digest. `HintKind::PreparedStatementPrefix` and
+  `HintKind::WeakHashDisclaimer` carry those vocabularies in the default pack
+  (and in any bundle that teaches them), so a new driver's factory spelling
+  or a codebase's own disclaimer token is taught rather than compiled in. An
+  empty set recognises nothing, so a config that teaches nothing never
+  suppresses a flow. Behaviour is unchanged on the measured corpora (OWASP
+  BenchmarkPython: TPR 38.1% / FPR 7.1%; 92 real-repo findings either side
+  of the refactor).
 - **Branch-arm-assigned variables survive the merge**: variables assigned only
   inside a `match`/`switch` arm were dropped from the environment at the branch
   merge (`env.pop` without hoisting), so a value defined in one arm and consumed

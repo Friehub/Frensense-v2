@@ -63,21 +63,25 @@ pub fn apply(
     apply_with_profile(advisories, min_confidence, severity_floor, Profile::Default).0
 }
 
-/// Apply the reporting floor and active scan profile: drop advisories below
-/// `min_confidence`, under `severity_floor`, or excluded by `profile`.
+/// Apply the reporting floor, active scan profile, and optional hygiene flag:
+/// drop advisories below `min_confidence`, under `severity_floor`, or excluded
+/// by `profile` (unless `enable_hygiene` is true and `a.tier == RuleTier::Hygiene`).
 /// Returns the surviving advisories and the count of hidden findings by tier.
 #[must_use]
-pub fn apply_with_profile(
+pub fn apply_with_profile_and_hygiene(
     advisories: Vec<Advisory>,
     min_confidence: f64,
     severity_floor: Option<Severity>,
     profile: Profile,
+    enable_hygiene: bool,
 ) -> (Vec<Advisory>, BTreeMap<RuleTier, usize>) {
     let mut kept = Vec::new();
     let mut hidden_by_tier = BTreeMap::new();
 
     for a in advisories {
-        if !profile.includes_tier(a.tier) {
+        let tier_allowed =
+            profile.includes_tier(a.tier) || (enable_hygiene && a.tier == RuleTier::Hygiene);
+        if !tier_allowed {
             *hidden_by_tier.entry(a.tier).or_insert(0) += 1;
             continue;
         }
@@ -91,6 +95,19 @@ pub fn apply_with_profile(
     }
 
     (kept, hidden_by_tier)
+}
+
+/// Apply the reporting floor and active scan profile: drop advisories below
+/// `min_confidence`, under `severity_floor`, or excluded by `profile`.
+/// Returns the surviving advisories and the count of hidden findings by tier.
+#[must_use]
+pub fn apply_with_profile(
+    advisories: Vec<Advisory>,
+    min_confidence: f64,
+    severity_floor: Option<Severity>,
+    profile: Profile,
+) -> (Vec<Advisory>, BTreeMap<RuleTier, usize>) {
+    apply_with_profile_and_hygiene(advisories, min_confidence, severity_floor, profile, false)
 }
 
 #[cfg(test)]
@@ -235,5 +252,24 @@ mod tests {
         assert_eq!(reported.len(), 2);
         assert_eq!(hidden.get(&RuleTier::Experimental), Some(&1));
         assert_eq!(hidden.get(&RuleTier::Hygiene), Some(&1));
+    }
+
+    #[test]
+    fn hygiene_flag_enables_hygiene_without_experimental() {
+        let advisories = vec![
+            mock_advisory(RuleTier::Stable, Severity::Warning),
+            mock_advisory(RuleTier::Beta, Severity::Warning),
+            mock_advisory(RuleTier::Experimental, Severity::Warning),
+            mock_advisory(RuleTier::Hygiene, Severity::Warning),
+        ];
+
+        let (reported, hidden) =
+            apply_with_profile_and_hygiene(advisories, 0.0, None, Profile::Default, true);
+        assert_eq!(reported.len(), 2);
+        assert_eq!(reported[0].tier, RuleTier::Stable);
+        assert_eq!(reported[1].tier, RuleTier::Hygiene);
+        assert_eq!(hidden.get(&RuleTier::Beta), Some(&1));
+        assert_eq!(hidden.get(&RuleTier::Experimental), Some(&1));
+        assert_eq!(hidden.get(&RuleTier::Hygiene), None);
     }
 }

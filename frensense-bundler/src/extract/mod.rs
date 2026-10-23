@@ -71,7 +71,7 @@ pub fn extract_facts_with_tables(
 /// language specs of the family's own extensions, plus the embedded
 /// default pack (Spec provenance - the CLI runner merges the same pack, so
 /// gate and scan replay under identical baselines).
-fn family_tables(f: &Family) -> (TaintConfig, FactTable) {
+pub fn family_tables(f: &Family) -> (TaintConfig, FactTable) {
     let exts: Vec<&str> = f
         .positives
         .iter()

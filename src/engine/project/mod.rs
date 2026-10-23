@@ -32,6 +32,11 @@ pub struct Engine {
     pub(crate) show_flows: bool,
     /// Precision profile governing reportable finding tiers.
     pub(crate) profile: crate::Profile,
+    /// When `true` (`--hygiene`), hygiene findings (such as `function_complexity`)
+    /// are reported even if not included in the active scan profile.
+    pub(crate) enable_hygiene: bool,
+    /// Optional cyclomatic complexity limit override (`--max-complexity`).
+    pub(crate) max_complexity: Option<usize>,
     /// Silent-finding records from the most recent `run` (when `explain`).
     pub(crate) explain_records: Vec<crate::explain::ExplainRecord>,
     /// Hidden finding counts grouped by tier.
@@ -50,6 +55,8 @@ impl Engine {
             explain: false,
             show_flows: false,
             profile: crate::Profile::Default,
+            enable_hygiene: false,
+            max_complexity: None,
             explain_records: Vec::new(),
             hidden_by_tier: std::collections::BTreeMap::new(),
         }
@@ -103,6 +110,20 @@ impl Engine {
     /// Set the scan profile governing which rule tiers are reported.
     pub fn set_profile(&mut self, profile: crate::Profile) {
         self.profile = profile;
+    }
+
+    /// Enable hygiene findings (such as function_complexity) under any profile.
+    pub fn set_enable_hygiene(&mut self, on: bool) {
+        self.enable_hygiene = on;
+    }
+
+    /// Set a custom cyclomatic complexity ceiling for the function_complexity check.
+    /// Setting this automatically enables hygiene rules.
+    pub fn set_max_complexity(&mut self, max: Option<usize>) {
+        self.max_complexity = max;
+        if max.is_some() {
+            self.enable_hygiene = true;
+        }
     }
 
     /// The active scan profile.

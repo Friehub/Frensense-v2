@@ -18,6 +18,7 @@ use crate::analysis::taint::facts::FactTable;
 use crate::checks::{self, CheckerFinding};
 use crate::harness::lower_source_with_facts;
 use crate::ir::function::FunctionIR;
+use frensense_lang::spec::{Export, Import, ModuleItem};
 
 /// Scan a set of source files under a config and fact table.
 ///
@@ -50,6 +51,14 @@ pub struct PreparedProgram {
     pub file_aliases: FxHashMap<String, FxHashMap<String, String>>,
     pub file_package_imports:
         FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
+    /// Import declarations per file (see [`ModuleResolution`]).
+    ///
+    /// [`ModuleResolution`]: crate::graph::module::ModuleResolution
+    pub file_imports: FxHashMap<String, Vec<Import>>,
+    /// Export/re-export declarations per file, with visibility and kind.
+    pub file_exports: FxHashMap<String, Vec<Export>>,
+    /// Every top-level declaration per file, exported or not.
+    pub file_module_items: FxHashMap<String, Vec<ModuleItem>>,
 }
 
 /// Lower every file once, remembering which file each function came from
@@ -106,6 +115,9 @@ pub fn prepare_with_facts(
         file_source,
         file_aliases: res.file_aliases,
         file_package_imports: res.file_package_imports,
+        file_imports: res.file_imports,
+        file_exports: res.file_exports,
+        file_module_items: res.file_module_items,
     })
 }
 
@@ -116,6 +128,41 @@ impl PreparedProgram {
             .iter()
             .map(|(name, ir)| (name.clone(), ir))
             .collect()
+    }
+
+    /// Every file the program parsed, sorted.
+    ///
+    /// The module surface is the complete list (every parsed file gets an
+    /// entry, even one that declares no function); `file_source` is the
+    /// fallback for a program built before that layer ran.
+    #[must_use]
+    pub fn files(&self) -> Vec<&str> {
+        let mut files: Vec<&str> = if self.file_imports.is_empty() {
+            self.file_source.keys().map(String::as_str).collect()
+        } else {
+            self.file_imports.keys().map(String::as_str).collect()
+        };
+        files.sort_unstable();
+        files
+    }
+
+    /// The export surface of one file; empty when the file declares none or
+    /// its language has no export syntax the spec models.
+    #[must_use]
+    pub fn exports_of(&self, file: &str) -> &[Export] {
+        self.file_exports.get(file).map_or(&[], Vec::as_slice)
+    }
+
+    /// Every top-level declaration of one file, exported or not.
+    #[must_use]
+    pub fn module_items_of(&self, file: &str) -> &[ModuleItem] {
+        self.file_module_items.get(file).map_or(&[], Vec::as_slice)
+    }
+
+    /// The import declarations of one file.
+    #[must_use]
+    pub fn imports_of(&self, file: &str) -> &[Import] {
+        self.file_imports.get(file).map_or(&[], Vec::as_slice)
     }
 }
 
