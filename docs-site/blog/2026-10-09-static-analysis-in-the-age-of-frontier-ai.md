@@ -1,7 +1,7 @@
 ---
 written-against-version: 0.7.0
-fact-checked: "2026-10-22"
-source-revision: 87d2b7e-dirty
+fact-checked: "2026-10-24"
+source-revision: 8a0ef9d-dirty
 title: "Static Analysis in the Era of Frontier AI: Why LLMs Need Deterministic Oracles"
 date: 2026-10-09
 image: /covers/frontier-ai-sast.svg
