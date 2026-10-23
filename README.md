@@ -99,6 +99,49 @@ frensense . --profile strict
 The engine auto-discovers a `frensense-corpus.frc` in the project root, or you
 can pass `-b, --bundle <path>` to use any rule bundle.
 
+## CLI Flags Reference
+
+### Output & Reporting
+
+| Flag | Description |
+|------|-------------|
+| `-o, --output <file>` | Write findings to a file instead of stdout |
+| `--sarif` | Emit SARIF 2.1 JSON (for GitHub Code Scanning, IDE plugins) |
+| `--json` | Emit findings as newline-delimited JSON |
+| `--github` | Emit GitHub Actions workflow annotation commands (`::error`) |
+| `--quiet` | Suppress the scan summary; only print findings |
+
+### Scan Scope
+
+| Flag | Description |
+|------|-------------|
+| `-b, --bundle <file>` | Load a `.frc` rule bundle (overrides auto-discovery) |
+| `--diff-only` | Scan only files changed since the last git commit |
+| `--language <lang>` | Restrict scan to a single language (`typescript`, `python`, `go`, `rust`, `c`) |
+
+### Severity & Profile
+
+| Flag | Description |
+|------|-------------|
+| `--profile <name>` | Rule profile: `default`, `recommended`, or `strict`. `strict` enables all experimental rules and hygiene checks |
+| `--severity <level>` | Minimum severity to report: `low`, `medium`, `high`, `critical` |
+| `--hygiene` | Enable code hygiene checks (e.g. function complexity) under any profile without requiring `--profile strict` |
+| `--max-complexity <n>` | Override the cyclomatic complexity ceiling (default: 25). Automatically enables `--hygiene` |
+
+### Baseline & Regression Gating
+
+| Flag | Description |
+|------|-------------|
+| `--emit-baseline <file>` | Save current findings as a baseline snapshot to a JSON file |
+| `--compare-baseline <file>` | Fail only on findings absent from the saved baseline (regression gate) |
+| `--strict` | Exit with code 1 if any findings are reported (CI gate) |
+
+### Rule Explanation
+
+| Flag | Description |
+|------|-------------|
+| `--explain <rule-id>` | Print the rule reference for a given stable rule ID and exit |
+
 ## Security Rule Bundles (`.frc`) & Capability Datasheets
 
 Frensense uses compiled `.frc` rule bundles to expand analysis capabilities with framework-specific sources, sinks, sanitizers, and zero-day CVE reproductions.
