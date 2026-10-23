@@ -57,11 +57,11 @@ pub fn print_scan_summary(
     println!("  - Info:           {info}");
     println!("Total Findings:     {}", advisories.len());
     let status_label = if advisories.is_empty() {
-        "PASSED (Clean)"
+        "Clean"
     } else {
-        "FAILED (Security gate violated)"
+        "Findings reported"
     };
-    println!("Security Gate:      {status_label}");
+    println!("Status:             {status_label}");
     if let Some(out) = output_path {
         println!("Report File:        {}", out.display());
     }
