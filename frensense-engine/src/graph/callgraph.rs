@@ -304,14 +304,15 @@ impl<'a> CallGraphBuilder<'a> {
                                 }
                                 None => {
                                     // Unknown receiver (library object or
-                                    // unresolved import). External, but if a
-                                    // program function shares the bare name,
-                                    // keep it as a candidate too (sound).
-                                    if self.irs.contains_key(resolved_method) {
-                                        targets.push(CallTarget::Function(
-                                            resolved_method.to_string(),
-                                        ));
-                                    }
+                                    // unresolved import). Record the site as
+                                    // external ONLY: binding it to a program
+                                    // function that merely shares the bare
+                                    // method name (`client.get` -> a local
+                                    // `get` helper) fabricates interprocedural
+                                    // edges, pulling unrelated same-named
+                                    // functions into the taint walk. Bare-name
+                                    // binding here was the dominant
+                                    // false-positive source (docs/mre audit).
                                     external_name = Some(resolved_method.to_string());
                                 }
                             }
@@ -462,11 +463,13 @@ impl<'a> CallGraphBuilder<'a> {
                                         }
                                     }
                                     None => {
-                                        if self.irs.contains_key(method) {
-                                            Some(method.clone())
-                                        } else {
-                                            None
-                                        }
+                                        // Unknown receiver: never bind the
+                                        // callee by bare method name (same FP
+                                        // class as the pass-3 unknown-receiver
+                                        // arm). The callback edge still lands
+                                        // via the fn-ref argument when the
+                                        // receiving slot is known.
+                                        None
                                     }
                                 }
                             }

@@ -1,10 +1,18 @@
 ---
-title: "Teaching a Static Analyzer Like a Human: How We Made Frensense 100% Teachable"
+written-against-version: 0.7.0
+fact-checked: "2026-10-24"
+source-revision: 8a0ef9d-dirty
+title: "Teaching a Static Analyzer Like a Human: Learning Detection from Twin Examples"
 date: 2026-09-29
-description: How Frensense replaced fragile pattern rules and hardcoded engine updates with a compiler that learns security vulnerabilities directly from positive and negative examples.
+description: How Frensense replaced fragile pattern rules and hardcoded engine updates with a compiler that learns security vulnerabilities directly from positive and negative examples - and how every fact must prove itself before it ships.
 ---
 
-# Teaching a Static Analyzer Like a Human: How We Made Frensense 100% Teachable
+> **Provenance.** Written against Frensense 0.7.x; fact-checked on source
+> rev `d6cfd3f` (0.8.0-beta). Mechanism references:
+> `frensense-bundler/src/pipeline.rs`, `frensense-bundler/src/builder.rs`,
+> `docs/FRENSENSE_CORPUS_GUIDE.md`, `docs/TEACHABILITY.md`.
+
+# Teaching a Static Analyzer Like a Human: Learning Detection from Twin Examples
 
 If you want to train a junior security engineer to recognize a new vulnerability in your codebase, you do not perform brain surgery on them. You do not ask them to write a hundred lines of formal logic or wait six months for a textbook update.
 
@@ -15,11 +23,11 @@ Instead, you show them two examples:
 
 Within seconds, their brain extracts the key difference: which function was dangerous, what input was uncontrolled, and what security check neutralized the threat.
 
-For the past twenty years, static application security testing (SAST) has operated in the exact opposite manner. If a new library was released, or if your team adopted a modern framework like Next.js or FastAPI, you faced two painful options:
-- Learn a complex, proprietary query language (such as CodeQL or Semgrep DSL) and write intricate AST patterns by hand.
-- Wait for a commercial SAST vendor to release an engine update months later.
+For the past twenty years, static application security testing (SAST) has operated in the exact opposite manner. If a new library was released, or if your team adopted a modern framework like Next.js or FastAPI, you faced two real options:
+- First learn a query or pattern language new to your team (CodeQL's QL or Semgrep's rule DSL), then hand-author and maintain intricate AST patterns.
+- Wait for a vendor to release coverage for the new framework.
 
-Even worse, when custom rules were written, they were often dumb pattern matches. They alerted whenever a function name appeared, flooding developers with false positives because the rule could not tell whether the input was actually dangerous or already sanitized.
+Even worse, once custom rules exist they are usually kept by whoever wrote them; many encode a shape rather than the dataflow - they alert whenever a function name matches, whether or not the input is actually dangerous or already sanitized. Both CodeQL and Semgrep offer deeper taint machinery (more analysis types than Frensense ships), but someone must still write, review, and validate each rule.
 
 With Frensense v2, we solved this problem by decoupling the engine into two distinct systems:
 - **A Compiler-Grade Analysis Engine** (`frensense-engine`): It understands how data moves through variables, memory, function calls, and branch conditions, but contains zero hardcoded vendor rules.
@@ -108,12 +116,22 @@ frensense src/ --corpus-bundle nextjs.frc
 ```
 The scanner flagged the leak immediately, providing the exact variable path from server component to client rendering.
 
+**One authoring constraint worth being explicit about:** facts are matched
+by *call name* (the last segment of a call), so a family whose positive and
+negative differ only in a directive or a property - without a call whose
+presence/absence or guarding separates them - does not teach a fact. Aspect
+shaped like the RSC example above should anchor their trigger on a call
+(the data-crossing handler, or a serialization helper at the boundary).
+`provisional` facts (support of one family) ship but should be confirmed by
+a second independently authored family; the bundler prints the status of
+every fact it publishes, and `FXDBG=1` shows why a candidate was rejected.
+
 ---
 
 ## Why This Changes Static Analysis
 
 1. **Zero Rust Code Required**: Security teams do not need to understand Rust, compiler ASTs, or control-flow graphs. If you can write the bug and its fix in your application's native language (Python, TypeScript, Go, C), you can teach Frensense.
 2. **Deterministic & Portable**: Knowledge bundles (`.frc`) are lightweight, versioned, checksummed binary files. You can commit them to your repository, share them across microservices, or load them directly into your CI/CD pipeline.
-3. **No False-Positive Creep**: Because every learned fact must prove that it separates the vulnerable code from the safe code during replay verification, rules cannot be published if they flag safe code.
+3. **False positives are bounded by the corpus, not by hope**: every learned fact must prove, at build time over the corpus it was mined from, that it separates the vulnerable code from the safe code. That is a specific, checkable guarantee - "does not fire on the negatives this family demonstrates" - not a claim of universal zero false positives on code you never showed it. The strength of a bundle scales with how many twins its families carry (more negatives per family = a stricter gate), and the `provisional`/`confirmed` status printed at build time tells you how much support each fact has.
 
 The engine provides the reasoning power; your team provides the examples. That is how static analysis keeps pace with modern engineering.

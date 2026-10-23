@@ -5,7 +5,7 @@
 //! Bundle construction: corpus pairs → replay-verified facts → `.frc` bytes.
 
 use crate::fact_extract::{extract_facts, group_families};
-use crate::format::{write_bundle, BundlePattern, BundlePayloadV6};
+use crate::format::{write_bundle_pinned, BundlePattern, BundlePayloadV6, EngineRequirement};
 
 /// §9 pipeline: corpus pairs → replay-verified learned facts → bundle bytes.
 ///
@@ -67,6 +67,13 @@ pub fn build_facts_bundle(
         policy_pack: Vec::new(),
     };
     let _ = learned_table;
-    let bytes = write_bundle(&payload, count)?;
+
+    // A corpus bundle is meant to be handed to other people's scanners, so it
+    // declares the engine series its families were replay-gated against.
+    // Bundles without the range still load (the strict vocabulary fingerprint
+    // is always checked), but a distribution that can say "this targets 0.9"
+    // should.
+    let engine = EngineRequirement::parse_triple(frensense_engine::VERSION).unwrap_or([0, 0, 0]);
+    let bytes = write_bundle_pinned(&payload, count, EngineRequirement::same_series(engine))?;
     Ok((bytes, published))
 }

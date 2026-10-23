@@ -286,6 +286,135 @@ pub enum LearnedFactEntry {
         /// Only fire in files that import this package.
         package: String,
     },
+    /// Global-only builtin sink marker (appended last: bincode encodes the
+    /// variant index first, so existing wire bytes keep decoding unchanged).
+    /// Marks the language's already-published `LanguageSink` entry with the
+    /// `global_only` runtime flag: the bare call form is the sink, while a
+    /// receiver-qualified call (`engine.eval(x)`) matches only once its
+    /// origin resolves to a known package (WI-12).
+    LanguageSinkGlobalOnly { language: String, call: String },
+    /// Appended last (bincode encodes the variant index first, so existing
+    /// wire bytes keep decoding unchanged): the SAME rule as
+    /// `IntegerOverflowRule` with the unbounded-operand modality taught -
+    /// the engine may fire on a size multiplication whose BOTH operands
+    /// are unboundedly dynamic (`malloc(rows * cols)` CVE-190 shape).
+    /// New intent must be added as its own trailing variant; never insert
+    /// a variant before an established one.
+    IntegerOverflowUnboundedRule {
+        rule: String,
+        wrap_threshold: u128,
+        severity: String,
+        message: String,
+    },
+}
+
+impl LearnedFactEntry {
+    /// Variant names in wire order: the serialization contract for `.frc`
+    /// bundles (bincode writes the variant index first). Appending a
+    /// variant changes
+    /// [`fact_vocabulary_fingerprint`](super::fact_vocabulary_fingerprint),
+    /// which invalidates every bundle built against the old vocabulary -
+    /// that is the point: a bundle that uses a variant an older binary does
+    /// not know must be rebuilt instead of misdecoded.
+    ///
+    /// The ratchet test in `vocabulary.rs` fails if this list and
+    /// [`Self::wire_index`] disagree, so a new variant cannot arrive
+    /// silently.
+    pub const VARIANT_TAGS: [&'static str; 42] = [
+        "source",
+        "sink",
+        "sanitizer",
+        "policy",
+        "check",
+        "memory_contract",
+        "weak_crypto",
+        "guard_bypass",
+        "schema_policy",
+        "grammar_role",
+        "grammar_feature",
+        "allocator",
+        "deallocator",
+        "idor_finder_sink",
+        "idor_key",
+        "propagator",
+        "guard_denylist_pattern",
+        "integer_overflow_rule",
+        "hints",
+        "weak_primitive_rule",
+        "insecure_config_rule",
+        "key_size_rule",
+        "suspicious_hash_wrappers",
+        "buffer_builtin",
+        "language_sink",
+        "language_sink_slots",
+        "language_idor_sink",
+        "language_source",
+        "language_sanitizer",
+        "language_propagator",
+        "language_session_root",
+        "language_route_pattern",
+        "stack_allocators",
+        "collection_constructors",
+        "schema_describe_methods",
+        "null_tokens",
+        "session_accessors",
+        "receiver_params",
+        "language_ambiguous_verbs",
+        "policy_scoped",
+        "language_sink_global_only",
+        "integer_overflow_unbounded_rule",
+    ];
+
+    /// Wire index of this variant. Exhaustive on purpose: adding a variant
+    /// is a compile error here, which is the reminder to append its tag to
+    /// [`Self::VARIANT_TAGS`] (the ratchet test fails until it is).
+    #[must_use]
+    pub fn wire_index(&self) -> usize {
+        match self {
+            LearnedFactEntry::Source { .. } => 0,
+            LearnedFactEntry::Sink { .. } => 1,
+            LearnedFactEntry::Sanitizer { .. } => 2,
+            LearnedFactEntry::Policy { .. } => 3,
+            LearnedFactEntry::Check { .. } => 4,
+            LearnedFactEntry::MemoryContract { .. } => 5,
+            LearnedFactEntry::WeakCrypto(_) => 6,
+            LearnedFactEntry::GuardBypass(_) => 7,
+            LearnedFactEntry::SchemaPolicy(_) => 8,
+            LearnedFactEntry::GrammarRole { .. } => 9,
+            LearnedFactEntry::GrammarFeature { .. } => 10,
+            LearnedFactEntry::Allocator { .. } => 11,
+            LearnedFactEntry::Deallocator { .. } => 12,
+            LearnedFactEntry::IdorFinderSink { .. } => 13,
+            LearnedFactEntry::IdorKey { .. } => 14,
+            LearnedFactEntry::Propagator { .. } => 15,
+            LearnedFactEntry::GuardDenylistPattern { .. } => 16,
+            LearnedFactEntry::IntegerOverflowRule { .. } => 17,
+            LearnedFactEntry::Hints { .. } => 18,
+            LearnedFactEntry::WeakPrimitiveRule { .. } => 19,
+            LearnedFactEntry::InsecureConfigRule { .. } => 20,
+            LearnedFactEntry::KeySizeRule { .. } => 21,
+            LearnedFactEntry::SuspiciousHashWrappers { .. } => 22,
+            LearnedFactEntry::BufferBuiltin { .. } => 23,
+            LearnedFactEntry::LanguageSink { .. } => 24,
+            LearnedFactEntry::LanguageSinkSlots { .. } => 25,
+            LearnedFactEntry::LanguageIdorSink { .. } => 26,
+            LearnedFactEntry::LanguageSource { .. } => 27,
+            LearnedFactEntry::LanguageSanitizer { .. } => 28,
+            LearnedFactEntry::LanguagePropagator { .. } => 29,
+            LearnedFactEntry::LanguageSessionRoot { .. } => 30,
+            LearnedFactEntry::LanguageRoutePattern { .. } => 31,
+            LearnedFactEntry::StackAllocators { .. } => 32,
+            LearnedFactEntry::CollectionConstructors { .. } => 33,
+            LearnedFactEntry::SchemaDescribeMethods { .. } => 34,
+            LearnedFactEntry::NullTokens { .. } => 35,
+            LearnedFactEntry::SessionAccessors { .. } => 36,
+            LearnedFactEntry::ReceiverParams { .. } => 37,
+            LearnedFactEntry::LanguageAmbiguousVerbs { .. } => 38,
+            LearnedFactEntry::PolicyScoped { .. } => 39,
+            LearnedFactEntry::LanguageSinkGlobalOnly { .. } => 40,
+            LearnedFactEntry::IntegerOverflowUnboundedRule { .. } => 41,
+        }
+    }
 }
 
 impl LearnedFactEntry {
@@ -359,6 +488,7 @@ impl LearnedFactEntry {
                     package: package.clone(),
                     dangerous_args: dangerous_args.clone(),
                     binding_args_safe: *binding_args_safe,
+                    global_only: false,
                     idor_keys,
                     role,
                     label,
@@ -576,6 +706,7 @@ impl LearnedFactEntry {
                     package: None,
                     dangerous_args: std::collections::BTreeSet::new(),
                     binding_args_safe: false,
+                    global_only: false,
                     // Per-call keys when taught; otherwise the learned global
                     // identity keys (no engine built-in fallback - vocabulary
                     // is spec/bundle-owned, empty disables the gate).
@@ -614,12 +745,24 @@ impl LearnedFactEntry {
                 wrap_threshold,
                 severity,
                 message,
+            }
+            | LearnedFactEntry::IntegerOverflowUnboundedRule {
+                rule,
+                wrap_threshold,
+                severity,
+                message,
             } => {
                 let fact = IntegerOverflowRule {
                     rule_id: rule.clone(),
                     wrap_threshold: *wrap_threshold,
                     severity: severity.clone(),
                     message: message.clone(),
+                    // The trailing wire variant carries the modality; the
+                    // base variant keeps the provable-range contract.
+                    unbounded_product: matches!(
+                        self,
+                        LearnedFactEntry::IntegerOverflowUnboundedRule { .. }
+                    ),
                 };
                 if let Some(existing) = table.integer_overflow_rules.iter_mut().find(|(r, _)| {
                     r.rule_id == fact.rule_id && r.wrap_threshold == fact.wrap_threshold
@@ -640,6 +783,9 @@ impl LearnedFactEntry {
                     HintKind::AuthGuard => &mut table.auth_guard_hints,
                     HintKind::JwtAlgorithm => &mut table.jwt_algorithm_hints,
                     HintKind::CredentialContext => &mut table.credential_context_hints,
+                    HintKind::KdfReceiver => &mut table.kdf_receiver_hints,
+                    HintKind::PreparedStatementPrefix => &mut table.prepared_statement_prefixes,
+                    HintKind::WeakHashDisclaimer => &mut table.weak_hash_disclaimer_tokens,
                 };
                 set.extend(values.iter().cloned());
             }
@@ -756,6 +902,7 @@ impl LearnedFactEntry {
             // ignores it so a family bundle can never pollute another
             // language's tables.
             LearnedFactEntry::LanguageSink { .. }
+            | LearnedFactEntry::LanguageSinkGlobalOnly { .. }
             | LearnedFactEntry::LanguageSinkSlots { .. }
             | LearnedFactEntry::LanguageIdorSink { .. }
             | LearnedFactEntry::LanguageSource { .. }

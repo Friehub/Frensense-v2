@@ -25,24 +25,68 @@ if [ -n "$STAGED_TEXT" ]; then
 fi
 
 # 1. Formatting Check
-echo "[CHECK 1/3] Verifying code formatting..."
+echo "[CHECK 1/6] Verifying code formatting..."
 if ! cargo fmt --all -- --check; then
     echo "[FAIL] Code formatting check failed. Run 'cargo fmt' to fix."
     FAILURES=$((FAILURES + 1))
 fi
 
 # 2. Clippy Semantic Lints (same flags as CI: warnings are errors)
-echo "[CHECK 2/3] Running workspace lints (clippy, warnings are errors)..."
+echo "[CHECK 2/6] Running workspace lints (clippy, warnings are errors)..."
 if ! cargo clippy --all-features --all-targets -- -D warnings; then
     echo "[FAIL] Clippy found warnings or errors."
     FAILURES=$((FAILURES + 1))
 fi
 
 # 3. Fast Unit Tests (lib + bins only; the full suite runs in local-ci.sh / CI)
-echo "[CHECK 3/3] Running workspace unit tests (lib + bins)..."
+echo "[CHECK 3/6] Running workspace unit tests (lib + bins)..."
 if ! cargo test --workspace --lib --bins; then
     echo "[FAIL] Workspace unit tests failed."
     FAILURES=$((FAILURES + 1))
+fi
+
+# 4. Release graph validation (dry-run; hard gate in CI, soft here so a
+#    missing toolchain never blocks a commit). Catches inconsistent
+#    inter-crate version requirements before they reach a release.
+echo "[CHECK 4/6] Validating release graph (cargo smart-release)..."
+if command -v cargo-smart-release >/dev/null 2>&1; then
+    if ! cargo smart-release \
+        --bump keep --bump-dependencies keep \
+        --no-changelog --no-changelog-preview --no-changelog-github-release \
+        --no-tag --no-push \
+        frensense >/dev/null 2>&1; then
+        echo "[FAIL] Release graph validation failed. Run 'cargo smart-release --bump keep' to see why."
+        FAILURES=$((FAILURES + 1))
+    fi
+else
+    echo "[SKIP] cargo-smart-release not installed (hard gate runs in CI)."
+fi
+
+# 5. Corpus lint (hard gate, as in CI): a family that fails lint would teach
+#    the engine the wrong thing, so it must not be committed. Runs only when
+#    the commit touches corpus families or the class registry - an ordinary
+#    code commit pays nothing.
+STAGED_CORPUS=$(git diff --cached --name-only --diff-filter=ACM \
+    | grep -E '^corpus/.*(_positive|_negative|bug_classes\.json|advisories\.json)' || true)
+if [ -n "$STAGED_CORPUS" ]; then
+    echo "[CHECK 5/6] Linting staged corpus families..."
+    if ! ./scripts/corpus-lint.sh; then
+        echo "[FAIL] Corpus lint rejected a family. Fix it before committing."
+        FAILURES=$((FAILURES + 1))
+    fi
+else
+    echo "[SKIP] Corpus lint: no corpus family or registry staged."
+fi
+
+# 6. Blog provenance (warn-only here; CI runs it with --strict). Only when
+#    blog files are staged, so ordinary code commits stay quiet.
+STAGED_BLOGS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^docs-site/blog/.*\.md$' || true)
+if [ -n "$STAGED_BLOGS" ]; then
+    if ! python3 scripts/blog_provenance.py check --strict; then
+        echo "[WARN] Blog provenance is stale. Reproduce the audit, then run:"
+        echo "       python3 scripts/blog_provenance.py stamp"
+        echo "       (commit is not blocked; the pre-deploy gate enforces this strictly)."
+    fi
 fi
 
 if [ "$FAILURES" -gt 0 ]; then

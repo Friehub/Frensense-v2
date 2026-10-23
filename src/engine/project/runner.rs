@@ -51,49 +51,18 @@ impl Engine {
             files.push((p.to_string_lossy().into_owned(), content, ext));
         }
 
-        // Built-in config + fact table from the language specs present.
-        let (mut config, mut facts) = build_spec_tables(&files);
-
-        // Default pack (D1/5.2): spec knowledge re-shipped as an embedded
-        // .frc, merged with Spec provenance between the spec seed and the
-        // consumer bundle so bundle facts still win (spec -> pack ->
-        // consumer, last-wins).
-        let pack_entries = frensense_bundler::format::default_pack()
-            .learned_facts
-            .as_slice();
-        facts.merge(&fact_table_from_entries_with(
-            pack_entries,
-            Provenance::Spec,
-        ));
-        // Phase 6.2: the pack's language-keyed sections install into config
-        // and facts together, filtered to the scanned languages, at the
-        // same pack layer. Since Phase 6.2d the spec seed carries none of
-        // this provider knowledge, so this install is its sole source. Must
-        // run before the consumer bundle merge so Learned facts still win.
-        let scanned_langs = languages_for_exts(files.iter().map(|(_, _, ext)| ext.as_str()));
-        apply_language_entries(&mut config, &mut facts, pack_entries, &scanned_langs);
-
-        // Merge learned facts from the .frc bundle, if any, and index the
-        // bundle's per-family advisory patterns by the finding identities
-        // they apply to (`BundlePattern::rules`) for the advisory path.
+        // Consumer bundle (if any): loaded once; its advisory patterns are
+        // indexed by the finding identities they apply to
+        // (`BundlePattern::rules`) and its learned facts are installed per
+        // language group below.
         let mut bundle_advisories: rustc_hash::FxHashMap<
             String,
             frensense_bundler::format::BundlePattern,
         > = rustc_hash::FxHashMap::default();
+        let mut loaded_bundle = None;
         if let Some(bundle_bytes) = self.load_bundle_bytes(root)? {
             match frensense_bundler::format::load_bundle(bundle_bytes) {
                 Ok(loaded) => {
-                    // Consumer-bundle language sections install through
-                    // apply_language_entries filtered to scanned languages
-                    // before bare merge so Learned facts still win over Spec
-                    // and foreign-language bundle facts do not leak.
-                    apply_language_entries(
-                        &mut config,
-                        &mut facts,
-                        &loaded.learned_facts,
-                        &scanned_langs,
-                    );
-                    facts.merge(&fact_table_from_entries(&loaded.learned_facts));
                     for pattern in &loaded.patterns {
                         for rule in &pattern.rules {
                             bundle_advisories
@@ -101,6 +70,7 @@ impl Engine {
                                 .or_insert_with(|| pattern.clone());
                         }
                     }
+                    loaded_bundle = Some(loaded);
                 }
                 Err(e) => {
                     tracing::warn!("failed to load corpus bundle: {e}");
@@ -108,13 +78,62 @@ impl Engine {
             }
         }
 
-        // Bundle-learned source patterns widen the taint config: the bundle
-        // teaches new framework sources without touching the built-in tables.
-        for pattern in facts.source_patterns() {
-            config.sources.insert(pattern.to_string());
+        // One scan per language family. Sink, source and sanitizer
+        // vocabularies are keyed by bare names (`create`, `run`, `context`),
+        // so merging every language's tables into one config made Rust's
+        // `File::create` a sink for every TypeScript `.create(...)` and a JS
+        // parameter named `context` a source in Go. Flows never cross a
+        // language boundary in the IR (there is no FFI model), so
+        // partitioning loses nothing. JavaScript and TypeScript share one
+        // family because they import each other.
+        let mut groups: std::collections::BTreeMap<&'static str, Vec<(String, String, String)>> =
+            std::collections::BTreeMap::new();
+        for f in &files {
+            if let Some(spec) = frensense_lang::spec_for_ext(&f.2) {
+                let family = match spec.name() {
+                    "javascript" | "typescript" => "javascript",
+                    other => other,
+                };
+                groups.entry(family).or_default().push(f.clone());
+            }
         }
-
-        let result = scan::scan(&files, &config, &facts);
+        let pack_entries = frensense_bundler::format::default_pack()
+            .learned_facts
+            .as_slice();
+        let mut result = scan::ScanResult::default();
+        for group in groups.values() {
+            // Built-in config + fact table from the language spec present.
+            let (mut config, mut facts) = build_spec_tables(group);
+            // Default pack (D1/5.2): spec knowledge re-shipped as an
+            // embedded .frc, merged with Spec provenance between the spec
+            // seed and the consumer bundle so bundle facts still win.
+            facts.merge(&fact_table_from_entries_with(
+                pack_entries,
+                Provenance::Spec,
+            ));
+            let scanned_langs = languages_for_exts(group.iter().map(|(_, _, ext)| ext.as_str()));
+            apply_language_entries(&mut config, &mut facts, pack_entries, &scanned_langs);
+            if let Some(loaded) = &loaded_bundle {
+                apply_language_entries(
+                    &mut config,
+                    &mut facts,
+                    &loaded.learned_facts,
+                    &scanned_langs,
+                );
+                facts.merge(&fact_table_from_entries(&loaded.learned_facts));
+            }
+            // Bundle-learned source patterns widen the taint config.
+            for pattern in facts.source_patterns() {
+                config.sources.insert(pattern.to_string());
+            }
+            facts.max_complexity = self.max_complexity;
+            let part = scan::scan(group, &config, &facts);
+            result.findings.extend(part.findings);
+            result.located.extend(part.located);
+            result.located_checker.extend(part.located_checker);
+            result.checker.extend(part.checker);
+            result.errors.extend(part.errors);
+        }
         for err in &result.errors {
             tracing::warn!("scan error: {err}");
         }
@@ -154,7 +173,14 @@ impl Engine {
         let mut candidates: Vec<&_> = Vec::new();
         for loc in &result.located {
             let f = &loc.finding;
-            if !crate::reporting::reports_finding(f) {
+            if !crate::policy::reports_finding(f) {
+                // --explain: record every silent sink argument so users can
+                // see where the engine looked and stayed quiet (why).
+                if self.explain
+                    && let Some(rec) = crate::explain::explain_silent(loc)
+                {
+                    self.explain_records.push(rec);
+                }
                 continue;
             }
             let key = (
@@ -182,14 +208,21 @@ impl Engine {
                 loc.column,
                 crate::engine::project::Engine::next_file_id(seq),
                 &bundle_advisories,
+                self.show_flows,
             ));
         }
 
-        Ok(crate::reporting::apply(
+        let (surviving, hidden) = crate::policy::apply_with_profile_and_hygiene(
             advisories,
             self.min_confidence,
             self.severity_filter,
-        ))
+            self.profile,
+            self.enable_hygiene,
+        );
+        for (tier, count) in hidden {
+            *self.hidden_by_tier.entry(tier).or_insert(0) += count;
+        }
+        Ok(surviving)
     }
 
     fn load_bundle_bytes(&self, root: &Path) -> Result<Option<&'static [u8]>> {
@@ -226,8 +259,12 @@ fn build_spec_tables(files: &[(String, String, String)]) -> (TaintConfig, FactTa
 /// the finding keeps the registry's severity.
 fn corpus_severity(raw: &str) -> Option<crate::Severity> {
     match raw.trim().to_ascii_lowercase().as_str() {
-        "critical" | "high" => Some(crate::Severity::Critical),
-        "medium" => Some(crate::Severity::Warning),
+        "critical" => Some(crate::Severity::Critical),
+        // The CLI's advisory ladder is 3-tier (critical / warning / info):
+        // a CVSS `high` (7.0-8.9) ranks below `critical` (9.0+), so it
+        // shares the `warning` tier with `medium` instead of collapsing
+        // into the top tier.
+        "high" | "medium" => Some(crate::Severity::Warning),
         "low" => Some(crate::Severity::Info),
         _ => None,
     }
@@ -338,7 +375,9 @@ fn advisory_from_checker(
     } else {
         sanitize_corpus_provenance(&observation)
     };
+    let tier = frensense_lang::severity::checker_rule_tier(&c.rule);
     let mut advisory = Advisory::bare(title, severity, file_id, path, observation)
+        .with_tier(tier)
         .with_confidence(1.0)
         .with_line(line)
         .with_column(column)
@@ -350,6 +389,33 @@ fn advisory_from_checker(
     if let Some(p) = pattern {
         apply_bundle_pattern(&mut advisory, p);
     }
+    // Built-in classification tag: the rule registry's CWE, unless the
+    // bundle overlay already stamped one (corpus-authored id wins).
+    let card = frensense_lang::rule_card::checker_card(&c.rule);
+    if !advisory.tags.iter().any(|t| t.starts_with("CWE-"))
+        && let Some(card) = card
+    {
+        advisory
+            .tags
+            .extend(card.cwe.iter().map(|w| (*w).to_string()));
+    }
+    // Rules with a card but no language-registry entry fall back to the
+    // generic "Policy violation: <id>" prose; the card replaces it with
+    // the class name and class-specific advice.
+    if let Some(card) = card
+        && advisory.title.starts_with("Policy violation:")
+    {
+        advisory.title = card.title.to_string();
+        advisory.impact = card.why.to_string();
+        advisory.improvement = card.fix.to_string();
+    }
+    advisory.rule_id = match card {
+        Some(card) => card.id.to_string(),
+        None => format!(
+            "policy.{}",
+            c.rule.trim_start_matches("policy_").replace('_', "-")
+        ),
+    };
     advisory.requires_human = false;
     advisory.fingerprint = stable_fingerprint(&[file, &c.rule, &c.function]);
     advisory
@@ -363,6 +429,7 @@ fn advisory_from_finding(
     column: u32,
     file_id: crate::FileId,
     bundle_advisories: &rustc_hash::FxHashMap<String, frensense_bundler::format::BundlePattern>,
+    show_flows: bool,
 ) -> Advisory {
     let src = f.source_desc.as_deref().unwrap_or("user input");
     let path = Path::new(file);
@@ -378,35 +445,43 @@ fn advisory_from_finding(
             frensense_lang::severity::TaintClass::Injection
         }
     };
-    let (severity, title) = frensense_lang::severity::taint_advisory(
+    let (severity, _generic_title) = frensense_lang::severity::taint_advisory(
         class,
         f.role.default_level(),
         class_tag,
         &f.sink,
         src,
     );
-    let flow = crate::reporter::render_taint_path(&f.path);
-    let observation = format!(
-        "Tainted value from `{src}` flows to sink `{}` (argument {}) in function `{}`.\nTaint path:\n{}",
-        f.sink,
-        f.arg_slot,
-        f.function,
-        flow.trim_end()
+    let card = frensense_lang::rule_card::taint_card(
+        f.label.as_deref(),
+        f.role,
+        matches!(class, frensense_lang::severity::TaintClass::Idor),
     );
+    let title = format!("{}: `{src}` reaches `{}`", card.title, f.sink);
+    // Human-facing path: compacted (adjacent def/use duplicates collapsed,
+    // bare SSA hops merged) so the rendered flow is readable; the raw path
+    // still feeds shape-based dedup above. Always materialized: those steps
+    // are the flow-path default (WI-54), carried in the JSON/SARIF finding
+    // (`taint_steps` / SARIF `codeFlows`) so agents act on the trace. The
+    // TEXT observation embeds the path only under `--show-flows`, keeping
+    // the clean text report terse.
+    let rendered_path = f.path.compacted();
+    let flow_summary = format!("`{src}` flows to `{}` (argument {}).", f.sink, f.arg_slot);
+    let observation = if show_flows {
+        let flow = crate::reporter::render_taint_path(&rendered_path);
+        format!("{flow_summary}\nTaint path:\n{}", flow.trim_end())
+    } else {
+        flow_summary
+    };
     let mut advisory = Advisory::bare(title, severity, file_id, path, observation)
         .with_confidence(1.0)
         .with_line(line)
         .with_column(column)
         .with_content(f.function.clone())
         .with_enclosing_symbol(f.function.clone())
-        .with_impact(format!(
-            "Unsanitized data from `{src}` reaches the `{}` sink at {}:{}.",
-            f.sink, file, line
-        ))
-        .with_improvement(format!(
-            "Sanitize `{src}` before it reaches `{}` in `{}`.",
-            f.sink, f.function
-        ))
+        .with_impact(card.why)
+        .with_improvement(card.fix)
+        .with_rule_id(card.id)
         .with_tags(["taint", class_tag]);
     if let Some(lbl) = f.label.as_deref() {
         advisory.tags.push(lbl.to_string());
@@ -416,21 +491,31 @@ fn advisory_from_finding(
     if let Some(pattern) = bundle_advisories.get(&f.sink) {
         apply_bundle_pattern(&mut advisory, pattern);
     }
+    // Built-in classification: the rule card's CWEs, unless the bundle
+    // overlay already stamped one (corpus-authored id wins).
+    if !advisory.tags.iter().any(|t| t.starts_with("CWE-")) {
+        advisory
+            .tags
+            .extend(card.cwe.iter().map(|w| (*w).to_string()));
+    }
     advisory.requires_human = false;
-    // Taint path steps (source→sink) for SARIF codeFlows / rich clients.
-    advisory.taint_steps = f
-        .path
-        .steps
-        .iter()
-        .zip(&f.path.spans)
-        .map(|(step, span)| {
-            (
-                crate::reporter::describe_path_step(step),
-                span.as_ref()
-                    .map(|(file, (start, _))| (file.clone(), *start)),
-            )
-        })
-        .collect();
+    // Taint path steps (source→sink) for SARIF codeFlows / rich clients,
+    // from the same compacted path the text observation may embed (WI-54:
+    // default-on in JSON/SARIF; agents act on the trace).
+    advisory.taint_steps = {
+        rendered_path
+            .steps
+            .iter()
+            .zip(rendered_path.spans.iter())
+            .map(|(step, span)| {
+                (
+                    crate::reporter::describe_step(step, span.as_ref()),
+                    span.as_ref()
+                        .map(|(file, (start, _))| (file.clone(), *start)),
+                )
+            })
+            .collect()
+    };
     advisory.fingerprint = stable_fingerprint(&[file, f.sink.as_str(), f.function.as_str(), src]);
     advisory
 }
@@ -514,23 +599,21 @@ mod shape_dedup_tests {
     /// `resolved` of them carry spans. Identical step sequence + tag
     /// produces an identical shape_id (variable numbers are ignored).
     fn located(file: &str, line: u32, steps: usize, resolved: usize, tag: &str) -> LocatedFinding {
-        let finding = SinkFinding {
-            function: "handler".to_string(),
-            sink: "exec".to_string(),
-            arg_slot: 0,
-            alert: Some(SinkAlert {
+        let finding = SinkFinding::builder()
+            .function("handler")
+            .sink("exec")
+            .arg_slot(0)
+            .alert(Some(SinkAlert {
                 sink: "exec".to_string(),
                 slot: 0,
                 function: "handler".to_string(),
                 class: FindingClass::Injection,
-            }),
-            verdict: BackwardVerdict::Vulnerable,
-            finding_class: FindingClass::Injection,
-            role: SinkRole::Execution,
-            label: None,
-            source_desc: Some(format!("source-{tag}")),
-            sink_span: None,
-            path: TaintPath {
+            }))
+            .verdict(BackwardVerdict::Vulnerable)
+            .finding_class(FindingClass::Injection)
+            .role(SinkRole::Execution)
+            .source_desc(Some(format!("source-{tag}")))
+            .path(TaintPath {
                 steps: (0..steps)
                     .map(|i| PathStep::Assignment {
                         function: format!("f{tag}"),
@@ -546,8 +629,8 @@ mod shape_dedup_tests {
                         }
                     })
                     .collect(),
-            },
-        };
+            })
+            .build();
         LocatedFinding {
             finding,
             file: file.to_string(),
@@ -609,6 +692,24 @@ mod checker_observation_tests {
         Engine::new().run(&dir.join(file)).expect("scan")
     }
 
+    /// The origin step carries its location into the advisory, so SARIF's
+    /// first codeFlow step is a real region rather than `location: null`.
+    #[test]
+    fn taint_steps_locate_the_origin() {
+        let advisories = scan_temp(
+            "origin",
+            "app.py",
+            "import os\nfrom flask import request\n\ndef run():\n    os.system(request.args['c'])\n",
+        );
+        let a = advisories
+            .iter()
+            .find(|a| a.rule_id.starts_with("taint."))
+            .expect("taint finding");
+        let (desc, location) = a.taint_steps.first().expect("origin step");
+        assert!(desc.starts_with("source:"), "{desc}");
+        assert!(location.is_some(), "origin step has no location: {desc}");
+    }
+
     #[test]
     fn bare_weak_hash_renders_lang_observation() {
         let advisories = scan_temp(
@@ -622,8 +723,12 @@ mod checker_observation_tests {
             "Weak hash function `md5`, not acceptable for passwords or security-sensitive \
              digests (use bcrypt/argon2/scrypt or SHA-256+)"
         );
-        assert_eq!(advisories[0].title, "Policy violation: weak_hash (digest)");
-        assert_eq!(advisories[0].tags, ["checker", "weak_hash", "policy"]);
+        assert_eq!(advisories[0].title, "Weak hash function");
+        assert_eq!(advisories[0].rule_id, "check.weak-hash");
+        assert_eq!(
+            advisories[0].tags,
+            ["checker", "weak_hash", "policy", "CWE-328"]
+        );
     }
 
     #[test]
@@ -666,6 +771,32 @@ mod checker_observation_tests {
              wrapper."
         );
     }
+
+    #[test]
+    fn taint_finding_carries_stable_rule_id_cwe_and_card_advice() {
+        let advisories = scan_temp(
+            "taint-card",
+            "app.py",
+            "import os\nfrom flask import request\n\ndef run():\n    os.system(request.args['c'])\n",
+        );
+        let a = advisories
+            .iter()
+            .find(|a| a.rule_id.starts_with("taint."))
+            .expect("taint finding");
+        assert_eq!(a.rule_id, "taint.command-injection");
+        assert_eq!(a.cwe(), ["CWE-78"]);
+        assert!(a.title.starts_with("OS command injection: "), "{}", a.title);
+        assert!(
+            a.improvement.contains("without a shell"),
+            "{}",
+            a.improvement
+        );
+        assert!(
+            !a.rule_id.contains(' ') && !a.rule_id.contains('`'),
+            "rule id must not contain finding text: {}",
+            a.rule_id
+        );
+    }
 }
 
 #[cfg(test)]
@@ -701,7 +832,7 @@ mod bundle_pattern_tests {
             cwe: Some("CWE-79".to_string()),
             cvss: Some(7.5),
             owasp: Some("A03:2021".to_string()),
-            severity: Some("High".to_string()),
+            severity: Some("Critical".to_string()),
             rules: rules.iter().map(|r| r.to_string()).collect(),
         }
     }
@@ -717,7 +848,9 @@ mod bundle_pattern_tests {
     #[test]
     fn corpus_severity_maps_cvss_labels_to_tiers() {
         assert_eq!(corpus_severity("critical"), Some(Severity::Critical));
-        assert_eq!(corpus_severity("High"), Some(Severity::Critical));
+        // CVSS `high` ranks below critical; the 3-tier advisory ladder
+        // puts it with `medium` on the warning tier.
+        assert_eq!(corpus_severity("High"), Some(Severity::Warning));
         assert_eq!(corpus_severity("medium"), Some(Severity::Warning));
         assert_eq!(corpus_severity("Low"), Some(Severity::Info));
         assert_eq!(corpus_severity("Bogus"), None);

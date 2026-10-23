@@ -93,6 +93,7 @@ pub mod callgraph_tests {
                     mem_in: caller.initial_memory_state,
                     func_ptr: Operand::Var(h),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -145,6 +146,7 @@ pub mod callgraph_tests {
                     receiver: Operand::Var(db),
                     method: "query".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -163,6 +165,65 @@ pub mod callgraph_tests {
             sites
         );
         let _ = database;
+    }
+
+    // -------------------------------------------------------------------
+    // 2b. Unknown receiver: `client.get(...)` must NOT bind to an
+    // unrelated program function that merely shares the bare method name.
+    // The bare-name binding fabricated interprocedural edges into
+    // unrelated same-named functions (the dominant false-positive source
+    // in the docs/mre audit); the site stays an unresolved external call.
+    // -------------------------------------------------------------------
+    #[test]
+    fn test_unknown_receiver_not_bound_by_bare_name() {
+        // Unrelated program function that happens to share the method name.
+        let mut get = FunctionIR::new("get".into());
+        {
+            let b = get.entry_block;
+            get.set_terminator(b, Terminator::Return { src: None });
+        }
+
+        let mut caller = FunctionIR::new("caller".into());
+        {
+            let b = caller.entry_block;
+            // `client` is a plain binding, not a `new Class()` allocation:
+            // its receiver class is unresolvable.
+            let client = caller.new_var(dummy_meta("client"));
+            let r = caller.new_var(dummy_meta("r"));
+            let mem = caller.new_var(dummy_meta("m"));
+            caller.push_instruction(
+                b,
+                Instruction::CallVirtual {
+                    dest: Some(r),
+                    mem_out: mem,
+                    mem_in: caller.initial_memory_state,
+                    receiver: Operand::Var(client),
+                    method: "get".into(),
+                    args: vec![],
+                    arg_names: Vec::new(),
+                },
+            );
+            caller.set_terminator(b, Terminator::Return { src: None });
+        }
+
+        let irs = build_graph(vec![get, caller]);
+        let cg = CallGraphBuilder::new(&irs).build();
+
+        let block = irs["caller"].entry_block.0;
+        // The CallVirtual is the block's only instruction (index 0).
+        let site = ("caller".to_string(), (block, 0));
+        let sites = cg.targets_at("caller", block, 0);
+        assert!(
+            sites.is_empty(),
+            "unknown receiver must not bind any internal target (the bare\n\
+             name `get` belongs to an unrelated program function); got {:?}",
+            sites
+        );
+        assert_eq!(
+            cg.unresolved.get(&site).map(String::as_str),
+            Some("get"),
+            "site must be recorded as an unresolved external call"
+        );
     }
 
     // -------------------------------------------------------------------
@@ -185,6 +246,7 @@ pub mod callgraph_tests {
                     mem_in: run.initial_memory_state,
                     func_ptr: Operand::Var(handler),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             run.set_terminator(b, Terminator::Return { src: None });
@@ -203,6 +265,7 @@ pub mod callgraph_tests {
                     mem_in: caller.initial_memory_state,
                     func: "run".into(),
                     args: vec![Operand::StringLiteral("processor".into())],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -250,6 +313,7 @@ pub mod callgraph_tests {
                     mem_in: a.initial_memory_state,
                     func: "b".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             a.set_terminator(bb, Terminator::Return { src: None });
@@ -265,6 +329,7 @@ pub mod callgraph_tests {
                     mem_in: b.initial_memory_state,
                     func: "a".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             b.set_terminator(bb, Terminator::Return { src: None });
@@ -306,6 +371,7 @@ pub mod callgraph_tests {
                     mem_in: caller.initial_memory_state,
                     func: "libraryFetch".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -367,6 +433,7 @@ pub mod callgraph_tests {
                     mem_in: caller.initial_memory_state,
                     func_ptr: Operand::Var(f),
                     args: vec![Operand::Var(inp)],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -417,6 +484,7 @@ pub mod callgraph_tests {
                     mem_in: a.initial_memory_state,
                     func: "b".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             a.set_terminator(bb, Terminator::Return { src: None });

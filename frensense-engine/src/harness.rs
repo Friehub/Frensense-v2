@@ -276,7 +276,16 @@ fn enclosing_extracted_name(
     None
 }
 
-fn is_route_registration(
+/// Route-registration predicate: a call site is a route handler when the
+/// spec's hard verb suffixes match the callee, OR when pack vocabulary
+/// (`facts.route_patterns`) lists a registration shape for that spec's
+/// language.
+///
+/// Used by the harness's IR lowering to extract route handlers, and by
+/// the backward engine's per-call-site resolution (when wired via
+/// [`EngineBuilder::route_registration`]) so a framework origin arms
+/// only at route handlers (schema §5.1).
+pub(crate) fn is_route_registration(
     callee_text: &str,
     spec: &dyn frensense_lang::spec::LanguageSpec,
     facts: Option<&FactTable>,
@@ -338,7 +347,14 @@ fn lower_one(
                 .set_terminator(ctx.current_block, Terminator::Return { src: Some(ret) });
         }
     }
-    SSABuilder::new(ctx.ir).build()
+    let mut ir = SSABuilder::new(ctx.ir).build();
+    ir.language = spec.name().to_string();
+    ir.entry_guards = spec
+        .decorator_guard_calls(fn_node, source)
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    ir
 }
 
 /// Walk a declarator chain until we find a `function_declarator` node.
@@ -366,7 +382,9 @@ fn lower_static(
 ) -> FunctionIR {
     let mut ctx = LoweringContext::new_with_facts(spec, source, name.to_string(), facts);
     ctx.visit_node(value_node);
-    SSABuilder::new(ctx.ir).build()
+    let mut ir = SSABuilder::new(ctx.ir).build();
+    ir.language = spec.name().to_string();
+    ir
 }
 
 fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &str) {
@@ -392,9 +410,7 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             continue;
         }
         let id = match p.kind() {
-            "required_parameter" | "optional_parameter" => {
-                p.child_by_field_name("pattern").or_else(|| p.child(0))
-            }
+            "required_parameter" | "optional_parameter" => param_binding(p),
             "identifier" => Some(p),
             // C `parameter_declaration`: shape is `type declarator`, where the
             // declarator may be pointer_declarator → identifier (e.g. `char *p`).
@@ -405,14 +421,28 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
                 .and_then(|d| find_param_identifier(d)),
             // Rust `parameter`, Go `parameter_declaration` (handled above),
             // variadic_parameter: first child is the identifier or pattern.
-            "parameter" | "variadic_parameter" => p.child(0),
+            // A pattern that destructures a wrapper (`Query(p): Query<P>`,
+            // `State(db): State<Pool>`) binds the INNER identifier: naming
+            // the parameter after the whole pattern text ("Query(p)") left
+            // the body reference `p` unbound, so the extractor parameter
+            // could never be a source nor feed one.
+            "parameter" | "variadic_parameter" => param_binding(p),
             _ => None,
         };
         if let Some(id) = id {
             let name = source[id.start_byte()..id.end_byte()].to_string();
+            // Parameter TYPE annotation (`Query<P>`, `web::Query<P>`,
+            // `*http.Request`), normalized to its path. Source vocabulary
+            // that names a type (the axum/actix extractor family) matches
+            // this: the parameter's type - not the author's variable name -
+            // decides whether the argument is attacker-controlled.
+            let type_name = p
+                .child_by_field_name("type")
+                .map(|t| normalize_type_path(&source[t.start_byte()..t.end_byte()]))
+                .filter(|t| !t.is_empty());
             let v = ctx.ir.new_var(VarMetadata {
                 source_name: Some(name.clone()),
-                type_name: None,
+                type_name,
                 byte_range: Some((p.start_byte(), p.end_byte())),
                 is_memory_state: false,
                 object_keys: Vec::new(),
@@ -421,6 +451,66 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             ctx.ir.parameters.push(v);
             ctx.env.last_mut().unwrap().insert(name, v);
         }
+    }
+}
+
+/// The binding identifier of a wrapper-shaped parameter pattern.
+///
+/// `Query(p)` (and `State(db)`, `Json(body)`) is a *named* pattern: it has a
+/// `type` field naming the wrapper plus one binding inside. The binding - not
+/// the wrapper - is what the body references, so the parameter must be named
+/// after it. Any other pattern (plain `identifier`, a JS object/array
+/// destructuring pattern with no `type` field, `&mut x`) is returned as-is so
+/// existing naming is untouched.
+/// The binding node of a parameter: a plain identifier, or the INNER
+/// identifier of a wrapper-shaped pattern (`Query(p)`, `{ body }`, `&mut x`).
+fn param_binding<'t>(p: tree_sitter::Node<'t>) -> Option<tree_sitter::Node<'t>> {
+    let pattern = p.child_by_field_name("pattern").or_else(|| p.child(0))?;
+    Some(extractor_binding(pattern).unwrap_or(pattern))
+}
+
+fn extractor_binding<'t>(pattern: tree_sitter::Node<'t>) -> Option<tree_sitter::Node<'t>> {
+    let wrapper = pattern.child_by_field_name("type")?;
+    let mut cursor = pattern.walk();
+    let mut inner = pattern
+        .named_children(&mut cursor)
+        .filter(|c| c.id() != wrapper.id());
+    let first = inner.next()?;
+    if first.kind() != "identifier" || inner.next().is_some() {
+        return None;
+    }
+    Some(first)
+}
+
+/// Normalize a parameter type annotation to its path: strip references and
+/// mutability (`&mut Foo`), keep the path before the generic arguments
+/// (`web::Query<P>` → `web::Query`), drop whitespace.
+fn normalize_type_path(raw: &str) -> String {
+    // The borrow marker is PRESERVED: framework request extractors are
+    // consumed by value (`Path<P>`, `web::Query<Q>`, `Json<B>`), while a
+    // borrowed type is the language's own value (`&Path` is `std::path::Path`).
+    // Dropping `&` made them indistinguishable, so every helper taking
+    // `&Path` was treated as an axum extractor and became a taint source.
+    let borrowed = raw.trim_start().starts_with('&');
+    let t = raw.trim();
+    let t = t.trim_start_matches('&').trim();
+    // Lifetime parameter: `&'a Path` -> `Path`.
+    let t = t
+        .strip_prefix('\'')
+        .map_or(t, |rest| match rest.find(char::is_whitespace) {
+            Some(i) => rest[i..].trim(),
+            None => rest,
+        });
+    let t = t.trim_start_matches("mut").trim();
+    let t = t.split('<').next().unwrap_or(t);
+    let path: String = t.chars().filter(|c| !c.is_whitespace()).collect();
+    if borrowed {
+        let mut owned = String::with_capacity(path.len() + 1);
+        owned.push('&');
+        owned.push_str(&path);
+        owned
+    } else {
+        path
     }
 }
 

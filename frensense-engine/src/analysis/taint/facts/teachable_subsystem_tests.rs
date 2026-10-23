@@ -4,6 +4,7 @@
 
 use super::*;
 
+use crate::analysis::taint::config::TaintConfig;
 use crate::checks::memory_summary::MemorySummaryRegistry;
 
 #[test]
@@ -95,6 +96,54 @@ fn test_teachable_propagator_rules() {
     assert_eq!(
         table.propagator_input_args("mod.custom_transform"),
         Some(&[0, 2][..])
+    );
+}
+
+#[test]
+fn test_language_propagator_last_entry_wins() {
+    // Regression: conflicting LanguagePropagator entries for one call key
+    // must resolve LAST-wins for BOTH the arg slots and the receiver-block
+    // flag. (The old install used first-wins for the alias and an
+    // append-only block set, so an earlier `tainted_receiver: false`
+    // permanently blocked the receiver edge even when a later `true` entry
+    // should have unblocked it - silently dropping the string/array-`join`
+    // receiver->return flow.)
+    let mk =
+        |tainted_arg: Option<usize>, tainted_receiver: bool| LearnedFactEntry::LanguagePropagator {
+            language: "py".into(),
+            call: "join".into(),
+            tainted_arg,
+            tainted_receiver,
+        };
+
+    // false then true: the later `true` must unblock the receiver edge.
+    let mut config = TaintConfig::default();
+    let mut facts = FactTable::default();
+    apply_language_entries(
+        &mut config,
+        &mut facts,
+        &[mk(Some(1), false), mk(None, true)],
+        &["py"],
+    );
+    assert_eq!(facts.propagator_input_args("join"), Some(&[][..]));
+    assert!(
+        !facts.propagator_blocks_receiver("join"),
+        "later tainted_receiver:true must unblock the receiver edge"
+    );
+
+    // true then false: the later `false` must (re)block it.
+    let mut config = TaintConfig::default();
+    let mut facts = FactTable::default();
+    apply_language_entries(
+        &mut config,
+        &mut facts,
+        &[mk(None, true), mk(Some(0), false)],
+        &["py"],
+    );
+    assert_eq!(facts.propagator_input_args("join"), Some(&[0][..]));
+    assert!(
+        facts.propagator_blocks_receiver("join"),
+        "later tainted_receiver:false must block the receiver edge"
     );
 }
 

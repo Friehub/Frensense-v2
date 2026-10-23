@@ -68,7 +68,7 @@ pub fn is_supported(path: &Path) -> bool {
 /// Filter advisories by severity threshold and minimum confidence.
 /// No language filter here - the file's own extension decides what runs.
 ///
-/// Thin wrapper over [`crate::reporting::apply`], the one reporting
+/// Thin wrapper over [`crate::policy::apply`], the one reporting
 /// policy every surface shares.
 #[must_use]
 pub fn filter_advisories(
@@ -76,7 +76,7 @@ pub fn filter_advisories(
     severity_threshold: &str,
     min_confidence: f64,
 ) -> Vec<Advisory> {
-    crate::reporting::apply(
+    crate::policy::apply(
         advisories,
         min_confidence,
         Some(Severity::parse(severity_threshold)),

@@ -121,6 +121,17 @@ pub enum NodeRole {
     /// Argument list: `arguments` (JS/TS), `argument_list` (Python/Go/C),
     /// `token_tree` (Rust macros).
     Arguments,
+    /// A named call argument (`f(secure=False)`): Python `keyword_argument`.
+    /// Distinct from a plain expression so the IR can keep the argument's
+    /// *name* alongside its value - a policy that constrains one flag cannot
+    /// be expressed correctly by position when the caller may omit earlier
+    /// optional arguments.
+    KeywordArgument {
+        /// Field holding the argument name.
+        name_field: Cow<'static, str>,
+        /// Field holding the argument value expression.
+        value_field: Cow<'static, str>,
+    },
     /// Class / struct / enum / interface / trait definition.
     ClassDef,
     /// Binary expression: `a + b`, `x && y`.
@@ -210,7 +221,7 @@ pub struct Import {
 }
 
 /// A parsed export or re-export as extracted by [`LanguageSpec::extract_exports`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Export {
     /// The exported symbol name (the name visible to importers).
     pub exported_name: String,
@@ -219,6 +230,42 @@ pub struct Export {
     /// If this is a re-export from another module (e.g. `export { x as y } from "./foo"`),
     /// the source module package / path. None for local exports.
     pub from_module: Option<String>,
+    /// Written visibility of the export.
+    pub visibility: Visibility,
+    /// Declaration kind of the exported symbol.
+    pub kind: ItemKind,
+}
+
+/// Written or inferred visibility of a declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum Visibility {
+    Public,
+    Internal,
+    Private,
+}
+
+/// The syntactic or semantic kind of a module-level declaration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ItemKind {
+    Function,
+    Constant,
+    Variable,
+    Class,
+    Enum,
+    Interface,
+    Type,
+    Module,
+    Struct,
+    Trait,
+    Other,
+}
+
+/// A top-level item declared in a module.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct ModuleItem {
+    pub name: String,
+    pub kind: ItemKind,
+    pub visibility: Visibility,
 }
 
 // ── The trait ─────────────────────────────────────────────────────────────────
@@ -307,6 +354,42 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// Returns `true` if this node kind represents a type cast or type assertion (e.g. `x as T`, `(T)x`).
     fn is_cast(&self, _kind: &str) -> bool {
         false
+    }
+
+    /// Decorator / attribute call names applied to this function-definition
+    /// node (`@guard(...)`, `#[guard]`, `@app.route(...)`).
+    ///
+    /// Pure grammar mechanism: decorators are placed either as *direct
+    /// children* of the definition (Python `decorated_definition`, JS/TS
+    /// member decorators) or as *preceding sibling attribute nodes*
+    /// (Rust `#[attr]` on `fn`). Their text reliably starts with `@`
+    /// or `#[`, so placement and spelling are recognized structurally
+    /// and no per-language node-kind table is needed. The name is
+    /// stripped to its last `.` segment and cut at the call paren so
+    /// `@group.require_role(user)` yields `require_role`.
+    fn decorator_guard_calls<'a>(
+        &self,
+        node: tree_sitter::Node<'a>,
+        source: &'a str,
+    ) -> Vec<&'a str> {
+        let mut out = Vec::new();
+        let mut visit = |n: tree_sitter::Node<'a>| {
+            if let Some(name) = decorator_call_name(node_text(n, source)) {
+                out.push(name);
+            }
+        };
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            visit(child);
+        }
+        let mut prev = node;
+        while let Some(sib) = prev.prev_sibling() {
+            if is_attribute_text(node_text(sib, source)) {
+                visit(sib);
+            }
+            prev = sib;
+        }
+        out
     }
 
     /// Returns `true` if this node kind represents a string template or interpolated string (e.g. `template_string`, `f_string`).
@@ -428,6 +511,11 @@ pub trait LanguageSpec: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// Walk `root` and return all top-level module items (declarations) in the file.
+    fn extract_module_items<'tree>(&self, _root: Node<'tree>, _source: &str) -> Vec<ModuleItem> {
+        Vec::new()
+    }
+
     // ── Tree-sitter queries ───────────────────────────────────────────────
 
     /// A tree-sitter query that captures symbol definitions.
@@ -501,4 +589,35 @@ pub fn call_last_segment(call: &str) -> &str {
 #[inline]
 pub fn node_text<'s>(node: Node<'_>, source: &'s str) -> &'s str {
     source.get(node.start_byte()..node.end_byte()).unwrap_or("")
+}
+
+/// Does a node's text look like a decorator or attribute definition
+/// (`@...` or `#[...]`) rather than ordinary statements? Purely textual,
+/// so placement styles differ per language without a kind table.
+#[inline]
+fn is_attribute_text(text: &str) -> bool {
+    let t = text.trim();
+    t.starts_with('@') || t.starts_with("#[")
+}
+
+/// Parse the call name out of decorator/attribute text:
+/// `"@app.route("/x")"` → `route`, `"#[ensure_owner]"` → `ensure_owner`.
+#[inline]
+fn decorator_call_name(text: &str) -> Option<&str> {
+    let t = text.trim();
+    let inner = match (t.strip_prefix('@'), t.strip_prefix("#[")) {
+        (Some(s), _) => s,
+        (_, Some(s)) => s,
+        (None, None) => return None,
+    };
+    let inner = inner.trim();
+    // Rust `#[...]` closes with `]`; the name is everything before the
+    // first paren or bracket.
+    let end = inner.find(['(', '[', '{', ']']).unwrap_or(inner.len());
+    let name = inner[..end].trim();
+    if name.is_empty() {
+        None
+    } else {
+        Some(call_last_segment(name))
+    }
 }

@@ -30,7 +30,10 @@ pub fn tool_definition() -> Value {
                 },
                 "language": {
                     "type": "string",
-                    "description": "Filter by language (rust, typescript, javascript, python)"
+                    "description": format!(
+                        "Filter by language ({})",
+                        crate::parser::language_names_help()
+                    )
                 },
                 "corpus_bundle": {
                     "type": "string",
@@ -56,15 +59,14 @@ pub fn write_notification(params: &Value) {
 }
 
 /// Severity + language filter. Severity comes from the one reporting
-/// policy ([`crate::reporting::apply`]); the language scope is this
+/// policy ([`crate::policy::apply`]); the language scope is this
 /// tool's own argument.
 pub fn filter_advisories(
     advisories: Vec<Advisory>,
     severity_threshold: &str,
     language: Option<&str>,
 ) -> Vec<Advisory> {
-    let filtered =
-        crate::reporting::apply(advisories, 0.0, Some(Severity::parse(severity_threshold)));
+    let filtered = crate::policy::apply(advisories, 0.0, Some(Severity::parse(severity_threshold)));
 
     let extensions = language.and_then(crate::parser::extensions_for);
 

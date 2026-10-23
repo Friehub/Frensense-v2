@@ -107,16 +107,13 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("hget", crate::role_map::SinkLabel::NoSqlInjection),
     ("hset", crate::role_map::SinkLabel::NoSqlInjection),
     ("del", crate::role_map::SinkLabel::NoSqlInjection),
-    ("keys", crate::role_map::SinkLabel::NoSqlInjection),
     ("deepMerge", crate::role_map::SinkLabel::PrototypePollution),
     ("merge", crate::role_map::SinkLabel::PrototypePollution),
     ("defaults", crate::role_map::SinkLabel::PrototypePollution),
     ("extend", crate::role_map::SinkLabel::PrototypePollution),
-    ("assign", crate::role_map::SinkLabel::PrototypePollution),
     ("deepExtend", crate::role_map::SinkLabel::PrototypePollution),
     ("mixin", crate::role_map::SinkLabel::PrototypePollution),
     ("cloneDeep", crate::role_map::SinkLabel::PrototypePollution),
-    ("sign", crate::role_map::SinkLabel::JwtWeakAlgorithm),
     ("decode", crate::role_map::SinkLabel::JwtUnsafeDecode),
     ("existsSync", crate::role_map::SinkLabel::Toctou),
     ("exists", crate::role_map::SinkLabel::Toctou),
@@ -135,12 +132,21 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
         crate::role_map::SinkLabel::CommandInjection,
     ),
     // Code Execution
+    // First-party recipe interpreter: RecipeExecutor.execute runs the
+    // recipe's logic expressions through the execution engine's mathjs
+    // evaluator (see @friehub/execution-engine dist/utils/logicEngine.js:
+    // evaluate -> math.evaluate(expression, scope)). Request bodies that
+    // become expression/recipe config must not reach it. Dotted entry so
+    // the (receiver, method) pair - not the bare verb `execute` - governs
+    // matching: generic `.execute()` receivers stay silent.
+    (
+        "RecipeExecutor.execute",
+        crate::role_map::SinkLabel::CodeExecution,
+    ),
     ("eval", crate::role_map::SinkLabel::CodeExecution),
     ("Function", crate::role_map::SinkLabel::CodeExecution),
     ("RegExp", crate::role_map::SinkLabel::Regex),
     ("RegExp.compile", crate::role_map::SinkLabel::Regex),
-    ("setTimeout", crate::role_map::SinkLabel::CodeExecution),
-    ("setInterval", crate::role_map::SinkLabel::CodeExecution),
     ("runInNewContext", crate::role_map::SinkLabel::CodeExecution),
     (
         "runInThisContext",
@@ -259,8 +265,35 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
         crate::role_map::SinkLabel::TemplateSsti,
     ),
     // Insecure Deserialization
-    ("serialize", crate::role_map::SinkLabel::UnsafeDeserialize),
-    ("deserialize", crate::role_map::SinkLabel::UnsafeDeserialize),
+    // `serialize` / `deserialize` are ordinary method names (every RPC
+    // transformer has them); node-serialize's RCE entry point is
+    // `unserialize`.
+    ("unserialize", crate::role_map::SinkLabel::UnsafeDeserialize),
+    (
+        "node-serialize.unserialize",
+        crate::role_map::SinkLabel::UnsafeDeserialize,
+    ),
+    // Qualified forms of receiver-gated verbs (see BOOTSTRAP_AMBIGUOUS_VERBS).
+    ("res.write", crate::role_map::SinkLabel::XssDom),
+    ("response.write", crate::role_map::SinkLabel::XssDom),
+    ("document.write", crate::role_map::SinkLabel::XssDom),
+    ("reply.send", crate::role_map::SinkLabel::XssReflected),
+    ("response.send", crate::role_map::SinkLabel::XssReflected),
+    ("_.merge", crate::role_map::SinkLabel::PrototypePollution),
+    (
+        "lodash.merge",
+        crate::role_map::SinkLabel::PrototypePollution,
+    ),
+    (
+        "_.defaultsDeep",
+        crate::role_map::SinkLabel::PrototypePollution,
+    ),
+    ("_.extend", crate::role_map::SinkLabel::PrototypePollution),
+    ("$.extend", crate::role_map::SinkLabel::PrototypePollution),
+    (
+        "jQuery.extend",
+        crate::role_map::SinkLabel::PrototypePollution,
+    ),
     ("yaml.load", crate::role_map::SinkLabel::UnsafeDeserialize),
     (
         "js-yaml.load",
@@ -333,14 +366,6 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("res.redirect", crate::role_map::SinkLabel::OpenRedirect),
     ("res.render", crate::role_map::SinkLabel::TemplateSsti),
     ("revalidatePath", crate::role_map::SinkLabel::StorageWrite),
-    (
-        "prisma.queryRawUnsafe",
-        crate::role_map::SinkLabel::SqlInjection,
-    ),
-    (
-        "prisma.executeRawUnsafe",
-        crate::role_map::SinkLabel::SqlInjection,
-    ),
     ("R2Bucket.put", crate::role_map::SinkLabel::StorageWrite),
     (
         "D1Database.prepare",
@@ -364,6 +389,7 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
         crate::role_map::SinkLabel::CommandInjection,
     ),
     ("db.query", crate::role_map::SinkLabel::SqlInjection),
+    ("db.prepare", crate::role_map::SinkLabel::SqlInjection),
     ("db.exec", crate::role_map::SinkLabel::CommandInjection),
     ("pool.query", crate::role_map::SinkLabel::SqlInjection),
     ("connection.query", crate::role_map::SinkLabel::SqlInjection),
@@ -396,6 +422,26 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     (
         "Model.aggregate",
         crate::role_map::SinkLabel::NoSqlInjection,
+    ),
+];
+
+/// Package-scoped framework sinks: named AFTER import-origin resolution,
+/// not by bare call name. A row fires only when the caller's origin
+/// resolves to the declaring package (`@prisma/client` files arm via
+/// `import { PrismaClient }`, the singleton factory `new PrismaClient()`,
+/// or a receiver imported under the package); everywhere else the call
+/// name stays inert — an unrelated object with a same-named method never
+/// inherits the framework's sink semantics. `(dotted call, package, label)`.
+pub(super) static JS_PACKAGE_SCOPED_SINKS: &[(&str, &str, crate::role_map::SinkLabel)] = &[
+    (
+        "prisma.$queryRawUnsafe",
+        "@prisma/client",
+        crate::role_map::SinkLabel::SqlInjection,
+    ),
+    (
+        "prisma.$executeRawUnsafe",
+        "@prisma/client",
+        crate::role_map::SinkLabel::SqlInjection,
     ),
 ];
 
@@ -460,6 +506,9 @@ pub(super) static JS_SINK_SIGNATURES: &[(&str, &[usize], bool)] = &[
     // keys keep all-args signatures. Measured on 11 local repos: 192 of
     // 263 HTTP-callee findings taint arg1/arg2 or the receiver of a
     // constant-URL call; the destination-URL findings (slot 0) still fire.
+    // jwt.sign(payload, secret, opts): the payload is data by design; a
+    // tainted SECRET (slot 1) is the injectable position.
+    ("jwt.sign", &[1], false),
     ("fetch", &[0], false),   // fetch(url, init) - init = method/headers/body
     ("post", &[0], false),    // client.post(url, data, config)
     ("patch", &[0], false),   // client.patch(url, data, config)
@@ -569,6 +618,22 @@ pub(super) static JS_SOURCE_PATTERNS: &[&str] = &[
     "event.body",
     "event.queryStringParameters",
     "event.pathParameters",
+    // h3 / Nuxt / Nitro request accessors (the handler's `event` parameter
+    // itself is no longer a blanket source).
+    "getQuery",
+    "getValidatedQuery",
+    "readBody",
+    "readValidatedBody",
+    "readRawBody",
+    "readFormData",
+    "readMultipartFormData",
+    "getCookie",
+    "parseCookies",
+    "getRouterParam",
+    "getRouterParams",
+    "getHeader",
+    "getHeaders",
+    "getRequestURL",
     // NOTE: `process.env` deliberately NOT a source: env vars are
     // developer-controlled config, not attacker input. Treating them as
     // sources was the largest FP class in the Juice Shop baseline.

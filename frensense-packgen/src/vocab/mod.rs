@@ -12,7 +12,7 @@
 use crate::role_map::{
     is_predicate_guard, sink_role_for_label, PropagatorRule, SanitizerKind, SinkLabel,
 };
-use frensense_engine::analysis::taint::facts::LearnedFactEntry;
+use frensense_engine::analysis::taint::facts::{LearnedFactEntry, PolicyRequirement, PolicyScope};
 
 mod c;
 mod go;
@@ -40,6 +40,15 @@ pub(crate) struct LanguageVocab {
     /// may narrow it.
     pub ambiguous_verbs: &'static [&'static str],
     pub sink_names: &'static [(&'static str, SinkLabel)],
+    /// Global-only builtin sinks (WI-12): the bare call form is the sink,
+    /// while a receiver-qualified call (`engine.eval(x)`) matches only once
+    /// its origin resolves to a known package. Emitted as the `global_only`
+    /// flag on the language's `LanguageSink` entries.
+    pub global_only_sinks: &'static [&'static str],
+    /// Package-scoped framework sinks (dotted call, package, label):
+    /// facts installed under (package, call) so a call only counts as a
+    /// sink when import-origin resolution names the package.
+    pub package_scoped_sinks: &'static [(&'static str, &'static str, SinkLabel)],
     pub sink_signatures: &'static [(&'static str, &'static [usize], bool)],
     pub idor_sinks: &'static [(&'static str, &'static [&'static str])],
     pub source_patterns: &'static [&'static str],
@@ -49,6 +58,42 @@ pub(crate) struct LanguageVocab {
     pub propagators: &'static [PropagatorRule],
     pub session_roots: &'static [&'static str],
     pub route_patterns: &'static [&'static str],
+    /// Structural (non-dataflow) policies this language's vocabulary
+    /// installs: a call plus the argument conditions that make it a
+    /// violation. Emitted as bundle-shaped `Policy`/`PolicyScoped` facts, so
+    /// the checker evaluates them with the same code path a corpus bundle
+    /// uses - the language section only supplies data.
+    pub policies: &'static [PolicySpec],
+}
+
+/// One static policy: when `when_call` occurs, every requirement in
+/// `require` must hold, otherwise the call is a finding (an empty
+/// `require` means the call itself is the violation).
+pub(crate) struct PolicySpec {
+    pub rule: &'static str,
+    pub when_call: &'static str,
+    pub require: &'static [RequirementSpec],
+    pub message: &'static str,
+    pub severity: &'static str,
+    /// Only fire in files importing this package (`None` = unscoped).
+    pub package: Option<&'static str>,
+    /// Precision tier. Governs which scan profile reports this rule.
+    #[allow(dead_code)]
+    pub tier: RuleTier,
+}
+
+pub(crate) use frensense_lang::RuleTier;
+
+/// Static form of a [`PolicyRequirement`]; owned strings are built at
+/// emission time so the tables stay `&'static`.
+pub(crate) enum RequirementSpec {
+    /// The named argument must be present and, when its value is a
+    /// provable literal, one of `values` (case-insensitive). See
+    /// [`PolicyRequirement::RequireNamedArgLiteral`].
+    RequireNamedArgLiteral {
+        name: &'static str,
+        values: &'static [&'static str],
+    },
 }
 
 /// Emit one language's provider sections from static tables - the pack's
@@ -74,6 +119,26 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
                 sink_role_name(sink_role_for_label(*label)),
                 label.slug()
             ),
+        });
+    }
+    // Global-only builtin markers (WI-12): emitted after the sink names so
+    // the install marks the already-published signatures.
+    for call in v.global_only_sinks {
+        entries.push(LearnedFactEntry::LanguageSinkGlobalOnly {
+            language: language.clone(),
+            call: (*call).to_string(),
+        });
+    }
+    // Package-scoped framework sinks: package-qualified LanguageSinkSlots
+    // entries (slot data synthesized as all-args dangerous) so packets
+    // matching by lowered facts get the exact (package, call) binding.
+    for (call, package, _label) in v.package_scoped_sinks {
+        entries.push(LearnedFactEntry::LanguageSinkSlots {
+            language: language.clone(),
+            call: (*call).to_string(),
+            package: Some((*package).to_string()),
+            dangerous_args: std::collections::BTreeSet::new(),
+            binding_args_safe: false,
         });
     }
     for (call, slots, binding_safe) in v.sink_signatures {
@@ -146,6 +211,42 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
             pattern: (*pattern).to_string(),
         });
     }
+    // Structural policies: emitted as the same fact shapes a bundle uses,
+    // so the conclusion (which call, which flags) is data from the moment
+    // it is generated. Profile selection filters reportable tiers at scan time.
+    for p in v.policies.iter() {
+        let require: Vec<PolicyRequirement> = p
+            .require
+            .iter()
+            .map(|r| match r {
+                RequirementSpec::RequireNamedArgLiteral { name, values } => {
+                    PolicyRequirement::RequireNamedArgLiteral {
+                        name: (*name).to_string(),
+                        values: values.iter().map(|s| (*s).to_string()).collect(),
+                    }
+                }
+            })
+            .collect();
+        entries.push(match p.package {
+            Some(pkg) => LearnedFactEntry::PolicyScoped {
+                rule: p.rule.to_string(),
+                when_call: p.when_call.to_string(),
+                require,
+                scope: PolicyScope::Function,
+                message: p.message.to_string(),
+                severity: p.severity.to_string(),
+                package: pkg.to_string(),
+            },
+            None => LearnedFactEntry::Policy {
+                rule: p.rule.to_string(),
+                when_call: p.when_call.to_string(),
+                require,
+                scope: PolicyScope::Function,
+                message: p.message.to_string(),
+                severity: p.severity.to_string(),
+            },
+        });
+    }
     entries
 }
 
@@ -160,4 +261,58 @@ pub(crate) fn all_vocab() -> Vec<&'static LanguageVocab> {
         rust::vocab(),
         javascript::typescript_vocab(),
     ]
+}
+
+#[cfg(test)]
+mod tier_tests {
+    use super::*;
+    use frensense_engine::analysis::taint::facts::LearnedFactEntry;
+
+    fn policy_rules(entries: &[LearnedFactEntry]) -> Vec<String> {
+        entries
+            .iter()
+            .filter_map(|e| match e {
+                LearnedFactEntry::Policy { rule, .. }
+                | LearnedFactEntry::PolicyScoped { rule, .. } => Some(rule.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The default pack carries the policies defined across all vocabularies.
+    #[test]
+    fn default_pack_holds_policies_with_tiers() {
+        let rules: Vec<String> = all_vocab()
+            .into_iter()
+            .flat_map(|v| policy_rules(&entries_for_static(v)))
+            .collect();
+        assert!(
+            rules.iter().any(|r| r == "cookie_secure_missing"),
+            "{rules:?}"
+        );
+        assert!(
+            rules.iter().any(|r| r == "cookie_httponly_missing"),
+            "hygiene rule should be emitted for profile selection: {rules:?}"
+        );
+    }
+
+    /// Every policy declares a tier.
+    #[test]
+    fn policy_declarations_have_expected_tiers() {
+        let stable: Vec<&str> = all_vocab()
+            .into_iter()
+            .flat_map(|v| v.policies.iter())
+            .filter(|p| p.tier == RuleTier::Stable)
+            .map(|p| p.rule)
+            .collect();
+        assert!(stable.contains(&"cookie_secure_missing"), "{stable:?}");
+
+        let hygiene: Vec<&str> = all_vocab()
+            .into_iter()
+            .flat_map(|v| v.policies.iter())
+            .filter(|p| p.tier == RuleTier::Hygiene)
+            .map(|p| p.rule)
+            .collect();
+        assert!(hygiene.contains(&"cookie_httponly_missing"), "{hygiene:?}");
+    }
 }

@@ -17,7 +17,8 @@
 use tree_sitter::Node;
 
 use crate::spec::{
-    call_last_segment, node_text, Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin,
+    call_last_segment, node_text, Export, Import, ItemKind, LanguageSpec, ModuleItem, NodeRole,
+    PackageCategory, TaintOrigin, Visibility,
 };
 
 // ── AST classification ────────────────────────────────────────────────────────
@@ -114,11 +115,20 @@ fn classify_python(kind: &str) -> NodeRole {
         | "dictionary_pattern"
         | "return_type" => NodeRole::Parameters,
         "argument_list" | "generator_expression" => NodeRole::Arguments,
+        // Keyword arguments keep their name: `set_cookie("sid", "v",
+        // secure=False)` is not the same fact as a 3rd positional `False`.
+        "keyword_argument" => NodeRole::KeywordArgument {
+            name_field: "name".into(),
+            value_field: "value".into(),
+        },
         "class_definition" => NodeRole::ClassDef,
-        "binary_operator" | "comparison_operator" | "boolean_operator" | "not_operator" => {
-            NodeRole::BinaryOp
-        }
-        "unary_operator" => NodeRole::UnaryOp,
+        // `not X` is a unary operator, not a pass-through binary one: the
+        // binary lowering returns its single operand unchanged, which drops
+        // the negation. Guard analysis needs the polarity (`if not
+        // uid.isdigit(): return` protects the OTHER branch), so keep the
+        // operator as an explicit UnaryOp.
+        "binary_operator" | "comparison_operator" | "boolean_operator" => NodeRole::BinaryOp,
+        "unary_operator" | "not_operator" => NodeRole::UnaryOp,
         "match_statement" => NodeRole::Match,
         "async_block" => NodeRole::AsyncBlock,
 
@@ -466,6 +476,24 @@ impl LanguageSpec for PythonSpec {
         extract_python_imports(root, source)
     }
 
+    fn extract_exports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Export> {
+        python_module_items(root, source)
+            .into_iter()
+            .filter(|item| item.visibility == Visibility::Public)
+            .map(|item| Export {
+                exported_name: item.name.clone(),
+                local_name: item.name,
+                from_module: None,
+                visibility: item.visibility,
+                kind: item.kind,
+            })
+            .collect()
+    }
+
+    fn extract_module_items<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<ModuleItem> {
+        python_module_items(root, source)
+    }
+
     fn symbol_query(&self) -> Option<&'static str> {
         Some(PYTHON_SYMBOL_QUERY)
     }
@@ -501,5 +529,151 @@ impl LanguageSpec for PythonSpec {
         // Python: `then if cond else else_arm` - the condition is the
         // middle named child, unlike JS/C where it comes first.
         1
+    }
+}
+
+// ── Module surface ────────────────────────────────────────────────────────────
+
+/// Every top-level declaration in the module.
+///
+/// Python has no export keyword: a module's surface is `__all__` when the
+/// module defines one, and the leading-underscore convention otherwise. Both
+/// are read here, so a module that curates `__all__` reports exactly that
+/// list - a name kept out of it is private no matter how it is spelled.
+fn python_module_items(root: Node<'_>, source: &str) -> Vec<ModuleItem> {
+    let curated = python_dunder_all(root, source);
+    let mut items = Vec::new();
+    for i in 0..root.named_child_count() {
+        let Some(child) = root.named_child(i) else {
+            continue;
+        };
+        // `@decorator` wraps the real definition; the name lives inside it.
+        let node = if child.kind() == "decorated_definition" {
+            child.child_by_field_name("definition").unwrap_or(child)
+        } else {
+            child
+        };
+        let Some((name, kind)) = python_declared_name(node, source) else {
+            continue;
+        };
+        let visibility = match &curated {
+            Some(names) => {
+                if names.iter().any(|n| *n == name) {
+                    Visibility::Public
+                } else {
+                    Visibility::Private
+                }
+            }
+            None => {
+                if name.starts_with('_') {
+                    Visibility::Private
+                } else {
+                    Visibility::Public
+                }
+            }
+        };
+        items.push(ModuleItem {
+            name,
+            kind,
+            visibility,
+        });
+    }
+    items
+}
+
+/// The name and declaration kind of one top-level statement.
+fn python_declared_name(node: Node<'_>, source: &str) -> Option<(String, ItemKind)> {
+    let kind = match node.kind() {
+        "function_definition" | "async_function_definition" => ItemKind::Function,
+        "class_definition" => ItemKind::Class,
+        // `NAME = value` binds a module-level name; SCREAMING_CASE is the
+        // constant convention, anything else is an ordinary variable.
+        "assignment" | "augmented_assignment" => {
+            let target = node.child_by_field_name("left")?;
+            if target.kind() != "identifier" {
+                return None;
+            }
+            let name = node_text(target, source);
+            if name == "__all__" {
+                return None;
+            }
+            let kind = if is_constant_name(name) {
+                ItemKind::Constant
+            } else {
+                ItemKind::Variable
+            };
+            return Some((name.to_owned(), kind));
+        }
+        "expression_statement" => {
+            let mut found = None;
+            for i in 0..node.named_child_count() {
+                if let Some(child) = node.named_child(i) {
+                    if let Some(decl) = python_declared_name(child, source) {
+                        found = Some(decl);
+                        break;
+                    }
+                }
+            }
+            return found;
+        }
+        _ => return None,
+    };
+    let name = node.child_by_field_name("name")?;
+    Some((node_text(name, source).to_owned(), kind))
+}
+
+/// SCREAMING_CASE (at least one letter, no lowercase letters).
+fn is_constant_name(name: &str) -> bool {
+    let mut saw_letter = false;
+    for c in name.chars() {
+        if c.is_alphabetic() {
+            saw_letter = true;
+            if c.is_lowercase() {
+                return false;
+            }
+        }
+    }
+    saw_letter
+}
+
+/// The names a module's `__all__` lists, when it has one.
+///
+/// `__all__ = [...]` and `__all__ += [...]` both count; the list accumulates
+/// across statements so a split definition stays one surface.
+fn python_dunder_all(root: Node<'_>, source: &str) -> Option<Vec<String>> {
+    let mut names: Option<Vec<String>> = None;
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        for i in 0..node.named_child_count() {
+            if let Some(child) = node.named_child(i) {
+                stack.push(child);
+            }
+        }
+        if !matches!(node.kind(), "assignment" | "augmented_assignment") {
+            continue;
+        }
+        let target = node.child_by_field_name("left");
+        if target.map(|t| node_text(t, source)) != Some("__all__") {
+            continue;
+        }
+        let Some(value) = node.child_by_field_name("right") else {
+            continue;
+        };
+        let listed = names.get_or_insert_with(Vec::new);
+        collect_python_strings(value, source, listed);
+    }
+    names
+}
+
+fn collect_python_strings(node: Node<'_>, source: &str, out: &mut Vec<String>) {
+    if node.kind() == "string" {
+        let raw = node_text(node, source);
+        out.push(raw.trim_matches(['"', '\'']).to_owned());
+        return;
+    }
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i) {
+            collect_python_strings(child, source, out);
+        }
     }
 }

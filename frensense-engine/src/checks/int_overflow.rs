@@ -38,6 +38,27 @@ use crate::checks::last_segment;
 use crate::checks::memory_summary::{CapacitySpec, MemorySummaryRegistry};
 use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand, VarId};
 
+/// Conservative inclusive upper bound for an unboundedly dynamic size
+/// operand under the unbounded-operand modality: the largest size the
+/// value lattice can denote. Two such operands can only exceed ANY
+/// realistic allocation-size threshold at their worst-case corner.
+const DYNAMIC_MAX: i64 = i64::MAX;
+
+/// Conservative inclusive upper-bound test for an unboundedly dynamic size
+/// operand under the unbounded-operand modality: a var the value lattice
+/// cannot bound at all (no interval, no provable constant) anywhere in the
+/// function - by definition `malloc(rows * cols)` operator-provided data.
+fn operand_is_dynamic(op: &Operand, val_info: &ValueInfo) -> bool {
+    match op {
+        Operand::Var(v) => {
+            val_info.range(*v).is_none()
+                && val_info.range_at(BlockId(0), *v).is_none()
+                && val_info.const_int(*v).is_none()
+        }
+        _ => false,
+    }
+}
+
 /// Evaluate an operand's inclusive integer interval at a block entry,
 /// mirroring the spatial checker's range lookup (block-entry sharpened
 /// state first, then the merged per-definition value).
@@ -180,10 +201,27 @@ fn check_rule(
             if op != "*" {
                 continue;
             }
-            let (Some((al, ah)), Some((bl, bh))) =
-                (range_of(lhs, *bid, val_info), range_of(rhs, *bid, val_info))
-            else {
-                continue;
+            let lhs_range = range_of(lhs, *bid, val_info);
+            let rhs_range = range_of(rhs, *bid, val_info);
+            // Default contract: both operand intervals must be PROVABLE
+            // and non-negative; an unprovable operand skips the site
+            // (zero-FP by construction). The corpus-taught unbounded
+            // modality additionally accepts the plain
+            // `malloc(rows * cols)` shape: BOTH operands unboundedly
+            // dynamic (no provable interval on either side and no
+            // constant), modeled at the platform worst case. Mixed shapes
+            // (`strlen(s) * 2`, one proven bounded side) and provably
+            // dynamic operands stay under the default contract.
+            let (al, ah, bl, bh, lhs_unb, rhs_unb) = match (lhs_range, rhs_range) {
+                (Some(l), Some(r)) => (l.0, l.1, r.0, r.1, false, false),
+                (None, None)
+                    if rule.unbounded_product
+                        && operand_is_dynamic(lhs, val_info)
+                        && operand_is_dynamic(rhs, val_info) =>
+                {
+                    (0, DYNAMIC_MAX, 0, DYNAMIC_MAX, true, true)
+                }
+                _ => continue,
             };
             // Only non-negative sizes participate (signed/unknown ranges skip).
             if al < 0 || bl < 0 {
@@ -211,11 +249,39 @@ fn check_rule(
                 params: vec![
                     ("message", rule.message.clone()),
                     ("lhs", operand_label(ir, lhs)),
-                    ("al", al.to_string()),
-                    ("ah", ah.to_string()),
+                    (
+                        "al",
+                        if lhs_unb {
+                            "unbounded".to_string()
+                        } else {
+                            al.to_string()
+                        },
+                    ),
+                    (
+                        "ah",
+                        if lhs_unb {
+                            "unbounded".to_string()
+                        } else {
+                            ah.to_string()
+                        },
+                    ),
                     ("rhs", operand_label(ir, rhs)),
-                    ("bl", bl.to_string()),
-                    ("bh", bh.to_string()),
+                    (
+                        "bl",
+                        if rhs_unb {
+                            "unbounded".to_string()
+                        } else {
+                            bl.to_string()
+                        },
+                    ),
+                    (
+                        "bh",
+                        if rhs_unb {
+                            "unbounded".to_string()
+                        } else {
+                            bh.to_string()
+                        },
+                    ),
                     ("threshold", rule.wrap_threshold.to_string()),
                     ("allocator", allocator),
                 ],

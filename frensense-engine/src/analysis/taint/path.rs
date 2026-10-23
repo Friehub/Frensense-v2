@@ -21,8 +21,10 @@ use crate::ir::function::{FunctionIR, Instruction};
 // Steps
 // ---------------------------------------------------------------------------
 
-/// One step on a taint path, in **source → sink** order (the walk runs the
-/// other way; [`TaintPath::new`] reverses it).
+/// One step on a taint path, in **source → sink** order (the backward engine
+/// walk runs the other way; [`BackwardTaintEngine::reconstruct_path`] follows
+/// parent links from the source toward the sink and [`TaintPath::new`] keeps
+/// that order).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathStep {
     /// The origin: a configured source (access path or call name).
@@ -88,26 +90,35 @@ pub struct TaintPath {
 }
 
 impl TaintPath {
-    /// Build a path from a sink→source walk (parent chain), reversing it into
-    /// source→sink order. `chain` yields `(function_name, function_ir, node,
-    /// step)` from the sink backwards; source steps must already carry their
-    /// description. `fn_file` maps function names to their source files so
-    /// step spans point at real files (unmapped functions, engine-internal
-    /// tests without files, keep the function name as a pseudo-file).
+    /// Build a path from the walked chain. `chain` yields
+    /// `(function_name, function_ir, node, step)` in source→sink order (see
+    /// [`BackwardTaintEngine::reconstruct_path`]); the leading
+    /// [`PathStep::Source`] must already carry its description.
+    /// `fn_file` maps function names to their source files so step spans
+    /// point at real files (unmapped functions, engine-internal tests
+    /// without files, keep the function name as a pseudo-file).
+    ///
+    /// ORDERING CONTRACT: steps are stored source → sink. The sink itself is
+    /// not a step (the finding already reports it), so the last step is the
+    /// propagation that feeds the sink argument.
     pub(crate) fn new(
         chain: Vec<(String, FunctionIR, NodeKey, PathStep)>,
         source_desc: Option<String>,
+        source_span: Option<(String, (usize, usize))>,
         fn_file: &FxHashMap<String, String>,
     ) -> Self {
         let mut steps = Vec::with_capacity(chain.len() + 1);
         let mut spans = Vec::with_capacity(chain.len() + 1);
-        // Source first (the chain starts at the sink).
         steps.push(PathStep::Source {
             description: source_desc.unwrap_or_else(|| "unknown origin".into()),
         });
-        spans.push(None);
-        // The chain runs sink→source; walk it backwards for source→sink.
-        for (fname, ir, key, step) in chain.iter().rev() {
+        // The origin carries a location like every other step: a flow whose
+        // first hop is unlocatable cannot be opened in a SARIF viewer, and
+        // clients render step 1 as a bare string.
+        spans.push(source_span);
+        // The chain is already source→sink; keep it (reversing it here used
+        // to render flows sink→source, the "step 2 is the sink" bug).
+        for (fname, ir, key, step) in chain.iter() {
             let _ = (fname, key);
             let file = fn_file
                 .get(&ir.name)
@@ -118,6 +129,54 @@ impl TaintPath {
             spans.push(span);
         }
         Self { steps, spans }
+    }
+
+    /// Stable identity of the path's *shape*: the sequence of step kinds with
+    /// function names, but no variable numbers. Two findings whose paths
+    /// differ only in SSA numbering dedup to the same shape.
+    /// Presentation-friendly compaction of the raw walked path.
+    ///
+    /// The backward walk records every SVFG node it stepped through, which
+    /// floods human-facing output with noise:
+    ///
+    /// 1. *Adjacent duplicate steps* — the walk visits both the def node and
+    ///    the use node of one instruction, producing two identical entries
+    ///    back to back;
+    /// 2. *Runs of `Assignment` hops* — SSA def→use renames inside one
+    ///    function (`flows through vNNN`) carry no user-visible content;
+    ///    value-shaping events (loads, phis, calls, interprocedural
+    ///    boundaries) are never `Assignment` steps.
+    ///
+    /// `compacted()` collapses both, keeping spans aligned: a collapsed step
+    /// keeps the first span of the collapsed run. Raw paths stay available
+    /// for shape dedup (`shape_id`) and machine consumers; call this only
+    /// where a path is rendered for humans.
+    #[must_use]
+    pub fn compacted(&self) -> TaintPath {
+        let mut steps: Vec<PathStep> = Vec::with_capacity(self.steps.len());
+        let mut spans: Vec<Option<(String, (usize, usize))>> = Vec::with_capacity(self.spans.len());
+        for (step, span) in self.steps.iter().zip(self.spans.iter()) {
+            // (1) identical neighbor (same kind, function, variable — the
+            // def/use pair of one instruction).
+            if steps.last().is_some_and(|prev| prev == step) {
+                continue;
+            }
+            // (2) collapse consecutive plain assignments inside one
+            // function to their first hop.
+            let merged = matches!(
+                (steps.last(), step),
+                (
+                    Some(PathStep::Assignment { function: prev_fn, .. }),
+                    PathStep::Assignment { function: cur_fn, .. }
+                ) if prev_fn == cur_fn,
+            );
+            if merged {
+                continue;
+            }
+            steps.push(step.clone());
+            spans.push(span.clone());
+        }
+        TaintPath { steps, spans }
     }
 
     /// Stable identity of the path's *shape*: the sequence of step kinds with
@@ -165,6 +224,14 @@ pub fn dedup_by_shape(paths: &[TaintPath]) -> Vec<usize> {
     let mut kept: Vec<usize> = best.into_values().collect();
     kept.sort_unstable();
     kept
+}
+
+/// Location of a node: the instruction's span, or the declaring site of its
+/// value. Parameter sentinels carry no instruction, so without the fallback
+/// an origin that is a function parameter has no location at all and SARIF
+/// renders its first step as `location: null`.
+fn span_with_decl(ir: &FunctionIR, key: &NodeKey) -> Option<(usize, usize)> {
+    span_of(ir, key).or_else(|| ir.var_metadata.get(&key.var).and_then(|m| m.byte_range))
 }
 
 /// Byte range of the instruction (or param sentinel) a node points at.
@@ -289,8 +356,12 @@ impl<'a> BackwardTaintEngine<'a> {
         }
     }
 
-    /// Walk the BFS parent map from the sink argument back to the source and
-    /// build the source→sink [`TaintPath`].
+    /// Walk the parent map recorded during the backward BFS and build the
+    /// source→sink [`TaintPath`]. Each visited node's parent is the node one
+    /// step *closer to the sink* (the node it was discovered from), so
+    /// following parents from the source walks toward the sink in source→
+    /// sink order. The sink argument node itself is not a step: the finding
+    /// already reports it.
     pub(super) fn reconstruct_path(
         &self,
         source_node: Option<(usize, NodeKey)>,
@@ -303,7 +374,18 @@ impl<'a> BackwardTaintEngine<'a> {
         // just before the sink argument. The sink node itself is not a step:
         // the finding already reports it.
         let Some((sf, skey)) = source_node else {
-            return TaintPath::new(chain, source_desc, &self.fn_file);
+            return TaintPath::new(chain, source_desc, None, &self.fn_file);
+        };
+        let source_span = {
+            let ir = self.prog.functions[sf].ir;
+            span_with_decl(ir, &skey).map(|r| {
+                let file = self
+                    .fn_file
+                    .get(&ir.name)
+                    .cloned()
+                    .unwrap_or_else(|| ir.name.clone());
+                (file, r)
+            })
         };
         let mut cur = (sf, skey);
         for _ in 0..self.current_parents.len() + 1 {
@@ -316,6 +398,17 @@ impl<'a> BackwardTaintEngine<'a> {
                 None => break,
             }
         }
-        TaintPath::new(chain, source_desc, &self.fn_file)
+        // The leading walk nodes ARE the origin: the chain starts at the
+        // source node, and its def/use pair each restates step 1 at the same
+        // byte range. The Source step now carries that location, so drop the
+        // echoes instead of printing the origin two or three times.
+        let origin = source_span.as_ref().map(|(_, r)| *r);
+        while let Some((_, ir, key, _)) = chain.first() {
+            if span_with_decl(ir, key) != origin {
+                break;
+            }
+            chain.remove(0);
+        }
+        TaintPath::new(chain, source_desc, source_span, &self.fn_file)
     }
 }

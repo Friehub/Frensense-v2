@@ -445,6 +445,88 @@ mod policy_proposal_tests {
         );
     }
 
+    /// A family whose `[frensense]` block declares `package:` scopes its
+    /// learned checks' blast radius: the candidate publishes as a
+    /// package-scoped policy (`PolicyScoped`) so its generic presence
+    /// trigger can never collide with unrelated bundle families that
+    /// merely share the verb but not the package import.
+    #[test]
+    fn family_declared_package_turns_checks_into_scoped_policies() {
+        let dir = TempDir::new().unwrap();
+        // Positive: privileged export inside the declared toolkit package.
+        // The `// package:` line lives in the positive's metadata block;
+        // the file also genuinely imports the package, because a scoped
+        // policy fires only in files that actually import it.
+        write(
+            &dir,
+            "sc_positive.ts",
+            concat!(
+                "// [frensense]\n",
+                "// package: toolkit-internal\n",
+                "\n",
+                "import { exportRecord, verifyExportPolicy } from 'toolkit-internal';\n",
+                "function handle(uid: string): void {\n",
+                "    exportRecord(uid);\n",
+                "}\n",
+            ),
+        );
+        // Negative: same trigger, but the enforcement guard is present.
+        write(
+            &dir,
+            "sc_negative.ts",
+            concat!(
+                "import { exportRecord, verifyExportPolicy } from 'toolkit-internal';\n",
+                "function handle(uid: string): void {\n",
+                "    if (!verifyExportPolicy(uid)) {\n",
+                "        throw new Error('denied');\n",
+                "    }\n",
+                "    exportRecord(uid);\n",
+                "}\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(
+            families[0].metadata.package.as_deref(),
+            Some("toolkit-internal"),
+            "the positive's package: line must land in the family metadata"
+        );
+
+        let (_, published) = extract_facts_with_tables(&families, &config, &table);
+
+        let scoped = published.iter().find(|f| match &f.entry {
+            LearnedFactEntry::PolicyScoped {
+                when_call,
+                require,
+                package,
+                ..
+            } => {
+                when_call == "exportRecord"
+                    && package == "toolkit-internal"
+                    && require.iter().any(|r| {
+                        matches!(r, PolicyRequirement::GuardCall { call }
+                            if call == "verifyExportPolicy")
+                    })
+            }
+            _ => false,
+        });
+        assert!(
+            scoped.is_some(),
+            "a family-declared package must scope its learned checks as \
+             PolicyScoped; got: {:#?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+        // No unscoped check fact may ship for the same trigger: the scoped
+        // policy replaces it outright.
+        assert!(
+            published
+                .iter()
+                .all(|f| !matches!(&f.entry, LearnedFactEntry::Check { call, .. } if call == "exportRecord")),
+            "the scoped policy must not be duplicated by an unscoped check"
+        );
+    }
+
     #[test]
     fn undeclared_families_get_no_policy_proposals() {
         let dir = TempDir::new().unwrap();
@@ -575,6 +657,288 @@ mod policy_proposal_tests {
             "family must separate under learned facts: positive alerts, negative is silent"
         );
     }
+
+    /// Guard synonyms, author-declared: a `guard: a, b` metadata line
+    /// teaches the enforcement set in ONE family. The published fact must
+    /// accept ANY declared helper (RequireCall any_of) rather than the
+    /// single best-synthesized guard, so held-out files guarded by each
+    /// spelling stay silent.
+    #[test]
+    fn declared_guard_synonyms_publish_any_of() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "synonyms_positive.py",
+            concat!(
+                "# [frensense]\n",
+                "# check-call: delete_user_account\n",
+                "# guard: verify_admin_permission, user.can\n",
+                "def handle(uid):\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+        // Negative 1: traditional named helper, branch-guarded.
+        write(
+            &dir,
+            "synonyms_negative.py",
+            concat!(
+                "def handle(uid):\n",
+                "    if not verify_admin_permission(uid):\n",
+                "        raise Exception('denied')\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+        // Negative 2: member-qualified inline predicate, the synonym.
+        write(
+            &dir,
+            "synonyms_negative_second_guard.py",
+            concat!(
+                "def handle(user, uid):\n",
+                "    if not user.can('delete_users'):\n",
+                "        return\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families.len(), 1, "one family expected");
+
+        let (learned_table, published) = extract_facts_with_tables(&families, &config, &table);
+        let taught = published.iter().any(|f| match &f.entry {
+            LearnedFactEntry::Policy {
+                when_call, require, ..
+            } => {
+                when_call.ends_with("delete_user_account")
+                    && require.iter().any(|r| {
+                        matches!(r, PolicyRequirement::RequireCall { any_of }
+                            if any_of.contains(&"verify_admin_permission".to_string())
+                                && any_of.contains(&"user.can".to_string()))
+                    })
+            }
+            _ => false,
+        });
+        assert!(
+            taught,
+            "declared synonyms must publish a RequireCall any_of over ALL of them: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+
+        let family = &families[0];
+        let prep = gate::PreparedFamily::new(family, &table).unwrap();
+        assert!(
+            prep.separates(&config, &learned_table),
+            "synonym-guarded twins must separate under the learned facts"
+        );
+    }
+
+    /// Unbounded-operand modality teaching: `check-rule:` + `wrap-max:`
+    /// plus `unbounded-product: true` publishes the trailing
+    /// `IntegerOverflowUnboundedRule` wire variant; the replay gate
+    /// validates separation with the positive's both-dynamic
+    /// `malloc(rows * cols)` firing and the negative's literal-bounded
+    /// clamp staying silent.
+    #[test]
+    fn unbounded_product_rule_teaches_and_separates() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "unbounded_positive.c",
+            concat!(
+                "// [frensense]\n",
+                "// check-rule: integer_overflow_alloc_unbounded\n",
+                "// wrap-max: 4294967295\n",
+                "// unbounded-product: true\n",
+                "#include <stdlib.h>\n",
+                "void *matrix(unsigned long rows, unsigned long cols) {\n",
+                "  void *p = malloc(rows * cols);\n",
+                "  return p;\n",
+                "}\n",
+            ),
+        );
+        write(
+            &dir,
+            "unbounded_negative.c",
+            concat!(
+                "#include <stdlib.h>\n",
+                "void *matrix(unsigned long rows, unsigned long cols) {\n",
+                "  if (rows < 1 || rows > 60000 || cols > 60000) return NULL;\n",
+                "  void *p = malloc(rows * cols);\n",
+                "  return p;\n",
+                "}\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families.len(), 1, "one family expected");
+
+        // This test's scan context is the bundle table below (_learned_table
+        // semantics are asserted by the sibling fixtures at 707/834/903).
+        let (_learned_table, published) = extract_facts_with_tables(&families, &config, &table);
+        let taught = published.iter().any(|f| matches!(&f.entry,
+            LearnedFactEntry::IntegerOverflowUnboundedRule { rule, .. } if rule == "integer_overflow_alloc_unbounded"));
+        assert!(
+            taught,
+            "the unbounded product flag must publish the trailing wire variant: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+
+        let family = &families[0];
+        let prep = gate::PreparedFamily::new(family, &table).unwrap();
+        // Scan context = the bundle table: builtin base + every published
+        // fact (what a CLI scan with the .frc loads).
+        let mut bundle_table = table.clone();
+        for f in &published {
+            f.entry.apply_with(
+                &mut bundle_table,
+                frensense_engine::analysis::taint::facts::Provenance::Learned,
+            );
+        }
+        let (pos_alerts, neg_alerts) = prep.alert_flags(&config, &bundle_table);
+        assert!(
+            pos_alerts && !neg_alerts,
+            "unbounded twins must separate: positive fires, clamped negative silent (positive={pos_alerts}, negative={neg_alerts})"
+        );
+    }
+
+    /// The same teaching WITHOUT a branch: a bare enforcement statement
+    /// (`guard_cmd(); trigger()`) in the negative is the exact shape the
+    /// scanner's `guard_executes_before` honors at scan time, so the
+    /// proposal layer must ground it dominantly instead of discarding it
+    /// as a coincidental guard (the "TAUGHT NOTHING" asymmetry).
+    #[test]
+    fn bare_statement_guard_dom_gate_teaches() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "bare_guard_positive.py",
+            concat!(
+                "# check-call: delete_user_account\n",
+                "def handle(uid):\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+        write(
+            &dir,
+            "bare_guard_negative.py",
+            concat!(
+                "def handle(uid):\n",
+                "    verify_admin_permission(uid)\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families.len(), 1, "one family expected");
+
+        let (learned_table, published) = extract_facts_with_tables(&families, &config, &table);
+        let taught = published.iter().any(|f| match &f.entry {
+            LearnedFactEntry::Check {
+                call, unless_guard, ..
+            } => unless_guard
+                .as_deref()
+                .map(|g| {
+                    call.ends_with("delete_user_account") && g.contains("verify_admin_permission")
+                })
+                .unwrap_or(false),
+            LearnedFactEntry::Policy {
+                when_call, require, ..
+            } => {
+                when_call.ends_with("delete_user_account")
+                    && require.iter().any(|r| {
+                        matches!(
+                            r,
+                            PolicyRequirement::GuardCall { call }
+                                if call.contains("verify_admin_permission")
+                        )
+                    })
+            }
+            _ => false,
+        });
+        assert!(
+            taught,
+            "a dominant bare-statement guard must teach: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+
+        let family = &families[0];
+        let prep = gate::PreparedFamily::new(family, &table).unwrap();
+        assert!(
+            prep.separates(&config, &learned_table),
+            "bare-statement twins must separate under the learned facts"
+        );
+    }
+
+    /// Decorators-as-guards teaching: the negative enforces through an
+    /// entry decorator (`@verify_admin_permission` on the definition).
+    /// The decorator is lowered into `entry_guards`, proposes as a guard,
+    /// grounds via the decorator shape, and separates the twins end to
+    /// end (the scanner treats an entry decorator as a dominating guard).
+    #[test]
+    fn decorator_guard_teaches_and_scans() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "decorated_positive.py",
+            concat!(
+                "# check-call: delete_user_account\n",
+                "def handle(uid):\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+        write(
+            &dir,
+            "decorated_negative.py",
+            concat!(
+                "@verify_admin_permission\n",
+                "def handle(uid):\n",
+                "    delete_user_account(uid)\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families.len(), 1, "one family expected");
+
+        let (learned_table, published) = extract_facts_with_tables(&families, &config, &table);
+        let taught = published.iter().any(|f| match &f.entry {
+            LearnedFactEntry::Check {
+                call, unless_guard, ..
+            } => unless_guard
+                .as_deref()
+                .map(|g| {
+                    call.ends_with("delete_user_account") && g.contains("verify_admin_permission")
+                })
+                .unwrap_or(false),
+            LearnedFactEntry::Policy {
+                when_call, require, ..
+            } => {
+                when_call.ends_with("delete_user_account")
+                    && require.iter().any(|r| {
+                        matches!(
+                            r,
+                            PolicyRequirement::GuardCall { call }
+                                if call.contains("verify_admin_permission")
+                        )
+                    })
+            }
+            _ => false,
+        });
+        assert!(
+            taught,
+            "a decorated negative must teach its entry guard: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+
+        let family = &families[0];
+        let prep = gate::PreparedFamily::new(family, &table).unwrap();
+        assert!(
+            prep.separates(&config, &learned_table),
+            "decorator-guarded twins must separate under the learned facts"
+        );
+    }
 }
 
 mod slot_regression_tests {
@@ -642,9 +1006,11 @@ export function badSearch (req: any) {
     fn builtin_table_is_slot_aware() {
         let (_, table) = builtin();
 
+        // Sink facts are language-keyed: look the slot rules up for the
+        // language that declared them, not through the shared name space.
         let q = table
-            .sink_signature("query")
-            .expect("query must be a known sink");
+            .sink_signature_for_language("query", Some("typescript"))
+            .expect("query must be a known TypeScript sink");
         assert!(q.is_dangerous(0), "SQL string slot is dangerous");
         assert!(
             !q.is_dangerous(1),
@@ -653,8 +1019,8 @@ export function badSearch (req: any) {
         assert!(q.is_binding(1));
 
         let d = table
-            .sink_signature("decrypt")
-            .expect("decrypt must be a known sink");
+            .sink_signature_for_language("decrypt", Some("typescript"))
+            .expect("decrypt must be a known TypeScript sink");
         assert!(d.is_dangerous(0), "ciphertext slot is dangerous");
         assert!(!d.is_dangerous(1), "key slot must not alert");
     }
@@ -747,6 +1113,61 @@ export function badSearch (req: any) {
         assert!(
             !alerts(&neg),
             "binding-channel safety must survive fact merge"
+        );
+    }
+}
+
+/// Gate/consumer parity for package-scoped sanitizers: `apply_candidate`
+/// builds the replay-gate trial tables, so it must install a package-
+/// scoped sanitizer under `(package, call)` ONLY — exactly like the
+/// engine's load path (`apply_language_entries`). A universal alias here
+/// would let the gate cut any receiver and approve facts whose strict
+/// consumer semantics differ.
+mod scoped_candidate_install_tests {
+    use super::*;
+    use crate::extract::{apply_candidate, Candidate};
+
+    #[test]
+    fn scoped_sanitizer_candidate_installs_no_universal_alias() {
+        let mut table = FactTable::default();
+        apply_candidate(
+            &mut table,
+            &Candidate::Sanitizer {
+                call: "scrub".into(),
+                package: Some("@acme/sanitize".into()),
+                guard: false,
+            },
+        );
+        assert!(
+            table
+                .scoped_sanitizer_facts
+                .contains_key(&("@acme/sanitize".to_string(), "scrub".to_string())),
+            "the scoped entry must be installed under (package, call)"
+        );
+        assert!(
+            table.sanitizer_facts.get("scrub").is_none(),
+            "a package-scoped sanitizer must not install a universal alias: \n             consumers load it origin-gated, so the gate must replay the same semantics"
+        );
+    }
+
+    #[test]
+    fn unscoped_sanitizer_candidate_stays_universal() {
+        let mut table = FactTable::default();
+        apply_candidate(
+            &mut table,
+            &Candidate::Sanitizer {
+                call: "scrub".into(),
+                package: None,
+                guard: false,
+            },
+        );
+        assert!(
+            table.sanitizer_facts.contains_key("scrub"),
+            "an unpackage-qualified sanitizer must stay universal"
+        );
+        assert!(
+            table.scoped_sanitizer_facts.is_empty(),
+            "an unpackage-qualified sanitizer must not create a scoped entry"
         );
     }
 }

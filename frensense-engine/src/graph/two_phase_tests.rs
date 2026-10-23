@@ -162,9 +162,13 @@ export function handler(req: any): void {
         let fns = lower_source("t.ts", src, "ts").expect("lower");
         let statics: rustc_hash::FxHashMap<String, &crate::ir::function::FunctionIR> =
             fns.iter().map(|(k, v)| (k.clone(), v)).collect();
-        let config = crate::analysis::taint::facts::seeded_tables(["ts"]).0;
-        let prog = crate::analysis::forward::ProgramSvfg::new(&statics, &config);
-        let mut engine = BackwardTaintEngine::new(&prog, &config);
+        // The pack's provider vocabulary (sources, sinks) is language-keyed
+        // fact data, not `TaintConfig` names: an engine built from the config
+        // alone knows only explicitly-configured calls. Mirror the scanner
+        // and hand both tables over.
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables(["ts"]);
+        let prog = crate::analysis::forward::ProgramSvfg::new_with_facts(&statics, &config, &facts);
+        let mut engine = BackwardTaintEngine::new(&prog, &config).with_fact_table(&facts);
         engine.run();
         assert!(
             !engine.findings.is_empty(),

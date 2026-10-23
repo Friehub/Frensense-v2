@@ -152,6 +152,12 @@ pub enum Instruction {
         mem_in: VarId,
         func: String,
         args: Vec<Operand>,
+        /// Keyword/keyed argument names, parallel to `args`: entry `i` is
+        /// the name of `args[i]`, or empty when that argument is
+        /// positional. Shorter than `args` (or empty) means the source
+        /// language, or the lowered node, carries no names - callers must
+        /// treat a missing entry as positional. See [`CallStatic::args`].
+        arg_names: Vec<String>,
     },
 
     /// mem_out, dest = receiver.method(args) @ mem_in
@@ -162,6 +168,8 @@ pub enum Instruction {
         method: String,
         receiver: Operand,
         args: Vec<Operand>,
+        /// Parallel to `args`; see [`Instruction::CallStatic`].
+        arg_names: Vec<String>,
     },
 
     /// mem_out, dest = func_ptr(args) @ mem_in
@@ -171,6 +179,8 @@ pub enum Instruction {
         mem_in: VarId,
         func_ptr: Operand,
         args: Vec<Operand>,
+        /// Parallel to `args`; see [`Instruction::CallStatic`].
+        arg_names: Vec<String>,
     },
 
     // --- Memory & Pointers (Systems Languages) ---
@@ -288,11 +298,25 @@ pub struct FunctionIR {
     pub blocks: FxHashMap<BlockId, BasicBlock>,
     pub entry_block: BlockId,
     pub var_metadata: FxHashMap<VarId, VarMetadata>,
+    /// Language key this IR was lowered from (`spec.name()`: `"typescript"`,
+    /// `"rust"`, ...). Sink and sanitizer facts are language-keyed, so every
+    /// call site must know its own language: without this, a Rust
+    /// `File::create` signature would fire on a JavaScript `prisma.create`
+    /// in the same mixed-language scan. Empty when the IR was built by hand
+    /// (synthetic test IRs) or decoded from legacy data.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub language: String,
     /// Program name of the innermost enclosing extracted function, when this
     /// function was extracted from a nested position (None for module scope).
     /// Closure edges resolve free variables through this lexical chain.
     #[cfg_attr(feature = "serialize", serde(default))]
     pub enclosing_fn: Option<String>,
+    /// Decorator / attribute call names applied to this function's
+    /// definition (`@guard`, `#[guard]`). A decorator executes before ANY
+    /// statement of the body, so policy guard requirements are satisfied
+    /// by a matching entry guard without a guard call inside the body.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub entry_guards: Vec<String>,
     #[cfg_attr(feature = "serialize", serde(default))]
     // legacy safety: recompute via max ids if absent
     next_var_id: usize,
@@ -313,7 +337,9 @@ impl FunctionIR {
             blocks,
             entry_block: entry_id,
             var_metadata: FxHashMap::default(),
+            language: String::new(),
             enclosing_fn: None,
+            entry_guards: Vec::new(),
             next_var_id: 1,
             next_block_id: 1,
         };
@@ -374,6 +400,26 @@ impl FunctionIR {
         {
             t.predecessors.push(from);
         }
+    }
+
+    /// The receiver operand of the virtual call whose result is `var`, if
+    /// any: lets a chained call (`conn.cursor().execute(..)`) resolve to
+    /// the root of its receiver chain.
+    pub(crate) fn call_receiver_def(&self, var: VarId) -> Option<VarId> {
+        for b in self.blocks.values() {
+            for instr in &b.instructions {
+                if let Instruction::CallVirtual {
+                    dest: Some(d),
+                    receiver: Operand::Var(r),
+                    ..
+                } = instr
+                    && *d == var
+                {
+                    return Some(*r);
+                }
+            }
+        }
+        None
     }
 
     /// The `LoadField` instruction defining `var`, if any (first match - IR

@@ -19,9 +19,14 @@ use super::LanguageVocab;
 
 /// The conventional request-parameter source names, formerly
 /// `spec_ts.rs::request_param_names` (both specs emitted them).
-static REQUEST_PARAM_NAMES: &[&str] = &[
-    "req", "request", "ctx", "context", "event", "c", "e", "r", "input", "args", "parent", "info",
-];
+///
+/// Only names that denote an HTTP request object stay. `ctx`, `c`, `event`,
+/// `context`, `r`, `e`, `input`, `args`, `parent` and `info` are generic
+/// parameter names (rpc contexts, minified single letters, callback
+/// payloads); marking them tainted fired on every library that uses them.
+/// Their request-carrying members are covered by the dotted source
+/// patterns (`ctx.request.body`, `c.req.query`, `event.body`, ...).
+static REQUEST_PARAM_NAMES: &[&str] = &["req", "request"];
 
 /// The route-registration call shapes, formerly
 /// `spec_ts.rs::route_registration_patterns` (both specs emitted them).
@@ -41,7 +46,11 @@ static ROUTE_PATTERNS: &[&str] = &[
 const TYPESCRIPT_VOCAB: LanguageVocab = LanguageVocab {
     language: "typescript",
     ambiguous_verbs: crate::data::BOOTSTRAP_AMBIGUOUS_VERBS,
+    // `eval` is a global builtin in both dialects: `engine.eval(x)` on an
+    // unqualified receiver is not the language's eval (WI-12).
+    global_only_sinks: &["eval"],
     sink_names: tables::JS_SINK_NAMES,
+    package_scoped_sinks: tables::JS_PACKAGE_SCOPED_SINKS,
     sink_signatures: tables::JS_SINK_SIGNATURES,
     idor_sinks: tables::JS_IDOR_SINKS,
     source_patterns: tables::JS_SOURCE_PATTERNS,
@@ -51,6 +60,7 @@ const TYPESCRIPT_VOCAB: LanguageVocab = LanguageVocab {
     propagators: propagators::JS_PROPAGATORS,
     session_roots: tables::JS_SESSION_ROOTS,
     route_patterns: ROUTE_PATTERNS,
+    policies: &[],
 };
 
 const JAVASCRIPT_VOCAB: LanguageVocab = LanguageVocab {

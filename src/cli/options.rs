@@ -6,7 +6,12 @@ use crate::Severity;
 use std::path::PathBuf;
 
 /// CLI options for the deterministic dataflow compiler scan.
+///
+/// `#[non_exhaustive]`: an evolving options DTO. New flags (e.g. `explain` in
+/// 0.8.0) are added as minor releases; construct via [`super::parse_options`],
+/// not literals.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct CliOptions {
     /// Positional scan target paths (files or directories).
     pub paths: Vec<PathBuf>,
@@ -18,7 +23,7 @@ pub struct CliOptions {
     pub is_strict: bool,
     /// Minimum severity floor: critical, warning, info. Default: warning.
     pub severity_filter: Option<Severity>,
-    /// Language filter (e.g., rust, typescript, javascript, python, c).
+    /// Language filter (e.g., rust, go, typescript, javascript, python, c).
     pub language_filter: Option<String>,
     /// .frc bundle providing learned facts and advisory patterns.
     pub corpus_bundle_path: Option<PathBuf>,
@@ -28,6 +33,20 @@ pub struct CliOptions {
     pub compare_baseline_path: Option<String>,
     /// Only scan files modified relative to git HEAD.
     pub diff_only: bool,
+    /// Record every silent sink argument (why the engine stayed quiet).
+    pub explain: bool,
+    /// Include the taint-path flow (source→sink SSA steps) in the text
+    /// observation. JSON/SARIF always carry the path (`taint_steps` / SARIF
+    /// `codeFlows`); `--show-flows` additionally embeds it in the text
+    /// observation for terminal reports.
+    pub show_flows: bool,
+    /// Precision profile: default (stable), recommended (stable + beta),
+    /// or strict (all tiers, including hygiene and experimental).
+    pub profile: crate::Profile,
+    /// Report code hygiene rules (e.g. function complexity) under any profile.
+    pub enable_hygiene: bool,
+    /// Maximum cyclomatic complexity ceiling before emitting function_complexity.
+    pub max_complexity: Option<usize>,
 }
 
 /// Parse CLI arguments into structured scan options.
@@ -43,6 +62,11 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
         emit_baseline_path: None,
         compare_baseline_path: None,
         diff_only: false,
+        explain: false,
+        show_flows: false,
+        profile: crate::Profile::Default,
+        enable_hygiene: false,
+        max_complexity: None,
     };
 
     let mut i = 1;
@@ -79,6 +103,27 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
             }
             "--strict" => options.is_strict = true,
             "--diff-only" => options.diff_only = true,
+            "--explain" => options.explain = true,
+            "--show-flows" => options.show_flows = true,
+            "--hygiene" => options.enable_hygiene = true,
+            "--max-complexity" => {
+                let val = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                let n = val.parse::<usize>().map_err(|_| {
+                    format!("invalid value for {arg}: '{val}' must be a positive integer")
+                })?;
+                options.max_complexity = Some(n);
+                options.enable_hygiene = true;
+                i += 1;
+            }
+            "-p" | "--profile" => {
+                let val = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                options.profile = crate::Profile::parse(val)?;
+                i += 1;
+            }
             "-s" | "--severity" => {
                 let level = args
                     .get(i + 1)
@@ -237,6 +282,22 @@ mod tests {
     }
 
     #[test]
+    fn explain_flag_parses() {
+        let opts = parse_options(&to_args(&["--explain"])).expect("parse");
+        assert!(opts.explain);
+        let opts = parse_options(&to_args(&["Cargo.toml"])).expect("parse");
+        assert!(!opts.explain);
+    }
+
+    #[test]
+    fn show_flows_flag_parses() {
+        let opts = parse_options(&to_args(&["--show-flows"])).expect("parse");
+        assert!(opts.show_flows);
+        let opts = parse_options(&to_args(&["Cargo.toml"])).expect("parse");
+        assert!(!opts.show_flows, "show_flows defaults to off");
+    }
+
+    #[test]
     fn missing_value_rejected() {
         let err = parse_options(&to_args(&["-o"])).expect_err("should reject");
         assert!(err.contains("missing value for -o"));
@@ -247,5 +308,48 @@ mod tests {
         let err = parse_options(&to_args(&["this_file_does_not_exist_at_all.xyz"]))
             .expect_err("should reject");
         assert!(err.contains("does not exist"));
+    }
+
+    #[test]
+    fn profile_flag_parses() {
+        let opts = parse_options(&to_args(&["Cargo.toml"])).expect("parse");
+        assert_eq!(opts.profile, crate::Profile::Default);
+
+        let opts =
+            parse_options(&to_args(&["--profile", "recommended", "Cargo.toml"])).expect("parse");
+        assert_eq!(opts.profile, crate::Profile::Recommended);
+
+        let opts = parse_options(&to_args(&["-p", "strict", "Cargo.toml"])).expect("parse");
+        assert_eq!(opts.profile, crate::Profile::Strict);
+
+        let err = parse_options(&to_args(&["--profile", "invalid", "Cargo.toml"]))
+            .expect_err("should reject");
+        assert!(err.contains("unknown profile 'invalid'"));
+    }
+
+    #[test]
+    fn hygiene_flag_parses() {
+        let opts = parse_options(&to_args(&["--hygiene"])).expect("parse");
+        assert!(opts.enable_hygiene);
+        assert_eq!(opts.max_complexity, None);
+
+        let opts = parse_options(&to_args(&["Cargo.toml"])).expect("parse");
+        assert!(!opts.enable_hygiene);
+    }
+
+    #[test]
+    fn max_complexity_flag_parses() {
+        let opts = parse_options(&to_args(&["--max-complexity", "15"])).expect("parse");
+        assert_eq!(opts.max_complexity, Some(15));
+        assert!(
+            opts.enable_hygiene,
+            "setting max-complexity should automatically enable hygiene"
+        );
+
+        let err = parse_options(&to_args(&["--max-complexity"])).expect_err("should reject");
+        assert!(err.contains("missing value for --max-complexity"));
+
+        let err = parse_options(&to_args(&["--max-complexity", "abc"])).expect_err("should reject");
+        assert!(err.contains("must be a positive integer"));
     }
 }

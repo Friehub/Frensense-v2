@@ -112,6 +112,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -123,6 +124,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "helper".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -142,6 +144,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(p0)],
+                    arg_names: Vec::new(),
                 },
             );
             helper.set_terminator(b, Terminator::Return { src: None });
@@ -203,6 +206,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             get.set_terminator(
@@ -227,6 +231,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "get".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -238,6 +243,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -276,6 +282,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let w = main.new_var(dummy_meta("w"));
@@ -288,6 +295,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "escapeHtml".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             let m3 = main.new_var(mem_meta("m3"));
@@ -299,6 +307,7 @@ pub mod demand_tests {
                     mem_in: m2,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(w)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -338,6 +347,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "db.execute".into(),
                     args: vec![Operand::StringLiteral("SELECT 1".into())],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -383,6 +393,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -422,6 +433,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -433,6 +445,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "helper".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -452,6 +465,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(p0)],
+                    arg_names: Vec::new(),
                 },
             );
             helper.set_terminator(b, Terminator::Return { src: None });
@@ -474,6 +488,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             noise.set_terminator(b, Terminator::Return { src: None });
@@ -526,6 +541,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "escapeHtml".into(),
                     args: vec![Operand::Var(x0)],
+                    arg_names: Vec::new(),
                 },
             );
             clean.set_terminator(
@@ -550,6 +566,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let w = main.new_var(dummy_meta("w"));
@@ -562,6 +579,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "clean".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             let m3 = main.new_var(mem_meta("m3"));
@@ -573,6 +591,7 @@ pub mod demand_tests {
                     mem_in: m2,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(w)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -629,6 +648,7 @@ pub mod demand_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -640,6 +660,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -695,6 +716,7 @@ pub mod demand_tests {
                     method: "randint".into(),
                     receiver: Operand::Var(random_mod),
                     args: vec![Operand::IntLiteral(0), Operand::IntLiteral(10)],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -706,6 +728,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "eval".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -789,6 +812,7 @@ pub mod demand_tests {
                     method: "get".into(),
                     receiver: Operand::Var(form),
                     args: vec![Operand::StringLiteral("\"p\"".into())],
+                    arg_names: Vec::new(),
                 },
             );
             let bar = handler.new_var(dummy_meta("bar"));
@@ -834,6 +858,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "open".into(),
                     args: vec![Operand::Var(bar)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(merge, Terminator::Return { src: None });
@@ -896,6 +921,7 @@ pub mod demand_tests {
                     method: "get".into(),
                     receiver: Operand::Var(form),
                     args: vec![Operand::StringLiteral("\"p\"".into())],
+                    arg_names: Vec::new(),
                 },
             );
             let bar = handler.new_var(dummy_meta("bar"));
@@ -919,6 +945,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "open".into(),
                     args: vec![Operand::Var(bar)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(merge, Terminator::Return { src: None });
@@ -976,6 +1003,7 @@ pub mod demand_tests {
                     method: "get".into(),
                     receiver: Operand::Var(form),
                     args: vec![Operand::StringLiteral("\"p\"".into())],
+                    arg_names: Vec::new(),
                 },
             );
             let bar = handler.new_var(dummy_meta("bar"));
@@ -1020,6 +1048,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "open".into(),
                     args: vec![Operand::Var(bar)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(flawed_sink_block, Terminator::Return { src: None });
@@ -1088,6 +1117,7 @@ pub mod demand_tests {
                     method: "get".into(),
                     receiver: Operand::Var(cookies),
                     args: vec![Operand::StringLiteral("\"p\"".into())],
+                    arg_names: Vec::new(),
                 },
             );
 
@@ -1179,6 +1209,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "open".into(),
                     args: vec![Operand::Var(bar)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(merge, Terminator::Return { src: None });
@@ -1241,6 +1272,7 @@ pub mod demand_tests {
                     method: "get".into(),
                     receiver: Operand::Var(cookies),
                     args: vec![Operand::StringLiteral("\"p\"".into())],
+                    arg_names: Vec::new(),
                 },
             );
 
@@ -1311,6 +1343,7 @@ pub mod demand_tests {
                     mem_in: m1,
                     func: "open".into(),
                     args: vec![Operand::Var(bar)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(merge, Terminator::Return { src: None });
@@ -1696,6 +1729,7 @@ export const redirect = ({ query }: any, res: any) => {
                     method: "get".into(),
                     receiver: Operand::Var(form),
                     args: vec![Operand::StringLiteral("\"p\"".into())],
+                    arg_names: Vec::new(),
                 },
             );
             let bar = handler.new_var(dummy_meta("bar"));
@@ -1806,6 +1840,7 @@ export const redirect = ({ query }: any, res: any) => {
                     mem_in: ms,
                     func: "open".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(merge, Terminator::Return { src: None });
@@ -1869,6 +1904,7 @@ export const redirect = ({ query }: any, res: any) => {
                     mem_in: main.initial_memory_state,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let flag = main.new_var(dummy_meta("flag"));
@@ -1890,6 +1926,7 @@ export const redirect = ({ query }: any, res: any) => {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(flag)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -1946,6 +1983,7 @@ export const redirect = ({ query }: any, res: any) => {
                     mem_in: main.initial_memory_state,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let y = main.new_var(dummy_meta("y"));
@@ -1977,6 +2015,7 @@ export const redirect = ({ query }: any, res: any) => {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(y), Operand::Var(x)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -2237,6 +2276,7 @@ export function b(id: any): void {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -2249,6 +2289,7 @@ export function b(id: any): void {
                     method: "json".into(),
                     receiver: Operand::Var(res),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             let m3 = main.new_var(mem_meta("m3"));
@@ -2261,6 +2302,7 @@ export function b(id: any): void {
                     method: "decode".into(),
                     receiver: Operand::Var(jwt),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             let m4 = main.new_var(mem_meta("m4"));
@@ -2272,6 +2314,7 @@ export function b(id: any): void {
                     mem_in: m3,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -2311,6 +2354,161 @@ export function b(id: any): void {
             engine.stats.sink_args_explored, 5,
             "role must never gate exploration: {:?}",
             engine.stats
+        );
+    }
+
+    /// WI-12 global-only sink facts: a table entry can say "global only",
+    /// so the bare call form is the sink (`eval(x)` fires) while a
+    /// receiver-qualified call on an unqualified, unimported receiver
+    /// (`engine.eval(x)`) does not. The pack carries the global-only flag
+    /// for `eval` on both JS/TS and Python; the negative below must stay
+    /// silent even though its callee's last segment is the same `eval`.
+    #[test]
+    fn global_only_sink_bare_matches_receiver_qualified_does_not() {
+        use crate::analysis::taint::facts::seeded_tables;
+        use crate::harness::lower_source;
+
+        let src = r#"
+            function b() {
+                const s = getSource();
+                return eval(s);
+            }
+            function g() {
+                const x = getSource();
+                const engine = getUnrelated();
+                return engine.eval(x);
+            }
+        "#;
+        let irs = lower_source("probe.js", src, "js").expect("lower probe");
+        let prog = build_program(irs.into_values().collect());
+        let (cfg, facts) = seeded_tables(["js"]);
+        let mut cfg = cfg.clone();
+        cfg.sources.insert("getSource".to_string());
+
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg).with_fact_table(&facts);
+        engine.run();
+
+        assert!(
+            engine
+                .findings
+                .iter()
+                .any(|f| f.function == "b" && f.verdict == BackwardVerdict::Vulnerable),
+            "bare eval(…) must stay a sink, got {:?}",
+            engine.findings
+        );
+        assert!(
+            !engine
+                .findings
+                .iter()
+                .any(|f| f.function == "g" && f.verdict == BackwardVerdict::Vulnerable),
+            "engine.eval(…) on an unqualified local receiver must stay silent, got {:?}",
+            engine.findings
+        );
+    }
+
+    /// WI-11: scope-separated callees (`std::fs::read_to_string`,
+    /// `fs::read_to_string`) must match the entry that matches the bare
+    /// `read_to_string(..)`. The engine resolves them at fact-matching time
+    /// through `::` suffix fallbacks — an engine-mechanism rule, keeping the
+    /// engine free of Rust-specific vocabulary. Qualified entries keep exact
+    /// precedence (the `Command::new` family stays qualified), and the
+    /// negative (literal path) stays silent.
+    #[test]
+    fn scope_separated_rust_calls_match_bare_entries() {
+        use crate::analysis::taint::facts::seeded_tables;
+        use crate::harness::lower_source;
+
+        let src = r#"
+            fn with_env() {
+                let p = std::env::var("FILE_PATH");
+                let s = std::fs::read_to_string(p);
+            }
+            fn clean() {
+                let s = std::fs::read_to_string("/etc/hostname");
+            }
+        "#;
+        let irs = lower_source("probe.rs", src, "rs").expect("lower probe");
+        let prog = build_program(irs.into_values().collect());
+        let (cfg, facts) = seeded_tables(["rs"]);
+        let mut cfg = cfg.clone();
+        cfg.sources.insert("std::env::var".to_string());
+
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg).with_fact_table(&facts);
+        engine.run();
+
+        assert!(
+            engine
+                .findings
+                .iter()
+                .any(|f| f.function == "with_env" && f.verdict == BackwardVerdict::Vulnerable),
+            "std::fs::read_to_string(tainted) must match the bare read_to_string entry, got {:?}",
+            engine.findings
+        );
+        assert!(
+            !engine
+                .findings
+                .iter()
+                .any(|f| f.function == "clean" && f.verdict == BackwardVerdict::Vulnerable),
+            "read_to_string(untainted literal) must stay silent, got {:?}",
+            engine.findings
+        );
+    }
+
+    /// WI-41: a call whose callee is defined in this program must not be
+    /// armed as a sink even when the name matches a library sink (`run`),
+    /// otherwise the same bug reports twice — once at the call site and once
+    /// at the callee's real sink. The callee's own sink reports once, its
+    /// backward path crossing the caller.
+    #[test]
+    fn program_local_callee_is_not_an_extra_sink() {
+        use crate::analysis::taint::facts::seeded_tables;
+        use crate::harness::lower_source;
+
+        let src = r#"
+            def run(cmd):
+                execute(cmd)
+
+            def handler(req):
+                run(req.body.payload)
+        "#;
+        let irs = lower_source("probe.py", src, "py").expect("lower probe");
+        let prog = build_program(irs.into_values().collect());
+        let (cfg, facts) = seeded_tables(["py"]);
+        let mut cfg = cfg.clone();
+        cfg.sources.insert("req.body".to_string());
+
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg).with_fact_table(&facts);
+        engine.run();
+
+        let vulns: Vec<_> = engine
+            .findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert_eq!(
+            vulns.len(),
+            1,
+            "exactly one finding (inside `run`), not one at the call site too; got {:?}",
+            vulns
+                .iter()
+                .map(|f| (&f.function, &f.sink))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            (vulns[0].function.as_str(), vulns[0].sink.as_str()),
+            ("run", "execute"),
+            "the surviving finding is the callee's real sink"
+        );
+        // And the caller–callee path is present: the walk crossed from
+        // `run` back into `handler`.
+        assert!(
+            vulns[0]
+                .path
+                .steps
+                .iter()
+                .any(|s| s.function() == Some("handler")),
+            "path must cross caller→callee; got {:?}",
+            vulns[0].path
         );
     }
 }

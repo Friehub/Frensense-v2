@@ -8,8 +8,46 @@ use super::*;
 // Shared IR predicates (same semantics as the single-function engine)
 // ---------------------------------------------------------------------------
 
+/// The source vocabulary visible at one call site: the language-agnostic
+/// `TaintConfig` set plus the call site's own language section.
+///
+/// Source facts are declared per language (TypeScript's `req`/`input`
+/// parameter names, Rust's `std::env::var`, ...) and a bare name is not
+/// portable between them: `input` is caller data in TypeScript and an
+/// unrelated local in Rust. Sharing one set across a mixed-language scan
+/// seeds taint from names that mean nothing in the file being analyzed.
+pub(crate) struct SourceScope<'a> {
+    universal: &'a rustc_hash::FxHashSet<String>,
+    language: Option<&'a rustc_hash::FxHashSet<String>>,
+}
+
+impl<'a> SourceScope<'a> {
+    pub(crate) fn for_ir(config: &'a TaintConfig, facts: &'a FactTable, ir: &FunctionIR) -> Self {
+        Self {
+            universal: &config.sources,
+            language: facts.language_sources(&ir.language),
+        }
+    }
+
+    pub(crate) fn contains(&self, name: &str) -> bool {
+        self.universal.contains(name) || self.language.is_some_and(|set| set.contains(name))
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &'a String> {
+        self.universal
+            .iter()
+            .chain(self.language.into_iter().flatten())
+    }
+}
+
 /// True if the node is a definition whose instruction is a configured source.
-pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) -> bool {
+pub(crate) fn is_source(
+    ir: &FunctionIR,
+    config: &TaintConfig,
+    facts: &FactTable,
+    key: &NodeKey,
+) -> bool {
+    let sources = SourceScope::for_ir(config, facts, ir);
     let NodeKey {
         block,
         instr_idx: Some(idx),
@@ -22,13 +60,24 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
         return false;
     };
     if idx >= b.instructions.len() {
-        // Sentinel node: function parameter. A parameter whose conventional
-        // name is a configured source (e.g. "req", "input", "body") is itself
-        // a taint source, the pack's conventional request-param vocabulary.
-        if let Some(meta) = ir.var_metadata.get(&var)
-            && let Some(name) = &meta.source_name
-        {
-            return config.sources.contains(name);
+        // Sentinel node: function parameter. Two pack-driven ways a parameter
+        // is a source:
+        //   1. its conventional NAME is a source ("req", "input", "body");
+        //   2. its TYPE annotation names one of the framework's request
+        //      value types (`Query<P>`, `web::Query<P>`, `*http.Request`).
+        // (2) exists because for typed languages the extractor type - not
+        // the author's variable name - decides that the argument carries
+        // attacker input. Matching the type keeps the knowledge in the
+        // pack's source vocabulary while the mechanism stays name-agnostic.
+        if let Some(meta) = ir.var_metadata.get(&var) {
+            if let Some(name) = &meta.source_name
+                && sources.contains(name)
+            {
+                return true;
+            }
+            return meta.type_name.as_deref().is_some_and(|ty| {
+                source_path_matches(&sources, ty, ty.split("::").next().unwrap_or(ty))
+            });
         }
         return false;
     }
@@ -37,7 +86,17 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
             func,
             dest: Some(d),
             ..
-        } => config.sources.contains(func) && !config.sinks.contains(func) && *d == var,
+        } => {
+            sources.contains(func)
+                && !config.sinks.contains(func)
+                && !facts.is_sink_call_scoped(
+                    func,
+                    None,
+                    None,
+                    (!ir.language.is_empty()).then_some(ir.language.as_str()),
+                )
+                && *d == var
+        }
         Instruction::CallVirtual {
             method,
             dest: Some(d),
@@ -50,7 +109,7 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
             // full member path `receiver.method` against dotted source
             // facts first, then the bare method name (same over-approximate
             // last-segment semantics as sinks).
-            if config.sources.contains(method) {
+            if sources.contains(method) {
                 return true;
             }
             if let Operand::Var(r) = receiver
@@ -72,7 +131,7 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
                 // reach, and the bare-root widening suppression would
                 // then correctly refuse to re-widen `request` over its
                 // granular children.
-                return source_path_matches(config, &path, root);
+                return source_path_matches(&sources, &path, root);
             }
             false
         }
@@ -88,9 +147,9 @@ pub(crate) fn is_source(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) ->
             crate::dbg_trace!(
                 crate::debug_flags::DebugFlags::get().is_source,
                 "[is_source] path={path:?} hit={}",
-                config.sources.contains(&path)
+                sources.contains(&path)
             );
-            source_path_matches(config, &path, root)
+            source_path_matches(&sources, &path, root)
         }
         _ => false,
     }
@@ -145,9 +204,9 @@ pub(crate) fn member_access_path(ir: &FunctionIR, mut base: VarId, last_field: &
 /// (The previous `sources.contains(root)` clause was redundant with the
 /// prefix rule for dotted paths and would defeat this suppression, so it is
 /// not carried over; dot-less paths hit `sources.contains(path)` exactly.)
-pub(crate) fn source_path_matches(config: &TaintConfig, path: &str, root: &str) -> bool {
-    config.sources.contains(path)
-        || config.sources.iter().any(|s| {
+pub(crate) fn source_path_matches(sources: &SourceScope<'_>, path: &str, root: &str) -> bool {
+    sources.contains(path)
+        || sources.iter().any(|s| {
             if !path.starts_with(s.as_str()) || path.as_bytes().get(s.len()) != Some(&b'.') {
                 return false;
             }
@@ -157,8 +216,7 @@ pub(crate) fn source_path_matches(config: &TaintConfig, path: &str, root: &str) 
             }
             // Whole-value root registration: live only when no granular
             // field rules exist for that root.
-            !config
-                .sources
+            !sources
                 .iter()
                 .any(|g| g.starts_with(root) && g.as_bytes().get(root.len()) == Some(&b'.'))
         })
@@ -192,6 +250,11 @@ use frensense_lang::severity::SanitizerKind;
 
 /// Fact-table-aware sanitizer check qualified by the sink's role and label.
 /// Returns true if this node is inside a sanitizer that actually defeats the candidate sink.
+///
+/// Package-scoped sanitizer facts additionally require `origin_package`
+/// to name their package (import resolution) — pass `None` when no
+/// origin is known; scoped facts then stay inert (recall-safe: they may
+/// only cut a flow under a confirmed origin).
 pub(crate) fn is_sanitizer_effective_for_role(
     ir: &FunctionIR,
     config: &TaintConfig,
@@ -199,6 +262,7 @@ pub(crate) fn is_sanitizer_effective_for_role(
     key: &NodeKey,
     role: SinkRole,
     label: Option<&str>,
+    origin_package: Option<&str>,
 ) -> bool {
     // `config` is retained for API stability with callers; the legacy
     // flat `config.sanitizers` fallback was removed (it cut sink-
@@ -221,7 +285,7 @@ pub(crate) fn is_sanitizer_effective_for_role(
     }
     match &b.instructions[idx] {
         Instruction::CallStatic { func, .. } => {
-            if let Some(fact) = facts.sanitizer_fact(func) {
+            if let Some(fact) = facts.sanitizer_fact_scoped(func, origin_package) {
                 if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
                     return kind.defeats_role_and_label(role, label);
                 }
@@ -242,7 +306,7 @@ pub(crate) fn is_sanitizer_effective_for_role(
                 let path = FactTable::receiver_access_path(ir, *r);
                 if let Some(ref p) = path {
                     let full = format!("{p}.{method}");
-                    if let Some(fact) = facts.sanitizer_fact(&full) {
+                    if let Some(fact) = facts.sanitizer_fact_scoped(&full, origin_package) {
                         if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
                             return kind.defeats_role_and_label(role, label);
                         }
@@ -253,7 +317,7 @@ pub(crate) fn is_sanitizer_effective_for_role(
                     return true;
                 }
             }
-            if let Some(fact) = facts.sanitizer_fact(method) {
+            if let Some(fact) = facts.sanitizer_fact_scoped(method, origin_package) {
                 if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
                     return kind.defeats_role_and_label(role, label);
                 }
@@ -268,6 +332,12 @@ pub(crate) fn is_sanitizer_effective_for_role(
 /// Fact-table-aware sanitizer check: configured sanitizers PLUS any call with
 /// a [`SanitizerFact`] in the table (e.g. `.replace()`, `.test()` guard
 /// methods learned from `frensense-lang` tables or a bundle).
+///
+/// Fact lookups pass no import origin (this path serves the forward
+/// relevance engine and summaries, which carry no per-file import
+/// context), so package-scoped sanitizer facts are inert here — the
+/// recall-safe direction: universal sanitizers still cut, a bundle-
+/// scoped one never silences a flow it was not proven on.
 pub(crate) fn is_sanitizer_use_with_facts(
     ir: &FunctionIR,
     config: &TaintConfig,
@@ -335,12 +405,16 @@ pub struct SinkAlert {
 /// Alert if the node is a tainted use inside a configured sink call.
 /// Honours [`FactTable`] sink signatures when one matches: a tainted arg in a
 /// *non-dangerous* slot (e.g. a parameterized query's binding array) does not
-/// alert. Callers build the [`FactTable`] once and pass it in.
+/// alert. Callers build the [`FactTable`] once and pass it in. Package-scoped
+/// sink facts additionally require `origin_package` to name their package
+/// (import resolution) — pass `None` when no origin is known.
 pub(crate) fn sink_alert_with_facts(
     ir: &FunctionIR,
     config: &TaintConfig,
     facts: &FactTable,
     key: &NodeKey,
+    origin_package: Option<&str>,
+    language: Option<&str>,
 ) -> Option<SinkAlert> {
     let NodeKey {
         block,
@@ -356,7 +430,14 @@ pub(crate) fn sink_alert_with_facts(
     }
     let slot_and_name = match &b.instructions[idx] {
         Instruction::CallStatic { func, args, .. }
-            if config.sinks.contains(func) || facts.is_sink_call(func, None) =>
+            if facts.sink_name_armed(
+                &config.sinks,
+                func,
+                None,
+                origin_package,
+                language,
+                false,
+            ) =>
         {
             args.iter()
                 .position(|a| *a == Operand::Var(var))
@@ -367,12 +448,19 @@ pub(crate) fn sink_alert_with_facts(
             args,
             receiver,
             ..
-        } if config.sinks.contains(method) || {
+        } if {
             let root = match receiver {
                 Operand::Var(r) => FactTable::receiver_root(ir, *r),
                 _ => None,
             };
-            facts.is_sink_call(method, root.as_deref())
+            facts.sink_name_armed(
+                &config.sinks,
+                method,
+                root.as_deref(),
+                origin_package,
+                language,
+                true,
+            )
         } =>
         {
             if receiver == &Operand::Var(var) {
@@ -386,6 +474,19 @@ pub(crate) fn sink_alert_with_facts(
         _ => None,
     };
     let (slot, name) = slot_and_name?;
+    // Arguments to a call on a prepared statement are bound parameters: the
+    // statement text was fixed when the handle was created, so `stmt.Exec(a,
+    // b)` carries values, not SQL. The creating call (`db.Prepare(query)`)
+    // is judged on its own.
+    if slot != usize::MAX
+        && let Instruction::CallVirtual {
+            receiver: Operand::Var(r),
+            ..
+        } = &b.instructions[idx]
+        && receiver_is_prepared_handle(ir, *r, facts)
+    {
+        return None;
+    }
     // Source-accessor precedence (RECEIVER-TAINT ALERTS ONLY): when the
     // alert comes from a tainted *receiver* and the method name is the last
     // segment of a configured dotted source pattern, the call READS taint
@@ -397,12 +498,11 @@ pub(crate) fn sink_alert_with_facts(
     // pattern, so a blanket rule would suppress `pool.query(sql)`, a real
     // sink, because the sink name matches a source-pattern segment.
     if slot == usize::MAX {
-        if is_source(ir, config, key) {
+        if is_source(ir, config, facts, key) {
             return None;
         }
         {
-            let is_source_accessor = config
-                .sources
+            let is_source_accessor = SourceScope::for_ir(config, facts, ir)
                 .iter()
                 .any(|s| s.rsplit('.').next() == Some(name));
             if is_source_accessor {
@@ -410,18 +510,29 @@ pub(crate) fn sink_alert_with_facts(
             }
         }
     }
+    // Slot layout is a property of the CALLED API, not of the shared
+    // method name. A package-scoped fact (declared for the call's import
+    // origin) carries the correct slots; without this lookup the engine
+    // arms a call through its scoped fact (`is_sink_call_scoped`) but then
+    // applies whatever bare-name signature shares the method name. The
+    // Go case is concrete: `http.Get(url)` (slot 0) and `db.Get(&dest, sql)`
+    // (slot 1, sqlx) both lower to `Get`, and the bare entry silently
+    // dropped the SSRF finding. `sink_signature_scoped` falls back to the
+    // universal tables when no scoped entry applies, so behaviour for
+    // unresolved origins is unchanged.
+    let signature = facts.sink_signature_scoped(name, origin_package, language);
     // Receiver-taint rule: for a slot-restricted sink (dangerous_args
     // non-empty), a tainted RECEIVER is the object being read (the DB
     // handle, the request object), not data being consumed, no alert.
     // Only all-args sinks keep receiver taint dangerous.
     if slot == usize::MAX
-        && let Some(sig) = facts.sink_signature(name)
+        && let Some(sig) = signature
         && !sig.dangerous_args.is_empty()
     {
         return None;
     }
     // Sink-signature check: dangerous slot (or receiver) only.
-    if let Some(sig) = facts.sink_signature(name)
+    if let Some(sig) = signature
         && slot != usize::MAX
         && !sig.is_dangerous(slot)
     {
@@ -434,8 +545,10 @@ pub(crate) fn sink_alert_with_facts(
     // parameterized clauses (`{ where: { id: taint } }`), non-identity object
     // fields and bare scalars are not provable access-control violations and
     // are not reported at all (zero-FP: structurally unprovable findings
-    // never fire).
-    if let Some(sig) = facts.sink_signature(name)
+    // never fire). The signature must be the same language-scoped one the
+    // match used: reading the shared table here would miss a language-keyed
+    // IDOR fact (a TypeScript `update`) and emit every write it guards.
+    if let Some(sig) = signature
         && slot != usize::MAX
         && !sig.idor_keys.is_empty()
         && !arg_is_idor_shape(ir, var, &sig.idor_keys)
@@ -447,7 +560,7 @@ pub(crate) fn sink_alert_with_facts(
     // driver parameterizes object values. Reported with the Idor class so
     // consumers rank it below Critical. (Non-identity shapes at these sinks
     // never reach here - the emission gate above returned already.)
-    let class = if let Some(sig) = facts.sink_signature(name)
+    let class = if let Some(sig) = signature
         && !sig.idor_keys.is_empty()
         && slot != usize::MAX
         && arg_is_idor_shape(ir, var, &sig.idor_keys)
@@ -741,6 +854,66 @@ pub(crate) fn idor_suppressed_by_auth_guard(
             || exit_reachable_avoiding(ir, *false_block, sink_block)
         {
             return true;
+        }
+    }
+    false
+}
+
+/// True when `var` is (an alias or tuple field of) the result of a call the
+/// pack declares a statement factory: the handle then executes text fixed at
+/// creation, and its call arguments are bindings.
+///
+/// Which names prepare a statement is pack knowledge
+/// ([`FactTable::prepared_statement_prefixes`], taught by the default pack or
+/// a bundle); the engine only walks the def chain and matches the prefix. An
+/// empty set recognises nothing, so a config that teaches nothing never
+/// suppresses a flow.
+fn receiver_is_prepared_handle(
+    ir: &FunctionIR,
+    var: crate::ir::function::VarId,
+    facts: &FactTable,
+) -> bool {
+    let prefixes = &facts.prepared_statement_prefixes;
+    if prefixes.is_empty() {
+        return false;
+    }
+    let mut cur = var;
+    for _ in 0..6 {
+        let mut next = None;
+        for blk in ir.blocks.values() {
+            for instr in &blk.instructions {
+                match instr {
+                    Instruction::Assign {
+                        dest,
+                        src: Operand::Var(s),
+                        ..
+                    } if *dest == cur => next = Some(*s),
+                    Instruction::ExtractValue {
+                        dest,
+                        tuple: Operand::Var(t),
+                        ..
+                    } if *dest == cur => next = Some(*t),
+                    Instruction::CallVirtual {
+                        dest: Some(d),
+                        method,
+                        ..
+                    }
+                    | Instruction::CallStatic {
+                        dest: Some(d),
+                        func: method,
+                        ..
+                    } if *d == cur => {
+                        let seg = method.rsplit('.').next().unwrap_or(method);
+                        let seg = seg.to_ascii_lowercase();
+                        return prefixes.iter().any(|p| seg.starts_with(p.as_str()));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        match next {
+            Some(n) => cur = n,
+            None => return false,
         }
     }
     false

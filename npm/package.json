@@ -1,6 +1,6 @@
 {
   "name": "@friehub/frensense",
-  "version": "0.7.0",
+  "version": "0.7.1-beta",
   "description": "Frensense: deterministic compiler-mode dataflow security scanner",
   "main": "bin/frensense.js",
   "bin": {

@@ -55,3 +55,34 @@ fn probe_cve_04_user_regexp_injection() {
     "#;
     assert_detected(&scan_ts(src), "cve_04_user_regexp_injection", "eval");
 }
+
+#[test]
+fn probe_cve_2025_27152_axios_instance_alias_ssrf() {
+    // CVE-2025-27152 (mre01): `const client = axios.create(...)` then
+    // `client.get(tainted)` must fire SSRF. The receiver resolves through
+    // its own source name (`client`), which collides with a declared client
+    // root and used to short-circuit before the factory fallback recovered
+    // `axios` - the verb sink then stayed suppressed (instance-alias false
+    // negative: positive silent, negative vacuous, family cannot separate).
+    let src = r#"
+        import axios from "axios";
+
+        const client = axios.create({ baseURL: "http://directory.internal/api/v1/" });
+
+        export function getUser(req: any) {
+            return client.get(String(req.params.id));
+        }
+    "#;
+    assert_detected(&scan_ts(src), "mre01_ssrf_instance_alias", "get");
+
+    // Precision pair: an instance NOT built from a client factory must not
+    // arm the verb sink just because its variable name collides with a
+    // declared client root.
+    let clean = r#"
+        export function getUser(req: any) {
+            const client = makeThing();
+            return client.get(String(req.params.id));
+        }
+    "#;
+    assert_clean(&scan_ts(clean), "mre01_non_factory_instance_not_ssrf");
+}

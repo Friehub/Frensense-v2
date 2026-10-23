@@ -1,6 +1,6 @@
 # Frensense Integrity Stack
 
-.PHONY: all audit check test fmt clean help corpus-check corpus-gen
+.PHONY: all audit check test fmt clean help corpus-check corpus-gen blog-check
 
 all: fmt check audit test
 
@@ -47,7 +47,17 @@ fuzz:
 	cargo fuzz run audit_parse
 
 ## Documentation
-docs:
+# Blog provenance gate: `check` (warn) before local builds, `--strict`
+# in CI so a stale or unequipped post fails the release build.
+blog-check:
+	@echo "[DOC] Blog provenance check..."
+	python3 scripts/blog_provenance.py check
+
+blog-check-strict:
+	@echo "[DOC] Blog provenance check (strict)..."
+	python3 scripts/blog_provenance.py check --strict
+
+docs: blog-check
 	@echo "[DOC] Building Frensense Documentation..."
 	npm run docs:build
 

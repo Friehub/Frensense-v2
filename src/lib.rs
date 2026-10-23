@@ -9,11 +9,13 @@
 
 pub mod cli;
 pub mod engine;
+pub mod explain;
+pub mod identity;
 pub mod lsp;
 pub mod mcp;
 pub mod parser;
+pub mod policy;
 pub mod reporter;
-pub mod reporting;
 
 pub use engine::Engine;
 
@@ -24,14 +26,24 @@ pub use frensense_engine::FileId;
 
 pub const FRENSENSE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Version of the *report* schema - the JSON/SARIF envelope this CLI emits.
+///
+/// Distinct from the engine's fact-vocabulary fingerprint and the bundler's
+/// `BUNDLE_VERSION`: those govern `.frc` bundles; this governs the shape of
+/// `--format json` / `--format sarif` output. Bump it whenever a field is
+/// renamed, removed, or changes type in any emitted report. The golden
+/// fixtures in `tests/` move with it so a silent shape change fails CI.
+pub const REPORT_SCHEMA_VERSION: u32 = 1;
+
 /// Advisory severity ranking - declared in `frensense-lang` alongside the
 /// per-language rule registries; re-exported here so every reporter surface
 /// (`cli`, `lsp`, `mcp`) keeps the `crate::Severity` path.
-pub use frensense_lang::Severity;
+pub use frensense_lang::{Profile, RuleTier, Severity};
 
 /// A single finding, rendered compiler-style: where, what, why, how to fix.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[must_use]
+#[non_exhaustive]
 pub struct Advisory {
     pub title: String,
     pub file_id: FileId,
@@ -54,8 +66,17 @@ pub struct Advisory {
     pub original_content: String,
     pub enclosing_symbol: Option<String>,
     pub fingerprint: String,
+    /// Stable rule id (`taint.sql-injection`, `check.weak-hash`,
+    /// `policy.<id>`). Never finding-specific text: reporters group,
+    /// suppress and trend by this. Empty only for advisories built outside
+    /// the engine; use [`Advisory::rule_id`] for a guaranteed value.
+    #[serde(default)]
+    pub rule_id: String,
     pub requires_human: bool,
     pub tags: Vec<String>,
+    /// Precision tier governing profile filtering.
+    #[serde(default)]
+    pub tier: RuleTier,
     /// Per-step descriptions of the taint flow (source→sink) plus the byte
     /// offset of each step, when the engine captured a path. Empty for
     /// non-dataflow findings. Rendered into SARIF `codeFlows`.
@@ -89,10 +110,54 @@ impl Advisory {
             original_content: String::new(),
             enclosing_symbol: None,
             fingerprint: String::new(),
+            rule_id: String::new(),
             requires_human: true,
             tags: Vec::new(),
+            tier: RuleTier::Stable,
             taint_steps: Vec::new(),
         }
+    }
+
+    pub fn with_rule_id(mut self, id: impl Into<String>) -> Self {
+        self.rule_id = id.into();
+        self
+    }
+
+    /// The rule id, or a lowercase-kebab id derived from the title when
+    /// the producer did not set one, so reporters never emit finding text
+    /// as an id.
+    #[must_use]
+    pub fn rule_id(&self) -> String {
+        if !self.rule_id.is_empty() {
+            return self.rule_id.clone();
+        }
+        let mut slug = String::new();
+        for ch in self.title.chars() {
+            if ch.is_ascii_alphanumeric() {
+                slug.push(ch.to_ascii_lowercase());
+            } else if !slug.ends_with('-') && !slug.is_empty() {
+                slug.push('-');
+            }
+            if slug.len() >= 48 {
+                break;
+            }
+        }
+        format!("policy.{}", slug.trim_end_matches('-'))
+    }
+
+    /// CWE ids carried in the tags, in order (`CWE-89`).
+    #[must_use]
+    pub fn cwe(&self) -> Vec<&str> {
+        self.tags
+            .iter()
+            .map(String::as_str)
+            .filter(|t| t.starts_with("CWE-"))
+            .collect()
+    }
+
+    pub fn with_tier(mut self, tier: RuleTier) -> Self {
+        self.tier = tier;
+        self
     }
 
     pub fn with_confidence(mut self, v: f64) -> Self {

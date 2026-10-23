@@ -103,6 +103,11 @@ impl NodeKey {
 // Node kind
 // ---------------------------------------------------------------------------
 
+/// `arg_index` recorded on an [`NodeKind::ActualArg`] node created for a
+/// call's *receiver* operand (`x.map(..)`): receivers are not positional
+/// arguments, so they carry no slot number.
+pub const RECEIVER_ARG_INDEX: usize = usize::MAX;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub enum NodeKind {
@@ -427,6 +432,26 @@ impl<'a> SvfgBuilder<'a> {
                         .add_edge(NodeKey::instr(block_id, idx, *sv), base_def);
                 }
 
+                if let Instruction::CallVirtual {
+                    receiver: Operand::Var(base),
+                    method,
+                    args,
+                    ..
+                } = instr
+                    && matches!(
+                        method.as_str(),
+                        "append" | "push" | "add" | "extend" | "unshift" | "insert"
+                    )
+                    && let Some(base_def) = self.allocation_def(*base)
+                {
+                    for arg in args {
+                        if let Operand::Var(sv) = arg {
+                            self.graph
+                                .add_edge(NodeKey::instr(block_id, idx, *sv), base_def);
+                        }
+                    }
+                }
+
                 // b) Memory flow: mem_in-use → mem_out-def (pass-through /
                 //    weak update semantics at the graph level).
                 if uses_mem && has_mem_out {
@@ -520,6 +545,27 @@ impl<'a> SvfgBuilder<'a> {
                         },
                         src,
                     ),
+                    Instruction::CallVirtual {
+                        receiver: Operand::Var(r),
+                        method,
+                        args,
+                        ..
+                    } if matches!(
+                        method.as_str(),
+                        "append" | "push" | "add" | "extend" | "unshift" | "insert"
+                    ) =>
+                    {
+                        for arg in args {
+                            if let Operand::Var(sv) = arg {
+                                stores.push((
+                                    *r,
+                                    "*".to_string(),
+                                    NodeKey::instr(block_id, idx, *sv),
+                                ));
+                            }
+                        }
+                        continue;
+                    }
                     _ => continue,
                 };
                 if let Operand::Var(sv) = src {
@@ -696,7 +742,7 @@ impl<'a> SvfgBuilder<'a> {
             let arg_key = NodeKey::instr(block, idx, *recv_var);
             self.upgrade_node_kind(arg_key, || NodeKind::ActualArg {
                 call_site: call_site_key,
-                arg_index: usize::MAX,
+                arg_index: RECEIVER_ARG_INDEX,
             });
         }
 

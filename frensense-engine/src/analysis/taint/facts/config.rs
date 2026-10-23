@@ -76,6 +76,7 @@ pub fn languages_for_exts<'a>(exts: impl IntoIterator<Item = &'a str>) -> Vec<&'
 fn entry_language(e: &LearnedFactEntry) -> Option<&str> {
     match e {
         LearnedFactEntry::LanguageSink { language, .. }
+        | LearnedFactEntry::LanguageSinkGlobalOnly { language, .. }
         | LearnedFactEntry::LanguageSinkSlots { language, .. }
         | LearnedFactEntry::LanguageIdorSink { language, .. }
         | LearnedFactEntry::LanguageSource { language, .. }
@@ -132,16 +133,38 @@ pub fn apply_language_entries(
             continue;
         };
         // Build this language's contribution in a fresh temp table, exactly
-        // like a per-spec seed merge, then merge it in: the
-        // merge's last-wins/widens rules resolve cross-language collisions
-        // the same way `tables_from_exts` merges per-spec tables.
+        // like a per-spec seed merge, then install it. The wildcard group is
+        // genuinely language-agnostic and merges into the shared name space;
+        // every other group is filed under its own language key, because a
+        // bare call name is not portable across languages (Rust
+        // `File::create` vs a JS `prisma.model.create`).
         let mut c = TaintConfig::default();
         let mut f = FactTable::default();
         install_language_group(&mut c, &mut f, group);
-        config.sources.extend(c.sources);
-        config.sinks.extend(c.sinks);
         config.sanitizers.extend(c.sanitizers);
-        facts.merge(&f);
+        if lang == "*" {
+            config.sources.extend(c.sources);
+            config.sinks.extend(c.sinks);
+            facts.merge(&f);
+        } else {
+            // Sources are language-keyed too: `input` is caller data in
+            // TypeScript and an unrelated local in Rust, so a shared set
+            // would seed taint from names that mean nothing in the file
+            // being scanned.
+            facts
+                .lang_sources
+                .entry(lang.to_string())
+                .or_default()
+                .extend(c.sources);
+            facts.merge_language(lang, &f);
+            // Everything except the sink signatures stays language-agnostic
+            // bookkeeping (receiver roots, ambiguous verbs, session roots,
+            // IDOR keys, propagators): those are name-keyed hints, not sink
+            // arming, and the sink lookup above already scopes by language.
+            let mut rest = f;
+            rest.sink_signatures.clear();
+            facts.merge(&rest);
+        }
     }
 }
 
@@ -167,8 +190,38 @@ fn install_language_group(
         .flatten()
         .map(String::as_str)
         .collect();
+    // Names this language declares as plain (undotted) sinks. A dotted
+    // entry whose last segment is NOT among them is receiver-qualified by
+    // construction (`yaml.load`, `res.send`): collapsing it to the bare
+    // last segment must not turn every `.load()` / `.send()` in the
+    // program into a sink, so those last segments are verb-gated too.
+    let bare_sink_names: Vec<&str> = group
+        .iter()
+        .filter_map(|e| match e {
+            LearnedFactEntry::LanguageSink { call, .. } if !call.contains('.') => {
+                Some(call.as_str())
+            }
+            _ => None,
+        })
+        .collect();
     for e in group {
         match e {
+            LearnedFactEntry::LanguageSinkGlobalOnly { call, .. } => {
+                // Mark-only fact (WI-12): the language's `LanguageSink`
+                // entry carries the sink semantics; this flips the
+                // `global_only` flag on the already-published signature so
+                // a receiver-qualified call matches only under a resolved
+                // origin (`engine.eval(x)` vs the global `eval`).
+                let last = call.rsplit('.').next().unwrap_or(call);
+                if let Some(sig) = facts.sink_signatures.get_mut(call.as_str()) {
+                    sig.global_only = true;
+                }
+                if last != call
+                    && let Some(sig) = facts.sink_signatures.get_mut(last)
+                {
+                    sig.global_only = true;
+                }
+            }
             LearnedFactEntry::LanguageSink { call, role, .. } => {
                 let slug = crate::analysis::taint::role::sink_label_slug_from_role_str(role)
                     .map(String::from);
@@ -204,10 +257,46 @@ fn install_language_group(
                                 .entry((root.to_string(), last.to_string()))
                                 .or_insert_with(|| s.clone());
                         }
-                        if ambiguous.contains(&last) {
+                        // The bare shadow this declaration publishes is a
+                        // shadow of a QUALIFIED sink: it must arm only
+                        // under the root the declaration named, or every
+                        // receiver in the program inherits the library's
+                        // semantics (`json.loads` from `pickle.loads`).
+                        facts
+                            .receiver_qualified_sinks
+                            .entry(last.to_string())
+                            .or_default()
+                            .insert(root.to_string());
+                        // A last segment this language never declares bare
+                        // is receiver-qualified by construction
+                        // (`yaml.load`, `res.send`): collapsing it to the
+                        // bare segment must not turn every `.load()` /
+                        // `.send()` in the program into a sink, so it is
+                        // verb-gated as well as root-gated.
+                        if ambiguous.contains(&last) || !bare_sink_names.contains(&last) {
                             facts.verb_sinks.insert(last.to_string());
                             facts.client_roots.insert(root.to_string());
                         }
+                    }
+                } else {
+                    // A bare declaration is the receiver-agnostic form: the
+                    // name is the language builtin's own (`eval`, `exec`,
+                    // `open`). It keeps matching any receiver, so it is
+                    // NOT receiver-gated.
+                    facts.bare_sink_names.insert(last.to_string());
+                    if ambiguous.contains(&last) {
+                        // Bare ambiguous verb with no dotted client entry in
+                        // this pack: still arm verb-gating so the name only
+                        // counts as a sink on a *qualified* receiver (see
+                        // is_sink_call_scoped). Without this, `execute`,
+                        // `aggregate`, `delete` ... sink any receiver in the
+                        // program (RecipeExecutor.execute, Prisma
+                        // db.trade.aggregate, array helpers, ...) - measured
+                        // 10+ false-positive advisories on one live TS repo.
+                        // Client roots must still come from dotted entries,
+                        // which is exactly the point: an unqualified bare
+                        // verb matches nothing by name alone.
+                        facts.verb_sinks.insert(last.to_string());
                     }
                 }
             }
@@ -231,37 +320,70 @@ fn install_language_group(
                     idor_keys: Vec::new(),
                     role,
                     label,
+                    global_only: false,
                 };
-                if let Some(pkg) = package {
-                    facts
-                        .scoped_sink_signatures
-                        .insert((pkg.clone(), call.clone()), entry.clone());
-                } else if let Some((root, _)) = call.split_once('.') {
-                    let last = call.rsplit('.').next().unwrap_or(call);
-                    facts
-                        .scoped_sink_signatures
-                        .insert((root.to_string(), last.to_string()), entry.clone());
-                }
-                facts.sink_signatures.insert(call.clone(), entry.clone());
-                let last = call.rsplit('.').next().unwrap_or(call);
-                if last != call {
-                    // Bare-wins alias rule: a dotted per-slot rule may
-                    // replace the mechanical dotted alias but never a
-                    // bare-owned entry (mirrors the spec seed).
-                    let alias_owned_by_dotted = facts
-                        .sink_signatures
-                        .get(last)
-                        .map(|cur| cur.call.contains('.'))
-                        .unwrap_or(false);
-                    if alias_owned_by_dotted {
-                        facts.sink_signatures.insert(last.to_string(), entry);
-                    } else {
+                match package {
+                    Some(pkg) => {
+                        // Package-scoped fact: install ONLY under
+                        // (package, call). No universal signature, no
+                        // bare-name aliases, no `config.sinks` entry —
+                        // matching is origin-gated (`is_sink_call_scoped`
+                        // -> `sink_signature_scoped`), so an unrelated
+                        // receiver or an unimported file never inherits
+                        // the framework's sink semantics. Also store the
+                        // last-segment key so receiver-call matching (the
+                        // walker matches on the method's last segment)
+                        // resolves the scoped fact.
                         facts
-                            .sink_signatures
-                            .entry(last.to_string())
-                            .or_insert(entry);
+                            .scoped_sink_signatures
+                            .insert((pkg.clone(), call.clone()), entry.clone());
+                        let last = call
+                            .rsplit('.')
+                            .next()
+                            .map(String::from)
+                            .unwrap_or_else(|| call.clone());
+                        if last != *call {
+                            facts
+                                .scoped_sink_signatures
+                                .insert((pkg.clone(), last.clone()), entry.clone());
+                        }
+                    }
+                    None => {
+                        if let Some((root, _)) = call.split_once('.') {
+                            let last = call.rsplit('.').next().unwrap_or(call);
+                            facts
+                                .scoped_sink_signatures
+                                .insert((root.to_string(), last.to_string()), entry.clone());
+                        }
+                        facts.sink_signatures.insert(call.clone(), entry.clone());
+                        let last = call.rsplit('.').next().unwrap_or(call);
+                        if last != call {
+                            // Bare-wins alias rule: a dotted per-slot rule may
+                            // replace the mechanical dotted alias but never a
+                            // bare-owned entry (mirrors the spec seed).
+                            let alias_owned_by_dotted = facts
+                                .sink_signatures
+                                .get(last)
+                                .map(|cur| cur.call.contains('.'))
+                                .unwrap_or(false);
+                            if alias_owned_by_dotted {
+                                facts
+                                    .sink_signatures
+                                    .insert(last.to_string(), entry.clone());
+                            } else {
+                                facts
+                                    .sink_signatures
+                                    .entry(last.to_string())
+                                    .or_insert(entry.clone());
+                            }
+                        }
                     }
                 }
+                // Role/label carry into the scoped design too: above the
+                // (role, label) lookup consulted the universal table only;
+                // package-scoped entries without a universal sibling keep
+                // the default role (Other) unless a bundle sources the same
+                // call.'s role separately.
             }
             LearnedFactEntry::LanguageIdorSink { call, keys, .. } => {
                 let last = call.rsplit('.').next().unwrap_or(call).to_string();
@@ -295,7 +417,6 @@ fn install_language_group(
                 guard_style,
                 ..
             } => {
-                config.sanitizers.insert(call.clone());
                 let fact = SanitizerFact {
                     call: call.clone(),
                     package: package.clone(),
@@ -303,12 +424,25 @@ fn install_language_group(
                     sanitizes_args: Default::default(),
                     guard_style: *guard_style,
                 };
-                if let Some(pkg) = package {
-                    facts
-                        .scoped_sanitizer_facts
-                        .insert((pkg.clone(), call.clone()), fact.clone());
+                match package {
+                    Some(pkg) => {
+                        // Package-scoped sanitizer: install ONLY under
+                        // (package, call). No universal `sanitizer_facts`
+                        // entry and no `config.sanitizers` entry — both
+                        // are consulted without import context, so a
+                        // universal alias would cut the call on ANY
+                        // receiver and silence true findings whose origin
+                        // is a different package (or unknown). Matching
+                        // is origin-gated (`sanitizer_fact_scoped`).
+                        facts
+                            .scoped_sanitizer_facts
+                            .insert((pkg.clone(), call.clone()), fact);
+                    }
+                    None => {
+                        config.sanitizers.insert(call.clone());
+                        facts.sanitizer_facts.entry(call.clone()).or_insert(fact);
+                    }
                 }
-                facts.sanitizer_facts.entry(call.clone()).or_insert(fact);
             }
             LearnedFactEntry::LanguagePropagator {
                 call,
@@ -322,12 +456,17 @@ fn install_language_group(
                     Some(idx) => vec![*idx],
                     None => Vec::new(),
                 };
+                // Consistent last-wins for every map: the final entry for a
+                // key fully determines its arg slots AND its receiver-blocked
+                // state. (Previously the alias was first-wins and the block
+                // set was append-only, so a `tainted_receiver: false` entry
+                // permanently poisoned the key even when a later `true` entry
+                // should unblock it.)
                 facts.propagators.insert(key.clone(), args.clone());
-                facts.propagators.entry(last.clone()).or_insert(args);
-                if !*tainted_receiver {
-                    facts.propagator_blocks_receiver.insert(key);
-                    facts.propagator_blocks_receiver.insert(last);
-                }
+                facts.propagators.insert(last.clone(), args);
+                let blocked = !*tainted_receiver;
+                facts.propagator_blocks_receiver.insert(key, blocked);
+                facts.propagator_blocks_receiver.insert(last, blocked);
             }
             LearnedFactEntry::LanguageSessionRoot { root, .. } => {
                 facts.session_roots.insert(root.clone());

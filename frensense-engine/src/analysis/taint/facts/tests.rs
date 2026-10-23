@@ -304,10 +304,18 @@ fn spec_drives_policy_vocabulary() {
             "{callee} must be a containment callee"
         );
     }
-    for sink in ["hash", "hashPassword", "setPassword"] {
+    for sink in ["hash", "hashPassword", "setSecret"] {
         assert!(
             t.credential_sinks.contains_key(sink),
             "{sink} must be a credential sink"
+        );
+    }
+    // Setters delegate to the framework hasher; the policy question belongs
+    // to the hasher, so they are not credential sinks themselves.
+    for setter in ["setPassword", "set_password", "hashpw"] {
+        assert!(
+            !t.credential_sinks.contains_key(setter),
+            "{setter} must not be a credential sink"
         );
     }
     assert!(t.credential_params.contains_key("password"));
@@ -426,6 +434,7 @@ fn iorule(rule: &str, msg: &str) -> IntegerOverflowRule {
         wrap_threshold: u64::MAX as u128,
         severity: "warning".into(),
         message: msg.into(),
+        unbounded_product: false,
     }
 }
 
@@ -545,4 +554,105 @@ fn equal_provenance_tie_keeps_existing_entry() {
     assert_eq!(first.learned_checks[0].0.message, "first");
     assert_eq!(first.policy_facts.len(), 1);
     assert_eq!(first.policy_facts[0].0.message, "first");
+}
+
+// ---------------------------------------------------------------------------
+// Receiver qualification: a sink declared under a module is a sink only
+// under that module.
+// ---------------------------------------------------------------------------
+
+/// Install one language group into a fresh table, the way the scan path
+/// does.
+fn language_table(entries: Vec<LearnedFactEntry>) -> (TaintConfig, FactTable) {
+    let mut config = TaintConfig::default();
+    let mut facts = FactTable::default();
+    apply_language_entries(&mut config, &mut facts, &entries, &["python"]);
+    (config, facts)
+}
+
+/// A dotted declaration publishes a bare shadow of its last segment (the
+/// walker matches a virtual call by method name and cannot see the module
+/// the method was reached through). The shadow must arm only under the
+/// declared root - otherwise every object in the program inherits the
+/// library's semantics.
+#[test]
+fn qualified_sink_shadow_requires_the_declared_root() {
+    let (_config, facts) = language_table(vec![LearnedFactEntry::LanguageSink {
+        language: "python".to_string(),
+        call: "pickle.loads".to_string(),
+        role: "unsafe_deserialize:unsafe-deserialization".to_string(),
+    }]);
+
+    assert!(
+        facts.is_receiver_qualified_only("loads"),
+        "a name declared only under a root is receiver-gated"
+    );
+    assert!(
+        facts.is_sink_call_scoped("loads", Some("pickle"), None, Some("python")),
+        "the declared root still arms"
+    );
+    assert!(
+        !facts.is_sink_call_scoped("loads", Some("json"), None, Some("python")),
+        "an unrelated receiver must not inherit the library's semantics"
+    );
+    // An import origin qualifies too: `from pickle import loads`.
+    assert!(facts.is_sink_call_scoped("loads", None, Some("pickle"), Some("python")));
+    assert!(!facts.is_sink_call_scoped("loads", None, Some("json"), Some("python")));
+}
+
+/// A bare declaration is the receiver-agnostic form (the language
+/// builtin's own name), so it keeps matching any receiver.
+#[test]
+fn bare_sink_declaration_is_not_receiver_gated() {
+    let (_config, facts) = language_table(vec![LearnedFactEntry::LanguageSink {
+        language: "python".to_string(),
+        call: "eval".to_string(),
+        role: "code_execution:code-execution".to_string(),
+    }]);
+
+    assert!(!facts.is_receiver_qualified_only("eval"));
+    assert!(facts.is_sink_call_scoped("eval", Some("engine"), None, Some("python")));
+}
+
+/// A bare declaration wins over a qualified one for the same name: the
+/// bare form is the receiver-agnostic one.
+#[test]
+fn bare_declaration_overrides_qualified_declaration_for_the_same_name() {
+    let (_config, facts) = language_table(vec![
+        LearnedFactEntry::LanguageSink {
+            language: "python".to_string(),
+            call: "shelve.open".to_string(),
+            role: "unsafe_deserialize:unsafe-deserialization".to_string(),
+        },
+        LearnedFactEntry::LanguageSink {
+            language: "python".to_string(),
+            call: "open".to_string(),
+            role: "path_traversal:path-traversal".to_string(),
+        },
+    ]);
+
+    assert!(!facts.is_receiver_qualified_only("open"));
+    assert!(facts.is_sink_call_scoped("open", Some("anything"), None, Some("python")));
+}
+
+/// The qualification survives a table merge: a bundle that declares a
+/// dotted sink adds its root to the qualified set.
+#[test]
+fn receiver_qualification_survives_merge() {
+    let (_config, mut facts) = language_table(vec![LearnedFactEntry::LanguageSink {
+        language: "python".to_string(),
+        call: "pickle.loads".to_string(),
+        role: "unsafe_deserialize:unsafe-deserialization".to_string(),
+    }]);
+
+    let mut other = FactTable::default();
+    other
+        .receiver_qualified_sinks
+        .entry("loads".to_string())
+        .or_default()
+        .insert("pickle".to_string());
+    facts.merge(&other);
+
+    assert!(facts.is_receiver_qualified_only("loads"));
+    assert!(facts.receiver_qualified_sinks["loads"].contains("pickle"));
 }

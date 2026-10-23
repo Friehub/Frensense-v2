@@ -21,6 +21,26 @@ pub struct Engine {
     pub(crate) severity_filter: Option<Severity>,
     pub(crate) language_filter: Option<Vec<&'static str>>,
     pub(crate) min_confidence: f64,
+    /// When `true`, the runner records every explored sink argument that
+    /// did NOT become an advisory (see [`crate::explain::ExplainRecord`]),
+    /// surfaced via [`Engine::take_explain`] under `--explain`.
+    pub(crate) explain: bool,
+    /// When `true` (`--show-flows`), the taint advisory TEXT also embeds
+    /// the full source→sink flow. `taint_steps`/SARIF `codeFlows` carry
+    /// the path unconditionally now (WI-54); this knob only governs the
+    /// text observation, the debug-grade detail of a clean text report.
+    pub(crate) show_flows: bool,
+    /// Precision profile governing reportable finding tiers.
+    pub(crate) profile: crate::Profile,
+    /// When `true` (`--hygiene`), hygiene findings (such as `function_complexity`)
+    /// are reported even if not included in the active scan profile.
+    pub(crate) enable_hygiene: bool,
+    /// Optional cyclomatic complexity limit override (`--max-complexity`).
+    pub(crate) max_complexity: Option<usize>,
+    /// Silent-finding records from the most recent `run` (when `explain`).
+    pub(crate) explain_records: Vec<crate::explain::ExplainRecord>,
+    /// Hidden finding counts grouped by tier.
+    pub(crate) hidden_by_tier: std::collections::BTreeMap<crate::RuleTier, usize>,
 }
 
 impl Engine {
@@ -32,6 +52,13 @@ impl Engine {
             severity_filter: None,
             language_filter: None,
             min_confidence: 0.0,
+            explain: false,
+            show_flows: false,
+            profile: crate::Profile::Default,
+            enable_hygiene: false,
+            max_complexity: None,
+            explain_records: Vec::new(),
+            hidden_by_tier: std::collections::BTreeMap::new(),
         }
     }
 
@@ -56,6 +83,59 @@ impl Engine {
 
     pub fn set_min_confidence(&mut self, min: f64) {
         self.min_confidence = min;
+    }
+
+    /// Enable `--explain`: record every silent sink argument (not reported)
+    /// with the reason the engine stayed silent, for later retrieval via
+    /// [`Engine::take_explain`].
+    pub fn set_explain(&mut self, on: bool) {
+        self.explain = on;
+    }
+
+    /// Enable `--show-flows`: taint advisories embed the full source→sink
+    /// flow in the observation text as well. `taint_steps` (and SARIF
+    /// codeFlows) are always populated since WI-54; this only widens the
+    /// text observation.
+    pub fn set_show_flows(&mut self, on: bool) {
+        self.show_flows = on;
+    }
+
+    /// Take the explain records collected by the most recent `run`.
+    /// Returns an empty vec when `--explain` was not enabled.
+    #[must_use]
+    pub fn take_explain(&mut self) -> Vec<crate::explain::ExplainRecord> {
+        std::mem::take(&mut self.explain_records)
+    }
+
+    /// Set the scan profile governing which rule tiers are reported.
+    pub fn set_profile(&mut self, profile: crate::Profile) {
+        self.profile = profile;
+    }
+
+    /// Enable hygiene findings (such as function_complexity) under any profile.
+    pub fn set_enable_hygiene(&mut self, on: bool) {
+        self.enable_hygiene = on;
+    }
+
+    /// Set a custom cyclomatic complexity ceiling for the function_complexity check.
+    /// Setting this automatically enables hygiene rules.
+    pub fn set_max_complexity(&mut self, max: Option<usize>) {
+        self.max_complexity = max;
+        if max.is_some() {
+            self.enable_hygiene = true;
+        }
+    }
+
+    /// The active scan profile.
+    #[must_use]
+    pub fn profile(&self) -> crate::Profile {
+        self.profile
+    }
+
+    /// Take the counts of hidden findings by tier collected by the most recent `run`.
+    #[must_use]
+    pub fn take_hidden_by_tier(&mut self) -> std::collections::BTreeMap<crate::RuleTier, usize> {
+        std::mem::take(&mut self.hidden_by_tier)
     }
 
     /// Register a synthetic file id for a scanned path (used by the runner

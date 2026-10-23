@@ -41,6 +41,17 @@ impl<'a> LoweringContext<'a> {
                 }
                 None
             }
+            _ if let Some(list) = node.child_by_field_name(name_field)
+                && Self::is_multi_target(list)
+                && value_node.is_some() =>
+            {
+                // `body, err := f(x)`: bind the tuple result to each target.
+                let rhs_op = self
+                    .visit_node(value_node.expect("checked above"))
+                    .unwrap_or(Operand::Unknown);
+                self.bind_each_target(list, rhs_op);
+                None
+            }
             (Some(pattern), Some(value_node)) if self.is_destructuring_pattern(pattern.kind()) => {
                 // Destructuring: `const { a: x, b } = obj`.
                 // Lower the RHS first (it defines the base value).
@@ -170,7 +181,7 @@ impl<'a> LoweringContext<'a> {
     /// body. Uninitialized-free analysis only reports `declared` vars:
     /// vars created at first expression use are file/module/header globals
     /// (initialized elsewhere), never never-assigned locals.
-    fn mark_declared(&mut self, var: VarId) {
+    pub(super) fn mark_declared(&mut self, var: VarId) {
         if let Some(meta) = self.ir.var_metadata.get_mut(&var) {
             meta.declared = true;
         }

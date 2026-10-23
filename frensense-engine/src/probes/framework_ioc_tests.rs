@@ -61,3 +61,38 @@ fn probe_fw_04_nestjs_controller_body() {
     "#;
     assert_detected(&scan_ts(src), "fw_04_nestjs_controller_body", "eval");
 }
+
+#[test]
+fn probe_fw_05_py_list_append() {
+    let src = r#"
+        from flask import Flask, request
+        import sqlite3
+
+        app = Flask(__name__)
+
+        @app.route('/u')
+        def u():
+            items = []
+            items.append(request.args.get('id'))
+            return str(sqlite3.connect('x').execute("SELECT * FROM t WHERE id = " + items[0]).fetchall())
+    "#;
+    assert_detected(&scan_py(src), "fw_05_py_list_append", "execute");
+}
+
+#[test]
+fn probe_fw_06_ts_array_push() {
+    let src = r#"
+        import express from 'express';
+        import { Pool } from 'pg';
+
+        const app = express();
+        const pool = new Pool();
+
+        app.get('/u', (req: any, res: any) => {
+            const items: any[] = [];
+            items.push(req.query.id);
+            pool.query("SELECT * FROM t WHERE id = " + items[0]);
+        });
+    "#;
+    assert_detected(&scan_ts(src), "fw_06_ts_array_push", "query");
+}

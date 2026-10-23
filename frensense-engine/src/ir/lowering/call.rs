@@ -30,13 +30,57 @@ impl<'a> LoweringContext<'a> {
             }
         }?;
 
+        // `args` stays positionally ordered (existing slot-based facts keep
+        // working); `arg_names[i]` carries the keyword name when the source
+        // spelled one, empty otherwise. A name is metadata, not a slot: the
+        // value still lands at its written position so an absent optional
+        // argument cannot shift it.
         let mut args = Vec::new();
+        let mut arg_names: Vec<String> = Vec::new();
         let mut cursor = args_node.walk();
         for child in args_node.children(&mut cursor) {
-            if child.is_named()
-                && let Some(op) = self.visit_node(child)
+            if !child.is_named() {
+                continue;
+            }
+            // Python spreads the keyword name right into the argument
+            // node: `set_cookie("sid", "abc", secure=False)` is an
+            // `assignment_expression` whose left is the flag name and
+            // whose right is its value (`secure`, `False`). There is no
+            // separate `keyword_argument` node in the py3.10 grammar, so
+            // walk such a child directly into the argument list and keep
+            // the slot at the written position (a name is metadata, not
+            // a slot): an earlier omitted optional cannot shift it.
+            if child.kind() == "assignment_expression"
+                && let Some(name_node) = child.child_by_field_name("left")
+                && child.child_by_field_name("right").is_some()
             {
+                if let Some(op) = self.visit_node(child.child_by_field_name("right").unwrap()) {
+                    args.push(op);
+                    arg_names.push(
+                        self.source[name_node.start_byte()..name_node.end_byte()].to_string(),
+                    );
+                }
+                continue;
+            }
+            if let NodeRole::KeywordArgument {
+                name_field,
+                value_field,
+            } = self.classify_node(child.kind())
+            {
+                let name = child
+                    .child_by_field_name(&*name_field)
+                    .map(|n| self.source[n.start_byte()..n.end_byte()].to_string())
+                    .unwrap_or_default();
+                let value = child.child_by_field_name(&*value_field).unwrap_or(child);
+                if let Some(op) = self.visit_node(value) {
+                    args.push(op);
+                    arg_names.push(name);
+                }
+                continue;
+            }
+            if let Some(op) = self.visit_node(child) {
                 args.push(op);
+                arg_names.push(String::new());
             }
         }
 
@@ -61,6 +105,7 @@ impl<'a> LoweringContext<'a> {
                     mem_in: self.memory_var,
                     func: func_name,
                     args,
+                    arg_names,
                 },
             );
         } else if let Some(LValue::Field { base, field }) = self.visit_lvalue(callee_node) {
@@ -73,6 +118,7 @@ impl<'a> LoweringContext<'a> {
                     method: field,
                     receiver: Operand::Var(base),
                     args,
+                    arg_names,
                 },
             );
         } else if let NodeRole::MemberAccess {
@@ -115,6 +161,7 @@ impl<'a> LoweringContext<'a> {
                         method,
                         receiver: Operand::Var(recv_var),
                         args,
+                        arg_names,
                     },
                 );
             } else {
@@ -127,6 +174,7 @@ impl<'a> LoweringContext<'a> {
                         mem_in: self.memory_var,
                         func_ptr: func_op,
                         args,
+                        arg_names,
                     },
                 );
             }
@@ -140,6 +188,7 @@ impl<'a> LoweringContext<'a> {
                     mem_in: self.memory_var,
                     func_ptr: func_op,
                     args,
+                    arg_names,
                 },
             );
         }

@@ -107,6 +107,14 @@ fn compare_consts(op: &str, l: i64, r: i64) -> Option<bool> {
     })
 }
 
+/// Record a silent stop site on the current root's exploration, keeping
+/// the list free of duplicates (a walk can hit the same cut on many nodes).
+fn record_cut(cuts: &mut Vec<&'static str>, reason: &'static str) {
+    if !cuts.contains(&reason) {
+        cuts.push(reason);
+    }
+}
+
 /// For the Phi `dest_var` in `merge_block`, return the incoming edges whose
 /// arm block is unreachable because the branch condition is a constant
 /// comparison with a decided outcome. Empty = nothing prunable.
@@ -177,6 +185,211 @@ fn phi_infeasible_incoming(
 }
 
 impl<'a> BackwardTaintEngine<'a> {
+    /// Package of the factory call that produced the receiver var, when
+    /// `armed` accepts the resolved package.
+    ///
+    /// Covers the singleton client shape `const prisma = new PrismaClient()`
+    /// (or any `... = PrismaClient(...)` / `.create()` / `.extend()` call):
+    /// the receiver itself is not an import alias, but its defining call
+    /// names a symbol resolved through the file's import table, so the
+    /// package origin arms (`@prisma/client`). The caller decides which
+    /// packages are worth arming for — sink origins arm on scoped sink
+    /// packages, sanitizer origins on scoped sanitizer packages — no-op
+    /// for unrelated packages, mirroring the receiver-root fallback.
+    fn factory_call_package_for(
+        &self,
+        ir: &crate::ir::function::FunctionIR,
+        recv: VarId,
+        file: &str,
+        armed: impl Fn(&str) -> bool,
+    ) -> Option<String> {
+        let imports = self.file_package_imports.get(file)?;
+        // The defining call's symbol name to look up in the import table.
+        let mut candidate: Option<String> = None;
+        for b in ir.blocks.values() {
+            for instr in &b.instructions {
+                match instr {
+                    Instruction::CallStatic {
+                        dest: Some(d),
+                        func,
+                        ..
+                    } if *d == recv => {
+                        // `new PrismaClient()` / `PrismaClient()` — match by
+                        // the callee's last segment (`PrismaClient`).
+                        let last = func.rsplit('.').next().unwrap_or(func);
+                        candidate.get_or_insert_with(|| last.to_string());
+                    }
+                    Instruction::CallVirtual {
+                        dest: Some(d),
+                        method,
+                        receiver: Operand::Var(cr),
+                        ..
+                    } if *d == recv && (method == "create" || method == "extend") => {
+                        // Factory wrappers: `Api.create()` / `axios.extend()` —
+                        // the producing symbol is the factory receiver's root.
+                        if let Some(root) = FactTable::receiver_root(ir, *cr) {
+                            candidate.get_or_insert(root);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // Module-scope def: `const prisma = new PrismaClient()` at file top
+        // level lowers into a pseudo-function named after the binding, so
+        // the receiver in a consuming function has no def in its own IR.
+        // Locate the same-file pseudo-function by the receiver's source
+        // name and take its defining factory callee.
+        if candidate.is_none() {
+            let root = ir
+                .var_metadata
+                .get(&recv)
+                .and_then(|m| m.source_name.clone());
+            if let Some(root) = root {
+                for f in &self.prog.functions {
+                    if (f.name == root
+                        || f.name
+                            .strip_suffix(root.as_str())
+                            .is_some_and(|p| p.ends_with(':')))
+                        && self.fn_file.get(&f.name).map(|s| s.as_str()) == Some(file)
+                    {
+                        for b in f.ir.blocks.values() {
+                            for instr in &b.instructions {
+                                match instr {
+                                    Instruction::CallStatic { func, .. } => {
+                                        let last = func.rsplit('.').next().unwrap_or(func);
+                                        candidate.get_or_insert_with(|| last.to_string());
+                                    }
+                                    // Factory wrappers at module scope too:
+                                    // `const client = axios.create(...)`
+                                    // lowers as CallVirtual, and the module-
+                                    // scope path only matched CallStatic,
+                                    // losing the factory origin (mre01).
+                                    Instruction::CallVirtual {
+                                        method,
+                                        receiver: Operand::Var(cr),
+                                        ..
+                                    } if method == "create" || method == "extend" => {
+                                        if let Some(root) = FactTable::receiver_root(f.ir, *cr) {
+                                            candidate.get_or_insert(root);
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let name = candidate?;
+        let pkg = imports.get(&name)?.package.clone();
+        // Arm only for packages the caller's fact scope cares about
+        // (same bar the receiver-root fallback applies).
+        armed(&pkg).then_some(pkg)
+    }
+
+    /// Package of the factory call that produced the receiver var, when a
+    /// package-scoped sink fact exists for it.
+    fn factory_call_package(
+        &self,
+        ir: &crate::ir::function::FunctionIR,
+        recv: VarId,
+        file: &str,
+    ) -> Option<String> {
+        self.factory_call_package_for(ir, recv, file, |pkg| {
+            self.facts
+                .scoped_sink_signatures
+                .keys()
+                .any(|(p, _)| p == pkg)
+        })
+    }
+
+    /// Import origin for a call node, for package-scoped sanitizer gating.
+    ///
+    /// The sanitizer-side mirror of the sink origin chain: a static call
+    /// resolves through the file's package-import table, a receiver call
+    /// through its receiver root (import alias, then a root naming a
+    /// package that carries scoped sanitizer facts, then the factory
+    /// singleton). `None` means unknown origin — package-scoped
+    /// sanitizer facts then stay inert at the cut (recall-safe: they may
+    /// only silence a flow under a confirmed origin).
+    fn sanitizer_origin_package(
+        &self,
+        cf: usize,
+        key: &crate::graph::svfg::NodeKey,
+    ) -> Option<String> {
+        let ir = self.prog.functions[cf].ir;
+        let ins = ir
+            .blocks
+            .get(&key.block)?
+            .instructions
+            .get(key.instr_idx?)?;
+        let fn_name = &self.prog.functions[cf].name;
+        let imports = self
+            .fn_file
+            .get(fn_name)
+            .and_then(|file| self.file_package_imports.get(file))
+            .or_else(|| {
+                if self.file_package_imports.len() == 1 {
+                    self.file_package_imports.values().next()
+                } else {
+                    None
+                }
+            });
+        match ins {
+            Instruction::CallStatic { func, .. } => {
+                imports.and_then(|m| m.get(func)).map(|p| p.package.clone())
+            }
+            Instruction::CallVirtual {
+                receiver: Operand::Var(r),
+                ..
+            } => {
+                let root = FactTable::receiver_root(ir, *r)?;
+                if let Some(pkg) = imports
+                    .and_then(|m| m.get(&root))
+                    .map(|p| p.package.clone())
+                {
+                    return Some(pkg);
+                }
+                let root_is_scoped = self
+                    .facts
+                    .scoped_sanitizer_facts
+                    .keys()
+                    .any(|(pkg, _)| *pkg == root);
+                if root_is_scoped {
+                    return Some(root);
+                }
+                let file = self.fn_file.get(fn_name).map(|s| s.as_str());
+                file.and_then(|file| {
+                    self.factory_call_package_for(ir, *r, file, |pkg| {
+                        self.facts
+                            .scoped_sanitizer_facts
+                            .keys()
+                            .any(|(p, _)| p == pkg)
+                    })
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// Does `name` resolve to a function defined in this program?
+    ///
+    /// Direct check via the call graph's exact-name index; the fallback
+    /// catches collision-rekeyed twins (`app/b.ts::helper`, built in
+    /// [`crate::scan::prepare_with_facts`]) and namespace-qualified keys.
+    /// Only absolute suffixes (a prefix ending in `:`) count, so
+    /// `execute_helper` is not a match for the name `helper`.
+    fn is_program_local(&self, name: &str) -> bool {
+        if self.prog.function_index(name).is_some() {
+            return true;
+        }
+        self.prog.functions.iter().any(|f| {
+            f.name.ends_with(name) && f.name.strip_suffix(name).is_some_and(|p| p.ends_with(':'))
+        })
+    }
+
     /// Explore one call site if it is a configured sink.
     pub(super) fn explore_call_site(
         &mut self,
@@ -233,6 +446,16 @@ impl<'a> BackwardTaintEngine<'a> {
             {
                 return;
             }
+            // A static call resolving to a function defined in this program is
+            // not an external sink either, even when the name matches a library
+            // sink (a user helper named `run` is not `subprocess.run`; a package
+            // import of that name short-circuits this guard above via
+            // `pkg_import`). The callee's own configured sinks report once with
+            // the full caller→callee path; arming the call site itself would
+            // emit the same bug twice - once as a shorter path prefix (WI-41).
+            if self.is_program_local(name) {
+                return;
+            }
             // Verb sinks that strictly require a receiver object (get, post, render, etc.);
             // a bare static call without package import is not a client method invocation.
             if is_receiver_only_verb(name) {
@@ -242,11 +465,53 @@ impl<'a> BackwardTaintEngine<'a> {
         // Receiver-aware sink match: verb-named sinks (get/post/...) from
         // dotted client entries only fire when the receiver root is a known
         // client, `map.get(t)` is a Map accessor, `got.get(t)` is SSRF.
+        let recv_var = match receiver {
+            Some(Operand::Var(r)) => Some(*r),
+            _ => None,
+        };
+        // Factory-resolved receiver roots must clear the same bar the
+        // sink matcher applies: the root is a declared client (client_roots),
+        // it carries a dotted entry for THIS method (receiver_roles), or it
+        // names a package carrying package-scoped sink facts
+        // (scoped_sink_signatures - the `axios.get` family lives here and
+        // populates neither of the other two sets). Gating factories on
+        // client_roots alone rejected `const client = axios.create(...)` ->
+        // `client.get(...)` even though `axios.get` is a declared sink
+        // (mre01 instance-alias false negative): the receiver resolved to
+        // its own source name ("client") and the sink stayed suppressed.
+        let factory_root_arms = |root: &str| {
+            self.facts.client_roots.contains(root)
+                || self
+                    .facts
+                    .receiver_roles
+                    .contains_key(&(root.to_string(), name.to_string()))
+                || self
+                    .facts
+                    .scoped_sink_signatures
+                    .keys()
+                    .any(|(pkg, _)| pkg == root)
+        };
         let receiver_root = match receiver {
             Some(Operand::Var(r)) => {
                 let direct = FactTable::receiver_root(ir, *r);
                 if let Some(ref d) = direct {
-                    if self.facts.client_roots.contains(d) {
+                    // Name-collision guard: a variable merely *named* like a
+                    // declared client root (a factory instance called
+                    // `client`) must not short-circuit before the factory
+                    // fallback - for a verb sink whose (root, method) pair is
+                    // not declared, the direct name cannot arm the call, so
+                    // fall through to import/factory resolution (which may
+                    // recover the real root, e.g. `axios` from
+                    // `axios.create(...)`) and only then default to `direct`
+                    // (`resolved.or(direct)` below keeps the old result when
+                    // nothing resolves). mre01 instance-alias false negative.
+                    if self.facts.client_roots.contains(d)
+                        && (!self.facts.verb_sinks.contains(name)
+                            || self
+                                .facts
+                                .receiver_roles
+                                .contains_key(&(d.clone(), name.to_string())))
+                    {
                         direct
                     } else {
                         // Check if d was imported as a package namespace (e.g. import cp from "child_process")
@@ -289,7 +554,7 @@ impl<'a> BackwardTaintEngine<'a> {
                                             && (method == "create" || method == "extend") =>
                                         {
                                             if let Some(cr_root) = FactTable::receiver_root(ir, *cr)
-                                                && self.facts.client_roots.contains(&cr_root)
+                                                && factory_root_arms(&cr_root)
                                             {
                                                 resolved = Some(cr_root);
                                             }
@@ -303,7 +568,7 @@ impl<'a> BackwardTaintEngine<'a> {
                                                 || func.ends_with(".extend")) =>
                                         {
                                             if let Some(prefix) = func.split('.').next()
-                                                && self.facts.client_roots.contains(prefix)
+                                                && factory_root_arms(prefix)
                                             {
                                                 resolved = Some(prefix.to_string());
                                             }
@@ -330,7 +595,7 @@ impl<'a> BackwardTaintEngine<'a> {
                                                     && (method == "create" || method == "extend")
                                                     && let Some(cr_root) =
                                                         FactTable::receiver_root(f.ir, *cr)
-                                                    && self.facts.client_roots.contains(&cr_root)
+                                                    && factory_root_arms(&cr_root)
                                                 {
                                                     resolved = Some(cr_root);
                                                     break;
@@ -350,32 +615,62 @@ impl<'a> BackwardTaintEngine<'a> {
             _ => pkg_import.map(|pkg| pkg.package.clone()),
         };
         let effective_name = pkg_import.and_then(|p| p.symbol.as_deref()).unwrap_or(name);
-        let origin_package = pkg_import
-            .map(|pkg| pkg.package.as_str())
+        // Factory-call package origin (owned): the receiver var was
+        // produced by a call to a symbol imported from a package with
+        // scoped sink facts (`const prisma = new PrismaClient()` with
+        // `import { PrismaClient } from '@prisma/client'`). Computed as an
+        // owned value before the origin chain so no borrow of `self`
+        // outlives it into the exploration loop.
+        let factory_origin = recv_var.and_then(|rv| {
+            let file = self.fn_file.get(&self.prog.functions[fi].name)?;
+            self.factory_call_package(ir, rv, file)
+        });
+        // Origin chain, resolved to an OWNED string: the borrows of
+        // `self` (import table, scoped-fact keys) end here, so the value
+        // can be consulted inside the per-slot exploration loop where
+        // `&mut self` borrows (guard state, stats) are live.
+        let origin_owned: Option<String> = pkg_import
+            .map(|pkg| pkg.package.clone())
             .or_else(|| {
                 receiver_root.as_deref().and_then(|root| {
                     self.fn_file
                         .get(&self.prog.functions[fi].name)
                         .and_then(|file| self.file_package_imports.get(file))
                         .and_then(|imports| imports.get(root))
-                        .map(|pkg| pkg.package.as_str())
+                        .map(|pkg| pkg.package.clone())
                 })
             })
             .or_else(|| {
-                receiver_root.as_deref().filter(|root| {
-                    self.facts
-                        .scoped_sink_signatures
-                        .keys()
-                        .any(|(pkg, _)| pkg == *root)
-                })
-            });
-        if !self
-            .facts
-            .is_sink_call_scoped(effective_name, receiver_root.as_deref(), origin_package)
-            && !self
-                .facts
-                .is_sink_call_scoped(name, receiver_root.as_deref(), origin_package)
-        {
+                receiver_root
+                    .as_deref()
+                    .filter(|root| {
+                        self.facts
+                            .scoped_sink_signatures
+                            .keys()
+                            .any(|(pkg, _)| pkg == *root)
+                    })
+                    .map(|root| root.to_string())
+            })
+            .or_else(|| factory_origin.clone());
+        let origin_package = origin_owned.as_deref();
+        // The call site's own language: sink facts are language-keyed, so a
+        // Rust `File::create` signature must not arm a TypeScript `create`
+        // call in the same mixed-language scan.
+        let language = (!ir.language.is_empty()).then_some(ir.language.as_str());
+        let has_receiver = recv_var.is_some();
+        if !self.facts.is_recv_sink_call_scoped(
+            effective_name,
+            receiver_root.as_deref(),
+            origin_package,
+            language,
+            has_receiver,
+        ) && !self.facts.is_recv_sink_call_scoped(
+            name,
+            receiver_root.as_deref(),
+            origin_package,
+            language,
+            has_receiver,
+        ) {
             return;
         }
         // Receiver-aware role: `kv.put(t)` resolves Storage (dotted
@@ -384,13 +679,35 @@ impl<'a> BackwardTaintEngine<'a> {
         // matching above.
         let role = self
             .facts
-            .role_for_call(effective_name, receiver_root.as_deref())
-            .or_else(|| self.facts.role_for_call(name, receiver_root.as_deref()))
+            .role_for_call_scoped(
+                effective_name,
+                receiver_root.as_deref(),
+                origin_package,
+                language,
+            )
+            .or_else(|| {
+                self.facts.role_for_call_scoped(
+                    name,
+                    receiver_root.as_deref(),
+                    origin_package,
+                    language,
+                )
+            })
             .unwrap_or_default();
-        let label = self
-            .facts
-            .label_for_call(effective_name, receiver_root.as_deref())
-            .or_else(|| self.facts.label_for_call(name, receiver_root.as_deref()));
+        let label = self.facts.label_for_call_scoped(
+            effective_name,
+            receiver_root.as_deref(),
+            origin_package,
+            language,
+        );
+        let label = label.or_else(|| {
+            self.facts.label_for_call_scoped(
+                name,
+                receiver_root.as_deref(),
+                origin_package,
+                language,
+            )
+        });
         // Engine purity: every fact-declared sink is explored and reported
         // when tainted data reaches it, regardless of role. Severity policy
         // (Response/Validation rank at `info`) is lang-declared ranking
@@ -416,8 +733,14 @@ impl<'a> BackwardTaintEngine<'a> {
         self.stats.sink_args_explored += triplets.len();
 
         for (arg_slot, var, arg_node) in triplets {
-            let Some(alert_info) = sink_alert_with_facts(ir, self.config, &self.facts, &arg_node)
-            else {
+            let Some(alert_info) = sink_alert_with_facts(
+                ir,
+                self.config,
+                &self.facts,
+                &arg_node,
+                origin_package,
+                language,
+            ) else {
                 continue;
             };
             let finding_class = alert_info.class;
@@ -479,6 +802,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 label: label.clone(),
                 source_desc: state.source_desc.clone(),
                 path,
+                cut_reasons: state.cuts.clone(),
                 // Span of the SINK CALL itself, not the tainted operand's
                 // definition: reports must point at the line the user fixes.
                 // (Reporting the operand's def site put `search.ts` SQLi at
@@ -602,15 +926,16 @@ impl<'a> BackwardTaintEngine<'a> {
                     || (cf == fi && gm.is_guarded(cur.var, root.block)))
             {
                 state.saw_sanitized_root_only = true;
+                record_cut(&mut state.cuts, "guard");
                 continue;
             }
 
             // Stop: source reached, vulnerable path confirmed.
-            if is_source(ir, self.config, &cur) {
+            if is_source(ir, self.config, &self.facts, &cur) {
                 state.saw_source = true;
                 if state.source_node.is_none() {
                     state.source_node = Some((cf, cur));
-                    state.source_desc = source_description(ir, self.config, &cur);
+                    state.source_desc = source_description(ir, self.config, &self.facts, &cur);
                 }
                 continue;
             }
@@ -630,11 +955,16 @@ impl<'a> BackwardTaintEngine<'a> {
                 .value_info_for(cf)
                 .is_some_and(|info| info.converged && info.values.contains_key(&cur.var));
             if provably_independent {
+                record_cut(&mut state.cuts, "value-const");
                 continue;
             }
 
             // Stop: sanitizer use, this branch is clean. Fact-table aware:
-            // includes learned methods like .replace()/.test() guards, qualified by sink role.
+            // includes learned methods like .replace()/.test() guards,
+            // qualified by sink role. Package-scoped sanitizer facts
+            // additionally require the call's own import origin to name
+            // their package; unknown origin leaves them inert.
+            let san_origin = self.sanitizer_origin_package(cf, &cur);
             if is_sanitizer_effective_for_role(
                 ir,
                 self.config,
@@ -642,8 +972,10 @@ impl<'a> BackwardTaintEngine<'a> {
                 &cur,
                 state.sink_role,
                 state.sink_label.as_deref(),
+                san_origin.as_deref(),
             ) {
                 state.saw_sanitized_root_only = true;
+                record_cut(&mut state.cuts, "sanitizer");
                 continue;
             }
 
@@ -732,6 +1064,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 // allocations) is a genuinely clean root.
                 if self.node_is_unresolvable(cf, &cur) {
                     state.saw_unknown = true;
+                    record_cut(&mut state.cuts, "unresolvable");
                 }
                 // Otherwise: clean root, stop.
                 continue;

@@ -96,6 +96,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -107,6 +108,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "helper".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -126,6 +128,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(p0)],
+                    arg_names: Vec::new(),
                 },
             );
             helper.set_terminator(b, Terminator::Return { src: None });
@@ -172,6 +175,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             get.set_terminator(
@@ -196,6 +200,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "get".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -207,6 +212,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -250,6 +256,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             source_fn.set_terminator(
@@ -274,6 +281,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "source_fn".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             middle.set_terminator(
@@ -298,6 +306,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "middle".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -309,6 +318,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -367,6 +377,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "escapeHtml".into(),
                     args: vec![Operand::Var(x0)],
+                    arg_names: Vec::new(),
                 },
             );
             clean.set_terminator(
@@ -391,6 +402,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let w = main.new_var(dummy_meta("w"));
@@ -403,6 +415,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "clean".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             let m3 = main.new_var(mem_meta("m3"));
@@ -414,6 +427,7 @@ pub mod interprocedural_tests {
                     mem_in: m2,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(w)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -452,6 +466,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "escapeHtml".into(),
                     args: vec![Operand::Var(x0)],
+                    arg_names: Vec::new(),
                 },
             );
             clean.set_terminator(
@@ -476,6 +491,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let w = main.new_var(dummy_meta("w"));
@@ -488,6 +504,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "clean".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             let m3 = main.new_var(mem_meta("m3"));
@@ -499,6 +516,7 @@ pub mod interprocedural_tests {
                     mem_in: m2,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(w)],
+                    arg_names: Vec::new(),
                 },
             );
             let m4 = main.new_var(mem_meta("m4"));
@@ -510,6 +528,7 @@ pub mod interprocedural_tests {
                     mem_in: m3,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)], // raw!
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -550,6 +569,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "rec".into(),
                     args: vec![Operand::Var(x0)],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = rec.new_var(mem_meta("m2"));
@@ -561,6 +581,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(y)],
+                    arg_names: Vec::new(),
                 },
             );
             rec.set_terminator(b, Terminator::Return { src: None });
@@ -580,6 +601,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -591,6 +613,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "rec".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -654,6 +677,7 @@ pub mod interprocedural_tests {
                     mem_in: caller.initial_memory_state,
                     func: "callee".into(),
                     args: vec![Operand::Var(x), Operand::Var(y)],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -719,6 +743,7 @@ pub mod interprocedural_tests {
                     mem_in: leaf.initial_memory_state,
                     func: "escapeHtml".into(),
                     args: vec![Operand::Var(la)],
+                    arg_names: Vec::new(),
                 },
             );
             leaf.set_terminator(
@@ -744,6 +769,7 @@ pub mod interprocedural_tests {
                     mem_in: f.initial_memory_state,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             f.push_instruction(
@@ -754,6 +780,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "leaf".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             f.push_instruction(
@@ -764,6 +791,7 @@ pub mod interprocedural_tests {
                     mem_in: m2,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(w)],
+                    arg_names: Vec::new(),
                 },
             );
             f.set_terminator(f.entry_block, Terminator::Return { src: None });
@@ -807,6 +835,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -818,6 +847,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -874,6 +904,7 @@ pub mod interprocedural_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = handler.new_var(mem_meta("m2"));
@@ -885,6 +916,7 @@ pub mod interprocedural_tests {
                     mem_in: m1,
                     func: "writer".into(),
                     args: vec![Operand::Var(obj), Operand::Var(taint)],
+                    arg_names: Vec::new(),
                 },
             );
             let ret = handler.new_var(dummy_meta("r"));
@@ -897,6 +929,7 @@ pub mod interprocedural_tests {
                     mem_in: m2,
                     func: "reader".into(),
                     args: vec![Operand::Var(obj)],
+                    arg_names: Vec::new(),
                 },
             );
             let m4 = handler.new_var(mem_meta("m4"));
@@ -908,6 +941,7 @@ pub mod interprocedural_tests {
                     mem_in: m3,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(ret)],
+                    arg_names: Vec::new(),
                 },
             );
             handler.set_terminator(b, Terminator::Return { src: None });
@@ -1037,6 +1071,7 @@ pub mod interprocedural_tests {
                     receiver: Operand::Var(obj),
                     method: "method".into(),
                     args: vec![Operand::Var(val)],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -1121,6 +1156,7 @@ pub mod interprocedural_tests {
                     receiver: Operand::Var(obj),
                     method: "method".into(),
                     args: vec![Operand::Var(val)],
+                    arg_names: Vec::new(),
                 },
             );
             caller.set_terminator(b, Terminator::Return { src: None });
@@ -1215,6 +1251,12 @@ function handler(ctx) {
         }
     }
 
+    /// Empty fact table: these fixtures declare their whole source
+    /// vocabulary in the `TaintConfig` (the language-agnostic lane).
+    fn facts() -> crate::analysis::taint::facts::FactTable {
+        crate::analysis::taint::facts::FactTable::default()
+    }
+
     /// Whole-value root registration ("ctx") must not leak into fields when
     /// the config also declares granular rules for that root ("ctx.state"):
     /// undeclared subtrees like `ctx.env.SECRET` stay clean.
@@ -1223,15 +1265,15 @@ function handler(ctx) {
         let ir = sample_ir();
         let cfg = config(&["ctx", "ctx.state"]);
         assert!(
-            is_source(&ir, &cfg, &node_for(&ir, "ctx.state.user")),
+            is_source(&ir, &cfg, &facts(), &node_for(&ir, "ctx.state.user")),
             "dotted source rule stays live"
         );
         assert!(
-            !is_source(&ir, &cfg, &node_for(&ir, "ctx.env.SECRET")),
+            !is_source(&ir, &cfg, &facts(), &node_for(&ir, "ctx.env.SECRET")),
             "whole-value root must not cover undeclared fields when granular rules exist"
         );
         assert!(
-            !is_source(&ir, &cfg, &node_for(&ir, "ctx.request.body")),
+            !is_source(&ir, &cfg, &facts(), &node_for(&ir, "ctx.request.body")),
             "undeclared subtree under a suppressed root is not a source"
         );
     }
@@ -1242,8 +1284,18 @@ function handler(ctx) {
     fn whole_value_root_covers_subtree_without_granular_rules() {
         let ir = sample_ir();
         let cfg = config(&["ctx"]);
-        assert!(is_source(&ir, &cfg, &node_for(&ir, "ctx.env.SECRET")));
-        assert!(is_source(&ir, &cfg, &node_for(&ir, "ctx.state.user")));
+        assert!(is_source(
+            &ir,
+            &cfg,
+            &facts(),
+            &node_for(&ir, "ctx.env.SECRET")
+        ));
+        assert!(is_source(
+            &ir,
+            &cfg,
+            &facts(),
+            &node_for(&ir, "ctx.state.user")
+        ));
     }
 
     /// Spec acceptance: granular-only config keeps prefix-subtree matching
@@ -1252,8 +1304,18 @@ function handler(ctx) {
     fn spec_acceptance_granular_only_config() {
         let ir = sample_ir();
         let cfg = config(&["ctx.request"]);
-        assert!(is_source(&ir, &cfg, &node_for(&ir, "ctx.request.body")));
-        assert!(!is_source(&ir, &cfg, &node_for(&ir, "ctx.env.SECRET")));
+        assert!(is_source(
+            &ir,
+            &cfg,
+            &facts(),
+            &node_for(&ir, "ctx.request.body")
+        ));
+        assert!(!is_source(
+            &ir,
+            &cfg,
+            &facts(),
+            &node_for(&ir, "ctx.env.SECRET")
+        ));
     }
 
     /// The alert-text resolver must agree with `is_source` on the same
@@ -1267,15 +1329,15 @@ function handler(ctx) {
         let cfg = config(&["ctx", "ctx.state"]);
         let user = node_for(&ir, "ctx.state.user");
         assert_eq!(
-            source_description(&ir, &cfg, &user).as_deref(),
+            source_description(&ir, &cfg, &facts(), &user).as_deref(),
             Some("ctx.state.user"),
             "declared dotted rule describes itself"
         );
         let secret = node_for(&ir, "ctx.env.SECRET");
         assert!(
-            source_description(&ir, &cfg, &secret).is_none(),
+            source_description(&ir, &cfg, &facts(), &secret).is_none(),
             "suppressed root yields no description"
         );
-        assert!(!is_source(&ir, &cfg, &secret));
+        assert!(!is_source(&ir, &cfg, &facts(), &secret));
     }
 }

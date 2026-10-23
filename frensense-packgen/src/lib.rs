@@ -72,6 +72,15 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
             HintKind::CredentialContext,
             data::BOOTSTRAP_CREDENTIAL_CONTEXT_HINTS,
         ),
+        (HintKind::KdfReceiver, data::BOOTSTRAP_KDF_RECEIVER_HINTS),
+        (
+            HintKind::PreparedStatementPrefix,
+            data::BOOTSTRAP_PREPARED_STATEMENT_PREFIXES,
+        ),
+        (
+            HintKind::WeakHashDisclaimer,
+            data::BOOTSTRAP_WEAK_HASH_DISCLAIMERS,
+        ),
     ] {
         entries.push(LearnedFactEntry::Hints {
             kind,
@@ -658,26 +667,53 @@ mod tests {
             let mut facts = FactTable::default();
             apply_language_entries(&mut config, &mut facts, &entries, &[lang]);
 
+            // Provider vocabulary is language-keyed, never flat: a bare call
+            // name is not portable between languages (`create` is a Rust
+            // `File::create` and a JS `prisma.model.create`), so the install
+            // must leave the language-agnostic config empty and file the
+            // values under this language only.
+            assert!(
+                config.sources.is_empty() && config.sinks.is_empty(),
+                "pack install must not publish {lang}'s sources/sinks to the shared name space"
+            );
+
             let expected_sources: std::collections::BTreeSet<String> = v
                 .source_patterns
                 .iter()
                 .chain(v.request_param_names.iter())
                 .map(|p| (*p).to_string())
                 .collect();
-            let actual_sources: std::collections::BTreeSet<String> =
-                config.sources.iter().cloned().collect();
+            let actual_sources: std::collections::BTreeSet<String> = facts
+                .language_sources(lang)
+                .map(|s| s.iter().cloned().collect())
+                .unwrap_or_default();
             assert_eq!(
                 actual_sources, expected_sources,
                 "sources differ for {lang}"
             );
 
+            // Every declared unqualified name shape owns a last-segment key
+            // in the language section: role names, per-slot rules and IDOR
+            // finders. Package-scoped framework sinks are keyed by
+            // `(package, call)` instead - they never arm a bare name.
             let expected_sinks: std::collections::BTreeSet<String> = v
                 .sink_names
                 .iter()
-                .map(|(call, _)| call.rsplit('.').next().unwrap_or(call).to_string())
+                .map(|(call, _)| *call)
+                .chain(v.sink_signatures.iter().map(|(call, _, _)| *call))
+                .chain(v.idor_sinks.iter().map(|(call, _)| *call))
+                .map(|call| call.rsplit('.').next().unwrap_or(call).to_string())
                 .collect();
-            let actual_sinks: std::collections::BTreeSet<String> =
-                config.sinks.iter().cloned().collect();
+            let actual_sinks: std::collections::BTreeSet<String> = facts
+                .lang_sink_signatures
+                .get(lang)
+                .map(|section| {
+                    section
+                        .keys()
+                        .map(|call| call.rsplit('.').next().unwrap_or(call).to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
             assert_eq!(actual_sinks, expected_sinks, "sinks differ for {lang}");
 
             let expected_sanitizers: std::collections::BTreeSet<String> =
@@ -690,8 +726,11 @@ mod tests {
             );
 
             assert!(
-                !facts.sink_signatures.is_empty(),
-                "pack install must populate sink_signatures for {lang}"
+                facts
+                    .lang_sink_signatures
+                    .get(lang)
+                    .is_some_and(|s| !s.is_empty()),
+                "pack install must populate the {lang} sink signatures"
             );
             assert!(
                 !facts.sanitizer_facts.is_empty(),
@@ -773,13 +812,30 @@ mod tests {
             // entries install - `verb_sinks` and `client_roots` must hold
             // exactly the dotted sinks whose last segment is one of them
             // (the bare spec seed stays empty; step 1 asserted that).
+            // Verb arming has two paths since Phase F1: dotted client
+            // entries arm (root, verb) pairs AND a bare ambiguous sink
+            // name arms verb-gating on itself (an unqualified bare verb
+            // matches nothing by name alone - `is_sink_call_scoped`).
+            // A name is receiver-gated when either it is a declared
+            // ambiguous verb, or this language never declares it bare: a
+            // dotted declaration publishes a bare shadow of its last
+            // segment, and a shadow with no bare declaration behind it
+            // (`yaml.load`, `res.send`) must not arm every receiver in the
+            // program by name alone.
+            let bare_names: std::collections::BTreeSet<&str> = v
+                .sink_names
+                .iter()
+                .filter(|(call, _)| !call.contains('.'))
+                .map(|(call, _)| *call)
+                .collect();
+            let gated = |call: &str| {
+                let last = call.rsplit('.').next().unwrap_or(call);
+                v.ambiguous_verbs.contains(&last) || !bare_names.contains(last)
+            };
             let expected_verbs: std::collections::BTreeSet<String> = v
                 .sink_names
                 .iter()
-                .filter(|(call, _)| {
-                    let last = call.rsplit('.').next().unwrap_or(call);
-                    last != *call && v.ambiguous_verbs.contains(&last)
-                })
+                .filter(|(call, _)| gated(call))
                 .map(|(call, _)| call.rsplit('.').next().unwrap_or(call).to_string())
                 .collect();
             let expected_roots: std::collections::BTreeSet<String> = v
@@ -787,7 +843,7 @@ mod tests {
                 .iter()
                 .filter(|(call, _)| {
                     let last = call.rsplit('.').next().unwrap_or(call);
-                    last != *call && v.ambiguous_verbs.contains(&last)
+                    last != *call && gated(call)
                 })
                 .map(|(call, _)| call.split('.').next().unwrap_or(call).to_string())
                 .collect();
@@ -800,6 +856,27 @@ mod tests {
                 actual_roots, expected_roots,
                 "client_roots differ for {lang}"
             );
+        }
+    }
+
+    /// Regression: no two propagator rules in one language may share a call
+    /// key. The install path resolves a key last-wins, so a duplicate is
+    /// always dead weight at best and a silent semantic flip at worst (the
+    /// old append-only receiver-block set made a `tainted_receiver: false`
+    /// duplicate permanently override a `true` one - e.g. the string/array
+    /// `join` receiver edge).
+    #[test]
+    fn propagator_tables_have_no_duplicate_call_keys() {
+        for v in crate::vocab::all_vocab() {
+            let mut seen = std::collections::HashSet::new();
+            for rule in v.propagators {
+                assert!(
+                    seen.insert(rule.call),
+                    "duplicate propagator key {:?} in {} vocabulary",
+                    rule.call,
+                    v.language
+                );
+            }
         }
     }
 }

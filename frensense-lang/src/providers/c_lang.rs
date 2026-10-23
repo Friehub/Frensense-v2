@@ -7,7 +7,10 @@
 
 use tree_sitter::Node;
 
-use crate::spec::{node_text, Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin};
+use crate::spec::{
+    node_text, Export, Import, ItemKind, LanguageSpec, ModuleItem, NodeRole, PackageCategory,
+    TaintOrigin, Visibility,
+};
 
 // ── AST classification ────────────────────────────────────────────────────────
 
@@ -173,6 +176,26 @@ impl LanguageSpec for CSpec {
         extract_c_includes(root, source)
     }
 
+    fn extract_exports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Export> {
+        // C's export rule is linkage: a file-scope definition without
+        // `static` is visible to the linker, with `static` it is not.
+        c_module_items(root, source)
+            .into_iter()
+            .filter(|item| item.visibility == Visibility::Public)
+            .map(|item| Export {
+                exported_name: item.name.clone(),
+                local_name: item.name,
+                from_module: None,
+                visibility: item.visibility,
+                kind: item.kind,
+            })
+            .collect()
+    }
+
+    fn extract_module_items<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<ModuleItem> {
+        c_module_items(root, source)
+    }
+
     fn symbol_query(&self) -> Option<&'static str> {
         Some(
             r"
@@ -303,5 +326,173 @@ impl LanguageSpec for CSpec {
             },
         ];
         REGISTRY
+    }
+}
+
+// ── Module surface ────────────────────────────────────────────────────────────
+
+/// Every file-scope declaration, with its linkage.
+///
+/// C has no `export`: a definition at file scope is visible to the linker
+/// unless it is `static`, and `static` is the only way a translation unit
+/// keeps a symbol to itself. Namespace and linkage-spec bodies (C++) and
+/// template declarations are descended into; class members are not, since
+/// their access is a per-member question this layer does not model.
+fn c_module_items(root: Node<'_>, source: &str) -> Vec<ModuleItem> {
+    let mut items = Vec::new();
+    collect_c_items(root, source, &mut items);
+    items
+}
+
+fn collect_c_items(node: Node<'_>, source: &str, out: &mut Vec<ModuleItem>) {
+    for i in 0..node.named_child_count() {
+        let Some(child) = node.named_child(i) else {
+            continue;
+        };
+        match child.kind() {
+            "function_definition" => {
+                let visibility = c_visibility(child, source);
+                if let Some(name) =
+                    c_declarator_name(child.child_by_field_name("declarator"), source)
+                {
+                    out.push(ModuleItem {
+                        name,
+                        kind: ItemKind::Function,
+                        visibility,
+                    });
+                }
+            }
+            "declaration" => {
+                let visibility = c_visibility(child, source);
+                for j in 0..child.named_child_count() {
+                    let Some(decl) = child.named_child(j) else {
+                        continue;
+                    };
+                    let Some(name) = c_declarator_name(Some(decl), source) else {
+                        continue;
+                    };
+                    let kind = if c_is_function_declarator(decl) {
+                        ItemKind::Function
+                    } else if decl.kind() == "type_identifier" {
+                        continue;
+                    } else {
+                        ItemKind::Variable
+                    };
+                    out.push(ModuleItem {
+                        name,
+                        kind,
+                        visibility,
+                    });
+                }
+            }
+            "type_definition" => {
+                for j in 0..child.named_child_count() {
+                    let Some(decl) = child.named_child(j) else {
+                        continue;
+                    };
+                    if let Some(name) = c_declarator_name(Some(decl), source) {
+                        out.push(ModuleItem {
+                            name,
+                            kind: ItemKind::Type,
+                            visibility: c_visibility(child, source),
+                        });
+                    }
+                }
+            }
+            "struct_specifier" | "union_specifier" | "class_specifier" => {
+                if child.child_by_field_name("body").is_none() {
+                    continue;
+                }
+                let Some(name) = child.child_by_field_name("name") else {
+                    continue;
+                };
+                out.push(ModuleItem {
+                    name: node_text(name, source).to_owned(),
+                    kind: ItemKind::Struct,
+                    visibility: c_visibility(child, source),
+                });
+            }
+            "enum_specifier" => {
+                if child.child_by_field_name("body").is_none() {
+                    continue;
+                }
+                let Some(name) = child.child_by_field_name("name") else {
+                    continue;
+                };
+                out.push(ModuleItem {
+                    name: node_text(name, source).to_owned(),
+                    kind: ItemKind::Enum,
+                    visibility: c_visibility(child, source),
+                });
+            }
+            "namespace_definition" | "linkage_specification" => {
+                if let Some(body) = child.child_by_field_name("body") {
+                    collect_c_items(body, source, out);
+                }
+            }
+            "template_declaration" => {
+                for j in 0..child.named_child_count() {
+                    if let Some(inner) = child.named_child(j) {
+                        collect_c_items(inner, source, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `static` at file scope is the only non-exporting storage class.
+fn c_visibility(node: Node<'_>, source: &str) -> Visibility {
+    if c_contains_static(node, source) {
+        Visibility::Private
+    } else {
+        Visibility::Public
+    }
+}
+
+fn c_contains_static(node: Node<'_>, source: &str) -> bool {
+    if node.kind() == "storage_class_specifier" && node_text(node, source) == "static" {
+        return true;
+    }
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i) {
+            if c_contains_static(child, source) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// The declared name behind C's nesting declarators
+/// (`*p`, `f(int)`, `a[10]`, `x = 1`, `Ns::name`).
+fn c_declarator_name(node: Option<Node<'_>>, source: &str) -> Option<String> {
+    let node = node?;
+    match node.kind() {
+        "identifier" | "field_identifier" | "type_identifier" => {
+            Some(node_text(node, source).to_owned())
+        }
+        "qualified_identifier" => node
+            .child_by_field_name("name")
+            .map(|n| node_text(n, source).to_owned()),
+        "function_declarator"
+        | "pointer_declarator"
+        | "array_declarator"
+        | "init_declarator"
+        | "parenthesized_declarator" => {
+            c_declarator_name(node.child_by_field_name("declarator"), source)
+        }
+        _ => None,
+    }
+}
+
+fn c_is_function_declarator(node: Node<'_>) -> bool {
+    match node.kind() {
+        "function_declarator" => true,
+        "pointer_declarator" | "init_declarator" | "parenthesized_declarator" => node
+            .child_by_field_name("declarator")
+            .is_some_and(c_is_function_declarator),
+        _ => false,
     }
 }

@@ -109,6 +109,7 @@ pub mod context_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let a = main.new_var(dummy_meta("a"));
@@ -121,6 +122,7 @@ pub mod context_tests {
                     mem_in: m1,
                     func: "id".into(),
                     args: vec![Operand::Var(t)],
+                    arg_names: Vec::new(),
                 },
             );
             let m3 = main.new_var(mem_meta("m3"));
@@ -132,6 +134,7 @@ pub mod context_tests {
                     mem_in: m2,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(a)],
+                    arg_names: Vec::new(),
                 },
             );
             // Clean call site: c = "safe"; b = id(c);
@@ -154,6 +157,7 @@ pub mod context_tests {
                     mem_in: m4,
                     func: "id".into(),
                     args: vec![Operand::Var(c)],
+                    arg_names: Vec::new(),
                 },
             );
             let m6 = main.new_var(mem_meta("m6"));
@@ -165,6 +169,7 @@ pub mod context_tests {
                     mem_in: m5,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(bvar)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -247,6 +252,7 @@ pub mod context_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let a = main.new_var(dummy_meta("a"));
@@ -259,6 +265,7 @@ pub mod context_tests {
                     mem_in: m1,
                     func: "id".into(),
                     args: vec![Operand::Var(t)],
+                    arg_names: Vec::new(),
                 },
             );
             let m3 = main.new_var(mem_meta("m3"));
@@ -270,6 +277,7 @@ pub mod context_tests {
                     mem_in: m2,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(a)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -306,6 +314,7 @@ pub mod context_tests {
                     mem_in: mem0,
                     func: "rec".into(),
                     args: vec![Operand::Var(x0)],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = rec.new_var(mem_meta("m2"));
@@ -317,6 +326,7 @@ pub mod context_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(y)],
+                    arg_names: Vec::new(),
                 },
             );
             rec.set_terminator(b, Terminator::Return { src: None });
@@ -336,6 +346,7 @@ pub mod context_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -347,6 +358,7 @@ pub mod context_tests {
                     mem_in: m1,
                     func: "rec".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });
@@ -382,6 +394,7 @@ pub mod context_tests {
                     mem_in: noise.initial_memory_state,
                     func: "db.execute".into(),
                     args: vec![Operand::IntLiteral(1)],
+                    arg_names: Vec::new(),
                 },
             );
             let _ = x;
@@ -402,6 +415,7 @@ pub mod context_tests {
                     mem_in: mem0,
                     func: "getSource".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = dirty.new_var(mem_meta("m2"));
@@ -413,6 +427,7 @@ pub mod context_tests {
                     mem_in: m1,
                     func: "db.execute".into(),
                     args: vec![Operand::Var(v)],
+                    arg_names: Vec::new(),
                 },
             );
             dirty.set_terminator(b, Terminator::Return { src: None });
@@ -430,6 +445,7 @@ pub mod context_tests {
                     mem_in: main.initial_memory_state,
                     func: "dirty".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             let m2 = main.new_var(mem_meta("m2"));
@@ -441,6 +457,7 @@ pub mod context_tests {
                     mem_in: m1,
                     func: "noise".into(),
                     args: vec![],
+                    arg_names: Vec::new(),
                 },
             );
             main.set_terminator(b, Terminator::Return { src: None });

@@ -39,17 +39,70 @@ impl<'a> LoweringContext<'a> {
         None
     }
 
+    /// `a, b` on the left of `=` / `:=`: a list of two or more targets.
+    pub(super) fn is_multi_target(node: Node) -> bool {
+        matches!(
+            node.kind(),
+            "expression_list" | "identifier_list" | "pattern_list" | "tuple_pattern"
+        ) && node.named_child_count() > 1
+    }
+
+    /// Bind `rhs` to every plain-variable element of a multi-target list;
+    /// `_` is skipped. The right side is a tuple, so any element may carry
+    /// the taint.
+    pub(super) fn bind_each_target(&mut self, list: Node, rhs: Operand) {
+        let mut cursor = list.walk();
+        let targets: Vec<Node> = list.named_children(&mut cursor).collect();
+        for target in targets {
+            if self.source[target.start_byte()..target.end_byte()].trim() == "_" {
+                continue;
+            }
+            if let Some(LValue::Variable(dest)) = self.visit_lvalue(target) {
+                self.mark_declared(dest);
+                self.ir.push_instruction(
+                    self.current_block,
+                    Instruction::Assign {
+                        dest,
+                        src: rhs.clone(),
+                    },
+                );
+            }
+        }
+    }
+
     pub fn visit_assignment(
         &mut self,
         node: Node,
         lhs_field: &str,
         rhs_field: &str,
     ) -> Option<Operand> {
-        let left_node = node.child_by_field_name(lhs_field)?;
-        let right_node = node.child_by_field_name(rhs_field)?;
+        // Some grammars wrap the target and/or value in a list node: Go's
+        // `assignment_statement` gives `expression_list` for both sides, so
+        // `q = v` reached `visit_lvalue(expression_list)` (role Other) and the
+        // store was dropped entirely - taint assigned inside an `if`/loop
+        // body never reached the variable read after the join. Unwrap the
+        // single-target form the same way declarations already do
+        // (`short_var_declaration` was unaffected, which is why its binding
+        // survived while plain assignment did not).
+        let left_node = self
+            .spec
+            .unwrap_declarator_node(node.child_by_field_name(lhs_field)?);
+        let right_node = self
+            .spec
+            .unwrap_declarator_node(node.child_by_field_name(rhs_field)?);
 
         let rhs_op = self.visit_node(right_node).unwrap_or(Operand::Unknown);
         let compound = self.compound_operator(node);
+
+        // Multi-target form (`body, err := f(x)`, `a, b = g()`): the call's
+        // result is a tuple, and any element of it can carry the taint. The
+        // single-target path below saw an `expression_list` lvalue and
+        // dropped the binding, so every Go `v, err :=` and Python tuple
+        // unpack lost its value flow.
+        if compound.is_none() && Self::is_multi_target(left_node) {
+            self.bind_each_target(left_node, rhs_op.clone());
+            return Some(rhs_op);
+        }
         let lval = self.visit_lvalue(left_node);
 
         match lval {

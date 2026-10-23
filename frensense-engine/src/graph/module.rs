@@ -10,7 +10,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use frensense_lang::spec::{Export, Import};
+use frensense_lang::spec::{Export, Import, ModuleItem};
 
 fn concat2(a: &str, b: &str) -> String {
     let mut s = String::with_capacity(a.len() + b.len());
@@ -151,10 +151,23 @@ pub struct PackageImport {
 }
 
 /// Result of whole-program module resolution.
+///
+/// Alias resolution is what taint needs; the other three maps are the
+/// surface it had to parse to get there, kept because every module-level
+/// question (what does this file declare, what does it export, who imports
+/// it) reads them, and re-parsing would make each consumer a second source
+/// of truth about the same source text.
 #[derive(Debug, Clone, Default)]
 pub struct ModuleResolution {
     pub file_aliases: FxHashMap<String, FxHashMap<String, String>>,
     pub file_package_imports: FxHashMap<String, FxHashMap<String, PackageImport>>,
+    /// Import declarations per file, aliases included.
+    pub file_imports: FxHashMap<String, Vec<Import>>,
+    /// Export and re-export declarations per file, with visibility and
+    /// declaration kind.
+    pub file_exports: FxHashMap<String, Vec<Export>>,
+    /// Every top-level declaration per file, exported or not.
+    pub file_module_items: FxHashMap<String, Vec<ModuleItem>>,
 }
 
 /// Computes module aliases and external package imports per file.
@@ -169,6 +182,7 @@ impl ModuleAliasResolver {
         let known_files: Vec<String> = files.iter().map(|(p, _, _)| p.clone()).collect();
         let mut file_imports: FxHashMap<String, Vec<Import>> = FxHashMap::default();
         let mut file_exports: FxHashMap<String, Vec<Export>> = FxHashMap::default();
+        let mut file_module_items: FxHashMap<String, Vec<ModuleItem>> = FxHashMap::default();
 
         for (path, source, ext) in files {
             let Some(spec) = frensense_lang::spec_for_ext(ext) else {
@@ -184,8 +198,10 @@ impl ModuleAliasResolver {
 
             let imps = spec.extract_imports(tree.root_node(), source);
             let exps = spec.extract_exports(tree.root_node(), source);
+            let items = spec.extract_module_items(tree.root_node(), source);
             file_imports.insert(path.clone(), imps);
             file_exports.insert(path.clone(), exps);
+            file_module_items.insert(path.clone(), items);
         }
 
         // Build per-file export map
@@ -272,6 +288,9 @@ impl ModuleAliasResolver {
         ModuleResolution {
             file_aliases,
             file_package_imports,
+            file_imports,
+            file_exports,
+            file_module_items,
         }
     }
 
@@ -351,5 +370,95 @@ impl ModuleAliasResolver {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::scan;
+    use frensense_lang::spec::Visibility;
+
+    fn files(entries: &[(&str, &str, &str)]) -> Vec<(String, String, String)> {
+        entries
+            .iter()
+            .map(|(p, s, e)| ((*p).to_string(), (*s).to_string(), (*e).to_string()))
+            .collect()
+    }
+
+    /// The surface the resolver parses must survive into the prepared
+    /// program: alias resolution is only one of its four readers.
+    #[test]
+    fn prepared_program_keeps_the_module_surface() {
+        let program = files(&[
+            (
+                "src/server.ts",
+                "export function handler() {}\nexport const LIMIT = 1;\nfunction local() {}\n",
+                "ts",
+            ),
+            (
+                "src/other.ts",
+                "import { handler } from \"./server\";\nhandler();\n",
+                "ts",
+            ),
+        ]);
+        let prepared = scan::prepare(&program).expect("prepare");
+
+        let exports = prepared.exports_of("src/server.ts");
+        assert_eq!(exports.len(), 2, "{exports:?}");
+        assert!(exports.iter().any(|e| e.exported_name == "handler"));
+        assert!(exports.iter().any(|e| e.exported_name == "LIMIT"));
+
+        let items = prepared.module_items_of("src/server.ts");
+        let local = items.iter().find(|i| i.name == "local").expect("local");
+        assert_eq!(local.visibility, Visibility::Private);
+
+        let imports = prepared.imports_of("src/other.ts");
+        assert!(imports.iter().any(|i| i.local_name == "handler"));
+
+        // Alias resolution still works off the same parse.
+        assert!(
+            prepared
+                .file_aliases
+                .get("src/other.ts")
+                .and_then(|m| m.get("handler"))
+                .is_some(),
+            "{:?}",
+            prepared.file_aliases
+        );
+
+        assert_eq!(prepared.files(), vec!["src/other.ts", "src/server.ts"]);
+    }
+
+    #[test]
+    fn rust_surface_keeps_private_items_for_visibility_checks() {
+        let program = files(&[(
+            "src/lib.rs",
+            "pub fn serve() {}\nfn helper() {}\npub(crate) fn internal() {}\n",
+            "rs",
+        )]);
+        let prepared = scan::prepare(&program).expect("prepare");
+
+        let exported: Vec<&str> = prepared
+            .exports_of("src/lib.rs")
+            .iter()
+            .map(|e| e.exported_name.as_str())
+            .collect();
+        assert_eq!(exported, vec!["serve"]);
+
+        let items = prepared.module_items_of("src/lib.rs");
+        assert_eq!(
+            items
+                .iter()
+                .find(|i| i.name == "helper")
+                .map(|i| i.visibility),
+            Some(Visibility::Private)
+        );
+        assert_eq!(
+            items
+                .iter()
+                .find(|i| i.name == "internal")
+                .map(|i| i.visibility),
+            Some(Visibility::Internal)
+        );
     }
 }

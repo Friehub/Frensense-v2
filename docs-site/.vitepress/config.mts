@@ -118,6 +118,14 @@ async function writePostsManifest(siteConfig: { outDir: string }): Promise<void>
         date: normalizeDate(entry.frontmatter.date),
         description: typeof entry.frontmatter.description === 'string' ? entry.frontmatter.description : '',
         image: new URL(cover, SITE_ORIGIN).href,
+        // Provenance: which engine version the post's claims are pinned to
+        // and when they were last fact-checked (scripts/blog_provenance.py).
+        writtenAgainstVersion: typeof entry.frontmatter['written-against-version'] === 'string'
+          ? entry.frontmatter['written-against-version']
+          : null,
+        factChecked: entry.frontmatter['fact-checked']
+          ? normalizeDate(entry.frontmatter['fact-checked'])
+          : null,
       }
     })
     .sort((a, b) => (a.date < b.date ? 1 : -1))

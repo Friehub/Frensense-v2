@@ -32,6 +32,7 @@ use serde::Serialize;
 
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::facts::FactTable;
+use frensense_engine::analysis::taint::facts::{PolicyRequirement, PolicyScope};
 
 pub use call_analysis::{
     collect_calls, cross_function_helper, defined_function_names, extract_call_arg_literals,
@@ -70,7 +71,7 @@ pub fn extract_facts_with_tables(
 /// language specs of the family's own extensions, plus the embedded
 /// default pack (Spec provenance - the CLI runner merges the same pack, so
 /// gate and scan replay under identical baselines).
-fn family_tables(f: &Family) -> (TaintConfig, FactTable) {
+pub fn family_tables(f: &Family) -> (TaintConfig, FactTable) {
     let exts: Vec<&str> = f
         .positives
         .iter()
@@ -112,6 +113,11 @@ fn extract_facts_with(
 
     // votes: candidate-key -> (support, families)
     let mut votes: FxHashMap<String, (Candidate, u32, Vec<String>)> = FxHashMap::default();
+    // Guard alternatives per `check:{rule}:{call}` key: families sharing a
+    // trigger verb propose the check with the helper THEIR negatives use;
+    // a union lets one fact accept every voting family's guard shape.
+    let mut check_guards: FxHashMap<String, std::collections::BTreeSet<String>> =
+        FxHashMap::default();
 
     // Pass 1: proposals per family (accumulate votes). The trace notes are
     // kept alongside so a family that teaches nothing can explain itself in
@@ -153,12 +159,66 @@ fn extract_facts_with(
                 Candidate::IntegerOverflowRule { rule, .. } => format!("io_rule:{rule}"),
             };
 
+            // Collect the enforcement helpers for a possible guard union.
+            if let Candidate::Check {
+                unless_guard: Some(guard),
+                ..
+            } = &c
+            {
+                check_guards
+                    .entry(key.clone())
+                    .or_default()
+                    .insert(guard.clone());
+            }
             let entry = votes.entry(key).or_insert_with(|| (c, 0, Vec::new()));
             entry.1 += 1;
             if !entry.2.contains(&f.id) {
                 entry.2.push(f.id.clone());
             }
         }
+    }
+
+    // Guard-union consolidation: several families can propose the same
+    // check fact with DIFFERENT enforcement helpers (each learned from its
+    // own negatives). The legacy Check fact carries one helper, so the
+    // first proposal won and the engine then alerted on twins whose guard
+    // used one of the discarded names (registry/network guard variants).
+    // When more than one guard name exists for a key, publish a
+    // generalized Policy whose RequireCall accepts ANY of them executing
+    // before the trigger.
+    for (key, guards) in &check_guards {
+        if guards.len() < 2 {
+            continue;
+        }
+        let Some(entry) = votes.get_mut(key) else {
+            continue;
+        };
+        let Some((rule, call, message, package)) = (match &entry.0 {
+            // A range-check modality cannot merge with the guard
+            // disjunction (require lists are conjunctive): keep the
+            // legacy fact intact.
+            Candidate::Check {
+                rule,
+                call,
+                message,
+                package,
+                unless_range_check: None,
+                ..
+            } => Some((rule.clone(), call.clone(), message.clone(), package.clone())),
+            _ => None,
+        }) else {
+            continue;
+        };
+        entry.0 = Candidate::Policy {
+            rule,
+            call,
+            message,
+            require: vec![PolicyRequirement::RequireCall {
+                any_of: guards.iter().cloned().collect(),
+            }],
+            scope: PolicyScope::Function,
+            package,
+        };
     }
 
     // Pass 2: replay gate. Every family is lowered once up front, under
@@ -168,10 +228,10 @@ fn extract_facts_with(
     // family (no re-lowering). Baseline separation is measured under each
     // family's own language tables; a candidate fact must be validated by
     // at least one voting family that separates under it, and must NOT
-    // break any family that already separates at baseline. Families that
-    // never separate under any table (corrupted positives, see
-    // docs/E2E_REPORT.md §1b) are excluded from the regression check:
-    // they can't be "broken" further, and gating on them would reject
+    // break any family that separated at baseline nor newly-noise any
+    // family whose baseline negative was clean. Only families whose
+    // baseline negative ALREADY alerts are exempt from the regression
+    // check: their noise predates the fact and gating on it would reject
     // every fact.
     let prepared: Vec<PreparedFamily> = families
         .iter()
@@ -222,13 +282,30 @@ fn extract_facts_with(
 
     // Deterministic gate order: `votes` is an `FxHashMap`, and its
     // iteration order decides equal-key tie-breaks downstream. Sort by
-    // candidate key so bundle bytes never depend on hasher layout or
-    // insertion history.
+    // gate tier, then key, so bundle bytes never depend on hasher layout
+    // or insertion history. The tier puts pest controllers first: a
+    // sanitizer that silences findings must be learned before any
+    // check/policy is trialed, or the regression gate measures noise
+    // against a context that the final bundle will never scan.
     let mut ordered_votes: Vec<(String, Candidate, u32, Vec<String>)> = votes
         .into_iter()
         .map(|(key, (cand, support, fams))| (key, cand, support, fams))
         .collect();
-    ordered_votes.sort_by(|a, b| a.0.cmp(&b.0));
+    ordered_votes.sort_by(|a, b| {
+        let tier = |key: &str| {
+            if key.starts_with("san:") {
+                0
+            } else if key.starts_with("sink:") {
+                1
+            } else {
+                2
+            }
+        };
+        tier(&a.0).cmp(&tier(&b.0)).then_with(|| a.0.cmp(&b.0))
+    });
+    // Candidates already published in this pass (gate context for
+    // regression baselines; see the non-voter regression check below).
+    let mut published_cands: Vec<Candidate> = Vec::new();
 
     let mut candidate_reports: Vec<CandidateReport> = Vec::new();
 
@@ -328,12 +405,41 @@ fn extract_facts_with(
                     let (pos_alerts, neg_alerts) = p.alert_flags(f_config, &trial);
                     first_failing_voter = Some((p.id.clone(), pos_alerts, neg_alerts));
                 }
-            } else if baseline.get(&p.id).map(|b| b.separates).unwrap_or(false) && !sep {
+            }
+            if !relevant {
+                // The fact cannot change this family at all: its baseline
+                // verdict holds by construction.
+                continue;
+            }
+            // Effective baseline: the family's tables plus every fact
+            // already published in this pass. The final bundle scans that
+            // accumulated context (facts interact: a sibling family's
+            // sanitizer silences a noisy negative before a co-occurring
+            // policy is even considered), and the gate tier order puts
+            // sanitizers first so the context is already learned.
+            let mut base_trial = f_builtin.clone();
+            for pc in &published_cands {
+                apply_candidate(&mut base_trial, pc);
+            }
+            let (base_pos, base_neg) = p.alert_flags(f_config, &base_trial);
+            let mut trial = base_trial.clone();
+            apply_candidate(&mut trial, &cand);
+            let (pos_alerts, neg_alerts) = p.alert_flags(f_config, &trial);
+            // Negative-noise regression: applies to every relevant family,
+            // voters included — no family may confirm a fact whose cost is
+            // its own sibling twin turning noisy. Failed separation stays a
+            // non-veto (the existential vote above).
+            if !base_neg && neg_alerts {
+                reject = Some(format!(
+                    "cross-family regression: '{}' negative was clean at baseline but alerts \
+                     under this fact (positive_alerts={pos_alerts}, negative_alerts={neg_alerts})",
+                    p.id
+                ));
+                break;
+            }
+            if !voted && base_pos && !(pos_alerts && !neg_alerts) {
                 // Cross-family regression: the fact broke a previously
                 // separating family. Reject the fact (shape-thinking creep).
-                let mut trial = f_builtin.clone();
-                apply_candidate(&mut trial, &cand);
-                let (pos_alerts, neg_alerts) = p.alert_flags(f_config, &trial);
                 reject = Some(format!(
                     "cross-family regression: '{}' separated at baseline but not under this \
                      fact (positive_alerts={pos_alerts}, negative_alerts={neg_alerts})",
@@ -358,6 +464,10 @@ fn extract_facts_with(
                 Candidate::Sink { package, .. } => package.as_deref(),
                 Candidate::Sanitizer { package, .. } => package.as_deref(),
                 Candidate::Policy { package, .. } => package.as_deref(),
+                // Check candidates carrying a family-declared package are
+                // published as scoped policies: the blast-radius quarantine
+                // must apply to them too.
+                Candidate::Check { package, .. } => package.as_deref(),
                 _ => None,
             };
             if let Some(pkg) = cand_pkg {
@@ -375,10 +485,19 @@ fn extract_facts_with(
                                         if parser.set_language(&spec.tree_sitter_language()).is_ok()
                                         {
                                             if let Some(tree) = parser.parse(src, None) {
+                                                // Project-scope: candidate packages are
+                                                // already normalized to the engine's
+                                                // token model (`node:crypto` ->
+                                                // `crypto`), so compare the import's
+                                                // normalized token, not the raw one.
                                                 return spec
                                                     .extract_imports(tree.root_node(), src)
                                                     .iter()
-                                                    .any(|i| i.package == pkg);
+                                                    .any(|i| {
+                                                        crate::extract::propose::normalize_pkg(
+                                                            &i.package,
+                                                        ) == pkg
+                                                    });
                                             }
                                         }
                                     }
@@ -419,6 +538,7 @@ fn extract_facts_with(
         });
 
         apply_candidate(&mut learned, &cand);
+        published_cands.push(cand.clone());
         let lang = fams.first().and_then(|id| {
             families
                 .iter()

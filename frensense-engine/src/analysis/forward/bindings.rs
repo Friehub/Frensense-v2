@@ -121,7 +121,16 @@ impl<'a> ProgramSvfg<'a> {
                         .filter_map(|t| t.internal_key())
                         .filter_map(|k| self.func_index.get(&k).copied())
                         .collect();
+                    // A builtin method name (`m.get(k)`, `buf.write(s)`) on an
+                    // unresolved receiver is the standard library's, never a
+                    // program function that happens to share the bare name.
+                    // The table is language mechanism, so it lives in
+                    // frensense-lang beside the grammar specs - not here and
+                    // not in the pack (packgen owns sink vocabulary).
+                    let builtin_verb =
+                        receiver.is_some() && frensense_lang::is_container_verb(&callee_name);
                     if callees.is_empty()
+                        && !builtin_verb
                         && let Some(gi) = self.func_index.get(&callee_name).copied()
                     {
                         callees.push(gi);

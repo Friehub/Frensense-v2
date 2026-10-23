@@ -44,18 +44,60 @@ impl Reporter {
     /// Generates a SARIF report for CI/CD integration.
     #[must_use]
     pub fn to_sarif(advisories: &[Advisory], _root_path: &Path) -> serde_json::Value {
-        let mut rules_map = std::collections::BTreeMap::new();
+        // One SARIF rule per stable rule id (never per message): code
+        // scanning groups, suppresses and trends findings by it.
+        let mut rule_ids: Vec<String> = Vec::new();
+        let mut rules_map: std::collections::BTreeMap<String, serde_json::Value> =
+            std::collections::BTreeMap::new();
+        let mut worst: std::collections::BTreeMap<String, crate::Severity> =
+            std::collections::BTreeMap::new();
         for adv in advisories {
-            rules_map.entry(adv.title.clone()).or_insert_with(|| {
-                serde_json::json!({
-                    "id": adv.title,
-                    "shortDescription": { "text": adv.observation.clone() },
-                    "fullDescription": {
-                        "text": format!("{}\n\nImpact: {}\n\nImprovement: {}",
-                            adv.observation, adv.impact, adv.improvement)
+            let id = adv.rule_id();
+            let entry = worst.entry(id.clone()).or_insert(adv.severity);
+            if adv.severity.meets_threshold(*entry) {
+                *entry = adv.severity;
+            }
+            rules_map.entry(id.clone()).or_insert_with(|| {
+                let card = frensense_lang::rule_card::card_by_id(&id);
+                let title = card.map_or_else(|| adv.title.clone(), |c| c.title.to_string());
+                let why = card.map_or_else(|| adv.impact.clone(), |c| c.why.to_string());
+                let fix = card.map_or_else(|| adv.improvement.clone(), |c| c.fix.to_string());
+                let cwes: Vec<String> = card.map_or_else(
+                    || adv.cwe().iter().map(|c| (*c).to_string()).collect(),
+                    |c| c.cwe.iter().map(|w| (*w).to_string()).collect(),
+                );
+                let mut tags: Vec<String> = vec!["security".to_string()];
+                tags.extend(
+                    cwes.iter()
+                        .map(|c| format!("external/cwe/cwe-{}", c.trim_start_matches("CWE-"))),
+                );
+                let mut rule = serde_json::json!({
+                    "id": id,
+                    "name": title,
+                    "shortDescription": { "text": title },
+                    "fullDescription": { "text": why },
+                    "help": {
+                        "text": format!("{why}\n\nFix: {fix}"),
+                        "markdown": format!("{why}\n\n**Fix:** {fix}")
                     },
-                })
+                    "properties": { "tags": tags, "precision": "high" },
+                });
+                if let Some(first) = cwes.first() {
+                    rule["helpUri"] = serde_json::json!(frensense_lang::rule_card::cwe_url(first));
+                }
+                rule
             });
+        }
+        for (id, rule) in &mut rules_map {
+            let sev = worst.get(id).copied().unwrap_or(crate::Severity::Warning);
+            let (level, score) = match sev {
+                crate::Severity::Critical => ("error", "9.0"),
+                crate::Severity::Warning => ("warning", "6.0"),
+                crate::Severity::Info => ("note", "3.0"),
+            };
+            rule["defaultConfiguration"] = serde_json::json!({ "level": level });
+            rule["properties"]["security-severity"] = serde_json::json!(score);
+            rule_ids.push(id.clone());
         }
         let rules_list: Vec<_> = rules_map.into_values().collect();
 
@@ -68,28 +110,30 @@ impl Reporter {
                         "name": "Frensense",
                         "version": crate::FRENSENSE_VERSION,
                         "informationUri": "https://friehub.com/frensense",
+                        // Producer identity: which engine, fact vocabulary and
+                        // default pack produced these findings. Lives under
+                        // `properties` so it rides along without changing any
+                        // required SARIF field.
+                        "properties": {
+                            "frensense": crate::identity::producer()
+                        },
                         "rules": rules_list
                     }
                 },
                 "results": advisories.iter().map(|adv| {
                     serde_json::json!({
-                        "ruleId": adv.title,
+                        "ruleId": adv.rule_id(),
+                        "ruleIndex": rule_ids.iter().position(|r| *r == adv.rule_id()),
                         "level": match adv.severity {
                             crate::Severity::Critical => "error",
                             crate::Severity::Warning => "warning",
                             crate::Severity::Info => "note",
                         },
-                        "message": {
-                            "text": format!("{}\n\nImpact: {}\n\nImprovement: {}",
-                                adv.observation, adv.impact, adv.improvement)
-                        },
+                        "message": { "text": adv.title.clone() },
                         "locations": [{
                             "physicalLocation": {
                                 "artifactLocation": { "uri": adv.file_path.clone() },
-                                "region": {
-                                    "startLine": adv.line,
-                                    "startColumn": adv.column,
-                                }
+                                "region": sarif_region(adv),
                             }
                         }],
                         "partialFingerprints": {
@@ -128,6 +172,8 @@ impl Reporter {
                             "confidence": adv.confidence,
                             "requires_human": adv.requires_human,
                             "tags": adv.tags,
+                            "cwe": adv.cwe(),
+                            "tier": adv.tier.as_str(),
                         }
                     })
                 }).collect::<Vec<_>>()
@@ -213,26 +259,55 @@ fn escape_workflow_message(value: &str) -> String {
 ///
 /// Presentation of the engine's structured [`PathStep`] data: the engine
 /// records steps, this renders them for text, SARIF codeFlows, and LSP
-/// clients.
+/// clients. Without the step's source span the wording falls back to SSA
+/// variable numbers (`v11`); [`describe_step`] resolves the real expression
+/// instead.
 #[must_use]
 pub fn describe_path_step(step: &PathStep) -> String {
+    describe_step(step, None)
+}
+
+/// One taint-path step, named from the source text at its span when known.
+///
+/// The IR names values `v11`; the developer names them `resp.data`. With the
+/// step's `(file, byte-range)` the rendered flow shows the expression the
+/// step actually moves (`reads `resp.data``), which is the only form that
+/// can be matched against the code on screen.
+#[must_use]
+pub fn describe_step(step: &PathStep, span: Option<&(String, (usize, usize))>) -> String {
+    let excerpt = span.and_then(|(file, range)| source_excerpt(file, *range));
     match step {
         PathStep::Source { description } => {
             format!("source: `{description}`")
         }
-        PathStep::Phi { function, variable } => {
-            format!("`{function}`: merge of incoming values (v{variable})")
+        PathStep::Phi {
+            function,
+            variable: _,
+        } => {
+            let function = short_fn(function);
+            match excerpt {
+                Some(text) => format!("`{function}`: merge of incoming values (`{text}`)"),
+                None => format!("`{function}`: merge of incoming values"),
+            }
         }
         PathStep::FieldLoad {
             function,
             base,
             field,
-        } => format!("`{function}`: reads `{base}.{field}`"),
+        } => {
+            let function = short_fn(function);
+            match excerpt {
+                Some(text) => format!("`{function}`: reads `{text}`"),
+                None if is_ssa_temp(base) => format!("`{function}`: reads field `{field}`"),
+                None => format!("`{function}`: reads `{base}.{field}`"),
+            }
+        }
         PathStep::CallReturn {
             function,
             callee,
             external,
         } => {
+            let function = short_fn(function);
             if *external {
                 format!("`{function}`: value from unresolvable call `{callee}`")
             } else {
@@ -243,17 +318,86 @@ pub fn describe_path_step(step: &PathStep) -> String {
             function,
             callee,
             slot,
-        } => format!("`{function}`: passes value to `{callee}` (arg {slot})"),
+        } => {
+            // The SVFG marks a call's receiver operand (`x.f(..)`), not a
+            // positional argument, with the sentinel arg index.
+            let function = short_fn(function);
+            if *slot == frensense_engine::graph::svfg::RECEIVER_ARG_INDEX {
+                format!("`{function}`: passes receiver to `{callee}`")
+            } else {
+                format!("`{function}`: passes value to `{callee}` (arg {slot})")
+            }
+        }
         PathStep::FormalParam { function, param } => {
-            format!("`{function}`: enters as parameter `{param}`")
+            format!("`{}`: enters as parameter `{param}`", short_fn(function))
         }
         PathStep::ReturnToCaller { caller } => {
-            format!("returns into `{caller}`")
+            format!("returns into `{}`", short_fn(caller))
         }
         PathStep::Assignment { function, variable } => {
-            format!("`{function}`: flows through v{variable}")
+            let function = short_fn(function);
+            match excerpt {
+                Some(text) => format!("`{function}`: `{text}`"),
+                None => format!("`{function}`: flows through v{variable}"),
+            }
         }
     }
+}
+
+/// Last segment of a qualified function name: the engine keys functions by
+/// `file::function`, which repeats what the step's own location line already
+/// says.
+fn short_fn(name: &str) -> &str {
+    name.rsplit("::").next().unwrap_or(name)
+}
+
+/// An SSA temporary name (`v11`, `v0`) rather than a source-level identifier.
+fn is_ssa_temp(name: &str) -> bool {
+    name.strip_prefix('v')
+        .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Source text at `(start, end)`, whitespace-collapsed and length-capped so
+/// it fits one line of a flow trace. `None` when the file is unreadable or
+/// the range is empty/out of bounds.
+fn source_excerpt(file: &str, (start, end): (usize, usize)) -> Option<String> {
+    if end <= start {
+        return None;
+    }
+    let text = read_source(file)?;
+    let slice = text.get(start..end)?;
+    let collapsed = slice.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return None;
+    }
+    Some(if collapsed.chars().count() > MAX_EXCERPT_CHARS {
+        collapsed
+            .chars()
+            .take(MAX_EXCERPT_CHARS)
+            .collect::<String>()
+            + "\u{2026}"
+    } else {
+        collapsed
+    })
+}
+
+/// Longest excerpt shown in a flow step, in characters.
+const MAX_EXCERPT_CHARS: usize = 60;
+
+/// Memoized source text per file: one flow trace reads the same file once
+/// per step, and multi-finding scans read the same files repeatedly.
+fn read_source(file: &str) -> Option<std::rc::Rc<str>> {
+    thread_local! {
+        static CACHE: std::cell::RefCell<HashMap<String, Option<std::rc::Rc<str>>>> =
+            std::cell::RefCell::new(HashMap::new());
+    }
+    CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .entry(file.to_string())
+            .or_insert_with(|| std::fs::read_to_string(file).ok().map(std::rc::Rc::from))
+            .clone()
+    })
 }
 
 /// Render a taint path as an indented multi-line text block (CLI output).
@@ -261,15 +405,94 @@ pub fn describe_path_step(step: &PathStep) -> String {
 pub fn render_taint_path(path: &TaintPath) -> String {
     let mut out = String::new();
     for (i, step) in path.steps.iter().enumerate() {
-        let _ = writeln!(out, "  {:>2}. {}", i + 1, describe_path_step(step));
+        let span = path.spans.get(i).and_then(Option::as_ref);
+        let _ = writeln!(out, "  {:>2}. {}", i + 1, describe_step(step, span));
     }
     out
+}
+
+/// A source excerpt around a finding: the line before (when present) and
+/// the finding's own line, with a caret span under the flagged token.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeFrame {
+    /// `(1-based line number, text with tabs expanded)`.
+    pub lines: Vec<(usize, String)>,
+    /// 0-based column of the caret on the last line (tab-expanded).
+    pub caret_col: usize,
+    /// Number of caret characters (at least 1).
+    pub caret_len: usize,
+}
+
+const MAX_FRAME_WIDTH: usize = 160;
+
+/// Build the frame for `file:line:column` by reading the file. `None` when
+/// the file is unreadable or the line is out of range, so callers fall back
+/// to the location-only form.
+#[must_use]
+pub fn code_frame(file: &str, line: u32, column: u32) -> Option<CodeFrame> {
+    if line == 0 {
+        return None;
+    }
+    let text = std::fs::read_to_string(file).ok()?;
+    frame_from_source(&text, line as usize, column as usize)
+}
+
+fn expand_tabs(s: &str) -> String {
+    s.replace('\t', "    ")
+}
+
+fn frame_from_source(text: &str, line: usize, column: usize) -> Option<CodeFrame> {
+    let all: Vec<&str> = text.lines().collect();
+    let target = all.get(line.checked_sub(1)?)?;
+    let mut lines = Vec::new();
+    if line >= 2
+        && let Some(prev) = all.get(line - 2)
+        && !prev.trim().is_empty()
+    {
+        lines.push((line - 1, expand_tabs(prev)));
+    }
+    // Caret position: columns count characters; tabs expand to four.
+    let chars: Vec<char> = target.chars().collect();
+    let col0 = column.saturating_sub(1).min(chars.len());
+    let tab_extra = chars[..col0].iter().filter(|c| **c == '\t').count() * 3;
+    let caret_col = col0 + tab_extra;
+    let caret_len = chars[col0..]
+        .iter()
+        .take_while(|c| c.is_alphanumeric() || matches!(c, '_' | '.' | ':' | '$' | '?' | '!'))
+        .count()
+        .max(1);
+    let mut shown = expand_tabs(target);
+    if shown.chars().count() > MAX_FRAME_WIDTH {
+        shown = shown.chars().take(MAX_FRAME_WIDTH).collect::<String>() + "...";
+    }
+    lines.push((line, shown));
+    Some(CodeFrame {
+        lines,
+        caret_col,
+        caret_len: caret_len.min(MAX_FRAME_WIDTH.saturating_sub(caret_col).max(1)),
+    })
 }
 
 /// Byte offset → 1-based (line, column) within a file, reading the source
 /// from disk. Results are memoized per file for one SARIF render (advisory
 /// counts are small; this keeps multi-finding scans from re-reading the
 /// same source repeatedly).
+/// SARIF region for the finding's own location, with the source line as
+/// `snippet` when the file is readable.
+fn sarif_region(adv: &Advisory) -> serde_json::Value {
+    let mut region = serde_json::json!({
+        "startLine": adv.line,
+        "startColumn": adv.column,
+    });
+    if let Some(frame) = code_frame(&adv.file_path, adv.line, adv.column)
+        && let Some((_, text)) = frame.lines.last()
+    {
+        region["snippet"] = serde_json::json!({ "text": text });
+        region["endColumn"] = serde_json::json!(adv.column as usize + frame.caret_len);
+    }
+    region
+}
+
 fn line_col_for(file: &str, byte_offset: usize) -> Option<(usize, usize)> {
     thread_local! {
         static SOURCE_CACHE: std::cell::RefCell<HashMap<String, Option<Vec<u8>>>> =
@@ -303,7 +526,95 @@ fn line_col_for(file: &str, byte_offset: usize) -> Option<(usize, usize)> {
 mod taint_render_tests {
     use frensense_engine::analysis::taint::path::{PathStep, TaintPath};
 
-    use super::{describe_path_step, render_taint_path};
+    use super::{describe_path_step, describe_step, render_taint_path};
+
+    /// A temporary file plus the byte range of `needle` inside it.
+    fn fixture(name: &str, source: &str, needle: &str) -> (String, (usize, usize)) {
+        let dir = std::env::temp_dir().join(format!("frensense-step-{name}"));
+        std::fs::create_dir_all(&dir).expect("dir");
+        let file = dir.join("app.ts");
+        std::fs::write(&file, source).expect("write");
+        let start = source.find(needle).expect("needle");
+        (
+            file.to_string_lossy().into_owned(),
+            (start, start + needle.len()),
+        )
+    }
+
+    /// Steps name the expression the source uses, not `v11`: the IR number is
+    /// meaningless to the reader and cannot be matched against the code.
+    #[test]
+    fn steps_are_named_from_source_text_not_ssa_numbers() {
+        let (file, range) = fixture(
+            "names",
+            "const a = req.body.name\nres.send(a)\n",
+            "req.body.name",
+        );
+        let span = (file, range);
+        let step = PathStep::Assignment {
+            function: "/repo/src/app.ts::handler".into(),
+            variable: 11,
+        };
+        let text = describe_step(&step, Some(&span));
+        assert!(text.contains("`req.body.name`"), "{text}");
+        assert!(!text.contains("v11"), "{text}");
+        assert!(text.starts_with("`handler`"), "file prefix kept: {text}");
+    }
+
+    /// An SSA-named receiver without a readable span must not leak `v7`
+    /// either: the field name alone is what the reader can act on.
+    #[test]
+    fn field_load_without_a_span_drops_the_ssa_receiver() {
+        let step = PathStep::FieldLoad {
+            function: "handler".into(),
+            base: "v7".into(),
+            field: "token".into(),
+        };
+        let text = describe_step(&step, None);
+        assert!(text.contains("field `token`"), "{text}");
+        assert!(!text.contains('v'), "{text}");
+    }
+
+    #[test]
+    fn long_or_missing_spans_fall_back_instead_of_panicking() {
+        let step = PathStep::Assignment {
+            function: "handler".into(),
+            variable: 3,
+        };
+        assert!(
+            describe_step(&step, Some(&("/nope/missing.ts".into(), (0, 8))))
+                .contains("flows through v3")
+        );
+        let (file, _) = fixture("range", "x = 1\n", "x");
+        assert!(describe_step(&step, Some(&(file, (900, 950)))).contains("flows through v3"));
+    }
+
+    /// `render_taint_path` uses each step's own span, so the text report and
+    /// the JSON/SARIF flows name the same expressions.
+    #[test]
+    fn rendered_flow_uses_step_spans() {
+        let (file, range) = fixture(
+            "path",
+            "const p = req.body.path\nread(p)\n",
+            "req.body.path",
+        );
+        let p = TaintPath {
+            steps: vec![
+                PathStep::Source {
+                    description: "req.body.path".into(),
+                },
+                PathStep::FieldLoad {
+                    function: "handler".into(),
+                    base: "v4".into(),
+                    field: "path".into(),
+                },
+            ],
+            spans: vec![Some((file.clone(), range)), Some((file, range))],
+        };
+        let text = render_taint_path(&p);
+        assert!(text.contains("reads `req.body.path`"), "{text}");
+        assert!(!text.contains("v4"), "{text}");
+    }
 
     #[test]
     fn render_text_is_numbered_source_first() {
@@ -373,9 +684,92 @@ mod taint_render_tests {
 }
 #[cfg(test)]
 mod sarif_line_mapping_tests {
-    use super::Reporter;
-    use super::line_col_for;
+    use super::{Reporter, code_frame, frame_from_source};
     use crate::Advisory;
+    use std::path::Path;
+
+    #[test]
+    fn code_frame_marks_the_flagged_call_and_expands_tabs() {
+        let src = "a = 1\n\tdb.query(q)\nz = 2\n";
+        let f = frame_from_source(src, 2, 2).expect("frame");
+        assert_eq!(f.lines.len(), 2);
+        assert_eq!(f.lines[1], (2, "    db.query(q)".to_string()));
+        assert_eq!(f.caret_col, 4, "tab expands to four columns");
+        assert_eq!(f.caret_len, "db.query".len());
+    }
+
+    #[test]
+    fn code_frame_handles_edges_without_panicking() {
+        assert!(frame_from_source("x\n", 0, 1).is_none());
+        assert!(frame_from_source("x\n", 9, 1).is_none());
+        let f = frame_from_source("x\n", 1, 99).expect("frame");
+        assert_eq!(f.lines, vec![(1, "x".to_string())]);
+        assert_eq!(f.caret_len, 1);
+        assert!(code_frame("/definitely/not/here.rs", 3, 1).is_none());
+    }
+
+    fn rule_advisory(msg: &str) -> Advisory {
+        let mut a = Advisory::bare(
+            format!("SQL injection: `{msg}` reaches `query`"),
+            crate::Severity::Critical,
+            crate::FileId(0),
+            Path::new("app.py"),
+            "obs",
+        );
+        a.rule_id = "taint.sql-injection".to_string();
+        a.tags = vec!["taint".into(), "CWE-89".into()];
+        a.line = 3;
+        a.column = 5;
+        a
+    }
+
+    #[test]
+    fn sarif_groups_findings_by_stable_rule_id_not_message() {
+        let advisories = vec![rule_advisory("a"), rule_advisory("b")];
+        let sarif = Reporter::to_sarif(&advisories, Path::new("."));
+        let run = &sarif["runs"][0];
+        let rules = run["tool"]["driver"]["rules"].as_array().expect("rules");
+        assert_eq!(rules.len(), 1, "two findings, one rule");
+        assert_eq!(rules[0]["id"], "taint.sql-injection");
+        let tags = rules[0]["properties"]["tags"].as_array().expect("tags");
+        assert!(tags.iter().any(|t| t == "external/cwe/cwe-89"), "{tags:?}");
+        let results = run["results"].as_array().expect("results");
+        assert!(results.iter().all(|r| r["ruleId"] == "taint.sql-injection"));
+        assert!(results.iter().all(|r| r["ruleIndex"] == 0));
+    }
+
+    #[test]
+    fn sarif_carries_producer_identity_block() {
+        let sarif = Reporter::to_sarif(&[rule_advisory("a")], Path::new("."));
+        let driver = &sarif["runs"][0]["tool"]["driver"];
+        let f = &driver["properties"]["frensense"];
+        assert_eq!(f["name"], "frensense");
+        assert_eq!(f["version"], crate::FRENSENSE_VERSION);
+        assert_eq!(f["report_schema"], crate::REPORT_SCHEMA_VERSION);
+        // The fingerprint is a 0x-prefixed 16-hex token, matching identity().
+        let fp = f["fact_vocabulary_fingerprint"]
+            .as_str()
+            .expect("fingerprint");
+        assert!(fp.starts_with("0x") && fp.len() == 18, "{fp}");
+        let digest = f["default_pack_blake3"].as_str().expect("digest");
+        assert_eq!(digest.len(), 64, "{digest}");
+    }
+
+    #[test]
+    fn missing_rule_id_is_derived_from_title_never_raw_text() {
+        let mut a = rule_advisory("x");
+        a.title = "Unsanitized data from `req.body` reaches sink `send`".to_string();
+        a.rule_id.clear();
+        let id = a.rule_id();
+        assert!(id.starts_with("policy."), "{id}");
+        assert!(
+            id.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '-'),
+            "{id}"
+        );
+    }
+
+    use super::line_col_for;
 
     #[test]
     fn maps_byte_offset_to_line_and_column() {

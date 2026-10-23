@@ -43,8 +43,32 @@ pub struct FamilyMetadata {
     /// cannot be an allocation size on the family's target platform
     /// (default u64::MAX == SIZE_MAX on LP64/LLP64).
     pub wrap_max: Option<u128>,
+    /// Declared unbounded-operand modality (`unbounded-product: true`): the
+    /// taught integer-overflow rule also fires when BOTH operands of the
+    /// size multiplication are unboundedly dynamic (`malloc(rows * cols)`
+    /// with operator-provided values). Default off: rules keep the
+    /// zero-FP provable-range contract unless the author opts in, and the
+    /// replay gate still validates that the corpus separates (the
+    /// negative clamps the operands with literal-bound guards).
+    pub unbounded_product: bool,
     /// Declared framework package provenance (`package: name`).
     pub package: Option<String>,
+    /// Declared enforcement guards (`guard: verify_admin_permission` or a
+    /// comma-separated synonym set `guard: verify_admin_permission, user.can`).
+    /// Declaring them replaces automatic guard synthesis: the learned fact
+    /// accepts ANY of them executing before the trigger (RequireCall
+    /// `any_of`), so one family can teach equivalent enforcement helpers,
+    /// member-qualified predicates, and alternate spellings. Names are
+    /// matched by last callee segment (member paths welcome).
+    pub guards: Vec<String>,
+    /// Explicit policy requirements authored in the metadata block
+    /// (`require-arg-key: <slot|any> <key[,key...]>`): the trigger call's
+    /// argument at `slot` must trace to an object construction carrying
+    /// one of the keys (`updateMany({ where: ... })`). `usize::MAX` slot
+    /// means any argument position. Declaration replaces automatic guard
+    /// synthesis: authors state the discriminator instead of hoping the
+    /// twin diff collides with it (the Date-guard coincidence class).
+    pub require_arg_keys: Vec<(usize, String)>,
 }
 
 impl FamilyMetadata {
@@ -113,12 +137,55 @@ impl FamilyMetadata {
                         meta.wrap_max = Some(v);
                     }
                 }
+                "unbounded-product" => {
+                    meta.unbounded_product = value.eq_ignore_ascii_case("true");
+                }
                 "package" => meta.package = Some(value.to_string()),
+                "guard" => {
+                    for g in split_csv_keys(value) {
+                        if !meta.guards.contains(&g) {
+                            meta.guards.push(g);
+                        }
+                    }
+                }
+                "require-arg-key" => {
+                    let mut parts = value.split_whitespace();
+                    match parts.next() {
+                        Some("any") => {
+                            for key in parts {
+                                meta.require_arg_keys.push((usize::MAX, key.to_string()));
+                            }
+                        }
+                        Some(slot) => match slot.parse::<usize>() {
+                            Ok(slot) => {
+                                let keys: Vec<String> = match parts.next() {
+                                    Some(rest) => split_csv_keys(rest),
+                                    None => Vec::new(),
+                                };
+                                for key in keys {
+                                    meta.require_arg_keys.push((slot, key));
+                                }
+                            }
+                            Err(_) => {}
+                        },
+                        None => {}
+                    }
+                }
                 _ => {}
             }
         }
         meta
     }
+}
+
+/// Split a `require-arg-key` value's key list: comma and/or whitespace
+/// separated (`where`, `where,filter`, `where filter`).
+fn split_csv_keys(rest: &str) -> Vec<String> {
+    rest.split([',', ' '])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect()
 }
 
 /// One corpus family: id + variant files.

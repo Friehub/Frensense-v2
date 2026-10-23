@@ -396,6 +396,24 @@ impl<'a> LoweringContext<'a> {
         Some(Operand::Var(dest))
     }
 
+    /// Pop a branch-arm scope and hoist its *new* bindings into the
+    /// enclosing scope. Python/JS/C give assignments function scope, not
+    /// block scope: a name first bound inside an `if`/`else` arm must
+    /// survive to the merge so the SSA pass can place a phi for it.
+    /// Names already present in an enclosing scope are left alone (the
+    /// arm reused the same VarId, and the phi is driven by the def sites).
+    fn hoist_arm_scope(env: &mut Vec<FxHashMap<String, VarId>>) {
+        let arm = match env.pop() {
+            Some(m) => m,
+            None => return,
+        };
+        if let Some(parent) = env.last_mut() {
+            for (name, var) in arm {
+                parent.entry(name).or_insert(var);
+            }
+        }
+    }
+
     pub fn visit_branch(&mut self, node: Node) -> Option<Operand> {
         let mut cursor = node.walk();
         let children: Vec<Node> = node
@@ -403,21 +421,46 @@ impl<'a> LoweringContext<'a> {
             .filter(|c| c.is_named())
             .collect();
 
-        let cond_node = children
-            .iter()
-            .find(|c| {
-                let k = c.kind();
-                !k.contains("statement") && k != "block" && k != "else_clause"
-            })
-            .copied();
-        let cons_node = children
-            .iter()
-            .find(|c| {
-                let k = c.kind();
-                k.contains("statement") || k.contains("block")
-            })
-            .copied();
-        let alt_node = children.iter().find(|c| c.kind().contains("else")).copied();
+        // Grammar fields first (every language we ship names these), so an
+        // `if` initializer is never mistaken for the condition and a
+        // grammar without an explicit `else_clause` node still finds its
+        // alternative. Go is the concrete case: `if v := get(); v != "" {...}
+        // else {...}` has an `initializer` field (`v := get()`) that the old
+        // first-child heuristic lowered as the condition - leaving the real
+        // `v != ""` comparison and the whole `else` arm unlowered, so taint
+        // assigned in the `else` arm (and the join) vanished.
+        let init_node = node.child_by_field_name("initializer");
+        let cond_node = node.child_by_field_name("condition").or_else(|| {
+            children
+                .iter()
+                .find(|c| {
+                    let k = c.kind();
+                    !k.contains("statement")
+                        && !k.contains("declaration")
+                        && !k.contains("assignment")
+                        && k != "block"
+                        && k != "else_clause"
+                })
+                .copied()
+        });
+        let cons_node = node.child_by_field_name("consequence").or_else(|| {
+            children
+                .iter()
+                .find(|c| {
+                    let k = c.kind();
+                    k.contains("statement") || k.contains("block")
+                })
+                .copied()
+        });
+        let alt_node = node
+            .child_by_field_name("alternative")
+            .or_else(|| children.iter().find(|c| c.kind().contains("else")).copied());
+
+        // An initializer runs on the fall-through path before the test; its
+        // bindings must be visible to the condition and both arms.
+        if let Some(init) = init_node {
+            self.visit_node(init);
+        }
 
         let cond_op = cond_node
             .and_then(|c| self.visit_node(c))
@@ -471,7 +514,7 @@ impl<'a> LoweringContext<'a> {
                 .set_terminator(self.current_block, Terminator::Jump(merge_block));
             self.ir.add_edge(self.current_block, merge_block);
         }
-        self.env.pop();
+        Self::hoist_arm_scope(&mut self.env);
 
         // False Branch
         if let Some(alt) = alt_node {
@@ -488,7 +531,7 @@ impl<'a> LoweringContext<'a> {
                     .set_terminator(self.current_block, Terminator::Jump(merge_block));
                 self.ir.add_edge(self.current_block, merge_block);
             }
-            self.env.pop();
+            Self::hoist_arm_scope(&mut self.env);
         }
 
         if is_switch {

@@ -36,6 +36,12 @@ pub struct SinkSignature {
     pub role: crate::analysis::taint::role::SinkRole,
     /// Semantic label slug for identity reporting (e.g. "prototype", "ssrf", "regex").
     pub label: Option<String>,
+    /// When `true`, this sink is a *global* builtin: it matches the bare /
+    /// unqualified call form, and a receiver-qualified call (`engine.eval(x)`)
+    /// only matches once the receiver's origin resolves to a known package
+    /// (schema "global-only" fact: JS `eval` vs an unrelated `engine.eval`).
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub global_only: bool,
 }
 
 impl SinkSignature {
@@ -49,6 +55,7 @@ impl SinkSignature {
             idor_keys: Vec::new(),
             role: crate::analysis::taint::role::SinkRole::Other,
             label: None,
+            global_only: false,
         }
     }
 
@@ -62,6 +69,7 @@ impl SinkSignature {
             idor_keys: Vec::new(),
             role: crate::analysis::taint::role::SinkRole::Other,
             label: None,
+            global_only: false,
         }
     }
 
@@ -73,6 +81,21 @@ impl SinkSignature {
     /// Is this slot an explicitly-safe binding channel?
     pub fn is_binding(&self, slot: usize) -> bool {
         self.binding_args_safe && !self.is_dangerous(slot)
+    }
+
+    /// Does this signature carry any API knowledge at all? A blanket
+    /// signature is what [`SinkSignature::all_args`] produces: every slot
+    /// dangerous, no binding channel, no identity-payload keys, no
+    /// global-only marking. It is the "this name is a sink, nothing else is
+    /// known" placeholder (`FactTable::from_config` seeds one per configured
+    /// sink), so it must never outrank a fact that knows the call's slots,
+    /// exactly like the merge rule that keeps an all-args entry from
+    /// widening a slot-restricted one.
+    pub fn is_blanket(&self) -> bool {
+        self.dangerous_args.is_empty()
+            && !self.binding_args_safe
+            && self.idor_keys.is_empty()
+            && !self.global_only
     }
 }
 
@@ -185,6 +208,32 @@ pub enum PolicyRequirement {
     /// The call's argument at `slot` MUST match one of `values`
     /// (case-insensitive comparison over string, boolean, or integer literals).
     RequiredArgLiteral { slot: usize, values: Vec<String> },
+    /// The call's argument at `slot` must trace to an object construction
+    /// carrying at least one of `keys` as an object-literal pair key
+    /// (`updateMany({ where: ... })`: the where clause scopes which rows
+    /// the bulk write touches). `slot` indexes the call's argument list as
+    /// the lowering records it (receiver excluded); `usize::MAX` matches
+    /// ANY argument position. Traceability: fully-keyed object literals
+    /// lower to `Allocate(kind: Object)` plus one `StoreField` per key,
+    /// and the lowering records the pair keys on the composite var, so
+    /// key presence is checkable in the IR without value analysis.
+    RequireArgKey { slot: usize, keys: Vec<String> },
+    /// The **named** argument `name` must be present and, when its value is
+    /// a provable literal, carry one of `values` (case-insensitive).
+    ///
+    /// Distinct from [`Self::RequiredArgLiteral`]: a keyword argument's
+    /// position moves when the caller omits earlier optional parameters
+    /// (`set_cookie("k", "v", path="/", secure=False)` puts `secure` at
+    /// slot 3, not 2), so a slot rule cannot express it correctly. Names
+    /// arrive from the lowering's `arg_names` (Python `keyword_argument`).
+    ///
+    /// Absent name = violation (the caller did not set the flag at all).
+    /// Present with an unresolvable value (a variable, a call result) is
+    /// **not** a violation: the check proves literal violations only.
+    ///
+    /// Appended last: bincode encodes the variant index first, so existing
+    /// wire bytes keep decoding with their original indices.
+    RequireNamedArgLiteral { name: String, values: Vec<String> },
 }
 
 impl PolicyRequirement {
@@ -199,7 +248,9 @@ impl PolicyRequirement {
             }
             PolicyRequirement::RangeCheck { .. }
             | PolicyRequirement::BannedArgLiteral { .. }
-            | PolicyRequirement::RequiredArgLiteral { .. } => Vec::new(),
+            | PolicyRequirement::RequiredArgLiteral { .. }
+            | PolicyRequirement::RequireArgKey { .. }
+            | PolicyRequirement::RequireNamedArgLiteral { .. } => Vec::new(),
         }
     }
 }
@@ -355,6 +406,80 @@ pub enum HintKind {
     /// [`FactTable::credential_context_hints`]: an enclosing name marks
     /// credential context.
     CredentialContext,
+    /// [`FactTable::kdf_receiver_hints`]: a receiver whose name marks a
+    /// password-hashing library (a credential hashed through it is the
+    /// intended use, not a policy violation). Appended last: bundles
+    /// encode the variant position.
+    KdfReceiver,
+    /// [`FactTable::prepared_statement_prefixes`]: a call whose last segment
+    /// starts with one of these prefixes creates a bound-parameter statement
+    /// handle (`Prepare`, `prepareStatement`, `prepare_cached`), so the
+    /// handle's later arguments are bindings rather than SQL. Appended last:
+    /// bundles encode the variant position.
+    PreparedStatementPrefix,
+    /// [`FactTable::weak_hash_disclaimer_tokens`]: an argument token that
+    /// disclaims security use of a weak digest - a literal `false` flag
+    /// marking the digest as a checksum or cache key. Appended last: bundles
+    /// encode the variant position.
+    WeakHashDisclaimer,
+}
+
+impl HintKind {
+    /// Every variant, in wire order. `.frc` bundles encode the variant
+    /// *position*, so this list is the serialization contract: appending a
+    /// variant changes
+    /// [`fact_vocabulary_fingerprint`](super::fact_vocabulary_fingerprint)
+    /// and therefore invalidates every bundle built before the change
+    /// (rebuild the bundle, or keep the engine that built it).
+    pub const ALL: [HintKind; 10] = [
+        HintKind::UrlParam,
+        HintKind::UrlArg,
+        HintKind::UrlLiteral,
+        HintKind::SecurityContext,
+        HintKind::AuthGuard,
+        HintKind::JwtAlgorithm,
+        HintKind::CredentialContext,
+        HintKind::KdfReceiver,
+        HintKind::PreparedStatementPrefix,
+        HintKind::WeakHashDisclaimer,
+    ];
+
+    /// Wire discriminant of this variant. Exhaustive on purpose: adding a
+    /// variant is a compile error here, which is the reminder to append it
+    /// to [`Self::ALL`] (the ratchet test fails until it is).
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            HintKind::UrlParam => 0,
+            HintKind::UrlArg => 1,
+            HintKind::UrlLiteral => 2,
+            HintKind::SecurityContext => 3,
+            HintKind::AuthGuard => 4,
+            HintKind::JwtAlgorithm => 5,
+            HintKind::CredentialContext => 6,
+            HintKind::KdfReceiver => 7,
+            HintKind::PreparedStatementPrefix => 8,
+            HintKind::WeakHashDisclaimer => 9,
+        }
+    }
+
+    /// Stable name used in the vocabulary fingerprint and in diagnostics.
+    /// Renaming a variant is a wire change too: the fingerprint catches it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            HintKind::UrlParam => "url_param",
+            HintKind::UrlArg => "url_arg",
+            HintKind::UrlLiteral => "url_literal",
+            HintKind::SecurityContext => "security_context",
+            HintKind::AuthGuard => "auth_guard",
+            HintKind::JwtAlgorithm => "jwt_algorithm",
+            HintKind::CredentialContext => "credential_context",
+            HintKind::KdfReceiver => "kdf_receiver",
+            HintKind::PreparedStatementPrefix => "prepared_statement_prefix",
+            HintKind::WeakHashDisclaimer => "weak_hash_disclaimer",
+        }
+    }
 }
 
 /// Syntactic grammar features that can be dynamically learned or configured via bundle facts.
@@ -418,6 +543,12 @@ pub enum TeachableNodeRole {
     Literal,
     Parameters,
     Arguments,
+    /// A named call argument: the name travels with the value so slot
+    /// policies can key on the argument's identity, not its position.
+    KeywordArgument {
+        name_field: String,
+        value_field: String,
+    },
     ClassDef,
     BinaryOp,
     UnaryOp,
@@ -498,6 +629,13 @@ impl TeachableNodeRole {
             TeachableNodeRole::Match => frensense_lang::NodeRole::Match,
             TeachableNodeRole::Unsafe => frensense_lang::NodeRole::Unsafe,
             TeachableNodeRole::AsyncBlock => frensense_lang::NodeRole::AsyncBlock,
+            TeachableNodeRole::KeywordArgument {
+                name_field,
+                value_field,
+            } => frensense_lang::NodeRole::KeywordArgument {
+                name_field: name_field.clone().into(),
+                value_field: value_field.clone().into(),
+            },
             TeachableNodeRole::Other => frensense_lang::NodeRole::Other,
         }
     }
@@ -544,6 +682,13 @@ impl From<&frensense_lang::NodeRole> for TeachableNodeRole {
             } => TeachableNodeRole::MemberAccess {
                 object_field: object_field.to_string(),
                 property_field: property_field.to_string(),
+            },
+            frensense_lang::NodeRole::KeywordArgument {
+                name_field,
+                value_field,
+            } => TeachableNodeRole::KeywordArgument {
+                name_field: name_field.to_string(),
+                value_field: value_field.to_string(),
             },
             frensense_lang::NodeRole::Branch => TeachableNodeRole::Branch,
             frensense_lang::NodeRole::Conditional => TeachableNodeRole::Conditional,
@@ -626,6 +771,16 @@ pub struct IntegerOverflowRule {
     pub severity: String,
     /// Corpus-authored advisory message (rendered with prover detail).
     pub message: String,
+    /// The unbounded-product modality (opt-in, default off). Default rules
+    /// keep the zero-FP property: both operand intervals must be provable
+    /// and non-negative, and unknown operands skip the site. When the
+    /// corpus teaches `unbounded_product`, a site whose multiplication has
+    /// BOTH operands unboundedly dynamic (no provable interval on either
+    /// side, no constant) is the plain `malloc(rows * cols)` CVE-190 shape
+    /// and fires; mixed shapes like `strlen(s) * 2` stay silent, as do
+    /// bounded operands.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub unbounded_product: bool,
 }
 
 /// A string-literal insecure-configuration selector: a call whose

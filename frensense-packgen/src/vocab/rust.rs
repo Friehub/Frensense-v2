@@ -18,8 +18,10 @@ fn rust_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
         "clean" | "ammonia" | "escape_html" => Some(SanitizerKind::HtmlEscape),
         // URL
         "encode" | "percent_encode" | "utf8_percent_encode" => Some(SanitizerKind::UrlEncode),
-        // Path
-        "canonicalize" | "normalize" => Some(SanitizerKind::PathNormalize),
+        // Path: `canonicalize`/`normalize` resolve traversal away; the
+        // basename extractor `Path::file_name()` drops every directory
+        // component, so a traversal payload cannot survive it.
+        "canonicalize" | "normalize" | "file_name" => Some(SanitizerKind::PathNormalize),
         _ => None,
     }
 }
@@ -240,7 +242,9 @@ pub(super) static RUST_PROPAGATORS: &[PropagatorRule] = &[
 pub(super) static RUST_REQUEST_PARAM_NAMES: &[&str] =
     // Axum/Actix: parameter names matter less than types; type-based
     // detection via classify_param_taint is the primary mechanism.
-    &["req", "request"];
+    // Only type-based extractors are sources; a request handle is not one
+    // (`req.rocket()`, `req.limits()`). Its data accessors are patterns.
+    &[];
 
 pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     // SQL Injection
@@ -254,6 +258,9 @@ pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("executeRaw", crate::role_map::SinkLabel::SqlInjection),
     ("queryRaw", crate::role_map::SinkLabel::SqlInjection),
     ("prepare", crate::role_map::SinkLabel::SqlInjection),
+    // diesel's raw escape hatch: `sql_query(sql)` interpolates a SQL string
+    // (the DSL, `users::table.filter(..)`, binds parameters instead).
+    ("sql_query", crate::role_map::SinkLabel::SqlInjection),
     // Command Injection
     ("Command", crate::role_map::SinkLabel::CommandInjection),
     ("Command::new", crate::role_map::SinkLabel::CommandInjection),
@@ -271,10 +278,6 @@ pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ),
     ("arg", crate::role_map::SinkLabel::CommandInjection),
     ("args", crate::role_map::SinkLabel::CommandInjection),
-    ("status", crate::role_map::SinkLabel::CommandInjection),
-    ("output", crate::role_map::SinkLabel::CommandInjection),
-    ("spawn", crate::role_map::SinkLabel::CommandInjection),
-    ("spawnSync", crate::role_map::SinkLabel::CommandInjection),
     ("exec", crate::role_map::SinkLabel::CommandInjection),
     // Path Traversal
     ("read", crate::role_map::SinkLabel::PathTraversal),
@@ -282,40 +285,59 @@ pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("open", crate::role_map::SinkLabel::PathTraversal),
     ("create", crate::role_map::SinkLabel::PathTraversal),
     ("write", crate::role_map::SinkLabel::PathTraversal),
-    ("readFile", crate::role_map::SinkLabel::PathTraversal),
-    ("writeFile", crate::role_map::SinkLabel::PathTraversal),
-    ("readFileSync", crate::role_map::SinkLabel::PathTraversal),
-    ("join", crate::role_map::SinkLabel::PathTraversal),
-    ("unlink", crate::role_map::SinkLabel::PathTraversal),
-    ("stat", crate::role_map::SinkLabel::PathTraversal),
-    ("access", crate::role_map::SinkLabel::PathTraversal),
     // SSRF
     ("reqwest::get", crate::role_map::SinkLabel::Ssrf),
     ("Client::get", crate::role_map::SinkLabel::Ssrf),
     ("ureq::get", crate::role_map::SinkLabel::Ssrf),
-    ("http.get", crate::role_map::SinkLabel::Ssrf),
-    ("https.get", crate::role_map::SinkLabel::Ssrf),
-    ("got", crate::role_map::SinkLabel::Ssrf),
     ("get", crate::role_map::SinkLabel::Ssrf),
     ("post", crate::role_map::SinkLabel::Ssrf),
     ("send", crate::role_map::SinkLabel::Ssrf),
     ("request", crate::role_map::SinkLabel::Ssrf),
+    ("client.get", crate::role_map::SinkLabel::Ssrf),
+    ("client.post", crate::role_map::SinkLabel::Ssrf),
+    ("client.put", crate::role_map::SinkLabel::Ssrf),
+    ("client.patch", crate::role_map::SinkLabel::Ssrf),
+    ("client.head", crate::role_map::SinkLabel::Ssrf),
+    ("client.request", crate::role_map::SinkLabel::Ssrf),
+    ("http_client.get", crate::role_map::SinkLabel::Ssrf),
+    ("http_client.post", crate::role_map::SinkLabel::Ssrf),
+    ("http_client.put", crate::role_map::SinkLabel::Ssrf),
+    ("http_client.patch", crate::role_map::SinkLabel::Ssrf),
+    ("http_client.head", crate::role_map::SinkLabel::Ssrf),
+    ("http_client.request", crate::role_map::SinkLabel::Ssrf),
+    ("httpclient.get", crate::role_map::SinkLabel::Ssrf),
+    ("httpclient.post", crate::role_map::SinkLabel::Ssrf),
+    ("httpclient.put", crate::role_map::SinkLabel::Ssrf),
+    ("httpclient.patch", crate::role_map::SinkLabel::Ssrf),
+    ("httpclient.head", crate::role_map::SinkLabel::Ssrf),
+    ("httpclient.request", crate::role_map::SinkLabel::Ssrf),
+    ("reqwest.get", crate::role_map::SinkLabel::Ssrf),
+    ("reqwest.post", crate::role_map::SinkLabel::Ssrf),
+    ("reqwest.put", crate::role_map::SinkLabel::Ssrf),
+    ("reqwest.patch", crate::role_map::SinkLabel::Ssrf),
+    ("reqwest.head", crate::role_map::SinkLabel::Ssrf),
+    ("reqwest.request", crate::role_map::SinkLabel::Ssrf),
+    ("http.get", crate::role_map::SinkLabel::Ssrf),
+    ("http.post", crate::role_map::SinkLabel::Ssrf),
+    ("http.put", crate::role_map::SinkLabel::Ssrf),
+    ("http.patch", crate::role_map::SinkLabel::Ssrf),
+    ("http.head", crate::role_map::SinkLabel::Ssrf),
+    ("http.request", crate::role_map::SinkLabel::Ssrf),
+    ("agent.get", crate::role_map::SinkLabel::Ssrf),
+    ("agent.post", crate::role_map::SinkLabel::Ssrf),
+    ("agent.put", crate::role_map::SinkLabel::Ssrf),
+    ("agent.patch", crate::role_map::SinkLabel::Ssrf),
+    ("agent.head", crate::role_map::SinkLabel::Ssrf),
+    ("agent.request", crate::role_map::SinkLabel::Ssrf),
+    ("fs::read", crate::role_map::SinkLabel::PathTraversal),
+    ("fs::write", crate::role_map::SinkLabel::PathTraversal),
     // Open Redirect
     ("redirect", crate::role_map::SinkLabel::OpenRedirect),
-    // XSS
-    ("innerHTML", crate::role_map::SinkLabel::XssDom),
-    ("outerHTML", crate::role_map::SinkLabel::XssDom),
-    (
-        "dangerouslySetInnerHTML",
-        crate::role_map::SinkLabel::XssDom,
-    ),
+    // Reflected XSS: `axum::response::Html(body)` writes the body into the
+    // response verbatim (compare the escaped `Html` wrapper from a template).
+    ("Html", crate::role_map::SinkLabel::XssReflected),
     // SSTI
     ("render", crate::role_map::SinkLabel::TemplateSsti),
-    ("render_template", crate::role_map::SinkLabel::TemplateSsti),
-    (
-        "render_template_string",
-        crate::role_map::SinkLabel::TemplateSsti,
-    ),
     // Unsafe Memory
     ("transmute", crate::role_map::SinkLabel::UnsafeMemory),
     ("transmute_copy", crate::role_map::SinkLabel::UnsafeMemory),
@@ -341,33 +363,19 @@ pub(super) static RUST_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
         "serde_pickle::from_slice",
         crate::role_map::SinkLabel::UnsafeDeserialize,
     ),
-    // MongoDB / ORM
-    ("update", crate::role_map::SinkLabel::NoSqlInjection),
-    ("updateOne", crate::role_map::SinkLabel::NoSqlInjection),
-    ("updateMany", crate::role_map::SinkLabel::NoSqlInjection),
-    ("insert", crate::role_map::SinkLabel::NoSqlInjection),
-    ("insertOne", crate::role_map::SinkLabel::NoSqlInjection),
-    ("insertMany", crate::role_map::SinkLabel::NoSqlInjection),
-    ("delete", crate::role_map::SinkLabel::NoSqlInjection),
-    ("deleteOne", crate::role_map::SinkLabel::NoSqlInjection),
-    ("deleteMany", crate::role_map::SinkLabel::NoSqlInjection),
+    // MongoDB / ORM (snake_case mongodb-crate verbs; camelCase JS
+    // driver names like findOne/insertMany are not Rust APIs)
     ("find_one", crate::role_map::SinkLabel::NoSqlInjection),
     ("find_many", crate::role_map::SinkLabel::NoSqlInjection),
     (
         "Collection::find",
         crate::role_map::SinkLabel::NoSqlInjection,
     ),
-    ("findOne", crate::role_map::SinkLabel::NoSqlInjection),
-    ("findAll", crate::role_map::SinkLabel::NoSqlInjection),
-    // Storage Write
-    ("put", crate::role_map::SinkLabel::StorageWrite),
     // Log Leak
     ("log", crate::role_map::SinkLabel::LogLeak),
     ("error", crate::role_map::SinkLabel::LogLeak),
     ("info", crate::role_map::SinkLabel::LogLeak),
     ("debug", crate::role_map::SinkLabel::LogLeak),
-    // JWT
-    ("jwt.sign", crate::role_map::SinkLabel::Jwt),
 ];
 
 pub(super) static RUST_SOURCE_PATTERNS: &[&str] = &[
@@ -383,6 +391,13 @@ pub(super) static RUST_SOURCE_PATTERNS: &[&str] = &[
     "web::Path",
     "web::Query",
     "web::Form",
+    "req.headers",
+    "req.uri",
+    "req.query_string",
+    "req.match_info",
+    "req.cookie",
+    "request.headers",
+    "request.uri",
     // Environment
     "std::env::var",
     "env::var",
@@ -393,11 +408,18 @@ pub(super) static RUST_SANITIZER_NAMES: &[&str] = &[
     "urlencoding::encode",
     "shell_words::quote",
     "atoi",
+    // `"42".parse::<i64>()` yields a typed number - no injection payload
+    // survives it (the classifier maps it to Full).
+    "parse",
+    // `Path::new(p).file_name()` - basename only.
+    "file_name",
 ];
 
 pub(super) const RUST_VOCAB: LanguageVocab = LanguageVocab {
     language: "rust",
     ambiguous_verbs: crate::data::BOOTSTRAP_AMBIGUOUS_VERBS,
+    global_only_sinks: &[],
+    package_scoped_sinks: &[],
     sink_names: RUST_SINK_NAMES,
     sink_signatures: RUST_SINK_SIGNATURES,
     idor_sinks: &[],
@@ -408,6 +430,7 @@ pub(super) const RUST_VOCAB: LanguageVocab = LanguageVocab {
     propagators: RUST_PROPAGATORS,
     session_roots: &[],
     route_patterns: &[],
+    policies: &[],
 };
 
 pub(crate) fn vocab() -> &'static LanguageVocab {

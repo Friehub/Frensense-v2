@@ -243,6 +243,29 @@ fn transfer(state: &AbsState, instr: &Instruction) -> Option<(VarId, Value)> {
     }
 }
 
+/// Does `instr` define a variable whose *value* is a boolean?
+///
+/// Only these shapes may carry a `BoolConst` refinement. A branch proves its
+/// condition is truthy, and for a boolean-valued variable truthiness IS the
+/// value; for anything else (`raw = request.args.get("id"); if raw:`) the
+/// truthiness says nothing about the payload, and recording a boolean there
+/// was unsound: the lattice then claimed `q = raw` was a constant and the
+/// backward walk cut a real source-to-sink flow as attacker-independent.
+fn is_boolean_producing(instr: &Instruction) -> bool {
+    match instr {
+        Instruction::BinaryOp { op, .. } => matches!(
+            op.as_str(),
+            "==" | "!=" | "===" | "!==" | "<" | "<=" | ">" | ">=" | "&&" | "||"
+        ),
+        Instruction::UnaryOp { op, .. } => matches!(op.as_str(), "!" | "not"),
+        Instruction::Assign {
+            src: Operand::BoolLiteral(_),
+            ..
+        } => true,
+        _ => false,
+    }
+}
+
 /// Sharpen variable bounds along a branch condition.
 fn sharpen_branch(
     mut state: AbsState,
@@ -255,7 +278,12 @@ fn sharpen_branch(
     loop {
         match cur {
             Operand::Var(c) => {
-                state.insert(*c, Value::BoolConst(sense));
+                // Truthiness == value only for a boolean-valued variable.
+                let boolean_valued = matches!(state.get(c), Some(Value::BoolConst(_)))
+                    || defs.get(c).is_some_and(|d| is_boolean_producing(d));
+                if boolean_valued {
+                    state.insert(*c, Value::BoolConst(sense));
+                }
                 match defs.get(c) {
                     Some(Instruction::UnaryOp { op, src, .. })
                         if op == "!" || op == "neg" || op == "not" =>

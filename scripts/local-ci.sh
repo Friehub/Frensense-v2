@@ -15,32 +15,52 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# 0. Artifact-format ratchet: a moved fact-vocabulary fingerprint must come
+#    with a BUNDLE_VERSION bump and a changelog note. Runs first because it is
+#    source-only (no build) and catches the contract violation cheapest.
+echo -e "\n${BLUE}[0/8] Artifact-format ratchet (fingerprint must move with bundle version)...${NC}"
+python3 scripts/format-ratchet.py
+echo -e "${GREEN}OK Artifact-format contract holds${NC}"
+
 echo -e "${BLUE}==================================================${NC}"
 echo -e "${BLUE}      Frensense Local CI (mirror of ci.yml)        ${NC}"
 echo -e "${BLUE}==================================================${NC}"
 
 # 1. Purity debt ratchet (ci.yml `qa` job, runs FIRST)
-echo -e "\n${BLUE}[1/5] Engine purity ratchet (debt must not grow)...${NC}"
+echo -e "\n${BLUE}[1/8] Engine purity ratchet (debt must not grow)...${NC}"
 python3 scripts/purity-ratchet.py
 echo -e "${GREEN}OK Purity debt within baseline${NC}"
 
-# 2. Style (ci.yml `qa` job)
-echo -e "\n${BLUE}[2/5] Enforcing style (rustfmt)...${NC}"
+# 1b. Blog provenance gate (ci.yml `qa` job): version-pinned claims, fresh audits
+echo -e "\n${BLUE}[2/8] Blog provenance gate (--strict)...${NC}"
+python3 scripts/blog_provenance.py check --strict
+echo -e "${GREEN}OK Blog claims version-pinned and fresh${NC}"
+
+# 3. Style (ci.yml `qa` job)
+echo -e "\n${BLUE}[3/8] Enforcing style (rustfmt)...${NC}"
 cargo fmt --all -- --check
 echo -e "${GREEN}OK Formatting is correct${NC}"
 
-# 3. Default pack drift check (ci.yml `qa` job)
-echo -e "\n${BLUE}[3/5] Default pack drift check (packgen --check)...${NC}"
+# 4. Default pack drift check (ci.yml `qa` job)
+echo -e "\n${BLUE}[4/8] Default pack drift check (packgen --check)...${NC}"
 cargo run -p frensense-packgen -- --check
 echo -e "${GREEN}OK Default pack asset is up to date${NC}"
 
-# 4. Lint (ci.yml `qa` job)
-echo -e "\n${BLUE}[4/5] Linting (clippy, warnings are errors)...${NC}"
+# 4b. Corpus lint (ci.yml `qa` job): a family that fails lint would teach the
+#     engine the wrong thing, so it is refused before the replay gate sees it.
+#     Skips only when the checkout carries no corpus at all; a half-configured
+#     corpus (families without bug_classes.json) fails here.
+echo -e "\n${BLUE}[5/8] Corpus lint (families must be teachable)...${NC}"
+./scripts/corpus-lint.sh
+echo -e "${GREEN}OK Corpus lint gate passed${NC}"
+
+# 5. Lint (ci.yml `qa` job)
+echo -e "\n${BLUE}[6/8] Linting (clippy, warnings are errors)...${NC}"
 cargo clippy --all-features --all-targets -- -D warnings
 echo -e "${GREEN}OK Clippy passed${NC}"
 
-# 5. Full regression suite (ci.yml `test-rust` job)
-echo -e "\n${BLUE}[5/5] Running full regression suite...${NC}"
+# 6. Full regression suite (ci.yml `test-rust` job)
+echo -e "\n${BLUE}[7/8] Running full regression suite...${NC}"
 cargo test --workspace --all-features
 echo -e "${GREEN}OK All tests passed${NC}"
 

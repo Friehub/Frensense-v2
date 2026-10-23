@@ -5,7 +5,10 @@
 
 use tree_sitter::Node;
 
-use crate::spec::{Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin};
+use crate::spec::{
+    node_text, Export, Import, ItemKind, LanguageSpec, ModuleItem, NodeRole, PackageCategory,
+    TaintOrigin, Visibility,
+};
 
 // ── AST classification ────────────────────────────────────────────────────────
 
@@ -185,6 +188,118 @@ fn split_rust_use_list(inner: &str) -> Vec<&str> {
     parts
 }
 
+// ── Module surface ────────────────────────────────────────────────────────────
+
+/// Every top-level declaration in a Rust file, exported or not, with its
+/// module-level visibility.
+///
+/// Visibility rules:
+/// - `pub` / `pub(crate)` / `pub(super)` / `pub(in …)` reach other modules
+///   and build the export surface;
+/// - `pub` items that reach the crate root become `Export` entries;
+/// - items inside `mod` bodies belong to the file's declaration surface with
+///   their written visibility, even if the module they live in is not itself
+///   `pub`.
+fn rust_module_items(root: Node<'_>, source: &str) -> Vec<ModuleItem> {
+    let mut items = Vec::new();
+    collect_rust_module_items(root, source, &mut items);
+    items
+}
+
+/// A Rust item's written visibility modifier.
+///
+/// `Public` marks a crate-external declaration; `Internal` marks the
+/// `pub(crate)` / `pub(super)` / `pub(in …)` forms; `Private` marks the
+/// module-private cases; `Unknown` is only reached when the grammar doesn't
+/// say.
+fn rust_visibility(node: Node<'_>, source: &str) -> Visibility {
+    for i in 0..node.child_count() {
+        let Some(child) = node.child(i) else {
+            continue;
+        };
+        if child.kind() != "visibility_modifier" {
+            continue;
+        }
+        let text = node_text(child, source).replace(' ', "");
+        return if text == "pub" {
+            Visibility::Public
+        } else {
+            Visibility::Internal
+        };
+    }
+    Visibility::Private
+}
+
+fn rust_item_kind(kind: &str) -> Option<ItemKind> {
+    Some(match kind {
+        "function_item" => ItemKind::Function,
+        "struct_item" | "union_item" => ItemKind::Struct,
+        "enum_item" => ItemKind::Enum,
+        "trait_item" => ItemKind::Trait,
+        "mod_item" => ItemKind::Module,
+        "const_item" | "static_item" => ItemKind::Constant,
+        "type_item" | "associated_type" => ItemKind::Type,
+        "macro_definition" | "macro_rules!" => ItemKind::Other,
+        _ => return None,
+    })
+}
+
+fn rust_module_item(node: Node<'_>, source: &str) -> Option<ModuleItem> {
+    let kind = rust_item_kind(node.kind())?;
+    let name = node.child_by_field_name("name")?;
+    Some(ModuleItem {
+        name: node_text(name, source).to_owned(),
+        kind,
+        visibility: rust_visibility(node, source),
+    })
+}
+
+fn collect_rust_module_items(node: Node<'_>, source: &str, out: &mut Vec<ModuleItem>) {
+    for i in 0..node.named_child_count() {
+        let Some(child) = node.named_child(i) else {
+            continue;
+        };
+        let Some(item) = rust_module_item(child, source) else {
+            continue;
+        };
+        let nested = child.kind() == "mod_item";
+        out.push(item);
+        if nested {
+            if let Some(body) = child.child_by_field_name("body") {
+                collect_rust_module_items(body, source, out);
+            }
+        }
+    }
+}
+
+/// Root-level `pub` items the crate exposes by path: the module-level export
+/// surface of a `lib.rs` root.
+fn root_level_items(root: Node<'_>, source: &str) -> Vec<ModuleItem> {
+    let mut items = Vec::new();
+    for i in 0..root.named_child_count() {
+        let Some(child) = root.named_child(i) else {
+            continue;
+        };
+        if let Some(item) = rust_module_item(child, source) {
+            items.push(item);
+        }
+    }
+    items
+}
+
+fn rust_export(item: ModuleItem) -> Option<Export> {
+    if item.visibility != Visibility::Public {
+        return None;
+    }
+    Some(Export {
+        exported_name: item.name.clone(),
+        local_name: item.name,
+        from_module: None,
+        visibility: item.visibility,
+        kind: item.kind,
+    })
+}
+
 // ── Package catalogue ─────────────────────────────────────────────────────────
 
 fn rust_package_category(pkg: &str) -> Option<PackageCategory> {
@@ -283,7 +398,7 @@ const RUST_CALL_QUERY: &str = r#"
                 value: (method_call_expression method: (field_identifier) @call))))
 "#;
 
-// ── RustSpec ──────────────────────────────────────────────────────────────────
+// ── LanguageSpec ────────────────────────────────────────────────────────────────
 
 pub struct RustSpec;
 
@@ -343,6 +458,17 @@ impl LanguageSpec for RustSpec {
 
     fn extract_imports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Import> {
         extract_rust_imports(root, source)
+    }
+
+    fn extract_exports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Export> {
+        root_level_items(root, source)
+            .into_iter()
+            .filter_map(rust_export)
+            .collect()
+    }
+
+    fn extract_module_items<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<ModuleItem> {
+        rust_module_items(root, source)
     }
 
     fn symbol_query(&self) -> Option<&'static str> {

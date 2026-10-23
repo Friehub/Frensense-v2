@@ -91,7 +91,12 @@ pub enum FindingClass {
 }
 
 /// One explored sink argument with its verdict.
+///
+/// `#[non_exhaustive]`: this is an evolving output DTO. New diagnostic fields
+/// (e.g. `cut_reasons` in 0.8.0) are added as minor releases; consumers read
+/// fields, they do not construct literals.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SinkFinding {
     /// Function in which the sink call lives.
     pub function: String,
@@ -119,10 +124,146 @@ pub struct SinkFinding {
     /// Reconstructed source→sink chain (vulnerable findings only; empty
     /// otherwise, and empty when path capture is disabled).
     pub path: TaintPath,
+    /// Distinct reasons the backward walk was cut short on this argument
+    /// (non-empty only for non-vulnerable verdicts). Each entry names a
+    /// silent stop site: `"guard"`, `"value-const"`, `"sanitizer"`,
+    /// `"unresolvable"`. Surfaces *where* a flow died under `--explain`;
+    /// empty for vulnerable findings and for walks that simply exhausted
+    /// their predecessors without hitting a source.
+    pub cut_reasons: Vec<&'static str>,
+}
+
+impl SinkFinding {
+    /// Start a [`SinkFindingBuilder`].
+    ///
+    /// `SinkFinding` is `#[non_exhaustive]`, so downstream crates cannot build
+    /// it with a struct literal. This builder is the sanctioned constructor:
+    /// each field starts at a neutral value and is set with a chained method.
+    /// Adding a field later is a minor release (it gains a builder method).
+    pub fn builder() -> SinkFindingBuilder {
+        SinkFindingBuilder {
+            function: String::new(),
+            sink: String::new(),
+            arg_slot: 0,
+            alert: None,
+            verdict: BackwardVerdict::Clean,
+            finding_class: FindingClass::default(),
+            role: crate::analysis::taint::role::SinkRole::Execution,
+            label: None,
+            source_desc: None,
+            sink_span: None,
+            path: TaintPath::default(),
+            cut_reasons: Vec::new(),
+        }
+    }
+}
+
+/// Builder for [`SinkFinding`] (which is `#[non_exhaustive]`).
+///
+/// All fields start at neutral defaults; set only what you care about, then
+/// call [`SinkFindingBuilder::build`].
+#[derive(Debug, Clone)]
+#[must_use]
+pub struct SinkFindingBuilder {
+    function: String,
+    sink: String,
+    arg_slot: usize,
+    alert: Option<SinkAlert>,
+    verdict: BackwardVerdict,
+    finding_class: FindingClass,
+    role: crate::analysis::taint::role::SinkRole,
+    label: Option<String>,
+    source_desc: Option<String>,
+    sink_span: Option<(usize, usize)>,
+    path: TaintPath,
+    cut_reasons: Vec<&'static str>,
+}
+
+impl SinkFindingBuilder {
+    /// Set the enclosing function name.
+    pub fn function(mut self, v: impl Into<String>) -> Self {
+        self.function = v.into();
+        self
+    }
+    /// Set the sink call name.
+    pub fn sink(mut self, v: impl Into<String>) -> Self {
+        self.sink = v.into();
+        self
+    }
+    /// Set the tainted argument slot (receiver = 0).
+    pub fn arg_slot(mut self, v: usize) -> Self {
+        self.arg_slot = v;
+        self
+    }
+    /// Set the structured sink alert.
+    pub fn alert(mut self, v: Option<SinkAlert>) -> Self {
+        self.alert = v;
+        self
+    }
+    /// Set the backward-walk verdict.
+    pub fn verdict(mut self, v: BackwardVerdict) -> Self {
+        self.verdict = v;
+        self
+    }
+    /// Set the shape classification.
+    pub fn finding_class(mut self, v: FindingClass) -> Self {
+        self.finding_class = v;
+        self
+    }
+    /// Set what the sink does with its input.
+    pub fn role(mut self, v: crate::analysis::taint::role::SinkRole) -> Self {
+        self.role = v;
+        self
+    }
+    /// Set the identity-reporting label slug.
+    pub fn label(mut self, v: Option<String>) -> Self {
+        self.label = v;
+        self
+    }
+    /// Set the human description of the taint origin.
+    pub fn source_desc(mut self, v: Option<String>) -> Self {
+        self.source_desc = v;
+        self
+    }
+    /// Set the byte range of the sink call.
+    pub fn sink_span(mut self, v: Option<(usize, usize)>) -> Self {
+        self.sink_span = v;
+        self
+    }
+    /// Set the reconstructed source-to-sink chain.
+    pub fn path(mut self, v: TaintPath) -> Self {
+        self.path = v;
+        self
+    }
+    /// Set the distinct reasons the backward walk was cut short.
+    pub fn cut_reasons(mut self, v: Vec<&'static str>) -> Self {
+        self.cut_reasons = v;
+        self
+    }
+    /// Finish, returning the [`SinkFinding`].
+    pub fn build(self) -> SinkFinding {
+        SinkFinding {
+            function: self.function,
+            sink: self.sink,
+            arg_slot: self.arg_slot,
+            alert: self.alert,
+            verdict: self.verdict,
+            finding_class: self.finding_class,
+            role: self.role,
+            label: self.label,
+            source_desc: self.source_desc,
+            sink_span: self.sink_span,
+            path: self.path,
+            cut_reasons: self.cut_reasons,
+        }
+    }
 }
 
 /// Traversal statistics, proof of the demand-driven cost model.
+///
+/// `#[non_exhaustive]`: evolving metrics DTO; new counters are minor releases.
 #[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct BackwardStats {
     /// `(function, node)` pairs visited during backward exploration.
     pub nodes_visited: usize,
@@ -155,6 +296,15 @@ struct CtxLink {
 /// less precise).
 const MAX_CTX_DEPTH: usize = 8;
 const MAX_CTX_CHAINS: usize = 4096;
+
+/// Type alias for the route-registration predicate used in the engine's
+/// per-call-site framing (schema §5.1 of the framework-scope doc): the
+/// exact signature of the harness's `is_route_registration`.
+pub type RouteRegistration = fn(
+    callee_text: &str,
+    spec: &dyn frensense_lang::spec::LanguageSpec,
+    facts: Option<&FactTable>,
+) -> bool;
 
 /// Demand-driven backward taint engine over the whole-program SVFG.
 pub struct BackwardTaintEngine<'a> {
@@ -192,6 +342,12 @@ pub struct BackwardTaintEngine<'a> {
     /// Per-file external package imports: `file_path -> local_name -> PackageImport`.
     pub(crate) file_package_imports:
         FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
+    /// Route-registration predicate for per-call-site framing, wired from
+    /// the harness via [`BackwardTaintEngine::with_route_registration`]
+    /// (schema §5.1 of the framework-scope doc). Consulted before a
+    /// framework-stemmable receiver is treated as a source; `None` keeps
+    /// the pre-wiring behaviour (spec verbs only, no pack route patterns).
+    pub route_registration: Option<RouteRegistration>,
     /// When `true`, reconstruct the walked source→sink chain per vulnerable
     /// finding (small extra bookkeeping; path reporting needs it).
     capture_paths: bool,
@@ -232,6 +388,9 @@ struct ExploreState {
     visited: FxHashSet<(usize, NodeKey, BlockId, bool, u32)>,
     /// Distinct `(function, node)` pairs seen, for stats only.
     seen_nodes: FxHashSet<(usize, NodeKey)>,
+    /// Silent stop sites hit during this root's exploration, for
+    /// `--explain` diagnostics (pure bookkeeping; no analysis effect).
+    cuts: Vec<&'static str>,
 }
 
 /// Human-readable description of the taint origin at a source node:
@@ -240,8 +399,10 @@ struct ExploreState {
 pub(crate) fn source_description(
     ir: &FunctionIR,
     config: &TaintConfig,
+    facts: &FactTable,
     key: &NodeKey,
 ) -> Option<String> {
+    let sources = crate::analysis::forward::SourceScope::for_ir(config, facts, ir);
     let NodeKey {
         block,
         instr_idx: Some(idx),
@@ -252,19 +413,31 @@ pub(crate) fn source_description(
     };
     let b = ir.blocks.get(&block)?;
     if idx >= b.instructions.len() {
-        // Parameter sentinel: the source is the parameter's own name.
-        return ir
-            .var_metadata
-            .get(&var)
-            .and_then(|m| m.source_name.clone())
-            .filter(|n| config.sources.contains(n));
+        // Parameter sentinel. The source is the parameter's own name when
+        // that name is registered; when it was matched by its TYPE instead
+        // (`Path(q): Path<P>`, `*http.Request`), the name is all we can
+        // report - returning `None` used to render the origin as
+        // "unknown origin", which read like an engine bug.
+        let meta = ir.var_metadata.get(&var)?;
+        if let Some(name) = meta.source_name.clone()
+            && sources.contains(&name)
+        {
+            return Some(name);
+        }
+        let ty = meta.type_name.clone()?;
+        let matched = crate::analysis::forward::predicates::source_path_matches(
+            &sources,
+            &ty,
+            ty.split("::").next().unwrap_or(&ty),
+        );
+        return matched.then(|| meta.source_name.clone().unwrap_or(ty));
     }
     match &b.instructions[idx] {
         Instruction::CallStatic {
             func,
             dest: Some(d),
             ..
-        } if config.sources.contains(func) && *d == var => Some(func.clone()),
+        } if sources.contains(func) && *d == var => Some(func.clone()),
         Instruction::CallVirtual {
             method,
             dest: Some(d),
@@ -274,15 +447,15 @@ pub(crate) fn source_description(
             // Module-qualified calls (`random.randint(...)`) lower as
             // CallVirtual: prefer the full `receiver.method` path (dotted
             // source facts), fall back to the bare method name.
-            if config.sources.contains(method) {
+            if sources.contains(method) {
                 return Some(method.clone());
             }
             if let Operand::Var(r) = receiver
                 && let Some(root) = crate::analysis::taint::facts::FactTable::receiver_root(ir, *r)
             {
                 let path = format!("{root}.{method}");
-                if config.sources.contains(&path)
-                    || config.sources.iter().any(|s| {
+                if sources.contains(&path)
+                    || sources.iter().any(|s| {
                         path.starts_with(s.as_str()) && path.as_bytes().get(s.len()) == Some(&b'.')
                     })
                 {
@@ -294,7 +467,7 @@ pub(crate) fn source_description(
         Instruction::LoadField { base, field, .. } => {
             let path = member_access_path(ir, *base, field);
             let root = path.split('.').next().unwrap_or("");
-            if source_path_matches(config, &path, root) {
+            if source_path_matches(&sources, &path, root) {
                 Some(path)
             } else {
                 None
@@ -310,6 +483,7 @@ impl<'a> BackwardTaintEngine<'a> {
             prog,
             config,
             facts: FactTable::from_config(config),
+            route_registration: None,
             honour_suppression: true,
             reverse_cross: FxHashMap::default(),
             guard_maps: FxHashMap::default(),
@@ -346,7 +520,14 @@ impl<'a> BackwardTaintEngine<'a> {
         self
     }
 
-    /// Provide external package imports per file: `file_path -> local_name -> PackageImport`.
+    /// Wire the harness's `is_route_registration` predicate into the engine
+    /// so the backward analysis consults it before arming a framework
+    /// origin (schema §5.1 of the framework-scope doc).
+    pub fn with_route_registration(mut self, predicate: RouteRegistration) -> Self {
+        self.route_registration = Some(predicate);
+        self
+    }
+
     pub fn with_file_package_imports(
         mut self,
         imports: &FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
@@ -407,9 +588,24 @@ impl<'a> BackwardTaintEngine<'a> {
         for fi in 0..self.prog.functions.len() {
             let ir = self.prog.functions[fi].ir;
             // Guard map per function (task 8.3): guards + dominators.
+            // Package-import context arms package-scoped guard-style
+            // sanitizers through their import origin (single-file
+            // fallback when the function's own file is untracked).
+            let fn_name = self.prog.functions[fi].name.clone();
+            let imports = self
+                .fn_file
+                .get(&fn_name)
+                .and_then(|file| self.file_package_imports.get(file))
+                .or_else(|| {
+                    if self.file_package_imports.len() == 1 {
+                        self.file_package_imports.values().next()
+                    } else {
+                        None
+                    }
+                });
             self.guard_maps
                 .entry(fi)
-                .or_insert_with(|| GuardMap::build(ir, &self.facts, self.config));
+                .or_insert_with(|| GuardMap::build(ir, &self.facts, self.config, imports));
             let mut block_ids: Vec<BlockId> = ir.blocks.keys().copied().collect();
             block_ids.sort_by_key(|b| b.0);
 

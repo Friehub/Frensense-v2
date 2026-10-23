@@ -12,7 +12,12 @@ use frensense_engine::analysis::taint::facts::{
 use frensense_engine::checks::memory_summary::CapacitySpec;
 
 /// A candidate fact proposed by delta analysis.
+///
+/// `#[non_exhaustive]`: an evolving internal DTO. Variant fields (e.g.
+/// `Check.package` in 0.8.0) are added as minor releases; it never escapes the
+/// bundler's functional API, so consumers match with a wildcard arm.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum Candidate {
     /// Call is a dangerous sink at these arg slots.
     Sink {
@@ -38,6 +43,11 @@ pub enum Candidate {
         /// Fire only when the trigger arg has NO literal range comparison
         /// (inline enforcement modality).
         unless_range_check: Option<Vec<String>>,
+        /// Optional package qualification from the family's `// package:`
+        /// metadata. When set, the check is published as a package-scoped
+        /// policy (`PolicyScoped`) so it cannot fire on unrelated files
+        /// that merely share the trigger verb. `None` = unscoped `Check`.
+        package: Option<String>,
     },
     /// Generalized co-occurrence policy (the `LearnedFactEntry::Policy`
     /// shape): trigger + a list of requirements the trigger's scope must
@@ -73,6 +83,7 @@ pub enum Candidate {
         wrap_threshold: u128,
         severity: String,
         message: String,
+        unbounded_product: bool,
     },
 }
 
@@ -149,14 +160,41 @@ impl Candidate {
                 message,
                 unless_guard,
                 unless_range_check,
-            } => LearnedFactEntry::Check {
-                rule: rule.clone(),
-                call: call.clone(),
-                message: message.clone(),
-                severity: "warning".into(),
-                unless_guard: unless_guard.clone(),
-                unless_range_check: unless_range_check.clone(),
-            },
+                package,
+            } => {
+                // A family-declared package turns the check into a
+                // package-scoped policy (same engine mechanism as
+                // `Candidate::Policy` + package): the generic presence
+                // trigger can then never collide with unrelated bundle
+                // families that share the verb but not the package import.
+                if let Some(pkg) = package {
+                    let mut require = Vec::new();
+                    if let Some(g) = unless_guard {
+                        require.push(PolicyRequirement::GuardCall { call: g.clone() });
+                    }
+                    if let Some(ops) = unless_range_check {
+                        require.push(PolicyRequirement::RangeCheck { ops: ops.clone() });
+                    }
+                    LearnedFactEntry::PolicyScoped {
+                        rule: rule.clone(),
+                        when_call: call.clone(),
+                        require,
+                        scope: PolicyScope::Function,
+                        message: message.clone(),
+                        severity: "warning".into(),
+                        package: pkg.clone(),
+                    }
+                } else {
+                    LearnedFactEntry::Check {
+                        rule: rule.clone(),
+                        call: call.clone(),
+                        message: message.clone(),
+                        severity: "warning".into(),
+                        unless_guard: unless_guard.clone(),
+                        unless_range_check: unless_range_check.clone(),
+                    }
+                }
+            }
             Candidate::Policy {
                 rule,
                 call,
@@ -205,12 +243,29 @@ impl Candidate {
                 wrap_threshold,
                 severity,
                 message,
-            } => LearnedFactEntry::IntegerOverflowRule {
-                rule: rule.clone(),
-                wrap_threshold: *wrap_threshold,
-                severity: severity.clone(),
-                message: message.clone(),
-            },
+                unbounded_product,
+            } => {
+                // The wire schema is positional: the base `IntegerOverflowRule`
+                // variant keeps its byte layout, and the modality travels as
+                // the trailing `IntegerOverflowUnboundedRule` variant instead
+                // of a new field.
+                let payload: LearnedFactEntry = if *unbounded_product {
+                    LearnedFactEntry::IntegerOverflowUnboundedRule {
+                        rule: rule.clone(),
+                        wrap_threshold: *wrap_threshold,
+                        severity: severity.clone(),
+                        message: message.clone(),
+                    }
+                } else {
+                    LearnedFactEntry::IntegerOverflowRule {
+                        rule: rule.clone(),
+                        wrap_threshold: *wrap_threshold,
+                        severity: severity.clone(),
+                        message: message.clone(),
+                    }
+                };
+                payload
+            }
         }
     }
 }
@@ -252,12 +307,23 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
                 sanitizes_args: Default::default(),
                 guard_style: *guard,
             };
-            if let Some(pkg) = package {
-                table
-                    .scoped_sanitizer_facts
-                    .insert((pkg.clone(), call.clone()), fact.clone());
+            match package {
+                Some(pkg) => {
+                    // Package-scoped sanitizer: install ONLY under
+                    // (package, call), mirroring the engine's load path
+                    // (`apply_language_entries`). The gate must replay
+                    // exactly the origin-gated semantics consumers get —
+                    // a universal alias here would let the trial table
+                    // cut any receiver and approve a fact that no longer
+                    // cuts (or wrongly cuts) once loaded strictly.
+                    table
+                        .scoped_sanitizer_facts
+                        .insert((pkg.clone(), call.clone()), fact);
+                }
+                None => {
+                    table.sanitizer_facts.insert(call.clone(), fact);
+                }
             }
-            table.sanitizer_facts.insert(call.clone(), fact);
         }
         Candidate::Check {
             rule,
@@ -265,18 +331,43 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
             message,
             unless_guard,
             unless_range_check,
+            package,
         } => {
-            table.learned_checks.push((
-                LearnedCheckFact {
-                    rule: rule.clone(),
-                    call: call.clone(),
-                    message: message.clone(),
-                    severity: "warning".into(),
-                    unless_guard: unless_guard.clone(),
-                    unless_range_check: unless_range_check.clone(),
-                },
-                Provenance::Learned,
-            ));
+            // Scoped checks are replayed as package-scoped policies so the
+            // trial scan exercises the exact publish shape.
+            if let Some(pkg) = package {
+                let mut require = Vec::new();
+                if let Some(g) = unless_guard {
+                    require.push(PolicyRequirement::GuardCall { call: g.clone() });
+                }
+                if let Some(ops) = unless_range_check {
+                    require.push(PolicyRequirement::RangeCheck { ops: ops.clone() });
+                }
+                table.policy_facts.push((
+                    PolicyFact {
+                        rule: rule.clone(),
+                        when_call: call.clone(),
+                        require,
+                        scope: PolicyScope::Function,
+                        message: message.clone(),
+                        severity: "warning".into(),
+                        package: Some(pkg.clone()),
+                    },
+                    Provenance::Learned,
+                ));
+            } else {
+                table.learned_checks.push((
+                    LearnedCheckFact {
+                        rule: rule.clone(),
+                        call: call.clone(),
+                        message: message.clone(),
+                        severity: "warning".into(),
+                        unless_guard: unless_guard.clone(),
+                        unless_range_check: unless_range_check.clone(),
+                    },
+                    Provenance::Learned,
+                ));
+            }
         }
         Candidate::Policy {
             rule,
@@ -365,12 +456,14 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
             wrap_threshold,
             severity,
             message,
+            unbounded_product,
         } => {
             let fact = frensense_engine::analysis::taint::facts::IntegerOverflowRule {
                 rule_id: rule.clone(),
                 wrap_threshold: *wrap_threshold,
                 severity: severity.clone(),
                 message: message.clone(),
+                unbounded_product: *unbounded_product,
             };
             if let Some(existing) = table
                 .integer_overflow_rules
@@ -435,7 +528,10 @@ pub fn fact_key(e: &LearnedFactEntry) -> (String, String) {
         LearnedFactEntry::GuardDenylistPattern { pattern } => {
             ("guard_denylist".into(), pattern.clone())
         }
-        LearnedFactEntry::IntegerOverflowRule { rule, .. } => ("io_rule".into(), rule.clone()),
+        LearnedFactEntry::IntegerOverflowRule { rule, .. }
+        | LearnedFactEntry::IntegerOverflowUnboundedRule { rule, .. } => {
+            ("io_rule".into(), rule.clone())
+        }
         LearnedFactEntry::Hints { kind, .. } => ("hints".into(), format!("{kind:?}")),
         LearnedFactEntry::WeakPrimitiveRule { rule_id, .. } => {
             ("weak_primitive".into(), rule_id.clone())
@@ -453,6 +549,10 @@ pub fn fact_key(e: &LearnedFactEntry) -> (String, String) {
         LearnedFactEntry::LanguageSink { language, call, .. } => {
             ("language_sink".into(), format!("{language}:{call}"))
         }
+        LearnedFactEntry::LanguageSinkGlobalOnly { language, call } => (
+            "language_sink_global_only".into(),
+            format!("{language}:{call}"),
+        ),
         LearnedFactEntry::LanguageSinkSlots { language, call, .. } => {
             ("language_sink_slots".into(), format!("{language}:{call}"))
         }

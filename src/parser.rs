@@ -19,3 +19,13 @@ pub fn extensions_for(name: &str) -> Option<&'static [&'static str]> {
         .find(|s| s.name().eq_ignore_ascii_case(name))
         .map(|s| s.extensions())
 }
+
+/// Registered language names, sorted for stable help output (WI-56: the
+/// CLI help, MCP tool descriptions and docs must agree on one generated
+/// list instead of hand-maintained copies).
+#[must_use]
+pub fn language_names_help() -> String {
+    let mut names: Vec<&'static str> = frensense_lang::all_specs().map(|s| s.name()).collect();
+    names.sort_unstable();
+    names.join(", ")
+}
