@@ -24,4 +24,8 @@ bundle. A bundle is discovered from (in order):
 Facts are lower-level than "regex rules": a learned sink participates in the
 same graph analysis as a builtin one, so taint paths, guard recognition, and
 value reasoning all apply to it. The bundler only publishes a fact after it
-replays against labelled positive *and* negative examples (support ≥ 2).
+replays against labelled positive *and* negative examples; one voting family
+publishes it as `provisional`, two or more as `confirmed`. Run
+`frensense bundle info my.frc` to see what a bundle actually carries, and
+`frensense lint mycorpus` to check the families before they are compiled - see the
+[authoring guide](/corpus/authoring).

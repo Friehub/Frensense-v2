@@ -10,6 +10,308 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## \[0.8.0-beta] - Unreleased
+
+### Breaking
+
+* **Version bump to 0.8.0** (from 0.7.0). This release adds fields to public
+  types (`CliOptions.explain`, `SinkFinding.cut_reasons`,
+  `Candidate::Check.package`). Under Cargo's `0.x` rules any field addition to
+  a constructible public type is a breaking change, so the whole workspace moves
+  to the `0.8.0` line. To keep future additions minor-compatible, the evolving
+  output/option DTOs are now `#[non_exhaustive]`: `CliOptions`, `Advisory`,
+  `ExplainRecord`, `SinkFinding`, `BackwardStats`, and `Candidate`. Consumers
+  read fields (and match `Candidate` with a wildcard arm); they no longer
+  construct these types via literals.
+
+### Added
+
+#### Code Hygiene & Complexity Controls
+
+* **`--hygiene` flag**: enables code hygiene and structural health rules (such
+  as `function_complexity`, CWE-1121) under any profile without requiring
+  `--profile strict`. Polyglot developers running `--profile default` or
+  `--profile recommended` can now monitor structural code health without
+  surfacing unproven experimental rules.
+* **`--max-complexity <n>` flag**: configures the cyclomatic complexity ceiling
+  (default: 25) for the `function_complexity` check directly from the command
+  line. Setting `--max-complexity` automatically enables hygiene rules so
+  findings are never silently suppressed. Preserves Frensense's zero-config,
+  language-agnostic architecture without introducing TOML configuration files.
+
+#### CLI Diagnostics
+
+* **`--explain` flag**: surfaces *where the engine stayed silent*. Every explored
+  sink argument that did not become an advisory is recorded with the reason the
+  backward taint walk was cut, so a false negative is no longer a black box.
+  Silent stop sites are tracked as pure bookkeeping on the walk state
+  (`SinkFinding.cut_reasons`): `guard` (a validating guard dominated the use),
+  `value-const` (the value folded to an attacker-independent constant),
+  `sanitizer` (a sanitizer transformed the value), and `unresolvable` (the flow
+  hit a value the engine cannot resolve). The section prints to stderr, so it
+  composes with any `--format` and never contaminates the report on stdout.
+  Example output for a `match`-statement blind spot:
+  ```
+  Explain: 1 silent sink argument(s) explored (no advisory)
+    clean   BenchmarkTest00160.py:49  exec(arg 0)
+        why: the value folded to an attacker-independent constant
+  ```
+* **Benchmark triage tooling**: added `scripts/owasp_mutation_ladder.py`, a
+  mutation-ladder triager that rewrites OWASP Benchmark false negatives into
+  minimal variants and classifies each cause into a bucket (knowledge gap,
+  engine bug, absent rule, harness artifact, unexplained), producing a
+  reproducible `--json-out` scorecard and per-case repro files.
+
+#### Corpus Lint (`frensense lint`)
+
+* **`frensense lint <corpus>`**: a corpus pre-flight on the shipped binary (the
+  same entry point as `frensense-bundler lint`), so curators need one
+  executable. It exits `0` when the corpus is acceptable, `1` when any error
+  (or any warning under `--strict`) is found, and `2` on a usage error. The path
+  rule matches `watch` and `bundle`: `frensense lint` scans a directory named
+  `./lint` when one exists, and `frensense lint <dir>` is always the subcommand;
+  `lint` owns its own `--help` because the global help intercept would otherwise
+  print scan flags and hide the curation flags.
+* **What it checks**: file layout and naming (missing or orphaned twins,
+  incomplete held-out pairs, cross-language stem collisions), the `[frensense]`
+  metadata block (required keys, unknown-key suggestions, duplicate keys,
+  placeholder prose, severity/CWE/cvss syntax), the class registry
+  (`bug_classes.json`: unknown class ids get a nearest-match hint, and every CWE
+  must belong to the declared class), provenance (`source:` form, CVE/GHSA/RUSTSEC
+  ids must exist in the offline advisory index and agree with the CWE),
+  cross-family diversity (near-duplicate call sets, structural clones, families
+  that teach identical or subset facts), and the family's declared `purpose:`
+  against what the bare engine actually does with the pair.
+* **`PU004`: a family that would teach nothing now says so, with the reason**.
+  A pair can satisfy every layout, metadata and purpose check and still
+  contribute no fact: the declared premise holds (knowledge with a silent
+  positive, precision with a noisy negative), yet the only facts it proposes do
+  not separate its own twins, so the replay gate publishes nothing and the
+  bundle scans both files exactly as the bare engine did. Lint now trials each
+  proposed fact against the family the way the gate's vote does and reports the
+  closest candidate with the engine verdict that sank it - e.g. `none of its 2
+  proposed fact(s) separates the pair; closest is sink:rawQuery
+  (positive_alerts=true, negative_alerts=true): the positive alerts but so does
+  the negative`. It also names the opposite case (the fact changes no verdict)
+  and the no-candidate case (the twins differ in no learnable source, sink,
+  sanitizer, guard or check call). Anchors are exempt, and the warning only
+  fires where the declared purpose's premise is actually true, so a family never
+  gets both PU001/PU003 and PU004 for the same mistake.
+* **Flags**: `--classes <file>`, `--advisories <file>`, `--strict`,
+  `--require-heldout`, `--no-gate` (skip the scan-based purpose and
+  teachability checks), `--dup-threshold <0..1>`, `--json`, `--coverage`
+  (class x language coverage counting only error-free families).
+* **`scripts/corpus-lint.sh`** runs the CLI over an authored corpus and is wired
+  into the local gate (`./scripts/local-ci.sh`) and the CI corpus step, so a
+  corpus that fails curation fails the build before a bundle is produced.
+
+#### Flow Traces & Rule Lookup
+
+* **Flow steps name what the developer wrote**: taint-path steps are rendered
+  from the source text at their byte range (`reads `resp.data\`\`,
+  `String(req.query.q)`) instead of IR temporaries (`flows through v11`), and
+  function names lose their `file::` prefix. A step with no readable span falls
+  back to the field or value description, never to an SSA number.
+
+* **The origin step has a location**: the `source:` step now carries the byte
+  range of the value it names (falling back to the parameter's declaration for
+  entry points), so SARIF's first `codeFlow` step is a real region instead of
+  `location: null`, and the origin is no longer printed twice (the walked
+  def/use pair above it is dropped).
+
+* **`frensense explain <rule-id>`**: prints a built-in rule's id, title, CWE
+  links, tier, why and fix from its rule card; with no id it lists every rule.
+  Unknown ids exit `2` instead of guessing.
+
+* **`explain` describes bundle-learned rules too**: a learned policy or check
+  has no card by design - its knowledge is the trigger, requirements and
+  message the bundle taught - so `frensense explain <id> -b <bundle>` renders
+  that data straight from the bundle (and from the embedded default pack),
+  with no invented CWE. `--list-rules -b <bundle>` lists the bundle's rule
+  ids alongside the built-ins, and unknown ids say to pass `-b`.
+
+* **`explain` no longer squats on a path of the same name**: `frensense
+  explain` scans a directory literally named `explain`, a rule id wins over a
+  same-named path, and the flag forms `--list-rules` / `--explain-rule <id>`
+  are always unambiguous.
+
+* **`mcp`, `watch` and `bundle` resolve same-named paths the same way**: a
+  repo containing `mcp/`, `watch/` or `bundle/` stays scannable with the bare
+  token — `frensense mcp` scans `./mcp`, and the server still starts via
+  `frensense --mcp`. Arguments only the subcommand understands keep it
+  claimed (`frensense watch <path>`, `frensense bundle <corpus> [out.frc]`),
+  only argv\[1] is a subcommand slot (`frensense . mcp` scans both paths), and
+  `watch` no longer strips every `watch` token from the line — only its own.
+  `lsp` is deliberately still literal: editors run it non-interactively, where
+  silently scanning an `lsp/` directory would break the editor rather than
+  present an ambiguity a human can resolve.
+
+* **Borrowed Rust types are not request extractors**: the type-named source
+  matcher strips the `&` when normalizing a parameter type, so `fn load(root:
+  &Path)` matched axum's `Path` extractor and every helper that reads a file
+  from a borrowed path looked attacker-controlled. The borrow marker is kept
+  (`&Path` is `std::path::Path`), which removes that false-discovery class -
+  including the path-traversal finding on Frensense's own bundle loader -
+  while by-value extractors (`Path<T>`) still fire.
+
+* **`--diff-only` reports only findings the diff introduced**: the gate still
+  scans each changed file whole (a change can make an old line reachable), but
+  a finding whose span touches no added line predates the diff and is
+  suppressed with a count, instead of failing the gate for a bug this change
+  never touched. Pre-existing debt belongs to the baseline
+  (`--emit-baseline` / `--compare-baseline`), not to the diff gate.
+
+#### Reported Identity & Triage
+
+* **Stable rule ids on every finding**: findings report under a stable id
+  (`taint.sql-injection`, `check.weak-hash`, `policy.<id>`) instead of the
+  message text, so baselines, suppression files and trend reports keep pointing
+  at the same rule when the wording changes. SARIF emits one rule per id with
+  its CWE `external/cwe/*` tags, help URI and `security-severity`, and the JSON
+  report carries a `cwe` array per finding.
+* **Rule cards are the single source of rule prose**: one card per sink label
+  and built-in checker rule (`frensense_lang::rule_card`) holds the id, title,
+  CWE list, why and fix, and `taint_cwe` / `checker_rule_cwe` resolve through
+  them, so no built-in rule can ship without a CWE and the terminal, SARIF and
+  JSON surfaces cannot drift. Sinks that name no class fall back to the broad
+  parent CWE (74 injection, 20 improper input validation) instead of guessing a
+  child class.
+* **No more "untrusted data reached something" findings**: a flow whose sink
+  resolves to a fallback card (unknown label, role that pins no class) is no
+  longer reported at all - it named no class to fix, suppress or trend, and
+  those were the bulk of the noise burying real flows. `--explain` lists such
+  sinks as silent instead, and a corpus family that does know the class teaches
+  it as a label on the sink fact.
+* **Code frame in the terminal report**: findings print the offending line (and
+  the line above it) with a caret under the flagged call, plus the rule id,
+  CWE and class-specific why/fix, replacing the repeated
+  Details/Impact/Remediation block.
+
+#### Language Facts
+
+* **CWE-94 tagging for Code Execution**: `eval`, `exec`, and `compile` sinks now
+  carry CWE-94 (Code Injection). The mapping previously matched a dead arm - the
+  sink slug is `"execution"`, not `"eval"` - so Code Execution findings were
+  reported without a resolvable CWE. CWE-94 class TPR moves from 0% to 35%.
+* **CWE-601 tagging for Open Redirect**: `redirect`-labelled Resource-role sinks
+  now carry CWE-601 (URL Redirection to Untrusted Site). CWE-601 class TPR moves
+  from 0% to 61.5%.
+
+#### Version Identity & Artifact Contracts (Phase 6)
+
+* **`frensense --version --json` and `frensense bundle info --json`** now expose a machine-readable build identity: engine version, bundle format, fact-vocabulary fingerprint, default-pack BLAKE3 digest, and report-schema version. The release workflow asserts on `frensense --version --json` before tagging and stamps the identity into the annotated tag.
+* **Bundle format v7** (`frensense-bundler` `BUNDLE_VERSION` 6 → 7): `.frc` envelopes now record the writing engine's fact-vocabulary fingerprint (`BundleHeader::vocabulary`, checked strictly on load), an optional coarse engine range (`requires_engine`), and the writing engine version (`built_by_engine`, diagnostics only). v6-and-earlier bundles are still loadable (`is_legacy()`); a v7 bundle built for a newer vocabulary is refused by name at the version gate before any payload decode. See `frensense-bundler/src/format/frc.rs`.
+* **Fact-vocabulary fingerprint** (`frensense-engine::analysis::taint::facts::FACT_VOCABULARY_FINGERPRINT`, currently `0x4994_27a8_ed94_e470`): a reproducible FNV-1a over the ordered serialized vocabulary (hint kinds + `LearnedFactEntry` variants). New fact variants are compile-enforced (`HintKind::index` / `LearnedFactEntry::wire_index` exhaustive matches), and a ratchet test fails until `FACT_VOCABULARY_FINGERPRINT` is updated — which is the cue to bump `BUNDLE_VERSION` and regenerate the default pack.
+* **Format contract ratified** in `docs/FORMATS.md` (single table of every artifact version and its bump rule) and enforced by `scripts/format-ratchet.py` (fails if the vocabulary fingerprint moves without a `BUNDLE_VERSION` bump and a changelog note).
+* **Regenerated embedded default pack** (`frensense-bundler/assets/frensense-default.frc`) under the v7 envelope so it carries its fact-vocabulary fingerprint.
+
+### Fixed
+
+#### Language Facts
+
+* **Cross-language sink contamination removed**: the Python, Go, C, and Rust
+  vocab tables carried large copy-pasted blocks of foreign APIs (JS DOM sinks
+  like `innerHTML`/`dangerouslySetInnerHTML`, Express `res.send`, Node
+  `spawnSync`/`readFile`, prototype-pollution `Object.assign`/`_.set`, Cloudflare
+  Workers and Prisma bindings, camelCase MongoDB driver verbs, Flask
+  `render_template` in Go/C/Rust, Rust `bincode`/`serde_json` in Python/Go/C).
+  Because the engine registers each dotted entry's last segment as a bare sink,
+  every one of these was a false-positive generator for the host language -
+  e.g. a Go `Object.assign` entry made every Go `.assign(` call a
+  prototype-pollution sink, and Go/C's `_.set` made every `.set(` call one.
+  All foreign entries are removed; each table now contains only APIs that
+  exist in its own language. Default pack 93,036 -> 82,697 bytes. OWASP score
+  unchanged (25.9%).
+* **Provider facts are language-scoped, not just language-sourced**: removing
+  foreign *entries* was not enough, because the install merged every language's
+  vocabulary into one name-keyed table (`apply_language_entries` built a
+  per-language temp table and then merged it last-wins). Any scan that contained
+  two languages shared one name space: adding a single `.rs` file to a
+  TypeScript package took the scan from 6 findings to 40, every one of them a
+  `prisma.order.create(...)` / `catalog.output(...)` / `logger.log(...)` call in
+  `.ts` files armed by Rust's `File::create`, `Command::output` and `log`
+  macros. The mirror error existed on the source side: Go's `http.ResponseWriter`
+  parameter name `w` seeded taint in TypeScript files, and TypeScript's `input`
+  did the same in Rust. Sink signatures (`lang_sink_signatures`) and source
+  vocabulary (`lang_sources`) are now keyed by `(language, call)` / `language`,
+  `FunctionIR` carries the language it was lowered from, and every match site
+  (backward walk, forward engine, sink-alert predicates) passes its own
+  language; the shared table keeps only genuinely language-agnostic knowledge
+  (`"*"` pack group, bundle facts, hand-built configs). A blanket all-args
+  placeholder seeded from `TaintConfig::sinks` never shadows the language's own
+  slot/identity knowledge. Measured on a mixed TS/Rust/Python/Go repo: 78 -> 26
+  advisories (52 removed, 0 added); each language still reports its own flows.
+  Two probes that had been passing through the leak were corrected: `probe_57`
+  (return-object-field) used a local named `w` and is now an explicit
+  `Blind spot:` (a callee-allocated container's field has no cross-function heap
+  edge), and the two-phase heap test now hands the engine its fact table.
+
+#### Engine
+
+* **Provider facts are language-scoped** (see *Language Facts* above):
+  `FunctionIR::language`, `FactTable::lang_sink_signatures` / `lang_sources`,
+  and language-aware `is_sink_call_scoped` / `sink_signature_for_language` /
+  `SourceScope`. The scoping rule is the second half of the merge-safety rule
+  (all-args never widens slot-restricted): a fact that knows a call's slots
+  beats a blanket name-only placeholder, whatever lane it sits in.
+* **Propagator install is consistently last-wins**: duplicate `join`/`Join`
+  propagator entries (a string/array method and a path-builder sharing one bare
+  call key) resolved by order-dependent accident. The install used first-wins
+  for the last-segment alias and an append-only receiver-block set, so a
+  `tainted_receiver: false` entry permanently blocked the receiver edge even
+  when a later `true` entry should unblock it - silently dropping the
+  string/array-`join` receiver->return flow (Python `sep.join(...)`, JS
+  `[...].join(...)`). `propagator_blocks_receiver` is now a two-way map
+  (`call -> blocked`), and both the arg slots and the receiver flag install
+  last-wins; `merge` matches. The redundant path-join duplicates (Python, Go,
+  JS) and a duplicate JS `toString` are removed, with a packgen regression test
+  asserting no duplicate propagator keys per language. OWASP score unchanged
+  (25.9%).
+* **Bare last segments stopped arming unrelated receivers**: a sink
+  declared under a module (`pickle.loads`, `subprocess.run`, `yaml.load`)
+  publishes a bare shadow of its last segment because the walker matches a
+  virtual call by method name, and that shadow used to arm every receiver in
+  the program - `json.loads` inherited unsafe deserialization, `f.read(n)`
+  inherited path traversal, `Workflow.run` inherited command injection. The
+  fact table now records which roots a qualified declaration named
+  (`receiver_qualified_sinks`) and which names a language declares bare
+  (`bare_sink_names`); a name that is only ever declared qualified arms only
+  under its own root or import origin, and a name a language never declares
+  bare is verb-gated as well. Measured on four real repositories: 111 -> 93
+  findings, every removed finding reviewed as a false positive, OWASP
+  BenchmarkPython score unchanged (TPR 38.1%, FPR 7.1%), and the Juice Shop
+  scan 3x faster (167s -> 54s) because the call graph no longer fabricates
+  same-named interprocedural edges.
+* **Minified JavaScript is skipped by content**: a single-line bundle with no
+  filename hint was lowered as ordinary source, producing findings no one
+  can act on.
+* **The last two name-based guesses in the engine are pack facts**: the
+  engine no longer assumes a call named `prepare*` creates a bound-parameter
+  statement handle, or that a literal `false` argument disclaims security use
+  of a weak digest. `HintKind::PreparedStatementPrefix` and
+  `HintKind::WeakHashDisclaimer` carry those vocabularies in the default pack
+  (and in any bundle that teaches them), so a new driver's factory spelling
+  or a codebase's own disclaimer token is taught rather than compiled in. An
+  empty set recognises nothing, so a config that teaches nothing never
+  suppresses a flow. Behaviour is unchanged on the measured corpora (OWASP
+  BenchmarkPython: TPR 38.1% / FPR 7.1%; 92 real-repo findings either side
+  of the refactor).
+* **Branch-arm-assigned variables survive the merge**: variables assigned only
+  inside a `match`/`switch` arm were dropped from the environment at the branch
+  merge (`env.pop` without hoisting), so a value defined in one arm and consumed
+  after the branch lost its taint. The lowering now hoists per-arm bindings
+  through a `hoist_arm_scope` pass, restoring flows that cross an arm boundary.
+  CWE-22 class TPR 33.8% -> 35.4%, CWE-78 class TPR 23.1% -> 30.8%.
+
+### Changed
+
+#### Benchmarks
+
+* **OWASP Benchmark for Python**: score on this branch improves from **22.4% to
+  25.9%** (TPR 23.9% -> 27.7%, FPR held flat at 1.8%) across the three fixes
+  above. Remaining false negatives are dominated by absent non-taint rules
+  (CWE-330 weak randomness, CWE-643 XPath injection) rather than dataflow gaps.
+
 ## \[0.7.0] - 2026-10-12
 
 ### Added

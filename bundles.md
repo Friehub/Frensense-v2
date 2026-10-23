@@ -17,16 +17,18 @@ Download the verified rule bundle for your language or grab the universal master
 
 | Bundle | Target Stack | Size | Verified Status | Download |
 | :--- | :--- | :---: | :---: | :--- |
-| **`frensense-typescript.frc`** | TypeScript & JavaScript (Node.js, Express, Next.js) | ~10 KB | 100% TPR / 0% FPR | [Download `.frc`](https://bundles.friehub.cloud/community/latest/frensense-typescript.frc) • [GitHub Mirror](https://github.com/Friehub/frensense-v2/releases/download/v0.7.0/frensense-typescript.frc) |
+| **`frensense-typescript.frc`** | TypeScript & JavaScript (Node.js, Express, Next.js) | ~38 KB | 100% TPR / 0% FPR | [Download `.frc`](https://bundles.friehub.cloud/community/latest/frensense-typescript.frc) • [GitHub Mirror](https://github.com/Friehub/frensense-v2/releases/download/v0.7.0/frensense-typescript.frc) |
 | **`frensense-python.frc`** | Python (Flask, Django, CLI scripts) | ~2 KB | 100% TPR / 0% FPR | [Download `.frc`](https://bundles.friehub.cloud/community/latest/frensense-python.frc) • [GitHub Mirror](https://github.com/Friehub/frensense-v2/releases/download/v0.7.0/frensense-python.frc) |
 | **`frensense-c.frc`** | C & Systems (Memory safety, UAF, Leaks, Buffer Bounds) | ~4 KB | 100% TPR / 0% FPR | [Download `.frc`](https://bundles.friehub.cloud/community/latest/frensense-c.frc) • [GitHub Mirror](https://github.com/Friehub/frensense-v2/releases/download/v0.7.0/frensense-c.frc) |
-| **`frensense-master.frc`** | Universal Unified Bundle (All Supported Languages) | ~16 KB | 100% TPR / 0% FPR | [Download `.frc`](https://bundles.friehub.cloud/community/latest/frensense-master.frc) • [GitHub Mirror](https://github.com/Friehub/frensense-v2/releases/download/v0.7.0/frensense-master.frc) |
+| **`frensense-go.frc`** | Go (HTTP handlers, templates, SQL drivers) | ~3 KB | 100% TPR / 0% FPR | [Download `.frc`](https://bundles.friehub.cloud/community/latest/frensense-go.frc) • [GitHub Mirror](https://github.com/Friehub/frensense-v2/releases/download/v0.7.0/frensense-go.frc) |
+| **`frensense-master.frc`** | Universal Unified Bundle (All Supported Languages) | ~47 KB | 100% TPR / 0% FPR | [Download `.frc`](https://bundles.friehub.cloud/community/latest/frensense-master.frc) • [GitHub Mirror](https://github.com/Friehub/frensense-v2/releases/download/v0.7.0/frensense-master.frc) |
 
 ### Integrity & Audit Artifacts
 
 * **Capability Datasheet (JSON)**: [`cwe_datasheet.json`](https://bundles.friehub.cloud/community/latest/cwe_datasheet.json)
 * **Capability Datasheet (Markdown)**: [`CWE_DATASHEET.md`](https://bundles.friehub.cloud/community/latest/CWE_DATASHEET.md)
 * **SHA-256 Checksums**: [`SHA256SUMS`](https://bundles.friehub.cloud/community/latest/SHA256SUMS)
+* **Ed25519 Signature**: [`SHA256SUMS.sig`](https://bundles.friehub.cloud/community/latest/SHA256SUMS.sig)
 
 ***
 
