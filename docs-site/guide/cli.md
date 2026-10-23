@@ -12,6 +12,7 @@ The `frensense` binary is the single entry point for the engine.
 | `frensense lsp` | Run the LSP server (stdio, Content-Length framing) for editors. |
 | `frensense bundle [<corpus>] [out.frc]` | Compile twin-example families into a `.frc` knowledge bundle. |
 | `frensense bundle info <file.frc>` | Inspect a bundle's metadata and facts. |
+| `frensense lint <corpus>` | Check corpus families before they are bundled: layout, metadata, class, provenance, diversity, and teachability. `--strict`, `--json`, `--coverage`, `--no-gate`, `--classes`, `--advisories`, `--require-heldout`. Exit `0` clean, `1` issues, `2` bad configuration. |
 | `frensense explain [<rule-id>] [-b <bundle>]` | Describe one rule (id, CWE, why, fix); no id lists every rule. `-b` also describes bundle-learned rules. A directory literally named `explain` is still scannable — flags are the unambiguous form. |
 
 One binary carries all of this; there is no separate MCP or LSP package.
@@ -27,6 +28,7 @@ understands keep it claimed, and each mode has an unambiguous form:
 | `frensense mcp` | Scans `./mcp`. `frensense --mcp` starts the server. |
 | `frensense watch` | Scans `./watch`. `frensense watch <path>` enters watch mode. |
 | `frensense bundle` | Scans `./bundle`. `frensense bundle <corpus> [out.frc]` compiles. |
+| `frensense lint` | Scans `./lint`. `frensense lint <corpus>` lints; `frensense lint --help` explains the subcommand's own flags. |
 | `frensense explain` | Scans `./explain`. `frensense --list-rules` lists rules. |
 
 Only argv[1] names a subcommand — `frensense . mcp` scans both paths — and

@@ -109,18 +109,29 @@ Detects Insecure Direct Object References (IDOR).
 Create a directory with positive and negative code snippets:
 
 ```bash
-mkdir -p my_corpus/custom_auth
+mkdir -p my_corpus/py/authz.missing/py_custom_auth
 ```
 
-Create `custom_auth_positive.py` (the bug):
+Create `py_custom_auth_positive.py` (the bug). The `[frensense]` block carries
+what every report shows and what the lint checks:
 ```python
+# [frensense]
+# observation: An invoice is fetched by id with no check that it belongs to the caller's organization.
+# impact: Any authenticated user can read another organization's invoices by guessing ids.
+# improvement: Scope the lookup to the caller's organization id.
+# cwe: CWE-639
+# severity: high
+# class: authz.missing
+# purpose: knowledge
+# shape: unscoped-idor-lookup
+# source: synthetic: minimal reproduction of the unscoped lookup
 # VULNERABLE: Direct lookup without tenant scoping
 def get_invoice(req):
     invoice_id = req.args.get("id")
     return db.query_invoice(invoice_id)
 ```
 
-Create `custom_auth_negative.py` (the fix):
+Create `py_custom_auth_negative.py` (the fix):
 ```python
 # SAFE: Scoped lookup requiring active organization ID
 def get_invoice(req):
@@ -129,14 +140,23 @@ def get_invoice(req):
     return db.query_invoice(invoice_id, org_id=org_id)
 ```
 
-### Step 2: Build the Bundle
-Run the Frensense bundler tool:
+A `bug_classes.json` at the corpus root declares `authz.missing` (CWE-639 plus
+its parent CWE-862 as `related_cwe`).
+
+### Step 2: Lint and Build the Bundle
 
 ```bash
-frensense-bundler my_corpus my_company.frc
+frensense lint my_corpus --strict     # metadata, layout, diversity, teachability
+frensense bundle my_corpus my_company.frc
+frensense bundle info my_company.frc  # what the bundle actually carries
 ```
 
-The bundler extracts the fact, executes the **replay verification gate** across both files, and outputs a binary `my_company.frc` knowledge bundle.
+The lint refuses the pair before a bundle exists if the metadata is incomplete
+or the family would teach nothing (`PU004`). The bundler then extracts the fact,
+runs the **replay verification gate** across both files, and writes the binary
+`my_company.frc` bundle. The full contract - required keys, the fact shapes a
+family can teach, held-out pairs and every lint code - is the
+[corpus authoring guide](/corpus/authoring).
 
 ### Step 3: Scan with Your Knowledge Bundle
 Provide the bundle to the scanner:

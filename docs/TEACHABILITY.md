@@ -61,8 +61,9 @@ The table below details the 13 subsystems supported by `LearnedFactEntry` (locat
 
 ### Building a Knowledge Bundle
 ```bash
-# Group and compile all positive/negative families in a directory
-frensense-bundler path/to/corpus output_bundle.frc
+# Check the families, then compile every positive/negative pair in a directory
+frensense lint path/to/corpus --strict
+frensense bundle path/to/corpus output_bundle.frc
 ```
 
 ### Scanning with a Knowledge Bundle
