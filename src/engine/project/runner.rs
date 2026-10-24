@@ -100,6 +100,22 @@ impl Engine {
         let pack_entries = frensense_bundler::format::default_pack()
             .learned_facts
             .as_slice();
+        // Advisory CWE per rule name: what classifies a bundle-learned sink.
+        let mut cwe_by_rule: rustc_hash::FxHashMap<String, String> =
+            rustc_hash::FxHashMap::default();
+        let patterns: &[frensense_bundler::format::BundlePattern] = loaded_bundle
+            .as_ref()
+            .map(|b| b.patterns.as_slice())
+            .unwrap_or(&[]);
+        for pattern in patterns {
+            if let Some(cwe) = &pattern.cwe {
+                for rule in &pattern.rules {
+                    cwe_by_rule
+                        .entry(rule.clone())
+                        .or_insert_with(|| cwe.clone());
+                }
+            }
+        }
         let mut result = scan::ScanResult::default();
         for group in groups.values() {
             // Built-in config + fact table from the language spec present.
@@ -127,7 +143,26 @@ impl Engine {
                 config.sources.insert(pattern.to_string());
             }
             facts.max_complexity = self.max_complexity;
-            let part = scan::scan(group, &config, &facts);
+            let mut part = scan::scan(group, &config, &facts);
+            // Classify bundle-learned sinks from the advisory pattern that
+            // names them. A `.frc` ships a CWE per pattern and nothing else
+            // about the class, so this is the class a consumer can honour
+            // without changing the bundle format - and the bundler's replay
+            // gate classifies identically before deciding a fact separates.
+            if !cwe_by_rule.is_empty() {
+                for f in &mut part.findings {
+                    if let Some(cwe) = cwe_by_rule.get(&f.sink) {
+                        f.classify_from_cwe(cwe);
+                    }
+                }
+                // Advisories are built from `located`, the pre-dedup findings
+                // with their file/line context, so classify that list too.
+                for loc in &mut part.located {
+                    if let Some(cwe) = cwe_by_rule.get(&loc.finding.sink) {
+                        loc.finding.classify_from_cwe(cwe);
+                    }
+                }
+            }
             result.findings.extend(part.findings);
             result.located.extend(part.located);
             result.located_checker.extend(part.located_checker);

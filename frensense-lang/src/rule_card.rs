@@ -267,6 +267,72 @@ fn taint_by_slug(slug: &str) -> &'static RuleCard {
     find(TAINT, slug).unwrap_or_else(|| find(TAINT, "other").expect("fallback card"))
 }
 
+/// The taint class a CWE id names, as `(role, label slug)`.
+///
+/// Corpus families declare `cwe:` in their `[frensense]` block and the bundler
+/// records it on the published advisory pattern, so this is class information
+/// every `.frc` has always carried. Deriving a learned sink's role and label
+/// from it classifies the sink **without a bundle format change**, which is
+/// what keeps previously published bundles loadable.
+///
+/// Only the TAINT cards are considered: a CWE that only a checker rule names
+/// (weak hash, TOCTOU) says nothing about what a sink does with its input.
+#[must_use]
+pub fn taint_class_for_cwe(cwe: &str) -> Option<(SinkRole, &'static str)> {
+    let want = cwe.trim();
+    // Parent CWEs describe "improper validation" in general, not what a sink
+    // does with its input, and several class cards list them. Deriving a
+    // class from one would invent a verdict the corpus never made.
+    const BROAD: &[&str] = &["cwe-20", "cwe-74", "cwe-693"];
+    let lower = want.to_ascii_lowercase();
+    if BROAD.contains(&lower.as_str()) {
+        return None;
+    }
+    // CWE variants an advisory files a defect under that our cards name by
+    // their canonical id: Django's SQL injection is CWE-564, argument
+    // injection is CWE-88. Aliased here rather than appended to the cards so
+    // a finding's own CWE tags keep the canonical id.
+    const ALIASES: &[(&str, &str)] = &[("cwe-564", "sql"), ("cwe-88", "command")];
+    if let Some((_, slug)) = ALIASES.iter().find(|(alias, _)| *alias == lower) {
+        return Some((taint_role_for_slug(slug), *slug));
+    }
+    TAINT
+        .iter()
+        // A generic card ("untrusted data reaches a sensitive operation")
+        // names no class, so landing on one would classify nothing. CWE-20
+        // and CWE-74 are attached to those catch-all cards.
+        .filter(|(_, c)| !c.is_generic())
+        .find(|(_, c)| c.cwe.iter().any(|id| id.eq_ignore_ascii_case(want)))
+        .map(|(slug, _)| (taint_role_for_slug(slug), *slug))
+}
+
+/// The role a taint card's class implies. Classes with a dedicated role keep
+/// it; every other class is code/SQL/command/deserialization, i.e.
+/// `Execution`.
+fn taint_role_for_slug(slug: &str) -> SinkRole {
+    match slug {
+        "traversal" => SinkRole::Resource,
+        "storage" => SinkRole::Storage,
+        "xss" => SinkRole::Xss,
+        "response" => SinkRole::Response,
+        "validation" => SinkRole::Validation,
+        _ => SinkRole::Execution,
+    }
+}
+
+/// Does a taint finding on this `(label, role)` pair name a vulnerability
+/// class a consumer can act on?
+///
+/// Single source of truth for "is this taint finding reportable". The bundler's
+/// replay gate and the CLI's advisory policy both answer it here, because they
+/// answered it separately before: the gate asked only whether a finding
+/// existed, the CLI asked whether it named a class, and the gate came to
+/// approve learned sinks no surface would ever report.
+#[must_use]
+pub fn names_vulnerability_class(label: Option<&str>, role: SinkRole, idor: bool) -> bool {
+    !taint_card(label, role, idor).is_generic()
+}
+
 /// Card for a built-in checker rule id, if one exists.
 #[must_use]
 pub fn checker_card(rule: &str) -> Option<&'static RuleCard> {
@@ -381,5 +447,54 @@ mod tests {
             taint_card(Some("eval"), SinkRole::Execution, false).id,
             "taint.code-injection"
         );
+    }
+}
+
+#[cfg(test)]
+mod cwe_class_tests {
+    use super::*;
+
+    #[test]
+    fn cwe_maps_to_the_taint_class_it_names() {
+        assert_eq!(taint_class_for_cwe("CWE-89").map(|c| c.1), Some("sql"));
+        assert_eq!(taint_class_for_cwe("CWE-564").map(|c| c.1), Some("sql"));
+        assert_eq!(
+            taint_class_for_cwe("CWE-22").map(|c| c.1),
+            Some("traversal")
+        );
+        assert_eq!(
+            taint_class_for_cwe("CWE-502").map(|c| c.1),
+            Some("deserialize")
+        );
+        assert_eq!(taint_class_for_cwe("cwe-89").map(|c| c.1), Some("sql"));
+    }
+
+    #[test]
+    fn cwe_roles_follow_the_class() {
+        assert_eq!(
+            taint_class_for_cwe("CWE-22").map(|c| c.0),
+            Some(SinkRole::Resource)
+        );
+        assert_eq!(
+            taint_class_for_cwe("CWE-79").map(|c| c.0),
+            Some(SinkRole::Xss)
+        );
+        assert_eq!(
+            taint_class_for_cwe("CWE-89").map(|c| c.0),
+            Some(SinkRole::Execution)
+        );
+    }
+
+    #[test]
+    fn unknown_cwe_names_no_class() {
+        assert!(taint_class_for_cwe("CWE-20").is_none());
+        assert!(taint_class_for_cwe("").is_none());
+    }
+
+    #[test]
+    fn classified_cwe_satisfies_the_reportability_predicate() {
+        let (role, slug) = taint_class_for_cwe("CWE-89").expect("sql class");
+        assert!(names_vulnerability_class(Some(slug), role, false));
+        assert!(!names_vulnerability_class(None, SinkRole::Other, false));
     }
 }

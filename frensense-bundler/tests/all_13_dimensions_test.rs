@@ -21,7 +21,7 @@
 
 use std::collections::BTreeSet;
 
-use frensense_bundler::extract::alerts;
+use frensense_bundler::extract::{alerts, alerts_with_cwe};
 use frensense_bundler::format::{load_bundle, write_bundle, BundlePayloadV6};
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::engine::FindingClass;
@@ -88,7 +88,7 @@ fn test_dim_01_dangerous_sinks_per_slot_safety() {
     )];
     let res_pos = scan(&pos_file, &cfg, &facts);
     assert!(
-        alerts(&res_pos),
+        alerts_with_cwe(&res_pos, Some("CWE-89")),
         "untrusted input in slot 0 must trigger an alert"
     );
 
@@ -100,7 +100,7 @@ fn test_dim_01_dangerous_sinks_per_slot_safety() {
     )];
     let res_neg = scan(&neg_file, &cfg, &facts);
     assert!(
-        !alerts(&res_neg),
+        !alerts_with_cwe(&res_neg, Some("CWE-89")),
         "untrusted input in safe binding slot 1 must stay silent: {:?}",
         res_neg.findings
     );
@@ -134,14 +134,14 @@ fn test_dim_02_taint_sources_custom_rpc() {
     // Baseline without learned source: blind to custom RPC -> SILENT
     let baseline = scan(&files, &cfg, &FactTable::default());
     assert!(
-        !alerts(&baseline),
+        !alerts_with_cwe(&baseline, Some("CWE-78")),
         "baseline must not alert without learned source"
     );
 
     // With learned source: ALERTS
     let taught = scan(&files, &cfg, &facts);
     assert!(
-        alerts(&taught),
+        alerts_with_cwe(&taught, Some("CWE-78")),
         "scanner must alert when taint flows from taught source to sink"
     );
 }
@@ -209,7 +209,7 @@ fn test_dim_04_data_propagators_custom_transform() {
     )];
     let pos_res = scan(&pos_file, &cfg, &facts);
     assert!(
-        alerts(&pos_res),
+        alerts_with_cwe(&pos_res, Some("CWE-94")),
         "taint passed through propagating slot 0 must alert"
     );
 
@@ -221,7 +221,7 @@ fn test_dim_04_data_propagators_custom_transform() {
     )];
     let neg_res = scan(&neg_file, &cfg, &facts);
     assert!(
-        !alerts(&neg_res),
+        !alerts_with_cwe(&neg_res, Some("CWE-94")),
         "taint passed to non-propagating slot 1 must stay silent: {:?}",
         neg_res.findings
     );

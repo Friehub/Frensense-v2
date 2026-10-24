@@ -134,6 +134,34 @@ pub struct SinkFinding {
 }
 
 impl SinkFinding {
+    /// Fill in the vulnerability class from a corpus advisory CWE.
+    ///
+    /// A bundle-learned sink carries no role or label of its own; the family
+    /// that taught it declares a `cwe:`, and the bundle ships that CWE on the
+    /// advisory pattern naming the sink. Applying it here classifies the
+    /// finding from data every `.frc` already carries, so the replay gate and
+    /// every reporting surface reach the same verdict without a bundle format
+    /// change.
+    ///
+    /// Returns `true` when the class was applied. A finding that already names
+    /// a class is left alone: a built-in sink's own vocabulary wins over the
+    /// corpus advisory's CWE.
+    pub fn classify_from_cwe(&mut self, cwe: &str) -> bool {
+        if frensense_lang::rule_card::names_vulnerability_class(
+            self.label.as_deref(),
+            self.role,
+            matches!(self.finding_class, FindingClass::Idor),
+        ) {
+            return false;
+        }
+        let Some((role, slug)) = frensense_lang::rule_card::taint_class_for_cwe(cwe) else {
+            return false;
+        };
+        self.role = role;
+        self.label = Some(slug.to_string());
+        true
+    }
+
     /// Start a [`SinkFindingBuilder`].
     ///
     /// `SinkFinding` is `#[non_exhaustive]`, so downstream crates cannot build
