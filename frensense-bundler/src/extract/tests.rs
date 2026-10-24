@@ -1171,3 +1171,54 @@ mod scoped_candidate_install_tests {
         );
     }
 }
+
+/// Sink half of the gate/consumer parity rule: a `Candidate::Sink` carrying a
+/// package must be installed under `(package, call)` only, exactly as the
+/// engine's load path publishes it.
+mod scoped_sink_candidate_install_tests {
+    use super::*;
+
+    #[test]
+    fn scoped_sink_candidate_installs_no_universal_alias() {
+        let mut table = FactTable::default();
+        apply_candidate(
+            &mut table,
+            &Candidate::Sink {
+                call: "extractAllTo".into(),
+                package: Some("adm-zip".into()),
+                dangerous: Default::default(),
+            },
+        );
+        assert!(
+            table
+                .scoped_sink_signatures
+                .contains_key(&("adm-zip".to_string(), "extractAllTo".to_string())),
+            "the scoped entry must be installed under (package, call)"
+        );
+        assert!(
+            table.sink_signatures.get("extractAllTo").is_none(),
+            "a package-scoped sink must not install a universal alias: consumers load it \n             origin-gated, so the gate must replay the same semantics"
+        );
+    }
+
+    #[test]
+    fn unscoped_sink_candidate_stays_universal() {
+        let mut table = FactTable::default();
+        apply_candidate(
+            &mut table,
+            &Candidate::Sink {
+                call: "sinkFn".into(),
+                package: None,
+                dangerous: Default::default(),
+            },
+        );
+        assert!(
+            table.sink_signatures.contains_key("sinkFn"),
+            "an unpackage-qualified sink must stay universal"
+        );
+        assert!(
+            table.scoped_sink_signatures.is_empty(),
+            "an unpackage-qualified sink must not create a scoped entry"
+        );
+    }
+}
