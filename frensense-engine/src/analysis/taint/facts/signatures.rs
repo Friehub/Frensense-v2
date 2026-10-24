@@ -105,7 +105,19 @@ impl FactTable {
             {
                 return Some(sig);
             }
-            let is_package_scoped = self.scoped_sink_signatures.keys().any(|(_, c)| c == call);
+            // Decorated sibling of a taught operation (`extractAllToAsync`
+            // for `extractAllTo`) is the same sink under the same package.
+            if let Some(base) = super::mirror_call_base(call)
+                && let Some(sig) = self
+                    .scoped_sink_signatures
+                    .get(&(pkg.to_string(), base.to_string()))
+            {
+                return Some(sig);
+            }
+            let is_package_scoped = self
+                .scoped_sink_signatures
+                .keys()
+                .any(|(_, c)| c == call || super::mirror_call_base(call) == Some(c.as_str()));
             if is_package_scoped {
                 // Known package origin mismatch: do not fall back to other
                 // packages' scoped sinks, only the caller's own language and
@@ -423,9 +435,13 @@ impl FactTable {
     /// provenance so findings report where the rule came from.
     pub fn learned_checks_for(&self, call: &str) -> Vec<(&LearnedCheckFact, Provenance)> {
         let seg = call.rsplit('.').next().unwrap_or(call);
+        let mirror = super::mirror_call_base(seg);
         self.learned_checks
             .iter()
-            .filter(|(c, _)| c.call.rsplit('.').next() == Some(seg))
+            .filter(|(c, _)| {
+                let taught = c.call.rsplit('.').next();
+                taught == Some(seg) || (taught.is_some() && taught == mirror)
+            })
             .map(|(c, p)| (c, *p))
             .collect()
     }

@@ -656,3 +656,67 @@ fn receiver_qualification_survives_merge() {
     assert!(facts.is_receiver_qualified_only("loads"));
     assert!(facts.receiver_qualified_sinks["loads"].contains("pickle"));
 }
+
+/// A corpus family teaches one call name, but libraries name their siblings by
+/// decorating that name (`extractAllTo` / `extractAllToAsync`). A fact must
+/// cover the decorated sibling under the same package, and nothing else.
+mod mirror_call_tests {
+    use super::*;
+
+    fn scoped_table() -> FactTable {
+        let mut t = FactTable::default();
+        LearnedFactEntry::Sink {
+            call: "extractAllTo".into(),
+            package: Some("adm-zip".into()),
+            dangerous_args: Default::default(),
+            binding_args_safe: false,
+        }
+        .apply(&mut t);
+        t
+    }
+
+    #[test]
+    fn decorated_sibling_arms_under_the_same_package() {
+        let t = scoped_table();
+        assert!(
+            t.is_sink_call_scoped(
+                "extractAllToAsync",
+                None,
+                Some("adm-zip"),
+                Some("javascript")
+            ),
+            "extractAllToAsync must inherit the extractAllTo fact"
+        );
+    }
+
+    #[test]
+    fn decorated_sibling_does_not_arm_under_another_package() {
+        let t = scoped_table();
+        assert!(
+            !t.is_sink_call_scoped(
+                "extractAllToAsync",
+                None,
+                Some("another-zip-lib"),
+                Some("javascript")
+            ),
+            "the mirror must stay package-scoped"
+        );
+    }
+
+    #[test]
+    fn undecorated_unrelated_name_stays_inert() {
+        let t = scoped_table();
+        assert!(
+            !t.is_sink_call_scoped("extractEntryTo", None, Some("adm-zip"), Some("javascript")),
+            "only a known decorator suffix qualifies as a mirror"
+        );
+    }
+
+    #[test]
+    fn base_name_is_unchanged_beyond_the_strip() {
+        assert_eq!(mirror_call_base("extractAllToAsync"), Some("extractAllTo"));
+        assert_eq!(mirror_call_base("readFileSync"), Some("readFile"));
+        assert_eq!(mirror_call_base("extractAllTo"), None);
+        assert_eq!(mirror_call_base("Async"), None);
+    }
+}

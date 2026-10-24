@@ -42,7 +42,12 @@ use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand, VarId};
 #[inline]
 fn callee_matches(taught: &str, written: &str) -> bool {
     if !taught.contains('.') && !taught.contains("::") {
-        return super::last_segment(written) == taught;
+        let seg = super::last_segment(written);
+        // A decorated mirror of the taught operation: a `extractAllTo`
+        // trigger also governs `extractAllToAsync`, the same call in its
+        // promise form.
+        return seg == taught
+            || crate::analysis::taint::facts::mirror_call_base(seg) == Some(taught);
     }
     let norm = |s: &str| -> String { s.replace("::", ".") };
     let t = norm(taught);

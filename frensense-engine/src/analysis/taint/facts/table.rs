@@ -357,7 +357,8 @@ impl FactTable {
         }
     }
 
-    /// Exact-then-`::`-suffix lookup over one signature source.
+    /// Exact, then `::`-suffix, then decorated-mirror lookup over one
+    /// signature source.
     fn lookup_sink_shape<'a>(
         lookup: &dyn Fn(&str) -> Option<&'a SinkSignature>,
         call: &str,
@@ -373,6 +374,11 @@ impl FactTable {
                     return Some(sig);
                 }
             }
+        }
+        // A decorated mirror of a taught operation (`extractAllToAsync` for
+        // `extractAllTo`) is the same API under a conventional suffix.
+        if let Some(base) = super::mirror_call_base(call) {
+            return lookup(base);
         }
         None
     }
