@@ -635,8 +635,20 @@ pub(crate) fn receiver_call_path(ir: &FunctionIR, recv: &Operand, method: &str) 
 
 /// Resolve an operand to a member path through its defining instructions.
 fn operand_member_path(ir: &FunctionIR, op: &Operand) -> String {
+    operand_member_path_at(ir, op, 0)
+}
+
+/// [`operand_member_path`] continuing an existing depth budget.
+///
+/// The budget must travel through EVERY edge of the walk. `Assign` used to
+/// call the entry point above, which restarts at depth 0, so a cycle of
+/// assignments (`v_a := v_b`, `v_b := v_a` - Python's `try`/`except` lowering
+/// emits these) recursed between `var_member_path` and
+/// `operand_member_path` forever and overflowed the stack instead of
+/// returning the empty path the depth guard promises.
+fn operand_member_path_at(ir: &FunctionIR, op: &Operand, depth: usize) -> String {
     match op {
-        Operand::Var(v) => var_member_path(ir, *v, 0),
+        Operand::Var(v) => var_member_path(ir, *v, depth),
         _ => String::new(),
     }
 }
@@ -651,7 +663,7 @@ fn var_member_path(ir: &FunctionIR, v: VarId, depth: usize) -> String {
         for instr in &b.instructions {
             match instr {
                 Instruction::Assign { dest, src } if *dest == v => {
-                    return operand_member_path(ir, src);
+                    return operand_member_path_at(ir, src, depth + 1);
                 }
                 Instruction::LoadField {
                     dest, base, field, ..

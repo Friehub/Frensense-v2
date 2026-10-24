@@ -1177,3 +1177,38 @@ def view_handler(request):
         assert_detected(&res, "probe_tp2", "query");
     }
 }
+
+// ============================================================================
+// Robustness regressions: scans that must terminate
+// ============================================================================
+
+mod robustness_regressions {
+    use super::*;
+
+    /// Python's `try`/`except` lowering inside a loop region can emit a cycle
+    /// of `Assign` instructions. The member-path walk used to restart its
+    /// depth budget on every `Assign`, so that cycle recursed without bound
+    /// and aborted the process with a stack overflow (reported on
+    /// healthchecks `hc/api/views.py`, 948 lines). The walk must terminate.
+    #[test]
+    fn assign_cycle_in_member_path_walk_terminates() {
+        let src = r#"
+def bounces(request):
+    try:
+        unsigned = unsign_bounce_id(to_local, max_age=3600 * 48)
+    except BadSignature:
+        return HttpResponse("OK (bad signature)")
+    for part in msg.walk():
+        if "Status" in part and "Action" in part:
+            if diagnostic.lower().startswith("smtp; "):
+                diagnostic = diagnostic[6:]
+        try:
+            n = Notification.objects.get(code=notification_code, created__gt=cutoff)
+        except Notification.DoesNotExist:
+            return HttpResponse("OK (notification not found)")
+"#;
+        // Reaching the assertion at all is the regression check: the run that
+        // aborts on stack overflow never returns from `scan_py`.
+        let _ = scan_py(src);
+    }
+}
