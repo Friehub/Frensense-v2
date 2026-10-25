@@ -303,17 +303,34 @@ fn extract_facts_with(
         };
         tier(&a.0).cmp(&tier(&b.0)).then_with(|| a.0.cmp(&b.0))
     });
-    // Sink candidates per voting family. A positive can taint several calls
-    // (the defect, then everything that consumes its result); the gate needs
-    // the sibling set to tell the upstream defect from a downstream echo.
-    let mut sink_candidates_by_family: std::collections::BTreeMap<
+    // Sink candidates that separate their voting family, per family. Two
+    // different shapes produce several tainted calls in one positive:
+    //
+    // * the defect followed by an echo of its result (Django `Trunc` then
+    //   `JsonResponse`): both separate, and the later one is not a sink;
+    // * a wrapper followed by the defect (unzipper `Open.buffer` then
+    //   `extract`): only the later one separates, so it is not an echo.
+    //
+    // Separation is what distinguishes them, so the echo test may only look
+    // at siblings that prove it themselves - a candidate that fails
+    // separation cannot explain another's taint.
+    let mut separating_sinks_by_family: std::collections::BTreeMap<
         String,
         std::collections::BTreeSet<String>,
     > = std::collections::BTreeMap::new();
     for (_, cand, _, fams) in &ordered_votes {
-        if let Candidate::Sink { call, .. } = cand {
-            for fam in fams {
-                sink_candidates_by_family
+        let Candidate::Sink { call, .. } = cand else {
+            continue;
+        };
+        for fam in fams {
+            let Some(p) = prepared.iter().find(|p| &p.id == fam) else {
+                continue;
+            };
+            let (f_config, f_builtin) = &fam_tables[&p.id];
+            let mut trial = f_builtin.clone();
+            apply_candidate(&mut trial, cand);
+            if p.separates(f_config, &trial) {
+                separating_sinks_by_family
                     .entry(fam.clone())
                     .or_default()
                     .insert(call.clone());
@@ -417,7 +434,7 @@ fn extract_facts_with(
                     // result it consumes. Publishing it teaches a sink that
                     // fires on any tainted value of that shape, so the family's
                     // knowledge must ride on the upstream call only.
-                    let echoed = match (&cand, sink_candidates_by_family.get(&p.id)) {
+                    let echoed = match (&cand, separating_sinks_by_family.get(&p.id)) {
                         (Candidate::Sink { call, .. }, Some(siblings)) => {
                             let mut echo_trial = f_builtin.clone();
                             apply_candidate(&mut echo_trial, &cand);
