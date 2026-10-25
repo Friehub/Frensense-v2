@@ -4,6 +4,45 @@
 
 use super::*;
 
+/// Resolve a `(package, call)` entry for a call site's import origin.
+///
+/// A corpus family declares the *package* it teaches (`lodash`, `django`,
+/// `@scope/pkg`), but an import names a path *into* that package:
+/// `require("lodash/template")`, `from django.db.models.functions import
+/// Trunc`, `github.com/mholt/archiver/v4`. Under exact-key matching the
+/// fact went inert on every subpath import of its own package - the
+/// Django family's own positive was silent through the CLI while the
+/// replay gate, which installs the candidate unscoped, accepted it.
+///
+/// Match the origin itself first, then each shorter root above it at a
+/// path boundary. Only a root that is actually a key can match, so a
+/// partial segment (`@scope` from `@scope/pkg`) never arms anything, and
+/// a fact proven for `pkg/sub` still never arms the whole of `pkg` - the
+/// walk only ever widens a call site's origin, never a fact's scope.
+fn scoped_lookup<'a, V>(
+    map: &'a rustc_hash::FxHashMap<(String, String), V>,
+    origin: &str,
+    call: &str,
+) -> Option<&'a V> {
+    let mut end = origin.len();
+    loop {
+        let root = &origin[..end];
+        if let Some(v) = map.get(&(root.to_string(), call.to_string())) {
+            return Some(v);
+        }
+        match origin[..end].rfind(['/', '.']) {
+            Some(i) if i > 0 => {
+                // `@scope` alone is not a package; its name follows the slash.
+                if root.starts_with('@') && !root[1..].contains('/') {
+                    return None;
+                }
+                end = i;
+            }
+            _ => return None,
+        }
+    }
+}
+
 impl FactTable {
     /// Session-accessor check over the receiver's full access path.
     /// Session stores are usually namespaced (`security.authenticatedUsers`),
@@ -99,18 +138,13 @@ impl FactTable {
         language: Option<&str>,
     ) -> Option<&SinkSignature> {
         if let Some(pkg) = origin_package {
-            if let Some(sig) = self
-                .scoped_sink_signatures
-                .get(&(pkg.to_string(), call.to_string()))
-            {
+            if let Some(sig) = scoped_lookup(&self.scoped_sink_signatures, pkg, call) {
                 return Some(sig);
             }
             // Decorated sibling of a taught operation (`extractAllToAsync`
             // for `extractAllTo`) is the same sink under the same package.
             if let Some(base) = super::mirror_call_base(call)
-                && let Some(sig) = self
-                    .scoped_sink_signatures
-                    .get(&(pkg.to_string(), base.to_string()))
+                && let Some(sig) = scoped_lookup(&self.scoped_sink_signatures, pkg, base)
             {
                 return Some(sig);
             }
@@ -148,9 +182,7 @@ impl FactTable {
         language: Option<&str>,
     ) -> Option<crate::analysis::taint::role::SinkRole> {
         if let Some(pkg) = origin_package
-            && let Some(sig) = self
-                .scoped_sink_signatures
-                .get(&(pkg.to_string(), last.to_string()))
+            && let Some(sig) = scoped_lookup(&self.scoped_sink_signatures, pkg, last)
         {
             return Some(sig.role);
         }
@@ -174,9 +206,7 @@ impl FactTable {
         language: Option<&str>,
     ) -> Option<String> {
         if let Some(pkg) = origin_package
-            && let Some(sig) = self
-                .scoped_sink_signatures
-                .get(&(pkg.to_string(), last.to_string()))
+            && let Some(sig) = scoped_lookup(&self.scoped_sink_signatures, pkg, last)
             && let Some(label) = sig.label.clone()
         {
             return Some(label);
@@ -215,10 +245,7 @@ impl FactTable {
         origin_package: Option<&str>,
     ) -> Option<&SanitizerFact> {
         if let Some(pkg) = origin_package {
-            if let Some(f) = self
-                .scoped_sanitizer_facts
-                .get(&(pkg.to_string(), call.to_string()))
-            {
+            if let Some(f) = scoped_lookup(&self.scoped_sanitizer_facts, pkg, call) {
                 return Some(f);
             }
             let is_package_scoped = self.scoped_sanitizer_facts.keys().any(|(_, c)| c == call);
