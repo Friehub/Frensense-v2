@@ -185,17 +185,115 @@ fn phi_infeasible_incoming(
 }
 
 impl<'a> BackwardTaintEngine<'a> {
-    /// Package of the factory call that produced the receiver var, when
-    /// `armed` accepts the resolved package.
+    /// Package an imported symbol name resolves to, when `armed` accepts it.
+    /// The first dotted segment is the binding: `unzipper.Open` is written on
+    /// the `unzipper` binding.
+    fn imported_symbol_package(
+        &self,
+        symbol: &str,
+        file: &str,
+        armed: &impl Fn(&str) -> bool,
+    ) -> Option<String> {
+        let root = symbol.split('.').next().unwrap_or(symbol);
+        let pkg = self
+            .file_package_imports
+            .get(file)?
+            .get(root)?
+            .package
+            .clone();
+        armed(&pkg).then_some(pkg)
+    }
+
+    /// Package a variable's provenance traces back to, when `armed` accepts
+    /// it.
+    ///
+    /// [`FactTable::receiver_root`] answers "what is this expression *written*
+    /// as", which is enough only when the call is written on the import
+    /// itself (`unzipper.extract(..)`). Real code unwraps or aliases first:
+    ///
+    /// ```text
+    /// const directory = await unzipper.Open.buffer(buf);  // chained call
+    /// const zip = unzipper;                               // plain alias
+    /// await directory.extract(path);
+    /// ```
+    ///
+    /// There the binding's own name (`directory`, `zip`) is no import, so the
+    /// root lookup misses and every package-scoped sink fact goes inert - the
+    /// false negative that made corpus-taught sinks undeliverable outside the
+    /// replay gate. Walk the producer chain instead (member load -> base, call
+    /// result -> its receiver, alias -> source) and accept the first name the
+    /// file's import table resolves to an armed package. A local helper
+    /// (`const d = getDirectory(..)`) still has no origin, so unrelated code
+    /// keeps matching only universal facts.
+    fn var_package_origin(
+        &self,
+        ir: &crate::ir::function::FunctionIR,
+        var: VarId,
+        file: &str,
+        depth: u8,
+        armed: &impl Fn(&str) -> bool,
+    ) -> Option<String> {
+        if let Some(name) = ir
+            .var_metadata
+            .get(&var)
+            .and_then(|m| m.source_name.clone())
+            && let Some(pkg) = self.imported_symbol_package(&name, file, armed)
+        {
+            return Some(pkg);
+        }
+        if depth == 0 {
+            return None;
+        }
+        if let Some((base, _)) = ir.loadfield_def(var) {
+            return self.var_package_origin(ir, base, file, depth - 1, armed);
+        }
+        if let Some(recv) = ir.call_receiver_def(var) {
+            return self.var_package_origin(ir, recv, file, depth - 1, armed);
+        }
+        // Constructor / factory producer: `const zip = new AdmZip(buf)` -
+        // the callee's symbol is what the import table can name.
+        for b in ir.blocks.values() {
+            for instr in &b.instructions {
+                if let Instruction::CallStatic {
+                    dest: Some(dest),
+                    func,
+                    ..
+                } = instr
+                    && *dest == var
+                {
+                    let last = func.rsplit('.').next().unwrap_or(func);
+                    if let Some(pkg) = self.imported_symbol_package(last, file, armed) {
+                        return Some(pkg);
+                    }
+                }
+            }
+        }
+        for b in ir.blocks.values() {
+            for instr in &b.instructions {
+                if let Instruction::Assign {
+                    dest,
+                    src: Operand::Var(src),
+                } = instr
+                    && *dest == var
+                {
+                    return self.var_package_origin(ir, *src, file, depth - 1, armed);
+                }
+            }
+        }
+        None
+    }
+
+    /// Package of the call that produced the receiver var, when `armed`
+    /// accepts the resolved package.
     ///
     /// Covers the singleton client shape `const prisma = new PrismaClient()`
     /// (or any `... = PrismaClient(...)` / `.create()` / `.extend()` call):
-    /// the receiver itself is not an import alias, but its defining call
-    /// names a symbol resolved through the file's import table, so the
-    /// package origin arms (`@prisma/client`). The caller decides which
-    /// packages are worth arming for — sink origins arm on scoped sink
-    /// packages, sanitizer origins on scoped sanitizer packages — no-op
-    /// for unrelated packages, mirroring the receiver-root fallback.
+    /// the receiver itself is not an import alias, but its defining call names
+    /// a symbol resolved through the file's import table, so the package
+    /// origin arms (`@prisma/client`). The caller decides which packages are
+    /// worth arming for - sink origins arm on scoped sink packages, sanitizer
+    /// origins on scoped sanitizer packages - no-op for unrelated packages,
+    /// mirroring the receiver-root fallback.
     fn factory_call_package_for(
         &self,
         ir: &crate::ir::function::FunctionIR,
@@ -203,90 +301,71 @@ impl<'a> BackwardTaintEngine<'a> {
         file: &str,
         armed: impl Fn(&str) -> bool,
     ) -> Option<String> {
-        let imports = self.file_package_imports.get(file)?;
-        // The defining call's symbol name to look up in the import table.
-        let mut candidate: Option<String> = None;
-        for b in ir.blocks.values() {
-            for instr in &b.instructions {
-                match instr {
-                    Instruction::CallStatic {
-                        dest: Some(d),
-                        func,
-                        ..
-                    } if *d == recv => {
-                        // `new PrismaClient()` / `PrismaClient()` — match by
-                        // the callee's last segment (`PrismaClient`).
-                        let last = func.rsplit('.').next().unwrap_or(func);
-                        candidate.get_or_insert_with(|| last.to_string());
-                    }
-                    Instruction::CallVirtual {
-                        dest: Some(d),
-                        method,
-                        receiver: Operand::Var(cr),
-                        ..
-                    } if *d == recv && (method == "create" || method == "extend") => {
-                        // Factory wrappers: `Api.create()` / `axios.extend()` —
-                        // the producing symbol is the factory receiver's root.
-                        if let Some(root) = FactTable::receiver_root(ir, *cr) {
-                            candidate.get_or_insert(root);
-                        }
-                    }
-                    _ => {}
-                }
-            }
+        if let Some(pkg) = self.var_package_origin(ir, recv, file, 4, &armed) {
+            return Some(pkg);
         }
         // Module-scope def: `const prisma = new PrismaClient()` at file top
         // level lowers into a pseudo-function named after the binding, so
         // the receiver in a consuming function has no def in its own IR.
         // Locate the same-file pseudo-function by the receiver's source
-        // name and take its defining factory callee.
-        if candidate.is_none() {
-            let root = ir
-                .var_metadata
-                .get(&recv)
-                .and_then(|m| m.source_name.clone());
-            if let Some(root) = root {
-                for f in &self.prog.functions {
-                    if (f.name == root
-                        || f.name
-                            .strip_suffix(root.as_str())
-                            .is_some_and(|p| p.ends_with(':')))
-                        && self.fn_file.get(&f.name).map(|s| s.as_str()) == Some(file)
-                    {
-                        for b in f.ir.blocks.values() {
-                            for instr in &b.instructions {
-                                match instr {
-                                    Instruction::CallStatic { func, .. } => {
-                                        let last = func.rsplit('.').next().unwrap_or(func);
-                                        candidate.get_or_insert_with(|| last.to_string());
-                                    }
-                                    // Factory wrappers at module scope too:
-                                    // `const client = axios.create(...)`
-                                    // lowers as CallVirtual, and the module-
-                                    // scope path only matched CallStatic,
-                                    // losing the factory origin (mre01).
-                                    Instruction::CallVirtual {
-                                        method,
-                                        receiver: Operand::Var(cr),
-                                        ..
-                                    } if method == "create" || method == "extend" => {
-                                        if let Some(root) = FactTable::receiver_root(f.ir, *cr) {
-                                            candidate.get_or_insert(root);
-                                        }
-                                    }
-                                    _ => {}
+        // name and resolve the initializer inside it.
+        let root = ir
+            .var_metadata
+            .get(&recv)
+            .and_then(|m| m.source_name.clone())?;
+        for f in &self.prog.functions {
+            if (f.name == root
+                || f.name
+                    .strip_suffix(root.as_str())
+                    .is_some_and(|p| p.ends_with(':')))
+                && self.fn_file.get(&f.name).map(|s| s.as_str()) == Some(file)
+            {
+                for b in f.ir.blocks.values() {
+                    for instr in &b.instructions {
+                        match instr {
+                            Instruction::CallStatic { func, .. } => {
+                                let last = func.rsplit('.').next().unwrap_or(func);
+                                if let Some(pkg) = self.imported_symbol_package(last, file, &armed)
+                                {
+                                    return Some(pkg);
                                 }
                             }
+                            // Factory wrappers and namespace member calls at
+                            // module scope: `const client = axios.create(..)`
+                            // and `const dir = unzipper.Open.buffer(..)` both
+                            // lower as CallVirtual, and the module-scope path
+                            // only matched CallStatic, losing the origin
+                            // (mre01).
+                            Instruction::CallVirtual {
+                                receiver: Operand::Var(cr),
+                                ..
+                            } => {
+                                if let Some(pkg) =
+                                    self.var_package_origin(f.ir, *cr, file, 4, &armed)
+                                {
+                                    return Some(pkg);
+                                }
+                            }
+                            // Module-level alias: `const zip = unzipper;`
+                            // lowers to an Assign in the binding's own
+                            // pseudo-function, so follow the source.
+                            Instruction::Assign {
+                                src: Operand::Var(src),
+                                ..
+                            } => {
+                                if let Some(pkg) =
+                                    self.var_package_origin(f.ir, *src, file, 4, &armed)
+                                {
+                                    return Some(pkg);
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
             }
         }
-        let name = candidate?;
-        let pkg = imports.get(&name)?.package.clone();
-        // Arm only for packages the caller's fact scope cares about
-        // (same bar the receiver-root fallback applies).
-        armed(&pkg).then_some(pkg)
+        None
     }
 
     /// Package of the factory call that produced the receiver var, when a

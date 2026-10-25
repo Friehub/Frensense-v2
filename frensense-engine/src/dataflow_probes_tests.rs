@@ -1212,3 +1212,156 @@ def bounces(request):
         let _ = scan_py(src);
     }
 }
+
+// ============================================================================
+// Receiver origin probes: a package-scoped fact must survive the shapes real
+// code uses to reach the call, not just `pkg.method(..)` written on the import.
+// ============================================================================
+mod receiver_origin_probes {
+    use super::*;
+    use crate::analysis::taint::config::TaintConfig;
+    use crate::analysis::taint::facts::{FactTable, LearnedFactEntry};
+
+    /// Production tables plus one package-scoped sink fact.
+    fn scoped(package: &str, call: &str) -> (TaintConfig, FactTable) {
+        let (config, mut facts) = seeded_tables_all();
+        LearnedFactEntry::Sink {
+            call: call.into(),
+            package: Some(package.into()),
+            dangerous_args: Default::default(),
+            binding_args_safe: false,
+        }
+        .apply(&mut facts);
+        (config, facts)
+    }
+
+    fn scan_js_with(src: &str, (config, facts): &(TaintConfig, FactTable)) -> ScanResult {
+        let files = vec![(
+            "app/probe.js".to_string(),
+            src.to_string(),
+            "js".to_string(),
+        )];
+        scan(&files, config, facts)
+    }
+
+    fn reaches(res: &ScanResult, sink: &str) -> bool {
+        res.located
+            .iter()
+            .any(|l| l.finding.sink == sink && l.finding.verdict == BackwardVerdict::Vulnerable)
+    }
+
+    #[test]
+    fn call_written_on_the_import_arms() {
+        let src = r#"
+            const unzipper = require("unzipper");
+            exports.h = function (req, res) {
+                unzipper.extract(req.body.dest, req.body.data);
+                res.send("ok");
+            };
+        "#;
+        assert!(reaches(
+            &scan_js_with(src, &scoped("unzipper", "extract")),
+            "extract"
+        ));
+    }
+
+    #[test]
+    fn receiver_unwrapped_from_a_namespace_member_arms() {
+        // `directory` is not an import, and the producing call is a member of
+        // one: provenance has to walk back through the call's receiver.
+        let src = r#"
+            const unzipper = require("unzipper");
+            exports.h = async function (req, res) {
+                const directory = await unzipper.Open.buffer(req.body.data);
+                await directory.extract(req.body.dest);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped("unzipper", "extract")),
+                "extract"
+            ),
+            "a namespace member call must carry the package origin to its result"
+        );
+    }
+
+    #[test]
+    fn local_alias_of_the_import_arms() {
+        let src = r#"
+            const unzipper = require("unzipper");
+            exports.h = function (req, res) {
+                const zip = unzipper;
+                zip.extract(req.body.dest, req.body.data);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped("unzipper", "extract")),
+                "extract"
+            ),
+            "an alias of the imported namespace is the same origin"
+        );
+    }
+
+    #[test]
+    fn constructor_result_keeps_the_package_origin() {
+        // The receiver slot is clean here (the tainted value is an argument),
+        // so this isolates origin resolution from receiver-taint propagation.
+        let src = r#"
+            const AdmZip = require("adm-zip");
+            exports.h = function (req, res) {
+                const zip = new AdmZip(req.files.importFile.data);
+                zip.extractAllTo(req.body.dest, true);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped("adm-zip", "extractAllTo")),
+                "extractAllTo"
+            ),
+            "`new Package(...)` is the package origin's canonical shape"
+        );
+    }
+
+    #[test]
+    fn an_unrelated_local_producer_does_not_arm() {
+        let src = r#"
+            const unzipper = require("unzipper");
+            function openLocal(data) { return data; }
+            exports.h = function (req, res) {
+                const directory = openLocal(req.body.data);
+                directory.extract(req.body.dest);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            !reaches(
+                &scan_js_with(src, &scoped("unzipper", "extract")),
+                "extract"
+            ),
+            "a local helper has no package origin; the scoped fact must stay inert"
+        );
+    }
+
+    #[test]
+    fn another_packages_result_does_not_arm() {
+        let src = r#"
+            const otherzip = require("other-zip");
+            exports.h = function (req, res) {
+                const directory = otherzip.open(req.body.data);
+                directory.extract(req.body.dest);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            !reaches(
+                &scan_js_with(src, &scoped("unzipper", "extract")),
+                "extract"
+            ),
+            "provenance is a package identity, not a call shape"
+        );
+    }
+}
