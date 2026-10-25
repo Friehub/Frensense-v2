@@ -1222,3 +1222,82 @@ mod scoped_sink_candidate_install_tests {
         );
     }
 }
+
+/// Sink minimality: a positive can taint the defect AND every call that
+/// consumes its result. Both separate the pair (the negative validated the
+/// value upstream, so the echo is silent there too), so separation alone
+/// publishes a response writer / logger as a sink - the
+/// `JsonResponse`/`annotate`/`list` junk the CVE review found. The captured
+/// path names the upstream call, so the echo is rejected and the upstream
+/// candidate carries the family.
+mod downstream_echo_tests {
+    use super::*;
+
+    fn builtin() -> (TaintConfig, FactTable) {
+        let all_extensions: Vec<&str> = frensense_lang::all_specs()
+            .flat_map(|s| s.extensions().iter().copied())
+            .collect();
+        tables_from_exts_with_pack(
+            all_extensions,
+            crate::format::default_pack().learned_facts.as_slice(),
+        )
+    }
+
+    fn write(dir: &TempDir, name: &str, body: &str) {
+        fs::write(dir.path().join(name), body).unwrap();
+    }
+
+    #[test]
+    fn echo_sink_is_rejected_and_the_upstream_candidate_publishes() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "echo_positive.py",
+            concat!(
+                "# [frensense]\n",
+                "# cwe: CWE-89\n",
+                "def handle(request):\n",
+                "    document = request.GET.get(\"doc\")\n",
+                "    rows = fetch_document(document)\n",
+                "    render_html(rows)\n",
+            ),
+        );
+        write(
+            &dir,
+            "echo_negative.py",
+            concat!(
+                "def handle(request):\n",
+                "    document = \"curated-report\"\n",
+                "    rows = fetch_document(document)\n",
+                "    render_html(rows)\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families.len(), 1, "one family expected");
+
+        let (learned, published) = extract_facts_with_tables(&families, &config, &table);
+        let taught_sink = |call: &str| {
+            published.iter().any(|f| {
+                matches!(&f.entry, LearnedFactEntry::Sink { call: c, .. } if c == call)
+                    || matches!(&f.entry, LearnedFactEntry::LanguageSinkSlots { call: c, .. } if c == call)
+            })
+        };
+        assert!(
+            taught_sink("fetch_document"),
+            "the upstream tainted call is the defect: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+        assert!(
+            !taught_sink("render_html"),
+            "a call that only echoes `fetch_document`'s result must not become a sink: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+        let prep = gate::PreparedFamily::new(&families[0], &table).unwrap();
+        assert!(
+            prep.separates(&config, &learned),
+            "the family must still separate under the surviving facts"
+        );
+    }
+}

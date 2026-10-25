@@ -303,6 +303,23 @@ fn extract_facts_with(
         };
         tier(&a.0).cmp(&tier(&b.0)).then_with(|| a.0.cmp(&b.0))
     });
+    // Sink candidates per voting family. A positive can taint several calls
+    // (the defect, then everything that consumes its result); the gate needs
+    // the sibling set to tell the upstream defect from a downstream echo.
+    let mut sink_candidates_by_family: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeSet<String>,
+    > = std::collections::BTreeMap::new();
+    for (_, cand, _, fams) in &ordered_votes {
+        if let Candidate::Sink { call, .. } = cand {
+            for fam in fams {
+                sink_candidates_by_family
+                    .entry(fam.clone())
+                    .or_default()
+                    .insert(call.clone());
+            }
+        }
+    }
     // Candidates already published in this pass (gate context for
     // regression baselines; see the non-voter regression check below).
     let mut published_cands: Vec<Candidate> = Vec::new();
@@ -396,6 +413,26 @@ fn extract_facts_with(
             };
             if voted {
                 if sep {
+                    // A downstream echo separates exactly like the defect whose
+                    // result it consumes. Publishing it teaches a sink that
+                    // fires on any tainted value of that shape, so the family's
+                    // knowledge must ride on the upstream call only.
+                    let echoed = match (&cand, sink_candidates_by_family.get(&p.id)) {
+                        (Candidate::Sink { call, .. }, Some(siblings)) => {
+                            let mut echo_trial = f_builtin.clone();
+                            apply_candidate(&mut echo_trial, &cand);
+                            p.downstream_echo(f_config, &echo_trial, call, siblings)
+                                .map(|upstream| (call.clone(), upstream))
+                        }
+                        _ => None,
+                    };
+                    if let Some((call, upstream)) = echoed {
+                        reject = Some(format!(
+                            "downstream echo: `{call}` only receives a value `{upstream}` already \
+                             carries, so it re-names the same defect with a wider blast radius"
+                        ));
+                        break;
+                    }
                     any_voter_separates = true;
                 } else if first_failing_voter.is_none() {
                     // Remember which side still fails: "does not separate"

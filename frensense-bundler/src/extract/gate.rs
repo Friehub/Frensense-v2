@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::engine::{BackwardVerdict, FindingClass};
 use frensense_engine::analysis::taint::facts::FactTable;
+use frensense_engine::analysis::taint::path::PathStep;
 use frensense_engine::scan;
 use frensense_lang::rule_card::names_vulnerability_class;
 use frensense_lang::Severity;
@@ -142,6 +143,50 @@ impl PreparedFamily {
     pub fn separates(&self, config: &TaintConfig, facts: &FactTable) -> bool {
         let (pos_alerts, neg_alerts) = self.alert_flags(config, facts);
         pos_alerts && !neg_alerts
+    }
+
+    /// The candidate sink this call's tainted argument flows *through*, if
+    /// any.
+    ///
+    /// A positive can taint more than one call: the defect, and calls that
+    /// merely receive its result (the response writer that echoes a query's
+    /// rows, the logger that prints a deserialized document). Separation
+    /// cannot tell them apart - the negative validated the value upstream, so
+    /// every downstream echo is silent there too, and both candidates pass.
+    /// Learning the echo publishes a sink that fires on *any* tainted value of
+    /// that shape, which is exactly the false positive the corpus review found
+    /// (`JsonResponse`, `annotate`, `list` taught by the Django Trunc family).
+    ///
+    /// The captured source→sink path answers it directly: a call whose
+    /// argument path already names another candidate sink is downstream of it,
+    /// so the upstream candidate is the one carrying the family's knowledge.
+    pub fn downstream_echo(
+        &self,
+        config: &TaintConfig,
+        facts: &FactTable,
+        call: &str,
+        siblings: &BTreeSet<String>,
+    ) -> Option<String> {
+        if siblings.len() < 2 {
+            return None;
+        }
+        for f in &scan::scan_prepared(&self.pos, config, facts).findings {
+            if f.sink != call || f.verdict != BackwardVerdict::Vulnerable || f.alert.is_none() {
+                continue;
+            }
+            for step in &f.path.steps {
+                let callee = match step {
+                    PathStep::CallArgument { callee, .. } | PathStep::CallReturn { callee, .. } => {
+                        callee
+                    }
+                    _ => continue,
+                };
+                if callee != call && siblings.contains(callee) {
+                    return Some(callee.clone());
+                }
+            }
+        }
+        None
     }
 }
 
