@@ -1327,6 +1327,111 @@ mod receiver_origin_probes {
     }
 
     #[test]
+    fn constructor_arguments_taint_the_result() {
+        // The tainted value is only ever the constructor's ARGUMENT; the sink
+        // call's own arguments are literals, so the alert can only come from
+        // the result carrying the constructor's taint.
+        let src = r#"
+            const AdmZip = require("adm-zip");
+            exports.h = function (req, res) {
+                const zip = new AdmZip(req.files.importFile.data);
+                zip.extractAllTo("/var/data/imports", true);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped("adm-zip", "extractAllTo")),
+                "extractAllTo"
+            ),
+            "`new Package(taint)` hands the taint to everything the result reaches"
+        );
+    }
+
+    #[test]
+    fn constructor_with_a_clean_argument_stays_clean() {
+        let src = r#"
+            const AdmZip = require("adm-zip");
+            exports.h = function (req, res) {
+                const zip = new AdmZip(loadBundledArchive());
+                zip.extractAllTo("/var/data/imports", true);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            !reaches(
+                &scan_js_with(src, &scoped("adm-zip", "extractAllTo")),
+                "extractAllTo"
+            ),
+            "only a tainted constructor argument taints the result"
+        );
+    }
+
+    #[test]
+    fn decorated_sibling_is_a_taint_sink_not_just_a_policy_hit() {
+        // A held-out pair written against the `Async` sibling of the taught
+        // call: the policy checker already sees the mirror, the dataflow
+        // engine has to arm it too or the flow is reported as policy noise.
+        let src = r#"
+            const AdmZip = require("adm-zip");
+            exports.h = function (req, res) {
+                const zip = new AdmZip(req.files.importFile.data);
+                zip.extractAllToAsync("/var/data/imports", true, function (err) {
+                    res.send("ok");
+                });
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped("adm-zip", "extractAllTo")),
+                "extractAllToAsync"
+            ),
+            "a mirror sibling resolves to the same sink signature"
+        );
+    }
+
+    /// The shape a bundle actually publishes (a per-language slot fact)
+    /// installed the way the scanner installs it - through
+    /// [`apply_language_entries`], not `LearnedFactEntry::apply`, which
+    /// deliberately ignores language-keyed entries.
+    fn scoped_slots(language: &str, package: &str, call: &str) -> (TaintConfig, FactTable) {
+        let (mut config, mut facts) = seeded_tables_all();
+        let entries = vec![LearnedFactEntry::LanguageSinkSlots {
+            language: language.into(),
+            call: call.into(),
+            package: Some(package.into()),
+            dangerous_args: Default::default(),
+            binding_args_safe: false,
+        }];
+        crate::analysis::taint::facts::apply_language_entries(
+            &mut config,
+            &mut facts,
+            &entries,
+            &[language],
+        );
+        (config, facts)
+    }
+
+    #[test]
+    fn decorated_sibling_arms_a_language_slot_fact() {
+        let src = r#"
+            const AdmZip = require("adm-zip");
+            exports.h = function (req, res) {
+                const zip = new AdmZip(req.files.importFile.data);
+                zip.extractAllToAsync("/var/data/imports", true);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped_slots("javascript", "adm-zip", "extractAllTo")),
+                "extractAllToAsync"
+            ),
+            "the mirror must resolve for the entry type bundles publish"
+        );
+    }
+
+    #[test]
     fn an_unrelated_local_producer_does_not_arm() {
         let src = r#"
             const unzipper = require("unzipper");

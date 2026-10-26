@@ -384,6 +384,7 @@ fn lower_static(
     ctx.visit_node(value_node);
     let mut ir = SSABuilder::new(ctx.ir).build();
     ir.language = spec.name().to_string();
+    ir.is_static_data = true;
     ir
 }
 
