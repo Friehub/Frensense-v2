@@ -1247,6 +1247,18 @@ mod downstream_echo_tests {
         fs::write(dir.path().join(name), body).unwrap();
     }
 
+    /// The tables a consumer scans the shipped bundle under: the pack
+    /// baseline with the learned facts merged on top. `learned` alone is what
+    /// the bundle *contains*, not what the engine runs with - the pack's
+    /// propagation rules (`list` forwards its argument) are missing there, so
+    /// a defect sitting behind one reads as unresolvable and the gate looks
+    /// like it disagrees with the CLI.
+    fn as_scanned(table: &FactTable, learned: &FactTable) -> FactTable {
+        let mut merged = table.clone();
+        merged.merge(learned);
+        merged
+    }
+
     #[test]
     fn echo_sink_is_rejected_and_the_upstream_candidate_publishes() {
         let dir = TempDir::new().unwrap();
@@ -1296,8 +1308,71 @@ mod downstream_echo_tests {
         );
         let prep = gate::PreparedFamily::new(&families[0], &table).unwrap();
         assert!(
-            prep.separates(&config, &learned),
-            "the family must still separate under the surviving facts"
+            prep.separates(&config, &as_scanned(&table, &learned)),
+            "the family must still separate under the facts a consumer scans with"
+        );
+    }
+
+    #[test]
+    fn a_sibling_that_fails_separation_cannot_make_the_defect_look_like_an_echo() {
+        // The mirror image of the test above, and the shape real advisories
+        // write: a wrapper composes with untrusted input in both twins (the
+        // negative still feeds it user data, it just does not reach the
+        // defect), then the defect consumes the wrapper's result.
+        //
+        // The wrapper is proposed as a sink - it is tainted - but it fires on
+        // the negative too, so it separates nothing and cannot be the
+        // upstream of anything. Reading it as one suppressed the family's own
+        // sink and the bundle taught nothing.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "wrapper_positive.py",
+            concat!(
+                "# [frensense]\n",
+                "# cwe: CWE-89\n",
+                "def handle(request):\n",
+                "    raw = request.GET.get(\"doc\")\n",
+                "    rows = list(raw)\n",
+                "    persist_rows(rows)\n",
+            ),
+        );
+        write(
+            &dir,
+            "wrapper_negative.py",
+            concat!(
+                "def handle(request):\n",
+                "    raw = request.GET.get(\"doc\")\n",
+                "    list(raw)\n",
+                "    persist_rows(\"curated-report\")\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families.len(), 1, "one family expected");
+
+        let (learned, published) = extract_facts_with_tables(&families, &config, &table);
+        let taught_sink = |call: &str| {
+            published.iter().any(|f| {
+                matches!(&f.entry, LearnedFactEntry::Sink { call: c, .. } if c == call)
+                    || matches!(&f.entry, LearnedFactEntry::LanguageSinkSlots { call: c, .. } if c == call)
+            })
+        };
+        assert!(
+            taught_sink("persist_rows"),
+            "the call the negative never taints is the defect: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+        assert!(
+            !taught_sink("list"),
+            "a wrapper that is tainted in the negative too explains nothing: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+        let prep = gate::PreparedFamily::new(&families[0], &table).unwrap();
+        assert!(
+            prep.separates(&config, &as_scanned(&table, &learned)),
+            "the family must separate under the facts a consumer scans with"
         );
     }
 }
