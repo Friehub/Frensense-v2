@@ -381,7 +381,34 @@ fn lower_static(
     facts: Option<&FactTable>,
 ) -> FunctionIR {
     let mut ctx = LoweringContext::new_with_facts(spec, source, name.to_string(), facts);
-    ctx.visit_node(value_node);
+    let init = ctx.visit_node(value_node);
+    // Module-level alias: `const zip = unzipper;`. An identifier has no call
+    // or literal to lower, so the visit yields only the aliased value and the
+    // pseudo-function came out empty - invisible to receiver-origin
+    // resolution, because the consuming function's IR has no def for the
+    // module-level name to walk. Record the binding as an assignment, the
+    // module-level twin of the `Assign` the declaration path emits inside a
+    // function body.
+    if value_node.kind() == "identifier"
+        && let Some(Operand::Var(src)) = init
+    {
+        let dest = ctx.ir.new_var(VarMetadata {
+            source_name: Some(name.to_string()),
+            type_name: None,
+            byte_range: Some((value_node.start_byte(), value_node.end_byte())),
+            is_memory_state: false,
+            object_keys: Vec::new(),
+            declared: true,
+        });
+        let block = ctx.current_block;
+        ctx.ir.push_instruction(
+            block,
+            Instruction::Assign {
+                dest,
+                src: Operand::Var(src),
+            },
+        );
+    }
     let mut ir = SSABuilder::new(ctx.ir).build();
     ir.language = spec.name().to_string();
     ir.is_static_data = true;

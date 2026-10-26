@@ -1327,6 +1327,29 @@ mod receiver_origin_probes {
     }
 
     #[test]
+    fn module_level_alias_of_the_import_arms() {
+        // `const zip = unzipper;` at file scope lowers into the binding's own
+        // pseudo-function. Without an assignment recorded there the origin
+        // walk has no producer edge to follow and the scoped fact stays inert
+        // for the whole module.
+        let src = r#"
+            const unzipper = require("unzipper");
+            const zip = unzipper;
+            exports.h = function (req, res) {
+                zip.extract(req.body.dest, req.body.data);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped("unzipper", "extract")),
+                "extract"
+            ),
+            "a module-level alias of the import is the same origin"
+        );
+    }
+
+    #[test]
     fn constructor_arguments_taint_the_result() {
         // The tainted value is only ever the constructor's ARGUMENT; the sink
         // call's own arguments are literals, so the alert can only come from
