@@ -438,6 +438,21 @@ fn requirement_holds(
                 None => true,
             }
         }
+        PolicyRequirement::BannedNamedArgLiteral { name, values } => {
+            let Some(idx) = arg_names.iter().position(|n| n.eq_ignore_ascii_case(name)) else {
+                // The caller never set the flag: absent is NOT a violation.
+                return true;
+            };
+            match args
+                .get(idx)
+                .and_then(|a| extract_literal_string(a, ir, val_info))
+            {
+                // A provable literal must NOT match any of the banned values.
+                Some(s) => !values.iter().any(|v| v.eq_ignore_ascii_case(&s)),
+                // Unresolvable value: literal-only proof, conservative.
+                None => true,
+            }
+        }
     }
 }
 

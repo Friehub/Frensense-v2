@@ -234,6 +234,13 @@ pub enum PolicyRequirement {
     /// Appended last: bincode encodes the variant index first, so existing
     /// wire bytes keep decoding with their original indices.
     RequireNamedArgLiteral { name: String, values: Vec<String> },
+    /// When `name` is present as a named argument, its value must NOT match
+    /// any of `values` (case-insensitive literal comparison).
+    ///
+    /// Distinct from [`Self::RequireNamedArgLiteral`]: absent name is NOT a
+    /// violation (allows framework defaults / benign calls to omit the flag
+    /// without false positives).
+    BannedNamedArgLiteral { name: String, values: Vec<String> },
 }
 
 impl PolicyRequirement {
@@ -250,7 +257,8 @@ impl PolicyRequirement {
             | PolicyRequirement::BannedArgLiteral { .. }
             | PolicyRequirement::RequiredArgLiteral { .. }
             | PolicyRequirement::RequireArgKey { .. }
-            | PolicyRequirement::RequireNamedArgLiteral { .. } => Vec::new(),
+            | PolicyRequirement::RequireNamedArgLiteral { .. }
+            | PolicyRequirement::BannedNamedArgLiteral { .. } => Vec::new(),
         }
     }
 }

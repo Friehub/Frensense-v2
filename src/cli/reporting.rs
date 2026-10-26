@@ -590,6 +590,9 @@ fn describe_requirement(
         R::RequireNamedArgLiteral { name, values } => {
             format!("named argument `{name}` is one of {}", quoted(values))
         }
+        R::BannedNamedArgLiteral { name, values } => {
+            format!("named argument `{name}` is not one of {}", quoted(values))
+        }
     }
 }
 
