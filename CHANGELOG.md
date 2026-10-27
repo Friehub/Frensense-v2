@@ -188,6 +188,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+#### Analysis Termination & Memory
+- **The points-to fixed point terminates on real code.** `SvfgBuilder` ran
+  `while changed { … }` inside `PointsToAnalysis::analyze_inner` with no
+  iteration cap, and on real repositories it never converged: a temporary pass
+  counter printed `passes=200000 pts=315 fields=4` - the iteration count kept
+  doubling while both set sizes stayed frozen, so nothing was being added any
+  more. The only non-monotone rule in the loop was the **strong update**: a
+  non-variable `StoreField`/`StoreElement` did `set.clear(); changed = true;`
+  while other instructions merged the same `(loc, field)` back in - a
+  clear-then-merge cycle that can never reach "no change". Field writes are now
+  weak (union-only, monotone) for a may-analysis, and the loop carries a hard
+  pass budget (`MAX_PASSES`) with a conservative fallback: on expiry the
+  analysis stops refining and reports non-convergence instead of looping.
+  `PointsToAnalysis::converged()` exposes the outcome to callers and
+  `FRENSdbg_PTS=1` prints per-pass `{pass, killed, pts, fields}` traces. The
+  three files that hung forever (`libpng/contrib/libtests/pngstest.c`,
+  `nextjs/packages/next/src/shared/lib/dynamic.tsx`, `redis/src/server.c`) now
+  converge in ≤ 5 passes, and libpng scans end-to-end in **17.6 s / 63
+  findings** where it previously never returned.
+- **SSA dominance was cubic; it is linear now.** The sequential-if-chain blowup
+  (`repros/n10_perf/gen.py N`: N=100 → 0.13 s, N=400 → 6.8 s, N=3000 never
+  finished) was not in taint analysis at all: phase taps showed
+  `SSABuilder::build()` alone going 184 ms → 1507 ms → 12 044 ms, 8× per
+  doubling, while parse+walk stayed in milliseconds. Two defects in
+  `frensense-engine/src/ir/ssa.rs`: `compute_immediate_dominators` recomputed
+  full dominator *sets* with a naive fixpoint iterated in random hash order
+  (O(B³)), and the idom search then rescanned its candidates linearly (O(B²)
+  per pass). Rewritten with the Cooper–Harvey–Kennedy iterative algorithm
+  (reverse post-order, intersect on the dominator tree): **12 044 ms → 3.4 ms
+  at N=400**, and `gen.py 3000` completes in 35.9 s / exit 0.
+- **A per-function work budget reports degraded analysis instead of hanging or
+  silently weakening it.** SSA construction is bounded by
+  `DEFAULT_SSA_BUDGET` (5 000 000 units). On expiry the function falls back to
+  its raw flow-insensitive IR, its phi placement is undone, and
+  `FunctionIR::analysis_incomplete` is set. That is surfaced end-to-end rather
+  than swallowed: the `--json` report gains an `analysis_incomplete` array
+  naming each degraded function and its file, and the CLI warns about them on
+  stderr. No function is ever dropped or silently scanned with a weaker
+  result.
+- **Taint-path reconstruction no longer clones a whole `FunctionIR` per
+  step - this is what made real C repositories run out of memory.**
+  `reconstruct_path` pushed `self.prog.functions[cf].ir.clone()` into the chain
+  for every hop, so one deep walk across the program graph retained a full
+  function IR (blocks, var metadata, string tables) per path step. On
+  `redis/src` a single `fopen` walk from `cliLoadPreferences` allocated
+  **1.47 GiB** in that reconstruction, and the whole-directory scan aborted at
+  5.65 GiB after 215 s - every individual file in the same tree scanned in
+  ≤ 4 s and ≤ 50 MB, so only the multi-file path was affected. The chain now
+  borrows the IR and reads only the byte span it needs, which takes that same
+  site from 1.47 GiB to 22 MB. Measured after the fix: the 96-file subset that
+  aborted at 5.1 GiB / 182 s now runs in **42 s / 845 MB**, `redis/src` (229
+  files) in **126 s / 2.68 GB**, and the whole `redis` checkout in **350 s /
+  2.64 GB with 64 advisories** - all exit 0.
+- **`FRENSdbg_MEM`: memory attribution from inside the process.** A new
+  debug flag (off by default, installed like the other `FRENSdbg_*` flags) dumps
+  RSS plus graph sizes at every phase boundary - lowering → SVFG → callgraph →
+  bindings → summaries → cross edges → checks → taint - and then per-function
+  and per-sink-site deltas inside the backward walk, with visited-state,
+  reached-function, context and interned-chain counts per walk. `perf`,
+  `valgrind` and `gdb` attachment are all unavailable in a restricted-ptrace
+  environment, so the scanner now reports its own allocation behaviour; this
+  is how the path-reconstruction clone above was found.
+
 #### Language Facts
 - **Cross-language sink contamination removed**: the Python, Go, C, and Rust
   vocab tables carried large copy-pasted blocks of foreign APIs (JS DOM sinks

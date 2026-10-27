@@ -36,6 +36,7 @@ pub fn scan(
             located_checker: Vec::new(),
             checker: Vec::new(),
             errors: vec![e],
+            analysis_incomplete: Vec::new(),
         },
     }
 }
@@ -189,6 +190,16 @@ pub fn scan_prepared(
     let statics = prepared.ir_views();
     let statics = &statics;
 
+    let mem_probe = crate::debug_flags::DebugFlags::get().mem;
+    if mem_probe {
+        eprintln!(
+            "[mem] after_lower files={} irs={} rss_kb={}",
+            prepared.files().len(),
+            prepared.irs.len(),
+            crate::debug_flags::rss_kb()
+        );
+    }
+
     // The program graph is built first: non-dataflow checks that walk
     // interprocedural value flow (UAF free/use pairs) reuse it, and the
     // taint engine below gets the same instance.
@@ -199,6 +210,13 @@ pub fn scan_prepared(
         Some(&prepared.file_aliases),
         Some(&prepared.fn_file),
     );
+    if mem_probe {
+        eprintln!(
+            "[mem] after_svfg fns={} rss_kb={}",
+            prog.functions.len(),
+            crate::debug_flags::rss_kb()
+        );
+    }
 
     // Non-dataflow policy checks run on the same lowered IR, no taint
     // needed, so weak-crypto/config bugs surface even with zero taint paths.
@@ -215,6 +233,13 @@ pub fn scan_prepared(
         Some(&prog),
         Some(&pkg_scope),
     );
+    if mem_probe {
+        eprintln!(
+            "[mem] after_checks findings={} rss_kb={}",
+            checker_findings.len(),
+            crate::debug_flags::rss_kb()
+        );
+    }
 
     let fn_file = &prepared.fn_file;
     let file_source = &prepared.file_source;
@@ -226,6 +251,13 @@ pub fn scan_prepared(
         // consult the same predicate the harness lowered the file with.
         .with_route_registration(crate::harness::is_route_registration);
     engine.run();
+    if mem_probe {
+        eprintln!(
+            "[mem] after_taint findings={} rss_kb={}",
+            engine.findings.len(),
+            crate::debug_flags::rss_kb()
+        );
+    }
 
     // Resolve each finding to a file + line/column from the sink's byte span.
     let located: Vec<LocatedFinding> = engine
@@ -287,13 +319,41 @@ pub fn scan_prepared(
         })
         .collect();
 
+    // Functions the per-function work budget pushed into the degraded
+    // (flow-insensitive) form during lowering: the report names them under
+    // `analysis_incomplete` rather than silently returning weaker results
+    // for them. Sorted so the JSON is stable across runs.
+    let mut analysis_incomplete: Vec<IncompleteFunction> = prepared
+        .irs
+        .iter()
+        .filter(|(_, ir)| ir.analysis_incomplete)
+        .map(|(name, _ir)| IncompleteFunction {
+            function: name.clone(),
+            file: prepared.fn_file.get(name).cloned().unwrap_or_default(),
+        })
+        .collect();
+    analysis_incomplete.sort_by(|a, b| (&a.file, &a.function).cmp(&(&b.file, &b.function)));
+
     ScanResult {
         findings: engine.findings,
         located,
         located_checker,
         checker: checker_findings,
         errors: Vec::new(),
+        analysis_incomplete,
     }
+}
+
+/// A function the per-function analysis budget forced into the degraded
+/// (flow-insensitive) form, and the file it came from. Reported as
+/// `analysis_incomplete` in the JSON report: the scan stays bounded and
+/// never silently hands back a weaker result for such a function.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncompleteFunction {
+    /// Function key as the scanner knows it (`handle`, `file::handler`).
+    pub function: String,
+    /// Path of the file the function was lowered from.
+    pub file: String,
 }
 
 /// The result of one scan: vulnerable findings + non-fatal errors.
@@ -312,6 +372,10 @@ pub struct ScanResult {
     /// over the API/constant choices in the lowered IR.
     pub checker: Vec<CheckerFinding>,
     pub errors: Vec<String>,
+    /// Functions analyzed in degraded form because their per-function work
+    /// budget expired (see [`IncompleteFunction`]). Empty for a scan in
+    /// which every function was analyzed fully.
+    pub analysis_incomplete: Vec<IncompleteFunction>,
 }
 
 /// A [`CheckerFinding`] pinned to its source location.

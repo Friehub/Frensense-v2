@@ -69,23 +69,40 @@ pub fn print_scan_summary(
 }
 
 /// The JSON report envelope: `schema_version` + `producer` identity block,
-/// then the finding payload.
+/// then the finding payload, plus `analysis_incomplete`: the functions whose
+/// per-function work budget expired and were therefore analyzed in degraded
+/// (flow-insensitive) form. Additive - consumers already ignoring unknown
+/// keys keep working - so the schema version is unchanged.
 ///
 /// Extracted so the shape is testable (and golden-assertable) without a
 /// filesystem. Bump [`crate::REPORT_SCHEMA_VERSION`] when a key here is
 /// renamed, removed, or changes type.
 #[must_use]
-pub fn json_report(advisories: &[Advisory]) -> serde_json::Value {
+pub fn json_report(
+    advisories: &[Advisory],
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
+) -> serde_json::Value {
     serde_json::json!({
         "schema_version": crate::REPORT_SCHEMA_VERSION,
         "producer": crate::identity::producer(),
         "clean": advisories.is_empty(),
         "advisory_count": advisories.len(),
+        "analysis_incomplete": incomplete
+            .iter()
+            .map(|f| serde_json::json!({
+                "function": f.function,
+                "file": f.file,
+            }))
+            .collect::<Vec<serde_json::Value>>(),
         "advisories": advisories,
     })
 }
 
 /// Print results in the requested format.
+///
+/// `incomplete` names the functions analyzed in degraded form because their
+/// per-function work budget expired; they are announced on stderr (never
+/// silently) and reported under `analysis_incomplete` in JSON.
 ///
 /// If `output_path` is provided, writes the formatted report to that destination
 /// and prints status summary to stdout.
@@ -94,14 +111,28 @@ pub fn json_report(advisories: &[Advisory]) -> serde_json::Value {
 /// Returns an error if serialization or file writing fails.
 pub fn print_results(
     advisories: &[Advisory],
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
     format: &str,
     input_path: &std::path::Path,
     duration: Option<std::time::Duration>,
     output_path: Option<&std::path::Path>,
 ) -> Result<()> {
+    if !incomplete.is_empty() {
+        eprintln!(
+            "Warning: {} function(s) exceeded the per-function analysis budget and were \
+             analyzed in degraded form (see `analysis_incomplete` in the JSON report):",
+            incomplete.len()
+        );
+        for f in incomplete.iter().take(20) {
+            eprintln!("  {} ({})", f.function, f.file);
+        }
+        if incomplete.len() > 20 {
+            eprintln!("  ... and {} more", incomplete.len() - 20);
+        }
+    }
     match format {
         "json" => {
-            let rendered = serde_json::to_string_pretty(&json_report(advisories))
+            let rendered = serde_json::to_string_pretty(&json_report(advisories, incomplete))
                 .map_err(|e| FrensenseError::Config(format!("JSON error: {e}")))?;
             if let Some(out) = output_path {
                 std::fs::write(out, rendered).map_err(|e| {
@@ -890,7 +921,7 @@ mod json_report_schema_tests {
 
     #[test]
     fn envelope_carries_schema_version_and_producer() {
-        let report = json_report(&[adv()]);
+        let report = json_report(&[adv()], &[]);
         assert_eq!(report["schema_version"], crate::REPORT_SCHEMA_VERSION);
         assert_eq!(report["clean"], false);
         assert_eq!(report["advisory_count"], 1);
@@ -907,7 +938,7 @@ mod json_report_schema_tests {
 
     #[test]
     fn clean_report_still_has_the_envelope() {
-        let report = json_report(&[]);
+        let report = json_report(&[], &[]);
         assert_eq!(report["clean"], true);
         assert_eq!(report["advisory_count"], 0);
         // The producer block is present even with no findings - a consumer

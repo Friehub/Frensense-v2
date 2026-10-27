@@ -613,6 +613,8 @@ impl<'a> BackwardTaintEngine<'a> {
     pub fn run(&mut self) {
         self.ensure_reverse_index();
 
+        let probe = crate::debug_flags::DebugFlags::get().mem;
+        let mut last_rss = crate::debug_flags::rss_kb();
         for fi in 0..self.prog.functions.len() {
             let ir = self.prog.functions[fi].ir;
             // Guard map per function (task 8.3): guards + dominators.
@@ -640,8 +642,39 @@ impl<'a> BackwardTaintEngine<'a> {
             for &block in &block_ids {
                 let bdata = &ir.blocks[&block];
                 for (idx, instr) in bdata.instructions.iter().enumerate() {
+                    let before = if probe {
+                        crate::debug_flags::rss_kb()
+                    } else {
+                        0
+                    };
                     self.explore_call_site(fi, block, idx, instr);
+                    if probe {
+                        let now = crate::debug_flags::rss_kb();
+                        if now.saturating_sub(before) > 5_000 {
+                            eprintln!(
+                                "[mem]     site fn={} blk={} idx={} delta_kb={}",
+                                self.prog.functions[fi].name,
+                                block.0,
+                                idx,
+                                now - before
+                            );
+                        }
+                    }
                 }
+            }
+            if probe {
+                let now = crate::debug_flags::rss_kb();
+                if now.saturating_sub(last_rss) > 10_000 {
+                    eprintln!(
+                        "[mem]   taint fn={} rss_kb={} delta_kb={} guards={} vals={}",
+                        self.prog.functions[fi].name,
+                        now,
+                        now - last_rss,
+                        self.guard_maps.len(),
+                        self.value_infos.len()
+                    );
+                }
+                last_rss = now;
             }
         }
     }

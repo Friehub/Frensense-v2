@@ -168,6 +168,12 @@ impl Engine {
             result.located_checker.extend(part.located_checker);
             result.checker.extend(part.checker);
             result.errors.extend(part.errors);
+            // Functions whose per-function budget expired: carried out of
+            // the aggregate immediately so `Engine::take_incomplete` can
+            // report them as `analysis_incomplete` instead of the scan
+            // silently presenting degraded results as full ones.
+            self.analysis_incomplete
+                .append(&mut part.analysis_incomplete);
         }
         for err in &result.errors {
             tracing::warn!("scan error: {err}");

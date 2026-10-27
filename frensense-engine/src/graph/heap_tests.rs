@@ -621,3 +621,162 @@ pub mod heap_flow_tests {
         );
     }
 }
+
+#[cfg(test)]
+pub mod points_to_convergence_tests {
+    use crate::graph::heap::PointsToAnalysis;
+    use crate::ir::function::*;
+
+    fn meta(name: &str) -> VarMetadata {
+        VarMetadata {
+            source_name: Some(name.to_string()),
+            type_name: None,
+            byte_range: None,
+            is_memory_state: false,
+            object_keys: Vec::new(),
+            declared: false,
+        }
+    }
+
+    fn mem_meta(name: &str) -> VarMetadata {
+        VarMetadata {
+            source_name: Some(name.to_string()),
+            type_name: None,
+            byte_range: None,
+            is_memory_state: true,
+            object_keys: Vec::new(),
+            declared: false,
+        }
+    }
+
+    /// The clear-then-fill pair that hung whole repositories.
+    ///
+    /// A non-variable store (`obj.f = <arrow/literal>`, which lowers to
+    /// `Operand::Unknown`) performed a strong update: `set.clear()` plus
+    /// `changed = true`. A variable store to the same key (`obj.f = v`) merged
+    /// the location straight back in the SAME pass, so `changed` never went
+    /// false and [`PointsToAnalysis::analyze`] never returned - observed at
+    /// 183 000 passes on next.js `dynamic.tsx`, 21 000 on libpng
+    /// `pngstest.c` and 68 000 on redis `server.c`, each of which blocked the
+    /// scan of its entire repository. See docs/REAL_REPO_BENCHMARK.md.
+    ///
+    /// The fixed point must now converge, and because points-to is a MAY
+    /// analysis the weak update must survive: dropping it would
+    /// under-approximate aliasing and could lose a real flow.
+    #[test]
+    fn field_clear_then_fill_reaches_fixed_point() {
+        let mut ir = FunctionIR::new("clear_then_fill".into());
+        let b = ir.entry_block;
+        let mem_0 = ir.initial_memory_state;
+
+        // obj = Allocate  (one abstract location)
+        let obj = ir.new_var(meta("obj"));
+        let mem_1 = ir.new_var(mem_meta("mem_1"));
+        ir.push_instruction(
+            b,
+            Instruction::Allocate {
+                dest: obj,
+                mem_out: mem_1,
+                mem_in: mem_0,
+                kind: AllocationKind::Object,
+            },
+        );
+
+        // v = Allocate  (the location the field must keep pointing at)
+        let v = ir.new_var(meta("v"));
+        let mem_2 = ir.new_var(mem_meta("mem_2"));
+        ir.push_instruction(
+            b,
+            Instruction::Allocate {
+                dest: v,
+                mem_out: mem_2,
+                mem_in: mem_1,
+                kind: AllocationKind::Object,
+            },
+        );
+
+        // obj.loader = <non-variable operand>  - the strong update that used
+        // to clear the field set and report `changed`.
+        let mem_3 = ir.new_var(mem_meta("mem_3"));
+        ir.push_instruction(
+            b,
+            Instruction::StoreField {
+                mem_out: mem_3,
+                mem_in: mem_2,
+                base: obj,
+                field: "loader".into(),
+                src: Operand::Unknown,
+            },
+        );
+
+        // obj.loader = v  - the weak update the clear used to undo forever.
+        let mem_4 = ir.new_var(mem_meta("mem_4"));
+        ir.push_instruction(
+            b,
+            Instruction::StoreField {
+                mem_out: mem_4,
+                mem_in: mem_3,
+                base: obj,
+                field: "loader".into(),
+                src: Operand::Var(v),
+            },
+        );
+
+        // v2 = obj.loader  (a reader of the contested field)
+        let v2 = ir.new_var(meta("v2"));
+        ir.push_instruction(
+            b,
+            Instruction::LoadField {
+                dest: v2,
+                mem_in: mem_4,
+                base: obj,
+                field: "loader".into(),
+            },
+        );
+        ir.set_terminator(b, Terminator::Return { src: None });
+
+        // Pre-fix this call never returned.
+        let mut pts = PointsToAnalysis::new();
+        pts.analyze(&ir);
+
+        // The regression signal: the fixed point must be REACHED, not
+        // approximated by the iteration budget. Under the old strong update
+        // this loop hit MAX_PASSES with `converged == false` (and printed
+        // the fallback warning) because the clear/fill pair never settled.
+        assert!(
+            pts.converged,
+            "points-to must reach a fixed point without the pass budget \
+             expiring (the clear-then-fill cycle used to loop forever)"
+        );
+
+        let obj_loc = *pts
+            .pts
+            .get(&obj)
+            .and_then(|s| s.iter().next())
+            .expect("obj must be allocated");
+        let v_loc = *pts
+            .pts
+            .get(&v)
+            .and_then(|s| s.iter().next())
+            .expect("v must be allocated");
+
+        let field = pts
+            .fields
+            .get(&(obj_loc, "loader".to_string()))
+            .expect("field must stay tracked after a non-variable store");
+        assert!(
+            field.contains(&v_loc),
+            "weak update must survive: points-to is a may-analysis, a strong \
+             update may not drop a location (field = {field:?})"
+        );
+
+        let loaded = pts
+            .pts
+            .get(&v2)
+            .expect("the load destination must be resolved");
+        assert!(
+            loaded.contains(&v_loc),
+            "a load of the contested field must still see the weak update"
+        );
+    }
+}

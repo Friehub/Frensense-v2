@@ -857,6 +857,10 @@ fn main() -> Result<()> {
 
     let mut explain_records = Vec::new();
     let mut hidden_by_tier = std::collections::BTreeMap::new();
+    // Functions the per-function work budget pushed into degraded analysis;
+    // reported as `analysis_incomplete` (JSON) + a stderr warning, never
+    // dropped silently.
+    let mut incomplete: Vec<frensense_engine::scan::IncompleteFunction> = Vec::new();
     let advisories = if options.diff_only {
         let repo_dir = if input_path.is_dir() {
             input_path.clone()
@@ -888,6 +892,7 @@ fn main() -> Result<()> {
                 e2.set_explain(options.explain);
                 e2.set_show_flows(options.show_flows);
                 all.extend(e2.run(f)?);
+                incomplete.extend(e2.take_incomplete());
                 if options.explain {
                     explain_records.extend(e2.take_explain());
                     for (tier, count) in e2.take_hidden_by_tier() {
@@ -922,6 +927,7 @@ fn main() -> Result<()> {
             explain_records = engine.take_explain();
             hidden_by_tier = engine.take_hidden_by_tier();
         }
+        incomplete = engine.take_incomplete();
         all
     };
 
@@ -931,6 +937,7 @@ fn main() -> Result<()> {
 
     print_results(
         &advisories,
+        &incomplete,
         &options.format,
         &input_path,
         Some(start_time.elapsed()),

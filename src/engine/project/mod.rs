@@ -39,6 +39,11 @@ pub struct Engine {
     pub(crate) max_complexity: Option<usize>,
     /// Silent-finding records from the most recent `run` (when `explain`).
     pub(crate) explain_records: Vec<crate::explain::ExplainRecord>,
+    /// Functions the per-function work budget pushed into the degraded
+    /// (flow-insensitive) form, accumulated across `run` calls and surfaced
+    /// via [`Engine::take_incomplete`] so the report can list them under
+    /// `analysis_incomplete` instead of silently weakening those results.
+    pub(crate) analysis_incomplete: Vec<frensense_engine::scan::IncompleteFunction>,
     /// Hidden finding counts grouped by tier.
     pub(crate) hidden_by_tier: std::collections::BTreeMap<crate::RuleTier, usize>,
 }
@@ -58,6 +63,7 @@ impl Engine {
             enable_hygiene: false,
             max_complexity: None,
             explain_records: Vec::new(),
+            analysis_incomplete: Vec::new(),
             hidden_by_tier: std::collections::BTreeMap::new(),
         }
     }
@@ -105,6 +111,14 @@ impl Engine {
     #[must_use]
     pub fn take_explain(&mut self) -> Vec<crate::explain::ExplainRecord> {
         std::mem::take(&mut self.explain_records)
+    }
+
+    /// Take the functions analyzed in degraded form because their
+    /// per-function work budget expired (accumulated across `run` calls).
+    /// Empty when every function was analyzed fully.
+    #[must_use]
+    pub fn take_incomplete(&mut self) -> Vec<frensense_engine::scan::IncompleteFunction> {
+        std::mem::take(&mut self.analysis_incomplete)
     }
 
     /// Set the scan profile governing which rule tiers are reported.

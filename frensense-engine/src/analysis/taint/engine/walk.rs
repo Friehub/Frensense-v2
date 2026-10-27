@@ -810,6 +810,12 @@ impl<'a> BackwardTaintEngine<'a> {
         }
 
         self.stats.sink_args_explored += triplets.len();
+        let mem_probe = crate::debug_flags::DebugFlags::get().mem;
+        let mem_entry = if mem_probe {
+            crate::debug_flags::rss_kb()
+        } else {
+            0
+        };
 
         for (arg_slot, var, arg_node) in triplets {
             let Some(alert_info) = sink_alert_with_facts(
@@ -830,7 +836,43 @@ impl<'a> BackwardTaintEngine<'a> {
             };
             state.seen_nodes.insert((fi, arg_node));
             self.current_parents.clear();
+            let rss_pre = if crate::debug_flags::DebugFlags::get().mem {
+                crate::debug_flags::rss_kb()
+            } else {
+                0
+            };
             self.explore_from(fi, arg_node, &mut state);
+            let rss_walk = if crate::debug_flags::DebugFlags::get().mem {
+                crate::debug_flags::rss_kb()
+            } else {
+                0
+            };
+
+            if crate::debug_flags::DebugFlags::get().mem
+                && (state.visited.len() > 50_000 || rss_walk.saturating_sub(rss_pre) > 1_000)
+            {
+                let mut fns: FxHashSet<usize> = FxHashSet::default();
+                for (f, _) in state.seen_nodes.iter() {
+                    fns.insert(*f);
+                }
+                let mut ctxs: FxHashSet<u32> = FxHashSet::default();
+                for (_, _, _, _, c) in state.visited.iter() {
+                    ctxs.insert(*c);
+                }
+                eprintln!(
+                    "[mem]     walk sink={} fn={} visited={} seen_nodes={} fns={} ctxs={} chains={} cuts={} rss_pre={} rss_after_explore={}",
+                    name,
+                    self.prog.functions[fi].name,
+                    state.visited.len(),
+                    state.seen_nodes.len(),
+                    fns.len(),
+                    ctxs.len(),
+                    self.ctx_chains.len(),
+                    state.cuts.len(),
+                    rss_pre,
+                    rss_walk
+                );
+            }
 
             let verdict = if state.saw_source {
                 BackwardVerdict::Vulnerable
@@ -892,6 +934,19 @@ impl<'a> BackwardTaintEngine<'a> {
                     .or_else(|| ir.var_metadata.get(&var).and_then(|m| m.byte_range)),
             });
             let _ = var;
+        }
+        if mem_probe {
+            let now = crate::debug_flags::rss_kb();
+            if now.saturating_sub(mem_entry) > 1_000 {
+                eprintln!(
+                    "[mem]     site_total fn={} sink={} nroots={} findings={} rss_delta_kb={}",
+                    self.prog.functions[fi].name,
+                    name,
+                    self.stats.sink_args_explored,
+                    self.findings.len(),
+                    now - mem_entry
+                );
+            }
         }
     }
 

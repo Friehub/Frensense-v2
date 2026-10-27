@@ -327,6 +327,13 @@ pub struct FunctionIR {
     /// edges and made every call through a `require` binding read Unknown.
     #[cfg_attr(feature = "serialize", serde(default))]
     pub is_static_data: bool,
+    /// True when the per-function analysis budget ran out while preparing
+    /// this IR (SSA construction degraded to flow-insensitive form), so this
+    /// function was analyzed with less precision than usual. The scanner
+    /// reports every such function as `analysis_incomplete` instead of
+    /// silently producing weaker results for it.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub analysis_incomplete: bool,
     #[cfg_attr(feature = "serialize", serde(default))]
     // legacy safety: recompute via max ids if absent
     next_var_id: usize,
@@ -351,6 +358,7 @@ impl FunctionIR {
             enclosing_fn: None,
             entry_guards: Vec::new(),
             is_static_data: false,
+            analysis_incomplete: false,
             next_var_id: 1,
             next_block_id: 1,
         };
