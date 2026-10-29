@@ -149,12 +149,10 @@ name = "frensense-engine"
 version = "0.8.0-beta"
 dependencies = [
  "bincode",
- "blake3",
  "frensense-lang",
  "frensense-packgen",
  "rustc-hash",
  "serde",
- "serde_json",
  "tree-sitter",
  "tree-sitter-html",
  "tree-sitter-javascript",

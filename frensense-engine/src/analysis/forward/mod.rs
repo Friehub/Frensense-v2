@@ -84,7 +84,7 @@ pub struct FunctionEntry<'a> {
     pub bindings: Vec<CallBinding>,
     /// Arg use-node key → `(binding index, formal slot)`.
     pub arg_slots: FxHashMap<NodeKey, (usize, usize)>,
-    /// Filled bottom-up during [`ProgramSvfg::compute_summaries`].
+    /// Filled bottom-up while the program-level value-flow structure is built.
     pub summary: Option<TaintSummary>,
 }
 

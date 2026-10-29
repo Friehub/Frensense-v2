@@ -63,6 +63,19 @@ jobs:
       - name: Enforce Style (rustfmt)
         run: cargo fmt --all -- --check
 
+      - name: Check engine rustdoc
+        run: RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links" cargo doc -p frensense-engine --all-features --no-deps
+
+      - name: Check unused dependencies
+        run: |
+          cargo install cargo-machete --locked
+          cargo machete --with-metadata frensense-engine frensense-lang frensense-bundler frensense-packgen frensense-devtools
+
+      - name: Check engine features in isolation
+        run: |
+          cargo install cargo-hack --locked
+          cargo hack check -p frensense-engine --each-feature --locked
+
       - name: Default pack drift check (packgen --check)
         run: cargo run -p frensense-packgen -- --check
 
@@ -87,7 +100,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1 (deny 0.20.2)
         with:
-          command: check advisories licenses bans
+          command: check
 
   # --- NPM Security Audit ---
   npm-security:
@@ -155,6 +168,11 @@ jobs:
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
       - name: Install cargo-semver-checks
         run: cargo install cargo-semver-checks --locked
+      - name: Check engine public API
+        # In the 0.8 beta line, compare against the previous commit as a patch
+        # to block newly introduced breaking changes, even while 0.7 -> 0.8
+        # contains intentionally accepted migration breaks.
+        run: cargo semver-checks check-release -p frensense-engine --baseline-rev HEAD^ --release-type patch
       - name: Check SemVer
         # Hard gate: fails if any publishable crate introduces a breaking
         # public-API change relative to its latest crates.io release. The

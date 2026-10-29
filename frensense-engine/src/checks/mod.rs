@@ -11,7 +11,7 @@
 //! only *mechanism*, how to look at the IR. They are the bootstrapping
 //! oracle, kept minimal so shape-thinking cannot creep back in.
 //!
-//! **Corpus-learned checks** ([`LearnedCheckFact`] in the fact table) supply
+//! **Corpus-learned checks** (`LearnedCheckFact` in the fact table) supply
 //! the *conclusions*, which calls are violations, with bundle-authored
 //! advisory text. They arrive through `.frc` bundles, were verified by the
 //! bundler's replay gate (fire on positives, silent on negatives), and are

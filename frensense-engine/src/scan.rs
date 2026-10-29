@@ -548,8 +548,8 @@ pub struct IncompleteFunction {
 /// The result of one scan: vulnerable findings + non-fatal errors.
 #[derive(Debug, Default)]
 pub struct ScanResult {
-    /// All sink findings (every verdict); filter on [`ScanResult::alerts`]
-    /// semantics.
+    /// All sink findings (every verdict); retain only findings whose verdict
+    /// is `Vulnerable` to obtain the alert set.
     pub findings: Vec<SinkFinding>,
     /// The same findings resolved to source locations (file/line/column).
     pub located: Vec<LocatedFinding>,

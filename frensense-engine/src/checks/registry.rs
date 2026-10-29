@@ -19,7 +19,7 @@
 //! non-dataflow check cannot reach into the taint engine's configuration.
 //! Checks see lowered IR and facts only.
 //!
-//! [`TaintConfig`]: crate::analysis::taint::TaintConfig
+//! [`TaintConfig`]: crate::analysis::taint::config::TaintConfig
 
 use crate::analysis::forward::ProgramSvfg;
 use crate::analysis::taint::facts::FactTable;

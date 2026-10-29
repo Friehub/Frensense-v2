@@ -42,7 +42,7 @@ pub struct PointsToAnalysis {
     pub var_locs: FxHashMap<VarId, LocId>,
 
     /// Whether the last [`Self::analyze`] run reached a true fixed point
-    /// before [`MAX_PASSES`]. `false` means the budget expired and the
+    /// before the configured iteration budget. `false` means the budget expired and the
     /// result was degraded to the conservative fallback, never a hang.
     pub converged: bool,
 

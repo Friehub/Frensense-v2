@@ -18,7 +18,7 @@ pub struct CallBinding {
     /// deduped. Empty when every target is external/unresolved, dynamic
     /// dispatch and callbacks may resolve to several callees at once; the
     /// cross-edge installer links all of them (sound: any may run).
-    /// Resolution comes from [`callgraph`] (aliases, receiver classes,
+    /// Resolution comes from `callgraph` (aliases, receiver classes,
     /// higher-order callbacks); bare-name matching is the fallback.
     pub callees: Vec<usize>,
     /// Best-known callee name for diagnostics and external fact lookup

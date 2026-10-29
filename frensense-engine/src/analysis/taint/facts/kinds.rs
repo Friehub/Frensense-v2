@@ -398,34 +398,34 @@ pub struct SchemaPolicyFact {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub enum HintKind {
-    /// [`FactTable::url_param_hints`]: a function parameter is URL-like.
+    /// [`super::FactTable::url_param_hints`]: a function parameter is URL-like.
     UrlParam,
-    /// [`FactTable::url_arg_hints`]: a guard argument is URL-ish.
+    /// [`super::FactTable::url_arg_hints`]: a guard argument is URL-ish.
     UrlArg,
-    /// [`FactTable::url_literal_hints`]: a literal is an absolute URL.
+    /// [`super::FactTable::url_literal_hints`]: a literal is an absolute URL.
     UrlLiteral,
-    /// [`FactTable::security_context_hints`]: a name marks security code.
+    /// [`super::FactTable::security_context_hints`]: a name marks security code.
     SecurityContext,
-    /// [`FactTable::auth_guard_hints`]: a call is an authentication check.
+    /// [`super::FactTable::auth_guard_hints`]: a call is an authentication check.
     AuthGuard,
-    /// [`FactTable::jwt_algorithm_hints`]: an algorithm choice is
+    /// [`super::FactTable::jwt_algorithm_hints`]: an algorithm choice is
     /// security-sensitive.
     JwtAlgorithm,
-    /// [`FactTable::credential_context_hints`]: an enclosing name marks
+    /// [`super::FactTable::credential_context_hints`]: an enclosing name marks
     /// credential context.
     CredentialContext,
-    /// [`FactTable::kdf_receiver_hints`]: a receiver whose name marks a
+    /// [`super::FactTable::kdf_receiver_hints`]: a receiver whose name marks a
     /// password-hashing library (a credential hashed through it is the
     /// intended use, not a policy violation). Appended last: bundles
     /// encode the variant position.
     KdfReceiver,
-    /// [`FactTable::prepared_statement_prefixes`]: a call whose last segment
+    /// [`super::FactTable::prepared_statement_prefixes`]: a call whose last segment
     /// starts with one of these prefixes creates a bound-parameter statement
     /// handle (`Prepare`, `prepareStatement`, `prepare_cached`), so the
     /// handle's later arguments are bindings rather than SQL. Appended last:
     /// bundles encode the variant position.
     PreparedStatementPrefix,
-    /// [`FactTable::weak_hash_disclaimer_tokens`]: an argument token that
+    /// [`super::FactTable::weak_hash_disclaimer_tokens`]: an argument token that
     /// disclaims security use of a weak digest - a literal `false` flag
     /// marking the digest as a checksum or cache key. Appended last: bundles
     /// encode the variant position.

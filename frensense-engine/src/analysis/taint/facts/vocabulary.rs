@@ -23,9 +23,9 @@
 //! * [`HintKind::index`] and [`LearnedFactEntry::wire_index`] are exhaustive
 //!   `match`es, so *adding* a variant is a compile error that lands the
 //!   developer next to the vocabulary lists.
-//! * [`tests::vocabulary_lists_are_ratcheted`] fails until the new variant is
+//! * `tests::vocabulary_lists_are_ratcheted` fails until the new variant is
 //!   appended to [`HintKind::ALL`] / [`LearnedFactEntry::VARIANT_TAGS`], and
-//!   [`tests::vocabulary_fingerprint_is_committed`] fails until the change is
+//!   `tests::vocabulary_fingerprint_is_committed` fails until the change is
 //!   acknowledged by updating [`FACT_VOCABULARY_FINGERPRINT`] - which is also
 //!   the cue to bump `BUNDLE_VERSION` and regenerate the default pack.
 //!

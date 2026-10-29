@@ -5,7 +5,7 @@
 //! Taint-path representation (R3c).
 //!
 //! A taint path is the ordered chain of SVFG nodes the
-//! [`BackwardTaintEngine`](super::engine::BackwardTaintEngine) walked from a
+//! [`super::engine::BackwardTaintEngine`] walked from a
 //! sink argument back to a source. It is intentionally *data*: the engine only
 //! records it; rendering (text/SARIF/LSP) lives in the consumer (see the
 //! root crate's `reporter` module). Keeping capture and rendering apart means
@@ -22,8 +22,8 @@ use crate::ir::function::{FunctionIR, Instruction};
 // ---------------------------------------------------------------------------
 
 /// One step on a taint path, in **source → sink** order (the backward engine
-/// walk runs the other way; [`BackwardTaintEngine::reconstruct_path`] follows
-/// parent links from the source toward the sink and [`TaintPath::new`] keeps
+/// walk runs the other way; the engine's private path reconstruction follows
+/// parent links from the source toward the sink and the private constructor keeps
 /// that order).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathStep {

@@ -32,11 +32,9 @@
 //!
 //! Backward analysis is *unsound* by nature when pass-through edges are
 //! suppressed (a sanitizing callee makes the local arg→dest edge vanish), so
-//! this engine deliberately runs over the **unsuppressed** predecessor view:
-//! it asks "could tainted data reach here?" rather than "does summary-tainted
-//! data reach here?". Call it with [`BackwardEngine::with_suppression`] to
-//! honour the summary-driven suppression instead (more precise, matches the
-//! forward engine's alerts exactly).
+//! this engine honours the summary-driven suppression by default; use
+//! [`BackwardTaintEngine::without_suppression`] only when an over-approximating
+//! upper bound is needed.
 //!
 //! ## Verdicts
 //!

@@ -110,7 +110,7 @@ pub enum Instruction {
         src: Operand,
     },
 
-    /// v_dest = base[index]  @ mem_in
+    /// `v_dest = base[index]  @ mem_in`
     LoadElement {
         dest: VarId,
         mem_in: VarId,
@@ -118,7 +118,7 @@ pub enum Instruction {
         index: Operand,
     },
 
-    /// base[index] = src  -> generates mem_out
+    /// `base[index] = src` generates `mem_out`.
     StoreElement {
         mem_out: VarId,
         mem_in: VarId,
@@ -156,7 +156,7 @@ pub enum Instruction {
         /// the name of `args[i]`, or empty when that argument is
         /// positional. Shorter than `args` (or empty) means the source
         /// language, or the lowered node, carries no names - callers must
-        /// treat a missing entry as positional. See [`CallStatic::args`].
+        /// treat a missing entry as positional. See the `args` field documentation.
         arg_names: Vec<String>,
     },
 

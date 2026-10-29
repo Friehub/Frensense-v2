@@ -11,7 +11,8 @@
 //!
 //! Lang declares / corpus teaches / engine computes: which calls allocate
 //! fresh memory and which consume their arguments comes from the
-//! lang-declared memory vocabulary seeded into the [`FactTable`] and
+//! lang-declared memory vocabulary seeded into the
+//! [`crate::analysis::taint::facts::FactTable`] and
 //! merged into the registry (`MemorySummaryRegistry::from_facts` -
 //! spec vocab plus bundle-learned contracts), never from hardcoded names
 //! here. Stack allocators (`alloca` and friends) come from

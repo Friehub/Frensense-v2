@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.0-beta] - Unreleased
 
+### Added
+- **Rust library quality gates**: CI and local CI now reject broken/private
+  intra-doc links in `frensense-engine`, audit workspace dependencies with
+  `cargo-machete`, and build the engine with each feature independently using
+  `cargo-hack`. CI's SemVer job gained an explicit engine gate that compares
+  against the previous commit as a patch release - it blocks newly introduced
+  breaking changes while the accepted 0.7 -> 0.8 migration breaks stay in the
+  changelog - and local CI runs the same comparison against `HEAD`; the
+  existing workspace check against the latest published release is unchanged.
+  `cargo deny check` is the local command matching the supply-chain CI check,
+  which now runs the complete `cargo deny check` rather than three of its four
+  groups. The first dependency audit also removed
+  unused optional `serde_json` and `blake3` dependencies from the engine;
+  grammar crates wired through `frensense-lang` are narrowly documented as
+  cargo-machete false positives.
+
 ### Breaking
 - **Version bump to 0.8.0** (from 0.7.0). This release adds fields to public
   types (`CliOptions.explain`, `SinkFinding.cut_reasons`,

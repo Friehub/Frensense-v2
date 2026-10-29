@@ -23,5 +23,10 @@ frensense-lang = { version = "0.8.0-beta", path = "../frensense-lang" }
 frensense-engine = { version = "0.8.0-beta", path = "../frensense-engine", features = ["serialize"] }
 
 tree-sitter-typescript = "0.23"
+
+[package.metadata.cargo-machete]
+# The grammar is loaded through frensense-lang's language specification.
+ignored = ["tree-sitter-typescript"]
+
 [dev-dependencies]
 tempfile = "3"
