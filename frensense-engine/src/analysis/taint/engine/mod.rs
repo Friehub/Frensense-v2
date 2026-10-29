@@ -290,6 +290,7 @@ impl SinkFindingBuilder {
 /// Traversal statistics, proof of the demand-driven cost model.
 ///
 /// `#[non_exhaustive]`: evolving metrics DTO; new counters are minor releases.
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, Default)]
 #[non_exhaustive]
 pub struct BackwardStats {
@@ -382,6 +383,13 @@ pub struct BackwardTaintEngine<'a> {
     /// BFS parent of each visited node for the *current* root exploration,
     /// consumed right after `explore_from` in `explore_call_site`.
     pub(crate) current_parents: FxHashMap<(usize, NodeKey), (usize, NodeKey)>,
+    /// Sink-argument node of the walk in progress; it never gets a parent.
+    pub(crate) current_root: Option<(usize, NodeKey)>,
+    /// The functions whose sink exploration dominated the run, kept as a
+    /// bounded top-`SLOW_SAMPLE` list rather than one row per function: a
+    /// report that says "93% of the time was these ten functions" is the
+    /// starting point for a performance fix, a per-function dump is not.
+    pub(crate) fn_timings: Vec<crate::telemetry::FunctionTiming>,
 }
 
 /// Per-root exploration state (not per-node: a node can be re-explored from
@@ -524,6 +532,8 @@ impl<'a> BackwardTaintEngine<'a> {
             ctx_interner: FxHashMap::default(),
             capture_paths: true,
             current_parents: FxHashMap::default(),
+            current_root: None,
+            fn_timings: Vec::new(),
             fn_file: FxHashMap::default(),
             file_package_imports: FxHashMap::default(),
             findings: Vec::new(),
@@ -599,6 +609,19 @@ impl<'a> BackwardTaintEngine<'a> {
         }
     }
 
+    /// Record `node`'s BFS parent on first discovery only. `visited` is keyed
+    /// by (node, block, field, context), so one node is reached several times;
+    /// letting a later arrival overwrite the parent chained nodes into cycles
+    /// and `reconstruct_path` then walked the cycle up to `len + 1` steps
+    /// (paths of ~98 000 steps on redis, a 350 MB report). The first parent is
+    /// the BFS-shortest and keeps the chain acyclic. The root never gets one.
+    pub(crate) fn record_parent(&mut self, node: (usize, NodeKey), parent: (usize, NodeKey)) {
+        if Some(node) == self.current_root {
+            return;
+        }
+        self.current_parents.entry(node).or_insert(parent);
+    }
+
     /// The per-function value lattice for `fi`, computed once on first use.
     fn value_info_for(&mut self, fi: usize) -> Option<&crate::analysis::value::ValueInfo> {
         if !self.value_infos.contains_key(&fi) {
@@ -616,6 +639,8 @@ impl<'a> BackwardTaintEngine<'a> {
         let probe = crate::debug_flags::DebugFlags::get().mem;
         let mut last_rss = crate::debug_flags::rss_kb();
         for fi in 0..self.prog.functions.len() {
+            let fn_started = std::time::Instant::now();
+            let args_before = self.stats.sink_args_explored;
             let ir = self.prog.functions[fi].ir;
             // Guard map per function (task 8.3): guards + dominators.
             // Package-import context arms package-scoped guard-style
@@ -676,6 +701,42 @@ impl<'a> BackwardTaintEngine<'a> {
                 }
                 last_rss = now;
             }
+
+            let ms = fn_started.elapsed().as_millis();
+            if ms > 0 {
+                let name = self.prog.functions[fi].name.clone();
+                let file = self.fn_file.get(&name).cloned().unwrap_or_default();
+                keep_slowest(
+                    &mut self.fn_timings,
+                    crate::telemetry::FunctionTiming {
+                        function: name,
+                        file,
+                        ms,
+                        sink_args: self.stats.sink_args_explored - args_before,
+                    },
+                );
+            }
         }
+    }
+}
+
+/// Keep `slowest` as the top [`crate::telemetry::SLOW_SAMPLE`] by time,
+/// inserting in place so the hot loop stays allocation-free in the common
+/// case (the new entry is slower than the slowest one already tracked).
+fn keep_slowest(
+    slowest: &mut Vec<crate::telemetry::FunctionTiming>,
+    entry: crate::telemetry::FunctionTiming,
+) {
+    use crate::telemetry::SLOW_SAMPLE;
+    if slowest.len() < SLOW_SAMPLE {
+        slowest.push(entry);
+        if slowest.len() == SLOW_SAMPLE {
+            slowest.sort_by_key(|b| std::cmp::Reverse(b.ms));
+        }
+        return;
+    }
+    if entry.ms > slowest[SLOW_SAMPLE - 1].ms {
+        slowest[SLOW_SAMPLE - 1] = entry;
+        slowest.sort_by_key(|b| std::cmp::Reverse(b.ms));
     }
 }

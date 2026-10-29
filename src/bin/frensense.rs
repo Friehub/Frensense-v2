@@ -6,7 +6,8 @@
 //! The frensense CLI: collect files → compiler scan → report.
 
 use frensense::cli::{
-    compare_baseline, parse_options, print_explain, print_results, print_scan_banner, save_baseline,
+    compare_baseline, parse_options, print_explain, print_results_detailed, print_scan_banner,
+    save_baseline,
 };
 use frensense::engine::Engine;
 use frensense::{FRENSENSE_VERSION, Result};
@@ -820,6 +821,15 @@ fn main() -> Result<()> {
         }
     };
 
+    if std::env::var("FRENSENSE_LOG").is_ok() || options.trace {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+            )
+            .try_init();
+    }
+
     let input_paths = options.paths.clone();
     let input_path = input_paths
         .first()
@@ -857,10 +867,8 @@ fn main() -> Result<()> {
 
     let mut explain_records = Vec::new();
     let mut hidden_by_tier = std::collections::BTreeMap::new();
-    // Functions the per-function work budget pushed into degraded analysis;
-    // reported as `analysis_incomplete` (JSON) + a stderr warning, never
-    // dropped silently.
     let mut incomplete: Vec<frensense_engine::scan::IncompleteFunction> = Vec::new();
+    let mut telemetry = frensense_engine::telemetry::ScanTelemetry::default();
     let advisories = if options.diff_only {
         let repo_dir = if input_path.is_dir() {
             input_path.clone()
@@ -893,6 +901,7 @@ fn main() -> Result<()> {
                 e2.set_show_flows(options.show_flows);
                 all.extend(e2.run(f)?);
                 incomplete.extend(e2.take_incomplete());
+                telemetry.merge(e2.take_telemetry());
                 if options.explain {
                     explain_records.extend(e2.take_explain());
                     for (tier, count) in e2.take_hidden_by_tier() {
@@ -900,11 +909,7 @@ fn main() -> Result<()> {
                     }
                 }
             }
-            // The gate answers one question - did THIS change introduce a
-            // finding? Whole files are scanned (a change can make an old
-            // line reachable), but a finding whose span touches no added
-            // line predates the diff: it belongs to the baseline
-            // (--compare-baseline), not to this gate.
+            telemetry.finalize();
             let (on_diff, pre_existing): (Vec<_>, Vec<_>) = all.into_iter().partition(|a| {
                 (a.line..=a.end_line.max(a.line))
                     .any(|ln| frensense::cli::git::is_added(&added, &repo_dir, &a.file_path, ln))
@@ -918,16 +923,21 @@ fn main() -> Result<()> {
             on_diff
         }
     } else {
-        // Scan every positional input path; findings merge across them.
+        // Scan every positional input path; findings and telemetry are
+        // merged here, while Engine::run retains only the latest run's metrics.
         let mut all = Vec::new();
         for p in &input_paths {
             all.extend(engine.run(p)?);
+            incomplete.extend(engine.take_incomplete());
+            telemetry.merge(engine.take_telemetry());
+            if options.explain {
+                explain_records.extend(engine.take_explain());
+                for (tier, count) in engine.take_hidden_by_tier() {
+                    *hidden_by_tier.entry(tier).or_insert(0) += count;
+                }
+            }
         }
-        if options.explain {
-            explain_records = engine.take_explain();
-            hidden_by_tier = engine.take_hidden_by_tier();
-        }
-        incomplete = engine.take_incomplete();
+        telemetry.finalize();
         all
     };
 
@@ -935,14 +945,60 @@ fn main() -> Result<()> {
         print_explain(&explain_records, &hidden_by_tier);
     }
 
-    print_results(
+    let status = frensense::cli::ScanStatus::compute(&telemetry, &incomplete);
+
+    print_results_detailed(
         &advisories,
         &incomplete,
+        Some(&telemetry),
         &options.format,
         &input_path,
         Some(start_time.elapsed()),
         options.output_path.as_deref(),
     )?;
+
+    if let Some(profile_path) = &options.profile_output {
+        let profile_json = serde_json::json!({
+            "status": status,
+            "phases": telemetry.phases,
+            "slowest_files": telemetry.slowest_files,
+            "slowest_functions": telemetry.slowest_functions,
+            "checks": telemetry.checks,
+            "caps": telemetry.caps,
+            "errors": telemetry.errors,
+            "suppressed": telemetry.suppressed,
+            "input": {
+                "submitted": telemetry.input.submitted,
+                "scanned": telemetry.input.scanned,
+                "failed": telemetry.input.failed,
+                "failed_files": telemetry.input.failed_files,
+                "unsupported": telemetry.input.unsupported,
+                "parse_partial": telemetry.input.parse_partial,
+                "parse_partial_files": telemetry.input.parse_partial_files,
+                "functions": telemetry.input.functions,
+            },
+            "taint": {
+                "nodes_visited": telemetry.taint.nodes_visited,
+                "functions_visited": telemetry.taint.functions_visited,
+                "sink_args_explored": telemetry.taint.sink_args_explored,
+                "vulnerable": telemetry.taint.vulnerable,
+                "sanitized": telemetry.taint.sanitized,
+                "unknown": telemetry.taint.unknown,
+                "clean": telemetry.taint.clean,
+            }
+        });
+        std::fs::write(
+            profile_path,
+            serde_json::to_string_pretty(&profile_json)
+                .map_err(|e| frensense::FrensenseError::Config(e.to_string()))?,
+        )
+        .map_err(|e| {
+            frensense::FrensenseError::Config(format!(
+                "Failed to write profile to {}: {e}",
+                profile_path.display()
+            ))
+        })?;
+    }
 
     if let Some(path) = &options.emit_baseline_path {
         save_baseline(&advisories, path)?;
@@ -951,6 +1007,10 @@ fn main() -> Result<()> {
     let mut regression_detected = false;
     if let Some(path) = &options.compare_baseline_path {
         regression_detected = compare_baseline(&advisories, path)?;
+    }
+
+    if options.fail_on_incomplete && status != frensense::cli::ScanStatus::Complete {
+        std::process::exit(2);
     }
 
     if regression_detected || (options.is_strict && !advisories.is_empty()) {

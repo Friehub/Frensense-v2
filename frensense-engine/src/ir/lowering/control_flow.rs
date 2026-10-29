@@ -414,6 +414,91 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
+    /// C preprocessor conditionals (`#if` / `#ifdef` / `#elif` / `#else`).
+    ///
+    /// The alternatives of one chain are mutually exclusive build
+    /// configurations, never statements that all run. Lowering them as
+    /// sequential code put three `realloc` calls in a row in redis's
+    /// `ztryrealloc_usable_internal` (one per `#ifdef` branch) and reported
+    /// the first as leaked. Each alternative becomes an arm of an
+    /// unknown-condition branch that rejoins after the chain, so every
+    /// configuration is analysed as its own path and a `return` inside one
+    /// ends only that path. An `#ifdef` without `#else` forks against "not
+    /// compiled".
+    pub fn visit_preproc_conditional(&mut self, node: Node) -> Option<Operand> {
+        let mut cursor = node.walk();
+        let skip: Vec<usize> = ["name", "condition", "alternative"]
+            .iter()
+            .filter_map(|f| node.child_by_field_name(f).map(|n| n.id()))
+            .collect();
+        let body: Vec<Node> = node
+            .children(&mut cursor)
+            .filter(|c| c.is_named() && !skip.contains(&c.id()) && c.kind() != "comment")
+            .collect();
+
+        // `#else` is not a fork of its own: it is the false arm's body.
+        if node.kind() == "preproc_else" {
+            for child in body {
+                self.visit_node(child);
+            }
+            return None;
+        }
+
+        let alt_node = node.child_by_field_name("alternative");
+        let true_block = self.ir.new_block();
+        let false_block = self.ir.new_block();
+        let merge_block = self.ir.new_block();
+        let false_target = if alt_node.is_some() {
+            false_block
+        } else {
+            merge_block
+        };
+        self.ir.set_terminator(
+            self.current_block,
+            Terminator::Branch {
+                cond: Operand::Unknown,
+                true_block,
+                false_block: false_target,
+            },
+        );
+        self.ir.add_edge(self.current_block, true_block);
+        self.ir.add_edge(self.current_block, false_target);
+
+        self.env.push(FxHashMap::default());
+        self.current_block = true_block;
+        for child in body {
+            self.visit_node(child);
+        }
+        self.close_arm(merge_block);
+        Self::hoist_arm_scope(&mut self.env);
+
+        if let Some(alt) = alt_node {
+            self.env.push(FxHashMap::default());
+            self.current_block = false_block;
+            self.visit_node(alt);
+            self.close_arm(merge_block);
+            Self::hoist_arm_scope(&mut self.env);
+        }
+
+        self.current_block = merge_block;
+        None
+    }
+
+    /// Jump the current block to `merge` unless it already ended in a
+    /// terminator (`return`, `goto`, ...).
+    fn close_arm(&mut self, merge: BlockId) {
+        if self
+            .ir
+            .blocks
+            .get(&self.current_block)
+            .is_none_or(|b| matches!(b.terminator, Terminator::None))
+        {
+            self.ir
+                .set_terminator(self.current_block, Terminator::Jump(merge));
+            self.ir.add_edge(self.current_block, merge);
+        }
+    }
+
     pub fn visit_branch(&mut self, node: Node) -> Option<Operand> {
         let mut cursor = node.walk();
         let children: Vec<Node> = node
@@ -651,8 +736,14 @@ impl<'a> LoweringContext<'a> {
 
         let inner_stmt = node.child_by_field_name("statement").or_else(|| {
             let mut c = node.walk();
-            node.named_children(&mut c)
-                .find(|n| n.kind() != "statement_identifier" && n.kind() != "identifier")
+            // A comment between the label and its statement
+            // (`cleanup: /* ... */ *out = p;`) is the first named child
+            // after the label; picking it dropped the statement entirely.
+            node.named_children(&mut c).find(|n| {
+                n.kind() != "statement_identifier"
+                    && n.kind() != "identifier"
+                    && n.kind() != "comment"
+            })
         });
 
         if let Some(stmt) = inner_stmt {

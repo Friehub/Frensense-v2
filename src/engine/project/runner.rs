@@ -30,9 +30,22 @@ impl Engine {
     /// Returns an error if the path does not exist or a bundle cannot be
     /// loaded.
     pub fn run(&mut self, root: &Path) -> Result<Vec<Advisory>> {
+        // A reusable Engine may serve multiple scans (MCP/LSP); each `run`
+        // contributes fresh telemetry, so clear its previous totals first.
+        self.telemetry = frensense_engine::telemetry::ScanTelemetry::default();
+        self.analysis_incomplete.clear();
+        self.hidden_by_tier.clear();
+        self.explain_records.clear();
+
         let paths = collect_files(root, self.language_filter.as_ref());
 
-        // Read all scannable sources.
+        // Track unsupported explicit inputs and read failures instead of
+        // letting either surface as a successful empty scan. Directory walks
+        // already filter unsupported files; an empty result is one absent or
+        // unsupported input. A single unsupported file remains in `paths` and
+        // is counted once by the extension check below.
+        let mut unsupported = usize::from(paths.is_empty());
+        let mut read_failures = Vec::new();
         let mut files: Vec<(String, String, String)> = Vec::new();
         let mut id_by_path: rustc_hash::FxHashMap<String, usize> = rustc_hash::FxHashMap::default();
         for (seq, p) in paths.iter().enumerate() {
@@ -42,10 +55,17 @@ impl Engine {
                 .map(str::to_lowercase)
                 .unwrap_or_default();
             if frensense_lang::spec_for_ext(&ext).is_none() {
+                if root.is_file() {
+                    unsupported += 1;
+                }
                 continue;
             }
-            let Ok(content) = std::fs::read_to_string(p) else {
-                continue;
+            let content = match std::fs::read_to_string(p) {
+                Ok(content) => content,
+                Err(error) => {
+                    read_failures.push((p.to_string_lossy().into_owned(), error.to_string()));
+                    continue;
+                }
             };
             id_by_path.insert(p.to_string_lossy().into_owned(), seq);
             files.push((p.to_string_lossy().into_owned(), content, ext));
@@ -143,7 +163,32 @@ impl Engine {
                 config.sources.insert(pattern.to_string());
             }
             facts.max_complexity = self.max_complexity;
-            let mut part = scan::scan(group, &config, &facts);
+            let mut part = std::thread::scope(|scope| {
+                let failed_files: Vec<String> = group.iter().map(|f| f.0.clone()).collect();
+                let failed_result = |message: String| {
+                    tracing::warn!("{message}");
+                    let mut failed = scan::ScanResult {
+                        errors: vec![message.clone()],
+                        ..scan::ScanResult::default()
+                    };
+                    failed.telemetry.errors.push(message);
+                    failed.telemetry.input.submitted = failed_files.len();
+                    failed.telemetry.input.failed = failed_files.len();
+                    failed.telemetry.input.failed_files = failed_files.clone();
+                    failed
+                };
+                match std::thread::Builder::new()
+                    .name("frensense-scanner-group".into())
+                    .stack_size(32 * 1024 * 1024)
+                    .spawn_scoped(scope, || scan::scan(group, &config, &facts))
+                {
+                    Ok(handle) => match handle.join() {
+                        Ok(result) => result,
+                        Err(_) => failed_result("scanner worker thread panicked".into()),
+                    },
+                    Err(error) => failed_result(format!("failed to spawn scanner worker: {error}")),
+                }
+            });
             // Classify bundle-learned sinks from the advisory pattern that
             // names them. A `.frc` ships a CWE per pattern and nothing else
             // about the class, so this is the class a consumer can honour
@@ -167,7 +212,7 @@ impl Engine {
             result.located.extend(part.located);
             result.located_checker.extend(part.located_checker);
             result.checker.extend(part.checker);
-            result.errors.extend(part.errors);
+            result.telemetry.merge(part.telemetry);
             // Functions whose per-function budget expired: carried out of
             // the aggregate immediately so `Engine::take_incomplete` can
             // report them as `analysis_incomplete` instead of the scan
@@ -175,6 +220,34 @@ impl Engine {
             self.analysis_incomplete
                 .append(&mut part.analysis_incomplete);
         }
+        // Successfully read files were already counted by each language
+        // group's scan. Add only supported paths that failed before grouping.
+        result.telemetry.input.submitted += read_failures.len();
+        result.telemetry.input.failed += read_failures.len();
+        for (file, error) in read_failures {
+            result.telemetry.input.failed_files.push(file.clone());
+            result
+                .telemetry
+                .errors
+                .push(format!("failed to read {file}: {error}"));
+        }
+        result.telemetry.input.unsupported += unsupported;
+        if unsupported > 0 {
+            result.telemetry.errors.push(format!(
+                "{unsupported} unsupported or absent source input(s)"
+            ));
+        }
+        if result.telemetry.input.submitted == 0 && result.telemetry.input.unsupported == 0 {
+            result.telemetry.errors.push(
+                "no supported source files were selected (inputs may be ignored or filtered)"
+                    .into(),
+            );
+        }
+        result
+            .errors
+            .extend(result.telemetry.errors.iter().cloned());
+        result.telemetry.finalize();
+        self.telemetry = result.telemetry.clone();
         for err in &result.errors {
             tracing::warn!("scan error: {err}");
         }
@@ -209,12 +282,15 @@ impl Engine {
         //    collapse to the variant with the most steps (the richest
         //    path). Grouping includes the sink location so the same helper
         //    called from two different sites still reports both.
-        let mut exact: std::collections::HashSet<(String, u32, String, String)> =
+        let mut exact: std::collections::HashSet<(&str, u32, &str, &str)> =
             std::collections::HashSet::new();
         let mut candidates: Vec<&_> = Vec::new();
+        let mut exact_duplicates = 0usize;
+        let mut not_reportable = 0usize;
         for loc in &result.located {
             let f = &loc.finding;
             if !crate::policy::reports_finding(f) {
+                not_reportable += 1;
                 // --explain: record every silent sink argument so users can
                 // see where the engine looked and stayed quiet (why).
                 if self.explain
@@ -225,18 +301,20 @@ impl Engine {
                 continue;
             }
             let key = (
-                loc.file.clone(),
+                loc.file.as_str(),
                 loc.line,
-                f.sink.clone(),
-                f.source_desc.clone().unwrap_or_default(),
+                f.sink.as_str(),
+                f.source_desc.as_deref().unwrap_or_default(),
             );
             if !exact.insert(key) {
+                exact_duplicates += 1;
                 continue;
             }
             candidates.push(loc);
         }
         // Shape gate: keep the richest path per (shape, sink location).
         let kept = dedup_keep_richest(&candidates);
+        let shape_duplicates = candidates.len().saturating_sub(kept.len());
         for i in kept {
             let loc = candidates[i];
             let Some(&seq) = id_by_path.get(&loc.file) else {
@@ -253,16 +331,73 @@ impl Engine {
             ));
         }
 
-        let (surviving, hidden) = crate::policy::apply_with_profile_and_hygiene(
-            advisories,
-            self.min_confidence,
-            self.severity_filter,
-            self.profile,
-            self.enable_hygiene,
-        );
+        let (surviving, hidden, below_confidence, below_severity) =
+            crate::policy::apply_with_profile_and_hygiene_counted(
+                advisories,
+                self.min_confidence,
+                self.severity_filter,
+                self.profile,
+                self.enable_hygiene,
+            );
         for (tier, count) in hidden {
             *self.hidden_by_tier.entry(tier).or_insert(0) += count;
+            result
+                .telemetry
+                .suppressed
+                .push(frensense_engine::telemetry::SuppressionCount {
+                    reason: format!("below-tier:{}", tier.as_str()),
+                    count,
+                });
         }
+        // Findings that did not pass the reportability gate are counted too,
+        // including unknown verdicts and generic cards, even without --explain.
+        if not_reportable > 0 {
+            result
+                .telemetry
+                .suppressed
+                .push(frensense_engine::telemetry::SuppressionCount {
+                    reason: "not-reportable".into(),
+                    count: not_reportable,
+                });
+        }
+        if exact_duplicates > 0 {
+            result
+                .telemetry
+                .suppressed
+                .push(frensense_engine::telemetry::SuppressionCount {
+                    reason: "exact-duplicate".into(),
+                    count: exact_duplicates,
+                });
+        }
+        if shape_duplicates > 0 {
+            result
+                .telemetry
+                .suppressed
+                .push(frensense_engine::telemetry::SuppressionCount {
+                    reason: "shape-duplicate".into(),
+                    count: shape_duplicates,
+                });
+        }
+        if below_confidence > 0 {
+            result
+                .telemetry
+                .suppressed
+                .push(frensense_engine::telemetry::SuppressionCount {
+                    reason: "below-confidence".into(),
+                    count: below_confidence,
+                });
+        }
+        if below_severity > 0 {
+            result
+                .telemetry
+                .suppressed
+                .push(frensense_engine::telemetry::SuppressionCount {
+                    reason: "below-severity".into(),
+                    count: below_severity,
+                });
+        }
+        result.telemetry.finalize();
+        self.telemetry = result.telemetry.clone();
         Ok(surviving)
     }
 
@@ -611,10 +746,10 @@ fn dedup_keep_richest(candidates: &[&LocatedFinding]) -> Vec<usize> {
             .filter(|s| s.is_some())
             .count()
     }
-    let mut best_by_shape: std::collections::HashMap<(String, String, u32), usize> =
+    let mut best_by_shape: std::collections::HashMap<(String, &str, u32), usize> =
         std::collections::HashMap::new();
     for (i, loc) in candidates.iter().enumerate() {
-        let key = (loc.finding.path.shape_id(), loc.file.clone(), loc.line);
+        let key = (loc.finding.path.shape_id(), loc.file.as_str(), loc.line);
         match best_by_shape.get(&key).copied() {
             Some(j) if resolved(candidates[j]) >= resolved(loc) => {}
             _ => {

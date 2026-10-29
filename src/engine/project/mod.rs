@@ -46,6 +46,8 @@ pub struct Engine {
     pub(crate) analysis_incomplete: Vec<frensense_engine::scan::IncompleteFunction>,
     /// Hidden finding counts grouped by tier.
     pub(crate) hidden_by_tier: std::collections::BTreeMap<crate::RuleTier, usize>,
+    /// Accumulated telemetry across scanned language groups.
+    pub(crate) telemetry: frensense_engine::telemetry::ScanTelemetry,
 }
 
 impl Engine {
@@ -65,6 +67,7 @@ impl Engine {
             explain_records: Vec::new(),
             analysis_incomplete: Vec::new(),
             hidden_by_tier: std::collections::BTreeMap::new(),
+            telemetry: frensense_engine::telemetry::ScanTelemetry::default(),
         }
     }
 
@@ -150,6 +153,12 @@ impl Engine {
     #[must_use]
     pub fn take_hidden_by_tier(&mut self) -> std::collections::BTreeMap<crate::RuleTier, usize> {
         std::mem::take(&mut self.hidden_by_tier)
+    }
+
+    /// Take the scan telemetry collected by the most recent `run`.
+    #[must_use]
+    pub fn take_telemetry(&mut self) -> frensense_engine::telemetry::ScanTelemetry {
+        std::mem::take(&mut self.telemetry)
     }
 
     /// Register a synthetic file id for a scanned path (used by the runner

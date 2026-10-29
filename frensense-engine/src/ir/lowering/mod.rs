@@ -59,6 +59,19 @@ impl<'a> LoweringContext<'a> {
             // conditions) instead of the coarse branch-with-sequential-body.
             _ if node.kind() == "switch_statement" => self.visit_switch(node),
 
+            // C preprocessor chains: alternatives are exclusive configs.
+            _ if matches!(
+                node.kind(),
+                "preproc_if"
+                    | "preproc_ifdef"
+                    | "preproc_elif"
+                    | "preproc_elifdef"
+                    | "preproc_else"
+            ) =>
+            {
+                self.visit_preproc_conditional(node)
+            }
+
             NodeRole::Branch if self.is_ternary_straight_line(node.kind()) => {
                 self.visit_ternary_straight_line(node)
             }

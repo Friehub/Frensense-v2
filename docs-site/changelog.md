@@ -191,6 +191,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Format contract ratified** in `docs/FORMATS.md` (single table of every artifact version and its bump rule) and enforced by `scripts/format-ratchet.py` (fails if the vocabulary fingerprint moves without a `BUNDLE_VERSION` bump and a changelog note).
 - **Regenerated embedded default pack** (`frensense-bundler/assets/frensense-default.frc`) under the v7 envelope so it carries its fact-vocabulary fingerprint.
 
+#### Telemetry & Observability
+
+- **`DiagnosticSink` trait on `CheckContext`**: the check context provides a
+  diagnostic interface for truncations and skips. The current default driver
+  supplies a no-op sink, so this is an extension seam, not yet an emitted
+  telemetry source.
+- **`catch_unwind` check isolation**: every non-dataflow check (both
+  program-scoped and function-scoped) now runs inside
+  `std::panic::catch_unwind(AssertUnwindSafe(...))`. A panicking check records
+  `CheckOutcome::Panicked(msg)` in telemetry and prints to stderr; all sibling
+  checks continue running. This prevents a single malformed function from
+  aborting the entire scan.
+- **`check_all_with_registry_and_telemetry`**: a new public entry point accepts
+  an explicit `CheckRegistry`, enabling unit tests and future plugin scenarios
+  to supply a synthetic check set without touching the global registry.
+- **32 MiB worker thread stacks**: each language group scan runs on a
+  dedicated OS thread spawned with `stack_size(32 * 1024 * 1024)`. File
+  lowering also uses a scoped 32 MiB worker per file, containing unwindable
+  panics to the affected file. This reduces stack exhaustion on deeply nested
+  inputs; Rust stack overflow aborts are not recoverable by `catch_unwind` and
+  still cannot be promised to complete normally.
+- **`ScanTelemetry.checks`**: per-check telemetry (`id`, `scope`, `ran`,
+  `findings`, `millis`, `outcome`) is collected for every registered check and
+  exposed in the JSON `analysis` envelope under `analysis.checks`.
+- **`ScanStatus` enum** (`Complete | Partial | Failed`): computed from
+  `ScanTelemetry` and the `IncompleteFunction` list after every scan. Drives
+  the terminal footer and the new `--fail-on-incomplete` exit code.
+- **JSON `analysis` object**: every `--json` report now contains a top-level
+  `analysis` object alongside `advisories`, carrying `status`, `coverage`
+  (files scanned / partial / functions), `verdicts` (vulnerable / sanitized /
+  unknown / clean counts), `truncations`, per-check `checks`, phase `timings`,
+  `slowest_files`, and `slowest_functions`. Coverage also reports submitted,
+  failed, and unsupported inputs; `analysis.errors` exposes failures, and
+  `analysis.suppressed` accounts for reportability, duplicate, tier, confidence,
+  and severity drops. Schema version is unchanged (additive keys only).
+- **SARIF `invocations`**: `--sarif` output now emits an `invocations` array
+  with `executionSuccessful` (false when analysis is incomplete) and
+  `toolExecutionNotifications` listing caps, partial parses, failed checks,
+  failed inputs, and degraded functions. Standalone scan errors are also
+  reported in that invocation notification list.
+- **`--fail-on-incomplete` flag**: exits with code `2` when the scan status is
+  `Partial` or `Failed`, allowing CI to distinguish a clean scan (0), a scan
+  with findings (1), and an incomplete scan (2). Default is off to preserve
+  backward compatibility.
+- **`--profile-output <path>` / `--profile-out <path>` flags**: writes the full
+  `ScanTelemetry` as pretty-printed JSON to the specified path. Also accepted
+  as `--profile <path.json>` when the argument ends in `.json`, so the existing
+  `--profile recommended` call is unaffected.
+- **`--trace` flag**: initialises a `tracing-subscriber` with `EnvFilter`
+  (defaulting to `info`). Also activated by the `FRENSENSE_LOG` environment
+  variable. Spans and log calls emitted by engine internals are now visible
+  without recompiling.
+- **Accurate scan accounting and bounded reporting**: per-thread cap counters
+  no longer mix independent concurrent scans; each file's lowering caps are
+  drained with its isolated worker. Reports distinguish submitted, scanned,
+  failed, and unsupported inputs, surface file read/lowering and worker
+  failures, and fail status when submitted inputs yield no scanned files.
+  Findings omitted by reportability, exact/shape deduplication, tier,
+  confidence, or severity gates are counted separately. Failure paths now
+  preserve cap/status information rather than returning a misleading clean
+  result. Hot-path reporting avoids cloning finding keys and shape dedup uses
+  borrowed file paths; no additional analysis work is performed for telemetry.
+
 ### Fixed
 
 #### Analysis Termination & Memory
@@ -349,6 +412,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after the branch lost its taint. The lowering now hoists per-arm bindings
   through a `hoist_arm_scope` pass, restoring flows that cross an arm boundary.
   CWE-22 class TPR 33.8% -> 35.4%, CWE-78 class TPR 23.1% -> 30.8%.
+
+#### C Taint Precision
+
+- **C command-line false positives reduced**: name-only `argv`/`argc` references
+  no longer count as attacker-controlled sources, and path-labeled sinks only
+  inspect path-carrying arguments, not mode flags, lengths or other slots.
+- **BFS parent is now stable across multi-edge nodes**: the backward taint walk
+  kept the *last* BFS parent seen for each node rather than the first. On graphs
+  where multiple edges reach the same taint node the reported path could diverge
+  from the actual flow depending on iteration order. `record_parent` now writes
+  only when no entry exists, making the reconstructed path deterministic and
+  correct for the first-discovered route.
+- **Name-only `argv`/`argc` references are not sources**: the C source matcher
+  previously treated any identifier named `argv` or `argc` as attacker-controlled
+  input regardless of context. Name-only uses (e.g. passing `argc` as an integer
+  count) are now silent; only call-position uses of `argv` that carry a path
+  argument continue to taint. Eliminates a class of false positives on C command
+  dispatch code.
+- **Non-path sink arguments in C are silent**: path-labeled C sinks
+  (`fopen`, `open`, `stat`, etc.) previously armed every argument slot. The
+  forward predicate now restricts taint alerting to slots that actually carry a
+  path value, leaving integer flags, mode bits, and buffer-length arguments
+  clean.
+- **C destination-buffer writes preserve taint**: calls described by the
+  default pack's buffer vocabulary now connect a source argument to later
+  reads of an aliased destination buffer. This closes the missed
+  `strcpy(buf, argv[1]); system(buf)` flow without treating every call argument
+  as a write or adding analysis work to non-C functions.
 
 ### Changed
 

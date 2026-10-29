@@ -47,6 +47,12 @@ pub struct CliOptions {
     pub enable_hygiene: bool,
     /// Maximum cyclomatic complexity ceiling before emitting function_complexity.
     pub max_complexity: Option<usize>,
+    /// Exit with code 2 if the scan was incomplete, degraded, or had errors.
+    pub fail_on_incomplete: bool,
+    /// Destination path to write profiling/telemetry JSON.
+    pub profile_output: Option<PathBuf>,
+    /// Initialize tracing subscriber for spans and logs.
+    pub trace: bool,
 }
 
 /// Parse CLI arguments into structured scan options.
@@ -67,6 +73,9 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
         profile: crate::Profile::Default,
         enable_hygiene: false,
         max_complexity: None,
+        fail_on_incomplete: false,
+        profile_output: None,
+        trace: false,
     };
 
     let mut i = 1;
@@ -117,11 +126,24 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
                 options.enable_hygiene = true;
                 i += 1;
             }
+            "--fail-on-incomplete" => options.fail_on_incomplete = true,
+            "--trace" => options.trace = true,
+            "--profile-out" | "--profile-output" => {
+                let val = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                options.profile_output = Some(PathBuf::from(val));
+                i += 1;
+            }
             "-p" | "--profile" => {
                 let val = args
                     .get(i + 1)
                     .ok_or_else(|| format!("missing value for {arg}"))?;
-                options.profile = crate::Profile::parse(val)?;
+                if val.ends_with(".json") {
+                    options.profile_output = Some(PathBuf::from(val));
+                } else {
+                    options.profile = crate::Profile::parse(val)?;
+                }
                 i += 1;
             }
             "-s" | "--severity" => {
@@ -351,5 +373,45 @@ mod tests {
 
         let err = parse_options(&to_args(&["--max-complexity", "abc"])).expect_err("should reject");
         assert!(err.contains("must be a positive integer"));
+    }
+
+    #[test]
+    fn fail_on_incomplete_flag_parses() {
+        let opts = parse_options(&to_args(&["--fail-on-incomplete"])).expect("parse");
+        assert!(opts.fail_on_incomplete);
+
+        // Must be false by default.
+        let opts = parse_options(&to_args(&["Cargo.toml"])).expect("parse");
+        assert!(!opts.fail_on_incomplete);
+    }
+
+    #[test]
+    fn trace_flag_parses() {
+        let opts = parse_options(&to_args(&["--trace"])).expect("parse");
+        assert!(opts.trace);
+
+        // Must be false by default.
+        let opts = parse_options(&to_args(&["Cargo.toml"])).expect("parse");
+        assert!(!opts.trace);
+    }
+
+    #[test]
+    fn profile_output_flag_parses() {
+        // Long form
+        let opts = parse_options(&to_args(&["--profile-output", "profile.json"])).expect("parse");
+        assert_eq!(opts.profile_output, Some(PathBuf::from("profile.json")));
+        // Short alias
+        let opts = parse_options(&to_args(&["--profile-out", "out.json"])).expect("parse");
+        assert_eq!(opts.profile_output, Some(PathBuf::from("out.json")));
+    }
+
+    #[test]
+    fn profile_flag_with_json_extension_sets_profile_output() {
+        // --profile <path.json> must route to profile_output, not precision profile.
+        let opts =
+            parse_options(&to_args(&["--profile", "timing.json", "Cargo.toml"])).expect("parse");
+        assert_eq!(opts.profile_output, Some(PathBuf::from("timing.json")));
+        // The precision profile must remain at its default.
+        assert_eq!(opts.profile, crate::Profile::Default);
     }
 }

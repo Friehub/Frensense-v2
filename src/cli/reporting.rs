@@ -29,12 +29,57 @@ pub fn print_scan_banner(
     println!();
 }
 
+/// Overall outcome of the scan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScanStatus {
+    /// Every file parsed cleanly, no checks panicked, no safety caps hit.
+    Complete,
+    /// Scan completed with caveats: caps fired, syntax parse partial, or degraded functions.
+    Partial,
+    /// All files failed to analyze or critical crash.
+    Failed,
+}
+
+impl ScanStatus {
+    #[must_use]
+    pub fn compute(
+        telemetry: &frensense_engine::telemetry::ScanTelemetry,
+        incomplete: &[frensense_engine::scan::IncompleteFunction],
+    ) -> Self {
+        if (telemetry.input.submitted > 0
+            && (telemetry.input.scanned == 0
+                || telemetry.input.failed >= telemetry.input.submitted))
+            || (telemetry.input.scanned == 0 && telemetry.input.unsupported > 0)
+        {
+            return ScanStatus::Failed;
+        }
+        if telemetry.is_complete() && incomplete.is_empty() {
+            ScanStatus::Complete
+        } else {
+            ScanStatus::Partial
+        }
+    }
+}
+
 /// Print a structured scan summary block.
 pub fn print_scan_summary(
     advisories: &[Advisory],
     input_path: &std::path::Path,
     duration: std::time::Duration,
     output_path: Option<&std::path::Path>,
+) {
+    print_scan_summary_detailed(advisories, input_path, duration, output_path, None, &[]);
+}
+
+/// Print a structured scan summary block with status and caveats.
+pub fn print_scan_summary_detailed(
+    advisories: &[Advisory],
+    input_path: &std::path::Path,
+    duration: std::time::Duration,
+    output_path: Option<&std::path::Path>,
+    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
 ) {
     let mut critical = 0;
     let mut warning = 0;
@@ -48,6 +93,10 @@ pub fn print_scan_summary(
         }
     }
 
+    let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
+    let telem = telemetry.unwrap_or(&empty_telem);
+    let status = ScanStatus::compute(telem, incomplete);
+
     println!("============================= Scan Summary =============================");
     println!("Target:             {}", input_path.display());
     println!("Scan Duration:      {:.2}s", duration.as_secs_f64());
@@ -56,16 +105,30 @@ pub fn print_scan_summary(
     println!("  - Warning:        {warning}");
     println!("  - Info:           {info}");
     println!("Total Findings:     {}", advisories.len());
-    let status_label = if advisories.is_empty() {
-        "Clean"
-    } else {
-        "Findings reported"
+    let status_label = match (status, advisories.is_empty()) {
+        (ScanStatus::Complete, true) => "Clean".to_string(),
+        (ScanStatus::Complete, false) => "Findings reported".to_string(),
+        (ScanStatus::Partial, true) => "Clean (Partial/Degraded analysis)".to_string(),
+        (ScanStatus::Partial, false) => "Findings reported (Partial/Degraded analysis)".to_string(),
+        (ScanStatus::Failed, _) => "Failed analysis".to_string(),
     };
     println!("Status:             {status_label}");
     if let Some(out) = output_path {
         println!("Report File:        {}", out.display());
     }
     println!("========================================================================");
+    if status != ScanStatus::Complete {
+        println!("Caveat: Analysis status is {status:?}; results may be partial.");
+        let caps_count = telem.caps.iter().map(|c| c.hits).sum::<usize>();
+        println!(
+            "        {} cap truncation(s), {} partial parse file(s), {} degraded function(s).",
+            caps_count,
+            telem.input.parse_partial,
+            incomplete.len()
+        );
+        println!("        Run with --json to inspect the full `analysis` telemetry object.");
+        println!("========================================================================");
+    }
 }
 
 /// The JSON report envelope: `schema_version` + `producer` identity block,
@@ -82,10 +145,82 @@ pub fn json_report(
     advisories: &[Advisory],
     incomplete: &[frensense_engine::scan::IncompleteFunction],
 ) -> serde_json::Value {
+    json_report_with_telemetry(advisories, incomplete, None)
+}
+
+/// The JSON report envelope with full `analysis` telemetry object.
+#[must_use]
+pub fn json_report_with_telemetry(
+    advisories: &[Advisory],
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
+    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+) -> serde_json::Value {
+    let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
+    let telem = telemetry.unwrap_or(&empty_telem);
+    let status = ScanStatus::compute(telem, incomplete);
+    let clean = status == ScanStatus::Complete && advisories.is_empty();
+
+    let analysis_obj = serde_json::json!({
+        "status": status,
+        "coverage": {
+            "files_submitted": telem.input.submitted,
+            "files_scanned": telem.input.scanned,
+            "files_failed": telem.input.failed,
+            "failed_files": telem.input.failed_files,
+            "unsupported_inputs": telem.input.unsupported,
+            "files_partial": telem.input.parse_partial,
+            "partial_files": telem.input.parse_partial_files,
+            "functions": telem.input.functions,
+        },
+        "errors": telem.errors,
+        "suppressed": telem.suppressed.iter().map(|s| serde_json::json!({
+            "reason": s.reason,
+            "count": s.count,
+        })).collect::<Vec<_>>(),
+        "verdicts": {
+            "vulnerable": telem.taint.vulnerable,
+            "sanitized": telem.taint.sanitized,
+            "unknown": telem.taint.unknown,
+            "clean": telem.taint.clean,
+        },
+        "truncations": telem.caps.iter().map(|c| serde_json::json!({
+            "cap": c.cap,
+            "hits": c.hits,
+            "effect": c.effect,
+        })).collect::<Vec<_>>(),
+        "checks": telem.checks.iter().map(|c| serde_json::json!({
+            "id": c.id,
+            "scope": c.scope,
+            "ran": c.ran,
+            "findings": c.findings,
+            "millis": c.millis,
+            "outcome": match &c.outcome {
+                frensense_engine::telemetry::CheckOutcome::Ok => "ok".into(),
+                frensense_engine::telemetry::CheckOutcome::Panicked(p) => format!("panicked: {p}"),
+                frensense_engine::telemetry::CheckOutcome::Skipped(s) => format!("skipped: {s}"),
+            },
+        })).collect::<Vec<_>>(),
+        "timings": telem.phases.iter().map(|p| serde_json::json!({
+            "phase": p.phase,
+            "ms": p.ms,
+        })).collect::<Vec<_>>(),
+        "slowest_files": telem.slowest_files.iter().map(|f| serde_json::json!({
+            "file": f.file,
+            "ms": f.ms,
+            "functions": f.functions,
+        })).collect::<Vec<_>>(),
+        "slowest_functions": telem.slowest_functions.iter().map(|f| serde_json::json!({
+            "function": f.function,
+            "file": f.file,
+            "ms": f.ms,
+            "sink_args": f.sink_args,
+        })).collect::<Vec<_>>(),
+    });
+
     serde_json::json!({
         "schema_version": crate::REPORT_SCHEMA_VERSION,
         "producer": crate::identity::producer(),
-        "clean": advisories.is_empty(),
+        "clean": clean,
         "advisory_count": advisories.len(),
         "analysis_incomplete": incomplete
             .iter()
@@ -94,6 +229,7 @@ pub fn json_report(
                 "file": f.file,
             }))
             .collect::<Vec<serde_json::Value>>(),
+        "analysis": analysis_obj,
         "advisories": advisories,
     })
 }
@@ -117,6 +253,27 @@ pub fn print_results(
     duration: Option<std::time::Duration>,
     output_path: Option<&std::path::Path>,
 ) -> Result<()> {
+    print_results_detailed(
+        advisories,
+        incomplete,
+        None,
+        format,
+        input_path,
+        duration,
+        output_path,
+    )
+}
+
+/// Print results with full telemetry and status reporting.
+pub fn print_results_detailed(
+    advisories: &[Advisory],
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
+    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+    format: &str,
+    input_path: &std::path::Path,
+    duration: Option<std::time::Duration>,
+    output_path: Option<&std::path::Path>,
+) -> Result<()> {
     if !incomplete.is_empty() {
         eprintln!(
             "Warning: {} function(s) exceeded the per-function analysis budget and were \
@@ -130,10 +287,28 @@ pub fn print_results(
             eprintln!("  ... and {} more", incomplete.len() - 20);
         }
     }
+    if let Some(telem) = telemetry
+        && !telem.is_complete()
+    {
+        eprintln!(
+            "Warning: scan is incomplete: {} submitted, {} scanned, {} failed, {} unsupported, {} partial-parse file(s), {} safety-cap event(s).",
+            telem.input.submitted,
+            telem.input.scanned,
+            telem.input.failed,
+            telem.input.unsupported,
+            telem.input.parse_partial,
+            telem.caps.iter().map(|c| c.hits).sum::<usize>(),
+        );
+        for error in telem.errors.iter().take(10) {
+            eprintln!("  {error}");
+        }
+    }
     match format {
         "json" => {
-            let rendered = serde_json::to_string_pretty(&json_report(advisories, incomplete))
-                .map_err(|e| FrensenseError::Config(format!("JSON error: {e}")))?;
+            let rendered = serde_json::to_string_pretty(&json_report_with_telemetry(
+                advisories, incomplete, telemetry,
+            ))
+            .map_err(|e| FrensenseError::Config(format!("JSON error: {e}")))?;
             if let Some(out) = output_path {
                 std::fs::write(out, rendered).map_err(|e| {
                     FrensenseError::Config(format!(
@@ -142,7 +317,14 @@ pub fn print_results(
                     ))
                 })?;
                 if let Some(d) = duration {
-                    print_scan_summary(advisories, input_path, d, Some(out));
+                    print_scan_summary_detailed(
+                        advisories,
+                        input_path,
+                        d,
+                        Some(out),
+                        telemetry,
+                        incomplete,
+                    );
                 }
                 println!("JSON report written to: {}", out.display());
             } else {
@@ -150,7 +332,7 @@ pub fn print_results(
             }
         }
         "sarif" => {
-            let sarif = Reporter::to_sarif(advisories, input_path);
+            let sarif = Reporter::to_sarif_detailed(advisories, input_path, telemetry, incomplete);
             let rendered = serde_json::to_string_pretty(&sarif)
                 .map_err(|e| FrensenseError::Config(format!("JSON error: {e}")))?;
             if let Some(out) = output_path {
@@ -161,7 +343,14 @@ pub fn print_results(
                     ))
                 })?;
                 if let Some(d) = duration {
-                    print_scan_summary(advisories, input_path, d, Some(out));
+                    print_scan_summary_detailed(
+                        advisories,
+                        input_path,
+                        d,
+                        Some(out),
+                        telemetry,
+                        incomplete,
+                    );
                 }
                 println!("SARIF report written to: {}", out.display());
             } else {
@@ -178,7 +367,14 @@ pub fn print_results(
                     ))
                 })?;
                 if let Some(d) = duration {
-                    print_scan_summary(advisories, input_path, d, Some(out));
+                    print_scan_summary_detailed(
+                        advisories,
+                        input_path,
+                        d,
+                        Some(out),
+                        telemetry,
+                        incomplete,
+                    );
                 }
                 println!("GitHub annotations written to: {}", out.display());
             } else {
@@ -213,7 +409,14 @@ pub fn print_results(
                 })?;
 
                 if let Some(d) = duration {
-                    print_scan_summary(advisories, input_path, d, Some(out));
+                    print_scan_summary_detailed(
+                        advisories,
+                        input_path,
+                        d,
+                        Some(out),
+                        telemetry,
+                        incomplete,
+                    );
                 }
                 println!("Text report written to: {}", out.display());
             } else {
@@ -221,7 +424,9 @@ pub fn print_results(
                     println!("Analysis Complete: No findings.");
                     if let Some(d) = duration {
                         println!();
-                        print_scan_summary(advisories, input_path, d, None);
+                        print_scan_summary_detailed(
+                            advisories, input_path, d, None, telemetry, incomplete,
+                        );
                     }
                 } else {
                     println!("Analysis: {}", input_path.display());
@@ -232,7 +437,9 @@ pub fn print_results(
                     println!("Total Findings: {}", advisories.len());
                     if let Some(d) = duration {
                         println!();
-                        print_scan_summary(advisories, input_path, d, None);
+                        print_scan_summary_detailed(
+                            advisories, input_path, d, None, telemetry, incomplete,
+                        );
                     }
                 }
             }
@@ -905,8 +1112,9 @@ mod explain_rule_tests {
 /// `REPORT_SCHEMA_VERSION` and this test move together.
 #[cfg(test)]
 mod json_report_schema_tests {
-    use super::json_report;
+    use super::{json_report, json_report_with_telemetry};
     use crate::Advisory;
+    use frensense_engine::telemetry::ScanTelemetry;
     use std::path::Path;
 
     fn adv() -> Advisory {
@@ -944,6 +1152,122 @@ mod json_report_schema_tests {
         // The producer block is present even with no findings - a consumer
         // can always attribute the report.
         assert!(report["producer"]["version"].is_string());
+    }
+
+    #[test]
+    fn analysis_envelope_has_required_keys() {
+        let report = json_report_with_telemetry(&[], &[], None);
+        let analysis = &report["analysis"];
+        // All top-level keys must be present.
+        assert!(analysis["status"].is_string(), "analysis.status missing");
+        assert!(
+            analysis["coverage"].is_object(),
+            "analysis.coverage missing"
+        );
+        assert!(
+            analysis["verdicts"].is_object(),
+            "analysis.verdicts missing"
+        );
+        assert!(
+            analysis["truncations"].is_array(),
+            "analysis.truncations missing"
+        );
+        assert!(analysis["checks"].is_array(), "analysis.checks missing");
+        assert!(analysis["timings"].is_array(), "analysis.timings missing");
+        assert!(
+            analysis["slowest_files"].is_array(),
+            "analysis.slowest_files missing"
+        );
+        assert!(
+            analysis["slowest_functions"].is_array(),
+            "analysis.slowest_functions missing"
+        );
+    }
+
+    #[test]
+    fn analysis_status_reflects_scan_telemetry() {
+        // No engine telemetry supplied → legacy API treats it as complete.
+        let report = json_report_with_telemetry(&[], &[], None);
+        assert_eq!(report["analysis"]["status"], "complete");
+
+        // With a partial-parse file recorded → Partial.
+        let mut telem = ScanTelemetry::default();
+        telem.input.scanned = 1;
+        telem.input.parse_partial = 1;
+        telem.input.parse_partial_files.push("bad.py".into());
+        let report = json_report_with_telemetry(&[], &[], Some(&telem));
+        assert_eq!(report["analysis"]["status"], "partial");
+    }
+}
+
+#[cfg(test)]
+mod scan_status_tests {
+    use super::ScanStatus;
+    use frensense_engine::{scan::IncompleteFunction, telemetry::ScanTelemetry};
+
+    fn incomplete(name: &str) -> IncompleteFunction {
+        IncompleteFunction {
+            function: name.to_string(),
+            file: "f.rs".to_string(),
+        }
+    }
+
+    #[test]
+    fn complete_on_clean_zero_files() {
+        let telem = ScanTelemetry::default();
+        assert_eq!(ScanStatus::compute(&telem, &[]), ScanStatus::Complete);
+    }
+
+    #[test]
+    fn complete_when_telemetry_is_clean_and_no_incomplete_functions() {
+        let mut telem = ScanTelemetry::default();
+        telem.input.scanned = 5;
+        assert_eq!(ScanStatus::compute(&telem, &[]), ScanStatus::Complete);
+    }
+
+    #[test]
+    fn partial_when_incomplete_functions_present() {
+        let telem = ScanTelemetry::default();
+        assert_eq!(
+            ScanStatus::compute(&telem, &[incomplete("fn_a")]),
+            ScanStatus::Partial
+        );
+    }
+
+    #[test]
+    fn partial_when_parse_partial_files_present() {
+        let mut telem = ScanTelemetry::default();
+        telem.input.scanned = 1;
+        telem.input.parse_partial = 1;
+        telem.input.parse_partial_files.push("bad.ts".into());
+        assert_eq!(ScanStatus::compute(&telem, &[]), ScanStatus::Partial);
+    }
+
+    #[test]
+    fn failed_when_all_submitted_inputs_fail() {
+        let mut telem = ScanTelemetry::default();
+        telem.input.submitted = 1;
+        telem.input.failed = 1;
+        telem.input.failed_files.push("crash.c".into());
+        assert_eq!(ScanStatus::compute(&telem, &[]), ScanStatus::Failed);
+    }
+
+    #[test]
+    fn failed_when_inputs_were_submitted_but_none_scanned() {
+        let mut telem = ScanTelemetry::default();
+        telem.input.submitted = 2;
+        telem.input.failed = 1;
+        telem.input.failed_files.push("crash.c".into());
+        assert_eq!(ScanStatus::compute(&telem, &[]), ScanStatus::Failed);
+    }
+
+    #[test]
+    fn partial_when_some_inputs_failed_but_others_scanned() {
+        let mut telem = ScanTelemetry::default();
+        telem.input.submitted = 2;
+        telem.input.scanned = 1;
+        telem.input.failed = 1;
+        assert_eq!(ScanStatus::compute(&telem, &[]), ScanStatus::Partial);
     }
 }
 

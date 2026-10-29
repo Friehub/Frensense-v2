@@ -26,8 +26,6 @@ pub(super) static C_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     // Path Traversal
     ("fopen", crate::role_map::SinkLabel::PathTraversal),
     ("open", crate::role_map::SinkLabel::PathTraversal),
-    ("read", crate::role_map::SinkLabel::PathTraversal),
-    ("write", crate::role_map::SinkLabel::PathTraversal),
     ("unlink", crate::role_map::SinkLabel::PathTraversal),
     ("stat", crate::role_map::SinkLabel::PathTraversal),
     ("access", crate::role_map::SinkLabel::PathTraversal),
@@ -60,6 +58,14 @@ pub(super) static C_SINK_SIGNATURES: &[(&str, &[usize], bool)] = &[
     ("printf", &[0], false),
     ("snprintf", &[2], false),
     ("sscanf", &[1], false),
+    // Path-taking calls: only the path argument is dangerous. `read` and
+    // `write` take a descriptor and a buffer, so they are not path sinks at
+    // all (19 of 48 redis findings ended at one of them).
+    ("fopen", &[0], false),
+    ("open", &[0], false),
+    ("unlink", &[0], false),
+    ("stat", &[0], false),
+    ("access", &[0], false),
 ];
 
 pub(super) static C_SOURCE_PATTERNS: &[&str] = &["argv", "getenv", "fgets", "scanf", "stdin"];
@@ -92,13 +98,24 @@ pub(super) static C_PROPAGATORS: &[PropagatorRule] = &[
     },
 ];
 
-pub(super) static C_SANITIZER_NAMES: &[&str] = &["atoi", "atol", "atof", "strtol", "strtoul"];
+/// Calls whose RESULT does not carry the taint of their arguments:
+/// numeric conversions, lengths and fresh allocations. A length is a number
+/// and a new allocation is a new object, neither is the string it was sized
+/// from; with both propagating, `malloc(strlen(attacker_string))` returned
+/// attacker data, every object allocated through `zmalloc`/`sdsnew`
+/// looked tainted and a command-line argument reached unrelated `open` calls
+/// (26 of the 48 redis path-traversal findings went through `strlen` -> `malloc`).
+pub(super) static C_SANITIZER_NAMES: &[&str] = &[
+    "atoi", "atol", "atof", "strtol", "strtoul", "strlen", "strnlen", "wcslen", "malloc", "calloc",
+    "alloca",
+];
 
 pub(super) static C_ROUTE_PATTERNS: &[&str] = &[];
 
 fn c_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
     match call_last_segment(call) {
-        "atoi" | "atol" | "atof" | "strtol" | "strtoul" => Some(SanitizerKind::Full),
+        "atoi" | "atol" | "atof" | "strtol" | "strtoul" | "strlen" | "strnlen" | "wcslen"
+        | "malloc" | "calloc" | "alloca" => Some(SanitizerKind::Full),
         _ => None,
     }
 }

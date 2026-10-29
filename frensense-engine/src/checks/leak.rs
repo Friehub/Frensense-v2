@@ -32,10 +32,8 @@
 //!   stored to fields/elements/globals, ownership assigned to a
 //!   parameter, derived handles (`&p->field` / load chains) passed to
 //!   callees, and arguments the callee's contract consumes. Direct
-//!   pointer arguments to unknown callees keep frame ownership (read and
-//!   I/O calls receive the buffer without retaining it), so they neither
-//!   release nor escape it - a retained direct argument is a false
-//!   negative, never a false positive.
+//!   pointer arguments to unknown callees keep frame ownership; a pointer
+//!   retained by an unsummarized callee may therefore be reported as a leak.
 //! - A branch whose condition compares an allocation against NULL
 //!   (`== NULL`, `!= NULL`, `!p`) kills it on the null edge: the failed
 //!   allocation path is not a live object. The proof covers every
@@ -155,6 +153,21 @@ fn collect(
                     src: *src,
                     dest: *dest,
                 }),
+                // `ptr + OFFSET` / `(char *)ptr + n` is a derived handle to
+                // the same object (allocators that hand back the address
+                // past a size header). C lowers the addition as `concat`.
+                Instruction::BinaryOp { dest, op, lhs, rhs }
+                    if matches!(op.as_str(), "+" | "-" | "add" | "sub" | "concat") =>
+                {
+                    for operand in [lhs, rhs] {
+                        if let Operand::Var(v) = operand {
+                            edges.push(Edge {
+                                src: *v,
+                                dest: *dest,
+                            });
+                        }
+                    }
+                }
                 Instruction::LoadField { dest, base, .. }
                 | Instruction::LoadElement { dest, base, .. } => edges.push(Edge {
                     src: *base,
@@ -488,7 +501,16 @@ pub fn check(
         }
     }
 
-    let params: FxHashSet<VarId> = ir.parameters.iter().copied().collect();
+    // Destinations that outlive the call: parameters, and names that no
+    // declaration in this body binds (file-scope statics, `extern`
+    // globals, `environ`). Assigning an allocation to either hands it
+    // over, exactly like a store to a field.
+    let mut params: FxHashSet<VarId> = ir.parameters.iter().copied().collect();
+    for (var, meta) in &ir.var_metadata {
+        if meta.source_name.is_some() && !meta.declared && !meta.is_memory_state {
+            params.insert(*var);
+        }
+    }
 
     // Reaching-definition index for the exit scan: dominators plus the
     // storage-cell grouping of SSA versions.
@@ -518,6 +540,11 @@ pub fn check(
     for (bid, block) in &ir.blocks {
         let mut state = join_edges(ir, &defs, &parents, &storage, &out_state, *bid, facts);
         transfer(summaries, &allocs, &parents, &params, block, &mut state);
+        // A block that ends the process (`exit`, `abort`, ...) is not a
+        // function exit: nothing outlives it, so nothing leaks past it.
+        if crate::checks::noreturn::block_diverges(block) {
+            continue;
+        }
         // Explicit returns and fall-off-the-end blocks (`Terminator::None`,
         // void functions with no trailing `return`) are function exits.
         match &block.terminator {
@@ -680,8 +707,9 @@ fn call_transfer(
             drop_alloc(state, id);
         }
     }
-    // Derived handles passed to a callee hand off the object; direct
-    // pointers keep frame ownership (reads and I/O never retain).
+    // Derived handles passed to an unknown callee hand off the object;
+    // direct pointers keep frame ownership unless an explicit contract
+    // consumes the argument (handled in the first loop above).
     for arg in args.iter().chain(extra.iter()) {
         let (ids, direct) = resolve(arg, state, parents);
         if direct {
@@ -819,6 +847,11 @@ fn edge_guard_kill(
             src: Operand::Var(v),
             ..
         }) if (op == "!" || op == "not") && on_true => Some(*v),
+        // Truthiness test, `if (p)` / `while (p)`: the false edge is the
+        // NULL edge. Without it `if (types) free(types);` kept the
+        // allocation live down the "types is NULL" side.
+        Some(Instruction::UnaryOp { .. }) => None,
+        _ if on_false => Some(*c),
         _ => None,
     };
     if let Some(v) = compared {

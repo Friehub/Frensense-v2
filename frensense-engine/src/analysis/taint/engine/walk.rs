@@ -836,6 +836,7 @@ impl<'a> BackwardTaintEngine<'a> {
             };
             state.seen_nodes.insert((fi, arg_node));
             self.current_parents.clear();
+            self.current_root = Some((fi, arg_node));
             let rss_pre = if crate::debug_flags::DebugFlags::get().mem {
                 crate::debug_flags::rss_kb()
             } else {
@@ -1228,7 +1229,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 {
                     state.seen_nodes.insert((pf, pk));
                     if self.capture_paths {
-                        self.current_parents.insert((pf, pk), (cf, cur));
+                        self.record_parent((pf, pk), (cf, cur));
                     }
                     queue.push_back((pf, pk, pk.block, field_demand, new_ctx));
                 }
@@ -1237,7 +1238,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 if state.visited.insert((cf, pk, cur.block, field_demand, ctx)) {
                     state.seen_nodes.insert((cf, pk));
                     if self.capture_paths {
-                        self.current_parents.insert((cf, pk), (cf, cur));
+                        self.record_parent((cf, pk), (cf, cur));
                     }
                     queue.push_back((cf, pk, cur.block, field_demand, ctx));
                 }

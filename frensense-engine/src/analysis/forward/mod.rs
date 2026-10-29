@@ -142,7 +142,8 @@ impl<'a> ProgramSvfg<'a> {
             .iter()
             .map(|n| {
                 let ir = irs[*n];
-                let (svfg, def_site) = SvfgBuilder::new(ir).build();
+                let (svfg, def_site) =
+                    SvfgBuilder::new(ir).build_with_buffer_builtins(&facts.buffer_builtins);
                 FunctionEntry {
                     name: (*n).clone(),
                     ir,

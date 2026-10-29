@@ -308,7 +308,6 @@ def test(request):
     }
 
     #[test]
-    #[ignore = "Blind spot: C strcpy destination buffer taint propagation"]
     fn probe_21_c_pointer_strcpy_sink() {
         let src = r#"
             #include <stdlib.h>

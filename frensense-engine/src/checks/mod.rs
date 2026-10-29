@@ -24,6 +24,7 @@ pub mod health;
 pub mod int_overflow;
 pub mod leak;
 pub mod memory_summary;
+pub mod noreturn;
 pub mod oob;
 pub mod policy;
 pub mod registry;
@@ -151,12 +152,34 @@ pub fn check_all_with_graph_scoped<'a>(
     prog: Option<&ProgramSvfg<'_>>,
     pkg_scope: Option<&policy::PackageScope<'_>>,
 ) -> Vec<CheckerFinding> {
+    check_all_with_telemetry(irs, facts, prog, pkg_scope).0
+}
+
+/// [`check_all_with_graph_scoped`] while also collecting execution telemetry
+/// (timings, run counts, findings, and outcomes with catch_unwind failure isolation).
+pub fn check_all_with_telemetry<'a>(
+    irs: impl IntoIterator<Item = &'a FunctionIR>,
+    facts: &FactTable,
+    prog: Option<&ProgramSvfg<'_>>,
+    pkg_scope: Option<&policy::PackageScope<'_>>,
+) -> (Vec<CheckerFinding>, Vec<crate::telemetry::CheckTelemetry>) {
+    let registry = registry::default_registry();
+    check_all_with_registry_and_telemetry(&registry, irs, facts, prog, pkg_scope)
+}
+
+/// [`check_all_with_telemetry`] with an explicit [`registry::CheckRegistry`].
+pub fn check_all_with_registry_and_telemetry<'a>(
+    registry: &registry::CheckRegistry,
+    irs: impl IntoIterator<Item = &'a FunctionIR>,
+    facts: &FactTable,
+    prog: Option<&ProgramSvfg<'_>>,
+    pkg_scope: Option<&policy::PackageScope<'_>>,
+) -> (Vec<CheckerFinding>, Vec<crate::telemetry::CheckTelemetry>) {
     let irs: Vec<&FunctionIR> = irs.into_iter().collect();
     // One memory-summary registry per scan: program summaries are inferred
     // from the whole IR set once, then shared by every memory check.
     let summaries =
         memory_summary::MemorySummaryRegistry::from_facts(facts).infer_program_summaries_into(&irs);
-    let registry = registry::default_registry();
     let program_ctx = CheckContext {
         irs: &irs,
         current: None,
@@ -164,10 +187,12 @@ pub fn check_all_with_graph_scoped<'a>(
         facts,
         pkg_scope,
         summaries: &summaries,
+        diag: &registry::NOOP_DIAGNOSTIC_SINK,
     };
 
     let mut seen: FxHashSet<(String, String, usize)> = FxHashSet::default();
     let mut all = Vec::new();
+    let mut telemetries = Vec::new();
 
     // Program-scoped checks run once over the whole IR set (they correlate
     // guards in one function with definitions in another).
@@ -175,27 +200,94 @@ pub fn check_all_with_graph_scoped<'a>(
         .checks()
         .filter(|c| c.scope() == CheckScope::Program)
     {
-        for f in check.run(&program_ctx) {
-            push_unique(&mut all, &mut seen, f);
-        }
+        let id = check.id().to_string();
+        let start = std::time::Instant::now();
+        let res =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check.run(&program_ctx)));
+        let ms = start.elapsed().as_millis();
+        let mut count = 0;
+        let outcome = match res {
+            Ok(findings) => {
+                count = findings.len();
+                for f in findings {
+                    push_unique(&mut all, &mut seen, f);
+                }
+                crate::telemetry::CheckOutcome::Ok
+            }
+            Err(payload) => {
+                let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = payload.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic".to_string()
+                };
+                eprintln!("frensense: check `{id}` panicked: {msg}");
+                crate::telemetry::CheckOutcome::Panicked(msg)
+            }
+        };
+        telemetries.push(crate::telemetry::CheckTelemetry {
+            id,
+            scope: "program".to_string(),
+            ran: 1,
+            findings: count,
+            millis: ms,
+            outcome,
+        });
     }
 
-    // Function-scoped checks are IR-major: every check on one function
-    // before moving to the next. Insertion order matters below the final
-    // stable sort for findings that share a (function, span) key.
-    for ir in &irs {
-        let ctx = CheckContext {
-            current: Some(*ir),
-            ..program_ctx
-        };
-        for check in registry
-            .checks()
-            .filter(|c| c.scope() == CheckScope::Function)
-        {
-            for f in check.run(&ctx) {
-                push_unique(&mut all, &mut seen, f);
+    // Function-scoped checks are grouped by check so we time and isolate per-check:
+    for check in registry
+        .checks()
+        .filter(|c| c.scope() == CheckScope::Function)
+    {
+        let id = check.id().to_string();
+        let start = std::time::Instant::now();
+        let mut ran = 0;
+        let mut count = 0;
+        let mut outcome = crate::telemetry::CheckOutcome::Ok;
+
+        for ir in &irs {
+            ran += 1;
+            let ctx = CheckContext {
+                current: Some(*ir),
+                ..program_ctx
+            };
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check.run(&ctx)));
+            match res {
+                Ok(findings) => {
+                    count += findings.len();
+                    for f in findings {
+                        push_unique(&mut all, &mut seen, f);
+                    }
+                }
+                Err(payload) => {
+                    let msg = if let Some(s) = payload.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = payload.downcast_ref::<String>() {
+                        s.clone()
+                    } else {
+                        "unknown panic".to_string()
+                    };
+                    eprintln!(
+                        "frensense: check `{id}` panicked on function `{}`: {msg}",
+                        ir.name
+                    );
+                    if matches!(outcome, crate::telemetry::CheckOutcome::Ok) {
+                        outcome = crate::telemetry::CheckOutcome::Panicked(msg);
+                    }
+                }
             }
         }
+        let ms = start.elapsed().as_millis();
+        telemetries.push(crate::telemetry::CheckTelemetry {
+            id,
+            scope: "function".to_string(),
+            ran,
+            findings: count,
+            millis: ms,
+            outcome,
+        });
     }
 
     all.sort_by_key(|f| {
@@ -204,7 +296,7 @@ pub fn check_all_with_graph_scoped<'a>(
             f.span.map(|s| s.0).unwrap_or(usize::MAX),
         )
     });
-    all
+    (all, telemetries)
 }
 
 /// The learned-check rule: apply corpus-verified checks from the fact

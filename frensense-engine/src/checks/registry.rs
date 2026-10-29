@@ -38,6 +38,24 @@ pub enum CheckScope {
     Program,
 }
 
+/// Receiver for diagnostics emitted during check execution.
+pub trait DiagnosticSink: Sync {
+    /// Report that the check truncated its analysis due to a safety cap or budget.
+    fn truncated(&self, cap: &'static str);
+    /// Report that the check skipped analysis for this subject (e.g. missing callers).
+    fn skipped(&self, reason: &'static str);
+}
+
+/// A no-op diagnostic sink used by default.
+pub struct NoopDiagnosticSink;
+
+impl DiagnosticSink for NoopDiagnosticSink {
+    fn truncated(&self, _cap: &'static str) {}
+    fn skipped(&self, _reason: &'static str) {}
+}
+
+pub static NOOP_DIAGNOSTIC_SINK: NoopDiagnosticSink = NoopDiagnosticSink;
+
 /// Everything a non-dataflow check may consult.
 ///
 /// All fields are shared references owned by the driver for the duration
@@ -58,6 +76,8 @@ pub struct CheckContext<'a> {
     pub pkg_scope: Option<&'a PackageScope<'a>>,
     /// Interprocedural memory summaries, inferred once per scan.
     pub summaries: &'a MemorySummaryRegistry,
+    /// Non-fatal diagnostic sink (truncations, skips).
+    pub diag: &'a dyn DiagnosticSink,
 }
 
 impl<'a> CheckContext<'a> {
@@ -104,6 +124,11 @@ pub struct CheckRegistry {
 }
 
 impl CheckRegistry {
+    /// Construct a registry from a static slice of check references.
+    pub const fn from_slice(checks: &'static [&'static dyn NonDataflowCheck]) -> Self {
+        Self { checks }
+    }
+
     /// The registered check classes, in run order.
     pub fn checks(&self) -> impl Iterator<Item = &'static dyn NonDataflowCheck> + '_ {
         self.checks.iter().copied()
@@ -389,7 +414,81 @@ mod tests {
             facts: &facts,
             pkg_scope: None,
             summaries: &summaries,
+            diag: &NOOP_DIAGNOSTIC_SINK,
         };
         let _ = ctx.ir();
+    }
+
+    struct PanickingFunctionCheck;
+    impl NonDataflowCheck for PanickingFunctionCheck {
+        fn id(&self) -> &'static str {
+            "panicking_check"
+        }
+        fn scope(&self) -> CheckScope {
+            CheckScope::Function
+        }
+        fn run(&self, _ctx: &CheckContext<'_>) -> Vec<CheckerFinding> {
+            panic!("intentional check panic");
+        }
+    }
+
+    struct HealthyFunctionCheck;
+    impl NonDataflowCheck for HealthyFunctionCheck {
+        fn id(&self) -> &'static str {
+            "healthy_check"
+        }
+        fn scope(&self) -> CheckScope {
+            CheckScope::Function
+        }
+        fn run(&self, ctx: &CheckContext<'_>) -> Vec<CheckerFinding> {
+            vec![CheckerFinding {
+                function: ctx.ir().name.clone(),
+                rule: "HEALTHY_RULE".into(),
+                message: "all good".into(),
+                params: Vec::new(),
+                span: None,
+                severity: "warning".into(),
+                provenance: crate::analysis::taint::facts::Provenance::Spec,
+            }]
+        }
+    }
+
+    #[test]
+    fn check_failure_is_isolated_and_recorded() {
+        static PANICKING: PanickingFunctionCheck = PanickingFunctionCheck;
+        static HEALTHY: HealthyFunctionCheck = HealthyFunctionCheck;
+        static CHECKS: &[&'static dyn NonDataflowCheck] = &[&PANICKING, &HEALTHY];
+
+        let registry = CheckRegistry::from_slice(CHECKS);
+        let ir = FunctionIR::new("target_fn".into());
+        let irs = vec![&ir];
+        let facts = FactTable::default();
+
+        let (findings, telemetry) = crate::checks::check_all_with_registry_and_telemetry(
+            &registry, irs, &facts, None, None,
+        );
+
+        // Healthy check finding should still be emitted:
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].rule, "HEALTHY_RULE");
+
+        // Telemetry should record both checks, panicking check having Panicked outcome:
+        assert_eq!(telemetry.len(), 2);
+        let panic_tel = telemetry
+            .iter()
+            .find(|t| t.id == "panicking_check")
+            .unwrap();
+        match &panic_tel.outcome {
+            crate::telemetry::CheckOutcome::Panicked(msg) => {
+                assert!(msg.contains("intentional check panic"));
+            }
+            _ => panic!("expected Panicked outcome"),
+        }
+        let healthy_tel = telemetry.iter().find(|t| t.id == "healthy_check").unwrap();
+        assert!(matches!(
+            healthy_tel.outcome,
+            crate::telemetry::CheckOutcome::Ok
+        ));
+        assert_eq!(healthy_tel.findings, 1);
     }
 }

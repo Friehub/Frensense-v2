@@ -523,6 +523,7 @@ impl PointsToAnalysis {
         let exhausted = passes >= MAX_PASSES && changed;
         self.converged = !exhausted;
         if exhausted {
+            crate::telemetry::Cap::PointsToPasses.record();
             eprintln!(
                 "frensense: points-to did not converge for `{}` after {MAX_PASSES} passes; \
                  falling back to conservative field resolution for this function",

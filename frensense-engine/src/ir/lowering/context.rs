@@ -41,6 +41,11 @@ pub struct LoweringContext<'a> {
 
     /// Optional learned fact table providing dynamic grammar overrides.
     pub facts: Option<&'a FactTable>,
+
+    /// Inside a `static`/`extern` declaration: the name has static storage
+    /// (zero-initialised, or defined elsewhere), so it is not a function-local
+    /// that can be read uninitialised and is not marked `declared`.
+    pub nonlocal_decl: bool,
 }
 
 impl<'a> LoweringContext<'a> {
@@ -67,6 +72,7 @@ impl<'a> LoweringContext<'a> {
             memory_var,
             labels: FxHashMap::default(),
             loop_stack: Vec::new(),
+            nonlocal_decl: false,
             facts,
         }
     }

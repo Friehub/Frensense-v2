@@ -10,14 +10,17 @@
 //! facts.
 
 use rustc_hash::FxHashMap;
+use std::time::Instant;
 
 use crate::analysis::forward::ProgramSvfg;
 use crate::analysis::taint::config::TaintConfig;
 use crate::analysis::taint::engine::{BackwardTaintEngine, SinkFinding};
 use crate::analysis::taint::facts::FactTable;
 use crate::checks::{self, CheckerFinding};
-use crate::harness::lower_source_with_facts;
 use crate::ir::function::FunctionIR;
+use crate::telemetry::{
+    CapHit, FileTiming, FunctionTiming, InputAccounting, PhaseTiming, ScanTelemetry, millis_since,
+};
 use frensense_lang::spec::{Export, Import, ModuleItem};
 
 /// Scan a set of source files under a config and fact table.
@@ -28,16 +31,29 @@ pub fn scan(
     config: &TaintConfig,
     facts: &FactTable,
 ) -> ScanResult {
+    let started = Instant::now();
     match prepare_with_facts(files, Some(facts)) {
-        Ok(p) => scan_prepared(&p, config, facts),
-        Err(e) => ScanResult {
-            findings: Vec::new(),
-            located: Vec::new(),
-            located_checker: Vec::new(),
-            checker: Vec::new(),
-            errors: vec![e],
-            analysis_incomplete: Vec::new(),
-        },
+        Ok(p) => {
+            let mut result = scan_prepared(&p, config, facts);
+            result.telemetry.phases.push(PhaseTiming {
+                phase: "total".into(),
+                ms: millis_since(started),
+            });
+            result
+        }
+        Err(e) => {
+            let mut telemetry = ScanTelemetry::default();
+            telemetry.errors.push(e.clone());
+            ScanResult {
+                findings: Vec::new(),
+                located: Vec::new(),
+                located_checker: Vec::new(),
+                checker: Vec::new(),
+                errors: vec![e],
+                analysis_incomplete: Vec::new(),
+                telemetry,
+            }
+        }
     }
 }
 
@@ -60,6 +76,57 @@ pub struct PreparedProgram {
     pub file_exports: FxHashMap<String, Vec<Export>>,
     /// Every top-level declaration per file, exported or not.
     pub file_module_items: FxHashMap<String, Vec<ModuleItem>>,
+    /// Files that could not be lowered, with the reason. The scan continues
+    /// without them and says so; it never drops one silently.
+    pub lower_errors: Vec<String>,
+    /// Files whose parse tree contained errors, so they were analyzed from
+    /// whatever tree-sitter recovered rather than from an intact tree.
+    pub parse_partial: Vec<String>,
+    /// Number of source inputs attempted by this prepared program.
+    pub submitted: usize,
+    /// Safety cap events that happened during per-file lowering.
+    pub lower_caps: Vec<CapHit>,
+    /// Paths that failed lowering, independent of error message formatting.
+    pub lower_failed_files: Vec<String>,
+    /// Lowering cost per file, feeding the slowest-file report.
+    pub file_timings: Vec<FileTiming>,
+}
+
+/// Stack size for the per-file lowering thread (the default 4 MiB overflows
+/// on deeply nested real-world functions; one such overflow used to abort the
+/// process and lose every file's findings).
+const LOWER_STACK_BYTES: usize = 32 * 1024 * 1024;
+
+/// Lower one file on its own thread with a larger stack.
+///
+/// Returns the extracted functions and whether the file only partially
+/// parsed. A panic is contained here and reported as that file's error.
+type IsolatedLowering = (FxHashMap<String, FunctionIR>, bool, Vec<CapHit>);
+
+fn lower_isolated(
+    path: &str,
+    source: &str,
+    ext: &str,
+    facts: Option<&FactTable>,
+) -> Result<IsolatedLowering, String> {
+    type Lowered = Result<(FxHashMap<String, FunctionIR>, bool), String>;
+    type JoinOutcome = Result<(Lowered, Vec<CapHit>), Box<dyn std::any::Any + Send + 'static>>;
+    let outcome: Result<JoinOutcome, std::io::Error> = std::thread::scope(|scope| {
+        let handle = std::thread::Builder::new()
+            .stack_size(LOWER_STACK_BYTES)
+            .spawn_scoped(scope, || {
+                let lowered = crate::harness::lower_source_detailed(path, source, ext, facts);
+                let caps = crate::telemetry::drain_caps();
+                (lowered, caps)
+            })?;
+        Ok(handle.join())
+    });
+    match outcome {
+        Ok(Ok((Ok((functions, partial)), caps))) => Ok((functions, partial, caps)),
+        Ok(Ok((Err(error), _))) => Err(error),
+        Ok(Err(_)) => Err("lowering worker panicked; see the file path in scan accounting".into()),
+        Err(_) => Err("failed to spawn lowering worker".into()),
+    }
 }
 
 /// Lower every file once, remembering which file each function came from
@@ -83,8 +150,32 @@ pub fn prepare_with_facts(
     // name keeps the bare key must not depend on directory walk order.
     let mut ordered: Vec<&(String, String, String)> = files.iter().collect();
     ordered.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut lower_errors: Vec<String> = Vec::new();
+    let mut lower_failed_files: Vec<String> = Vec::new();
+    let mut lower_caps: Vec<CapHit> = Vec::new();
+    let mut parse_partial: Vec<String> = Vec::new();
+    let submitted = ordered.len();
+    let mut file_timings: Vec<FileTiming> = Vec::new();
     for (path, source, ext) in ordered {
-        let fns = lower_source_with_facts(path, source, ext, facts)?;
+        let started = Instant::now();
+        let lowered = lower_isolated(path, source, ext, facts);
+        let (fns, parse_broken, caps) = match lowered {
+            Ok(ok) => ok,
+            Err(reason) => {
+                lower_failed_files.push(path.clone());
+                lower_errors.push(reason);
+                continue;
+            }
+        };
+        lower_caps.extend(caps);
+        if parse_broken {
+            parse_partial.push(path.clone());
+        }
+        file_timings.push(FileTiming {
+            file: path.clone(),
+            ms: millis_since(started),
+            functions: fns.len(),
+        });
         for (name, mut ir) in fns {
             file_source
                 .entry(path.clone())
@@ -119,6 +210,12 @@ pub fn prepare_with_facts(
         file_imports: res.file_imports,
         file_exports: res.file_exports,
         file_module_items: res.file_module_items,
+        lower_errors,
+        parse_partial,
+        submitted,
+        lower_caps,
+        lower_failed_files,
+        file_timings,
     })
 }
 
@@ -190,6 +287,10 @@ pub fn scan_prepared(
     let statics = prepared.ir_views();
     let statics = &statics;
 
+    // Phase accounting. Every phase below is timed; the reader of a report
+    // needs to know where the minutes went, not just that there were some.
+    let mut phases: Vec<PhaseTiming> = Vec::new();
+
     let mem_probe = crate::debug_flags::DebugFlags::get().mem;
     if mem_probe {
         eprintln!(
@@ -203,21 +304,28 @@ pub fn scan_prepared(
     // The program graph is built first: non-dataflow checks that walk
     // interprocedural value flow (UAF free/use pairs) reuse it, and the
     // taint engine below gets the same instance.
-    let prog = ProgramSvfg::new_with_module_aliases(
-        statics,
-        config,
-        facts,
-        Some(&prepared.file_aliases),
-        Some(&prepared.fn_file),
-    );
-    if mem_probe {
-        eprintln!(
-            "[mem] after_svfg fns={} rss_kb={}",
-            prog.functions.len(),
-            crate::debug_flags::rss_kb()
+    let prog = {
+        let t = Instant::now();
+        let prog = ProgramSvfg::new_with_module_aliases(
+            statics,
+            config,
+            facts,
+            Some(&prepared.file_aliases),
+            Some(&prepared.fn_file),
         );
-    }
-
+        if mem_probe {
+            eprintln!(
+                "[mem] after_svfg fns={} rss_kb={}",
+                prog.functions.len(),
+                crate::debug_flags::rss_kb()
+            );
+        }
+        phases.push(PhaseTiming {
+            phase: "graph".into(),
+            ms: millis_since(t),
+        });
+        prog
+    };
     // Non-dataflow policy checks run on the same lowered IR, no taint
     // needed, so weak-crypto/config bugs surface even with zero taint paths.
     // `facts` also carries corpus-learned checks installed by the bundle.
@@ -227,19 +335,27 @@ pub fn scan_prepared(
         fn_file: &prepared.fn_file,
         file_package_imports: &prepared.file_package_imports,
     };
-    let checker_findings = checks::check_all_with_graph_scoped(
-        statics.values().copied(),
-        facts,
-        Some(&prog),
-        Some(&pkg_scope),
-    );
-    if mem_probe {
-        eprintln!(
-            "[mem] after_checks findings={} rss_kb={}",
-            checker_findings.len(),
-            crate::debug_flags::rss_kb()
+    let (checker_findings, check_telemetry) = {
+        let t = Instant::now();
+        let (found, check_telemetry) = checks::check_all_with_telemetry(
+            statics.values().copied(),
+            facts,
+            Some(&prog),
+            Some(&pkg_scope),
         );
-    }
+        if mem_probe {
+            eprintln!(
+                "[mem] after_checks findings={} rss_kb={}",
+                found.len(),
+                crate::debug_flags::rss_kb()
+            );
+        }
+        phases.push(PhaseTiming {
+            phase: "checks".into(),
+            ms: millis_since(t),
+        });
+        (found, check_telemetry)
+    };
 
     let fn_file = &prepared.fn_file;
     let file_source = &prepared.file_source;
@@ -250,7 +366,11 @@ pub fn scan_prepared(
         // Route anchoring for per-call-site framing (schema §5.1):
         // consult the same predicate the harness lowered the file with.
         .with_route_registration(crate::harness::is_route_registration);
-    engine.run();
+    let taint_timing = {
+        let t = Instant::now();
+        engine.run();
+        millis_since(t)
+    };
     if mem_probe {
         eprintln!(
             "[mem] after_taint findings={} rss_kb={}",
@@ -258,6 +378,14 @@ pub fn scan_prepared(
             crate::debug_flags::rss_kb()
         );
     }
+    phases.push(PhaseTiming {
+        phase: "taint".into(),
+        ms: taint_timing,
+    });
+
+    // Which functions ate the taint phase: the ten slowest, with their file
+    // and how many sink arguments each one explored.
+    let slowest_functions = slowest_functions(&engine, &prepared.fn_file);
 
     // Resolve each finding to a file + line/column from the sink's byte span.
     let located: Vec<LocatedFinding> = engine
@@ -334,14 +462,75 @@ pub fn scan_prepared(
         .collect();
     analysis_incomplete.sort_by(|a, b| (&a.file, &a.function).cmp(&(&b.file, &b.function)));
 
+    // Lowering already happened before this function; its cost is carried
+    // on the prepared program so `scan` and `scan_prepared` agree.
+    phases.insert(
+        0,
+        PhaseTiming {
+            phase: "lower".into(),
+            ms: prepared.file_timings.iter().map(|f| f.ms).sum(),
+        },
+    );
+
+    let failed_files = prepared.lower_failed_files.clone();
+    let mut caps = prepared.lower_caps.clone();
+    caps.extend(crate::telemetry::drain_caps());
+    let mut telemetry = ScanTelemetry {
+        phases,
+        slowest_files: prepared.file_timings.clone(),
+        slowest_functions,
+        caps,
+        checks: check_telemetry,
+        suppressed: Vec::new(),
+        errors: prepared.lower_errors.clone(),
+        input: InputAccounting {
+            submitted: prepared.submitted,
+            scanned: prepared.file_timings.len(),
+            failed: prepared.lower_failed_files.len(),
+            unsupported: 0,
+            failed_files,
+            parse_partial: prepared.parse_partial.len(),
+            parse_partial_files: prepared.parse_partial.clone(),
+            functions: prepared.irs.len(),
+        },
+        taint: engine.stats,
+    };
+    telemetry
+        .slowest_files
+        .sort_by_key(|b| std::cmp::Reverse(b.ms));
+    telemetry
+        .slowest_files
+        .truncate(crate::telemetry::SLOW_SAMPLE);
+    // Files that failed to lower are errors, not silence: they land in both
+    // places so a report with no `errors` key really did read everything.
+    let errors = prepared.lower_errors.clone();
+
     ScanResult {
         findings: engine.findings,
         located,
         located_checker,
         checker: checker_findings,
-        errors: Vec::new(),
+        errors,
         analysis_incomplete,
+        telemetry,
     }
+}
+
+/// The `SLOW_SAMPLE` functions whose sink exploration took longest, each
+/// with the file it came from.
+fn slowest_functions(
+    engine: &BackwardTaintEngine<'_>,
+    fn_file: &FxHashMap<String, String>,
+) -> Vec<FunctionTiming> {
+    let mut slowest = engine.fn_timings.clone();
+    for entry in &mut slowest {
+        if entry.file.is_empty() {
+            entry.file = fn_file.get(&entry.function).cloned().unwrap_or_default();
+        }
+    }
+    slowest.sort_by_key(|b| std::cmp::Reverse(b.ms));
+    slowest.truncate(crate::telemetry::SLOW_SAMPLE);
+    slowest
 }
 
 /// A function the per-function analysis budget forced into the degraded
@@ -376,6 +565,11 @@ pub struct ScanResult {
     /// budget expired (see [`IncompleteFunction`]). Empty for a scan in
     /// which every function was analyzed fully.
     pub analysis_incomplete: Vec<IncompleteFunction>,
+    /// What the scan measured and what stopped it: phase timings, the files
+    /// and functions that ate the time, every safety valve that fired, and
+    /// how much of the input was actually readable. See
+    /// [`crate::telemetry::ScanTelemetry`].
+    pub telemetry: ScanTelemetry,
 }
 
 /// A [`CheckerFinding`] pinned to its source location.

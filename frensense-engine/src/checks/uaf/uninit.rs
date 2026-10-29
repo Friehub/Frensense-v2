@@ -21,6 +21,15 @@ pub fn check_uninitialized_frees(ir: &FunctionIR, frees: &[FreeSite]) -> Vec<Che
             continue;
         }
 
+        // Only a name bound by a declaration in this body can be an
+        // uninitialised stack slot. Statics, externs and file-scope globals
+        // are zero-initialised or defined elsewhere (redis: `static robj
+        // **lua_argv = NULL;` flagged because `zrealloc(lua_argv, ..)` is a
+        // consuming call and the phi gate below never checked declaration).
+        if !is_declared_in_function(ir, f.var) {
+            continue;
+        }
+
         // Pointers loaded from globals are not stack uninitialized pointers.
         if is_derived_from_global(ir, f.var) {
             continue;
@@ -36,6 +45,15 @@ pub fn check_uninitialized_frees(ir: &FunctionIR, frees: &[FreeSite]) -> Vec<Che
         // so "no reaching def here" is expected, not a bug.
         if has_no_reaching_def(ir, f) && is_declared_in_function(ir, f.var) {
             findings.push(finding(ir, Violation::UninitializedFree, &f.var, None));
+            continue;
+        }
+
+        // An out-parameter write (`f(..., &err)`) initialises the variable
+        // on paths the phi analysis below cannot see: the callee stores
+        // through the address, and the `if (!result)` that follows is the
+        // callee's error contract, not a missing initialisation (redis
+        // `clusterManagerMoveSlot(..., &err)` then `zfree(err)`).
+        if address_is_taken(ir, f.var) {
             continue;
         }
 
@@ -56,6 +74,29 @@ pub fn check_uninitialized_frees(ir: &FunctionIR, frees: &[FreeSite]) -> Vec<Che
     }
 
     findings
+}
+
+/// True when the address of `var` (or of a same-named version of it) is
+/// taken anywhere in the function.
+fn address_is_taken(ir: &FunctionIR, var: VarId) -> bool {
+    let name = ir
+        .var_metadata
+        .get(&var)
+        .and_then(|m| m.source_name.as_deref());
+    ir.blocks.values().any(|block| {
+        block.instructions.iter().any(|instr| {
+            let Instruction::AddressOf { src, .. } = instr else {
+                return false;
+            };
+            *src == var
+                || name.is_some_and(|n| {
+                    ir.var_metadata
+                        .get(src)
+                        .and_then(|m| m.source_name.as_deref())
+                        == Some(n)
+                })
+        })
+    })
 }
 
 /// Identifies if `var` is loaded from a global or derived from global memory.

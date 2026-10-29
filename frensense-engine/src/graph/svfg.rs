@@ -267,6 +267,7 @@ impl Svfg {
 pub struct SvfgBuilder<'a> {
     ir: &'a FunctionIR,
     graph: Svfg,
+    buffer_builtins: Vec<crate::analysis::taint::facts::BufferBuiltinSpec>,
     /// Maps each VarId to the SVFG node that *defines* it.
     def_site: FxHashMap<VarId, NodeKey>,
     /// Shared points-to analysis for this function, built lazily on first
@@ -282,11 +283,24 @@ impl<'a> SvfgBuilder<'a> {
             graph: Svfg::default(),
             def_site: FxHashMap::default(),
             heap_cache: None,
+            buffer_builtins: Vec::new(),
         }
     }
 
     /// Consume the builder and return the finished graph plus the def-site table.
-    pub fn build(mut self) -> (Svfg, FxHashMap<VarId, NodeKey>) {
+    pub fn build(self) -> (Svfg, FxHashMap<VarId, NodeKey>) {
+        self.build_inner()
+    }
+
+    pub fn build_with_buffer_builtins(
+        mut self,
+        specs: &[crate::analysis::taint::facts::BufferBuiltinSpec],
+    ) -> (Svfg, FxHashMap<VarId, NodeKey>) {
+        self.buffer_builtins = specs.to_vec();
+        self.build_inner()
+    }
+
+    fn build_inner(mut self) -> (Svfg, FxHashMap<VarId, NodeKey>) {
         // -----------------------------------------------------------------
         // Pass 0: Register formal parameters as def nodes.
         // -----------------------------------------------------------------
@@ -496,6 +510,11 @@ impl<'a> SvfgBuilder<'a> {
         // Pass 3: field-sensitive heap edges (store.src → load.dest).
         // -----------------------------------------------------------------
         self.connect_heap_edges(&block_ids);
+        // C's out-parameter writes (`strcpy(dst, src)`, `read(fd, dst, n)`,
+        // etc.) mutate their destination instead of returning its contents.
+        // Connect the source argument to subsequent reads through the same
+        // destination object, using the existing field-sensitive heap edges.
+        self.connect_buffer_builtin_edges(&block_ids);
 
         (self.graph, self.def_site)
     }
@@ -609,6 +628,106 @@ impl<'a> SvfgBuilder<'a> {
                         continue;
                     }
                     self.graph.add_edge(*src_use_key, load_dest_key);
+                }
+            }
+        }
+    }
+
+    /// Reachable blocks from a given block, including the starting block.
+    fn reachable_blocks(&self, start: BlockId) -> FxHashSet<BlockId> {
+        let mut seen = FxHashSet::default();
+        let mut work = vec![start];
+        while let Some(block) = work.pop() {
+            if !seen.insert(block) {
+                continue;
+            }
+            if let Some(data) = self.ir.blocks.get(&block) {
+                work.extend(data.successors.iter().copied());
+            }
+        }
+        seen
+    }
+
+    /// Model C buffer-mutator calls as writes into their destination object.
+    /// The slots come from the generated/default pack so the IR mechanism
+    /// stays vocabulary-free. This is deliberately restricted to known
+    /// buffer builtins and local post-call reads, rather than connecting every
+    /// call argument to every variable in the function.
+    fn connect_buffer_builtin_edges(&mut self, block_ids: &[BlockId]) {
+        if !matches!(self.ir.language.as_str(), "c" | "cpp") || self.buffer_builtins.is_empty() {
+            return;
+        }
+
+        let mut writes: Vec<(BlockId, usize, VarId, NodeKey)> = Vec::new();
+        for &block_id in block_ids {
+            let block = &self.ir.blocks[&block_id];
+            for (idx, instr) in block.instructions.iter().enumerate() {
+                let (name, args) = match instr {
+                    Instruction::CallStatic { func, args, .. } => (func.as_str(), args),
+                    Instruction::CallVirtual { method, args, .. } => (method.as_str(), args),
+                    _ => continue,
+                };
+                let last = name.rsplit(['.', ':']).next().unwrap_or(name);
+                let Some(spec) = self.buffer_builtins.iter().find(|spec| spec.name == last) else {
+                    continue;
+                };
+                let Some(dst_idx) = spec.dst_arg else {
+                    continue;
+                };
+                let Some(Operand::Var(dst)) = args.get(dst_idx) else {
+                    continue;
+                };
+                let Some(src_idx) = spec.src_arg else {
+                    continue;
+                };
+                let Some(Operand::Var(src)) = args.get(src_idx) else {
+                    continue;
+                };
+                // Reuse the call argument use node as the source of the
+                // mutation edge. The call's regular argument→return edge
+                // remains unchanged; only destination reads receive this
+                // write's source taint.
+                writes.push((block_id, idx, *dst, NodeKey::instr(block_id, idx, *src)));
+            }
+        }
+        if writes.is_empty() {
+            return;
+        }
+
+        // Cache reachability from each call block so branches after the
+        // write are included without adding a whole-program O(writes*blocks)
+        // traversal for each use.
+        let mut reachable: FxHashMap<BlockId, FxHashSet<BlockId>> = FxHashMap::default();
+        for &block_id in block_ids {
+            let block = &self.ir.blocks[&block_id];
+            for (idx, instr) in block.instructions.iter().enumerate() {
+                let args = match instr {
+                    Instruction::CallStatic { args, .. }
+                    | Instruction::CallVirtual { args, .. }
+                    | Instruction::CallPointer { args, .. } => args,
+                    _ => continue,
+                };
+                for (write_block, write_idx, written_dst, src_use) in &writes {
+                    let ordered_after = if block_id == *write_block {
+                        idx > *write_idx
+                    } else {
+                        reachable
+                            .entry(*write_block)
+                            .or_insert_with(|| self.reachable_blocks(*write_block))
+                            .contains(&block_id)
+                    };
+                    if !ordered_after {
+                        continue;
+                    }
+                    for arg in args {
+                        let Operand::Var(arg_var) = arg else {
+                            continue;
+                        };
+                        if self.may_alias_cached(*written_dst, *arg_var) {
+                            self.graph
+                                .add_edge(*src_use, NodeKey::instr(block_id, idx, *arg_var));
+                        }
+                    }
                 }
             }
         }

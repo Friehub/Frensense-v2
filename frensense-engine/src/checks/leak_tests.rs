@@ -23,6 +23,87 @@ pub mod leak_spec {
         out
     }
 
+    /// `realloc` of an object the function did not allocate (loaded through
+    /// a parameter) moves the caller's object; the function is not a factory
+    /// and a caller storing the result back leaks nothing (redis
+    /// `ziplistMerge`). Needs the program-level summary inference, which is
+    /// where the wrong "returns a fresh allocation" contract came from.
+    #[test]
+    fn realloc_of_borrowed_object_is_not_a_fresh_allocation() {
+        let src = r#"
+unsigned char *merge(unsigned char **first, unsigned char **second) {
+    unsigned char *target;
+    if (**first >= **second) { target = *first; } else { target = *second; }
+    target = realloc(target, 64);
+    return target;
+}
+void caller(unsigned char *x, unsigned char *y) {
+    unsigned char *a = x;
+    unsigned char *b = y;
+    a = merge(&a, &b);
+    free(a);
+}
+"#;
+        let facts = crate::analysis::taint::facts::seeded_tables(["c"]).1;
+        let fns = lower_source("t.c", src, "c").unwrap();
+        let irs: Vec<&crate::ir::function::FunctionIR> = fns.values().collect();
+        let summaries =
+            MemorySummaryRegistry::from_facts(&facts).infer_program_summaries_into(&irs);
+        assert!(
+            !summaries.returns_fresh("merge"),
+            "a realloc of a borrowed object is not a factory"
+        );
+        let leaks: Vec<_> = fns
+            .values()
+            .flat_map(|ir| leak::check(ir, &summaries, &facts))
+            .filter(|f| f.rule == "memory_leak")
+            .collect();
+        assert!(leaks.is_empty(), "no leak expected: {leaks:?}");
+    }
+
+    /// A realloc of the function's own allocation is still a factory.
+    #[test]
+    fn realloc_of_own_allocation_is_still_fresh() {
+        let src = "char *grow(unsigned n) { char *p = malloc(4); p = realloc(p, n); return p; }\n";
+        let facts = crate::analysis::taint::facts::seeded_tables(["c"]).1;
+        let fns = lower_source("t.c", src, "c").unwrap();
+        let irs: Vec<&crate::ir::function::FunctionIR> = fns.values().collect();
+        let summaries =
+            MemorySummaryRegistry::from_facts(&facts).infer_program_summaries_into(&irs);
+        assert!(summaries.returns_fresh("grow"));
+    }
+
+    /// A memory vocabulary contract captures deallocation, not pointer retention.
+    #[test]
+    fn retaining_callee_takes_ownership() {
+        let src = "void init(const char *s) { char *tmp = strdup(s); setprogname(tmp); }\n";
+        let mut facts = crate::analysis::taint::facts::seeded_tables(["c"]).1;
+        facts
+            .memory_functions
+            .push(crate::analysis::taint::facts::MemoryFuncSpec {
+                name: "setprogname",
+                returns_fresh: false,
+                capacity: crate::analysis::taint::facts::AllocCapacity::Unknown,
+                consumes_params: &[0],
+            });
+        let summaries = MemorySummaryRegistry::from_facts(&facts);
+        let fns = lower_source("t.c", src, "c").unwrap();
+        assert!(
+            fns.values()
+                .flat_map(|ir| leak::check(ir, &summaries, &facts))
+                .all(|finding| finding.rule != "memory_leak"),
+            "no leak expected only if the contract actually deallocates the pointer"
+        );
+    }
+
+    /// The same allocation only read by an ordinary callee still leaks.
+    #[test]
+    fn read_only_callee_still_leaks() {
+        let src = "void init(const char *s) { char *tmp = strdup(s); printf(\"%s\", tmp); }\n";
+        let r = rules(src);
+        assert!(r.iter().any(|x| x == "memory_leak"), "leak expected: {r:?}");
+    }
+
     /// Phase 4 teachability: a hand-built bundle drives the leak checker.
     /// `talloc` is invisible to the spec-only table (no allocation, no
     /// finding); the bundle's `custom_allocators` makes it a leak

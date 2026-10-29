@@ -351,4 +351,130 @@ export function getAccount(req: any, repo: any): void {
                 .collect::<Vec<_>>()
         );
     }
+
+    /// A tainted value that circulates through mutually recursive helpers and
+    /// a loop reaches the same graph node several times (different call
+    /// context). The recorded parent must stay the first discovery; a later
+    /// arrival used to overwrite it, chaining nodes into a cycle that
+    /// `reconstruct_path` walked for `len + 1` steps (98 000-step paths and a
+    /// 350 MB report on redis).
+    #[test]
+    fn path_through_recursion_stays_short_and_acyclic() {
+        // A ring of 14 functions, each calling its successor and the one 3
+        // ahead: every function is reachable under many call contexts.
+        let k = 14;
+        let mut src = String::from("import { Pool } from \"pg\";\nconst pool = new Pool();\n");
+        for i in 0..k {
+            src.push_str(&format!(
+                "function f{i}(s: string, n: number): string {{ if (n > 0) {{ return f{}(s + \"a\", n - 1) + f{}(s, n - 1); }} return s; }}\n",
+                (i + 1) % k,
+                (i + 3) % k
+            ));
+        }
+        src.push_str(
+            "function handler(req: any): void { const q = f0(req.body.id, 5); pool.query(q); const r = f5(req.body.id, 5); pool.query(r); }\n",
+        );
+        let findings = run(&src);
+        let vuln: Vec<_> = findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(!vuln.is_empty(), "probe must produce a vulnerable finding");
+        for f in vuln {
+            assert!(
+                f.path.steps.len() < 40,
+                "path must be the shortest chain, got {} steps",
+                f.path.steps.len()
+            );
+        }
+    }
+
+    /// `argv` is the process command line only in `main`. In any other
+    /// function it is an ordinary parameter (redis: `robj **argv` of a client
+    /// command, `sds *argv` of a config line), and treating it as attacker
+    /// input produced path-traversal findings with the wrong source.
+    fn run_c(src: &str) -> Vec<super::super::engine::SinkFinding> {
+        let fns = lower_source("t.c", src, "c").expect("lower");
+        let owned: Vec<FunctionIR> = fns.into_values().collect();
+        let mut statics: FxHashMap<String, &FunctionIR> = FxHashMap::default();
+        for ir in &owned {
+            statics.insert(ir.name.clone(), ir);
+        }
+        let (mut config, facts) = crate::analysis::taint::facts::seeded_tables(["c"]);
+        config.sinks.insert("system".into());
+        config.sinks.insert("open".into());
+        config.sources.insert("argv".into());
+        let prog = ProgramSvfg::new_with_facts(&statics, &config, &facts);
+        let mut engine = BackwardTaintEngine::new(&prog, &config).with_fact_table(&facts);
+        engine.run();
+        engine.findings
+    }
+
+    fn vulnerable(f: &[super::super::engine::SinkFinding]) -> usize {
+        f.iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .count()
+    }
+
+    #[test]
+    fn c_argv_is_a_source_only_in_main() {
+        let src = "void helper(char **argv) { system(argv[1]); }\n\
+                   int main(int argc, char **argv) { return 0; }\n";
+        assert_eq!(
+            vulnerable(&run_c(src)),
+            0,
+            "non-main `argv` is a plain parameter"
+        );
+    }
+
+    #[test]
+    fn c_main_argv_reaches_a_sink_through_a_call() {
+        let src = "static void run(char *c) { system(c); }\n\
+                   int main(int argc, char **argv) { run(argv[1]); return 0; }\n";
+        assert_eq!(
+            vulnerable(&run_c(src)),
+            1,
+            "main's argv must still flow to the sink"
+        );
+    }
+
+    #[test]
+    fn c_length_and_fresh_allocation_do_not_carry_taint() {
+        let src = "char *copy(const char *s) { return malloc(strlen(s) + 1); }\n\
+                   int main(int argc, char **argv) {\n\
+                     char *a = copy(argv[1]);\n\
+                     open(a, 0);\n\
+                     return 0;\n\
+                   }\n";
+        assert_eq!(
+            vulnerable(&run_c(src)),
+            0,
+            "a new buffer sized from argv is not argv"
+        );
+    }
+
+    #[test]
+    fn c_strcpy_destination_preserves_taint_for_later_use() {
+        let src = r#"
+            int system(const char *command);
+            char *strcpy(char *dst, const char *src);
+            int main(int argc, char **argv) {
+                char dst[128];
+                strcpy(dst, argv[1]);
+                system(dst);
+                return 0;
+            }
+        "#;
+        let findings = run_c(src);
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|finding| {
+                    finding.verdict == BackwardVerdict::Vulnerable && finding.sink == "system"
+                })
+                .count(),
+            1,
+            "strcpy must taint dst's later use: {findings:?}"
+        );
+    }
 }
