@@ -4,34 +4,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.0-beta] - Unreleased
+**Scope.** This file is the changelog of the `frensense` crate (the binary and
+consumer library in `src/`): CLI, MCP, LSP, reporting, policy and build
+identity. It is what a release tag (`vX.Y.Z`) points at. Changes inside the
+workspace crates are recorded in their own changelogs, which version and ship
+independently:
 
-### Added
-- **Rust library quality gates**: CI and local CI now reject broken/private
-  intra-doc links in `frensense-engine`, audit workspace dependencies with
-  `cargo-machete`, and build the engine with each feature independently using
-  `cargo-hack`. CI's SemVer job gained an explicit engine gate that compares
-  against the previous commit as a patch release - it blocks newly introduced
-  breaking changes while the accepted 0.7 -> 0.8 migration breaks stay in the
-  changelog - and local CI runs the same comparison against `HEAD`; the
-  existing workspace check against the latest published release is unchanged.
-  `cargo deny check` is the local command matching the supply-chain CI check,
-  which now runs the complete `cargo deny check` rather than three of its four
-  groups. The first dependency audit also removed
-  unused optional `serde_json` and `blake3` dependencies from the engine;
-  grammar crates wired through `frensense-lang` are narrowly documented as
-  cargo-machete false positives.
+- [`frensense-engine/CHANGELOG.md`](frensense-engine/CHANGELOG.md) — IR, graphs, taint analysis, checks, harness, `scan` API
+- [`frensense-lang/CHANGELOG.md`](frensense-lang/CHANGELOG.md) — language specs, rule cards, severities, CWE tables
+- [`frensense-bundler/CHANGELOG.md`](frensense-bundler/CHANGELOG.md) — `.frc` format, corpus bundling, `lint`, embedded default pack
+- [`frensense-packgen/CHANGELOG.md`](frensense-packgen/CHANGELOG.md) — the generated built-in vocabulary behind the default pack
+
+Sections below `0.8.0` predate that split and are the combined release
+narrative of the tagged binaries. `frensense-devtools` is an unpublished
+harness and keeps no changelog.
+
+## [0.8.0] - 2026-10-30
 
 ### Breaking
 - **Version bump to 0.8.0** (from 0.7.0). This release adds fields to public
   types (`CliOptions.explain`, `SinkFinding.cut_reasons`,
   `Candidate::Check.package`). Under Cargo's `0.x` rules any field addition to
-  a constructible public type is a breaking change, so the whole workspace moves
-  to the `0.8.0` line. To keep future additions minor-compatible, the evolving
-  output/option DTOs are now `#[non_exhaustive]`: `CliOptions`, `Advisory`,
-  `ExplainRecord`, `SinkFinding`, `BackwardStats`, and `Candidate`. Consumers
-  read fields (and match `Candidate` with a wildcard arm); they no longer
-  construct these types via literals.
+  a constructible public type is a breaking change, so the crates that changed
+  move to the `0.8.0` line. To keep future additions minor-compatible, the
+  evolving output/option DTOs are now `#[non_exhaustive]`: `CliOptions`,
+  `Advisory`, `ExplainRecord`, `SinkFinding`, `BackwardStats`, and `Candidate`.
+  Consumers read fields (and match `Candidate` with a wildcard arm); they no
+  longer construct these types via literals.
+- **`reporting` module removed; two helpers moved to `policy`.**
+  `frensense::reporting::{reports_finding, apply}` are now
+  `frensense::policy::{reports_finding, apply}`, and `print_results` (in
+  `cli::print_results` and `cli::reporting::print_results`) takes one more
+  parameter (6 instead of 5) for the explain record. Library consumers calling
+  either helper must update the path and the call.
+- `frensense-engine`, `frensense-lang` and `frensense-bundler` carry their own
+  breaking entries. `cargo semver-checks check-release --release-type patch`
+  against the published `0.7.0` reports **4** major checks failing for this
+  crate (module removed, two functions moved/renamed, arity change,
+  `Advisory` now `non_exhaustive`), **6** for the engine, **3** for the language
+  specs and **3** for the bundler.
 
 ### Added
 
@@ -46,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line. Setting `--max-complexity` automatically enables hygiene rules so
   findings are never silently suppressed. Preserves Frensense's zero-config,
   language-agnostic architecture without introducing TOML configuration files.
+  The check itself lives in `frensense-engine`.
 
 #### CLI Diagnostics
 - **`--explain` flag**: surfaces *where the engine stayed silent*. Every explored
@@ -63,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     clean   BenchmarkTest00160.py:49  exec(arg 0)
         why: the value folded to an attacker-independent constant
   ```
+  Debug tracing of the same walk (`FRENSdbg_WALK`, `FRENSdbg_DEADEND`,
+  `FRENSdbg_UNRES`, `FRENSdbg_IS_SOURCE`, `FRENSdbg_STATIC`, `FRENSdbg_PTS`,
+  `FRENSdbg_MEM`) is installed by the binary at startup and documented in
+  `frensense-engine/src/debug_flags.rs`.
 - **Benchmark triage tooling**: added `scripts/owasp_mutation_ladder.py`, a
   mutation-ladder triager that rewrites OWASP Benchmark false negatives into
   minimal variants and classifies each cause into a bucket (knowledge gap,
@@ -77,36 +93,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule matches `watch` and `bundle`: `frensense lint` scans a directory named
   `./lint` when one exists, and `frensense lint <dir>` is always the subcommand;
   `lint` owns its own `--help` because the global help intercept would otherwise
-  print scan flags and hide the curation flags.
-- **What it checks**: file layout and naming (missing or orphaned twins,
-  incomplete held-out pairs, cross-language stem collisions), the `[frensense]`
-  metadata block (required keys, unknown-key suggestions, duplicate keys,
-  placeholder prose, severity/CWE/cvss syntax), the class registry
-  (`bug_classes.json`: unknown class ids get a nearest-match hint, and every CWE
-  must belong to the declared class), provenance (`source:` form, CVE/GHSA/RUSTSEC
-  ids must exist in the offline advisory index and agree with the CWE),
-  cross-family diversity (near-duplicate call sets, structural clones, families
-  that teach identical or subset facts), and the family's declared `purpose:`
-  against what the bare engine actually does with the pair.
-- **`PU004`: a family that would teach nothing now says so, with the reason**.
-  A pair can satisfy every layout, metadata and purpose check and still
-  contribute no fact: the declared premise holds (knowledge with a silent
-  positive, precision with a noisy negative), yet the only facts it proposes do
-  not separate its own twins, so the replay gate publishes nothing and the
-  bundle scans both files exactly as the bare engine did. Lint now trials each
-  proposed fact against the family the way the gate's vote does and reports the
-  closest candidate with the engine verdict that sank it - e.g. `none of its 2
-  proposed fact(s) separates the pair; closest is sink:rawQuery
-  (positive_alerts=true, negative_alerts=true): the positive alerts but so does
-  the negative`. It also names the opposite case (the fact changes no verdict)
-  and the no-candidate case (the twins differ in no learnable source, sink,
-  sanitizer, guard or check call). Anchors are exempt, and the warning only
-  fires where the declared purpose's premise is actually true, so a family never
-  gets both PU001/PU003 and PU004 for the same mistake.
-- **Flags**: `--classes <file>`, `--advisories <file>`, `--strict`,
-  `--require-heldout`, `--no-gate` (skip the scan-based purpose and
-  teachability checks), `--dup-threshold <0..1>`, `--json`, `--coverage`
-  (class x language coverage counting only error-free families).
+  print scan flags and hide the curation flags. The checks themselves
+  (`PU004`, provenance, diversity, coverage) are implemented in
+  `frensense-bundler`; see its changelog.
 - **`scripts/corpus-lint.sh`** runs the CLI over an authored corpus and is wired
   into the local gate (`./scripts/local-ci.sh`) and the CI corpus step, so a
   corpus that fails curation fails the build before a bundle is produced.
@@ -124,7 +113,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   def/use pair above it is dropped).
 - **`frensense explain <rule-id>`**: prints a built-in rule's id, title, CWE
   links, tier, why and fix from its rule card; with no id it lists every rule.
-  Unknown ids exit `2` instead of guessing.
+  Unknown ids exit `2` instead of guessing. Rule cards are owned by
+  `frensense-lang`.
 - **`explain` describes bundle-learned rules too**: a learned policy or check
   has no card by design - its knowledge is the trigger, requirements and
   message the bundle taught - so `frensense explain <id> -b <bundle>` renders
@@ -151,7 +141,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from a borrowed path looked attacker-controlled. The borrow marker is kept
   (`&Path` is `std::path::Path`), which removes that false-discovery class -
   including the path-traversal finding on Frensense's own bundle loader -
-  while by-value extractors (`Path<T>`) still fire.
+  while by-value extractors (`Path<T>`) still fire. The normalization is in
+  `frensense-engine`'s harness; the removed finding was on `frensense`'s own
+  bundle loader.
 
 - **`--diff-only` reports only findings the diff introduced**: the gate still
   scans each changed file whole (a change can make an old line reachable), but
@@ -185,50 +177,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CWE and class-specific why/fix, replacing the repeated
   Details/Impact/Remediation block.
 
-#### Language Facts
-- **CWE-94 tagging for Code Execution**: `eval`, `exec`, and `compile` sinks now
-  carry CWE-94 (Code Injection). The mapping previously matched a dead arm - the
-  sink slug is `"execution"`, not `"eval"` - so Code Execution findings were
-  reported without a resolvable CWE. CWE-94 class TPR moves from 0% to 35%.
-- **CWE-601 tagging for Open Redirect**: `redirect`-labelled Resource-role sinks
-  now carry CWE-601 (URL Redirection to Untrusted Site). CWE-601 class TPR moves
-  from 0% to 61.5%.
+#### Version Identity
+- **`frensense --version --json` and `frensense bundle info --json`** now expose
+  a machine-readable build identity: engine version, bundle format,
+  fact-vocabulary fingerprint, default-pack BLAKE3 digest, and report-schema
+  version. The release workflow asserts on `frensense --version --json` before
+  tagging and stamps the identity into the annotated tag. The fingerprint
+  itself is owned by `frensense-engine` and the envelope by
+  `frensense-bundler`; both document their halves.
+- **Format contract ratified** in `docs/FORMATS.md` (single table of every
+  artifact version and its bump rule) and enforced by
+  `scripts/format-ratchet.py` (fails if the vocabulary fingerprint moves
+  without a `BUNDLE_VERSION` bump and a note in the *bundler* changelog).
 
-#### Version Identity & Artifact Contracts (Phase 6)
-
-- **`frensense --version --json` and `frensense bundle info --json`** now expose a machine-readable build identity: engine version, bundle format, fact-vocabulary fingerprint, default-pack BLAKE3 digest, and report-schema version. The release workflow asserts on `frensense --version --json` before tagging and stamps the identity into the annotated tag.
-- **Bundle format v7** (`frensense-bundler` `BUNDLE_VERSION` 6 → 7): `.frc` envelopes now record the writing engine's fact-vocabulary fingerprint (`BundleHeader::vocabulary`, checked strictly on load), an optional coarse engine range (`requires_engine`), and the writing engine version (`built_by_engine`, diagnostics only). v6-and-earlier bundles are still loadable (`is_legacy()`); a v7 bundle built for a newer vocabulary is refused by name at the version gate before any payload decode. See `frensense-bundler/src/format/frc.rs`.
-- **Fact-vocabulary fingerprint** (`frensense-engine::analysis::taint::facts::FACT_VOCABULARY_FINGERPRINT`, currently `0x4994_27a8_ed94_e470`): a reproducible FNV-1a over the ordered serialized vocabulary (hint kinds + `LearnedFactEntry` variants). New fact variants are compile-enforced (`HintKind::index` / `LearnedFactEntry::wire_index` exhaustive matches), and a ratchet test fails until `FACT_VOCABULARY_FINGERPRINT` is updated — which is the cue to bump `BUNDLE_VERSION` and regenerate the default pack.
-- **Format contract ratified** in `docs/FORMATS.md` (single table of every artifact version and its bump rule) and enforced by `scripts/format-ratchet.py` (fails if the vocabulary fingerprint moves without a `BUNDLE_VERSION` bump and a changelog note).
-- **Regenerated embedded default pack** (`frensense-bundler/assets/frensense-default.frc`) under the v7 envelope so it carries its fact-vocabulary fingerprint.
-
-#### Telemetry & Observability
-
-- **`DiagnosticSink` trait on `CheckContext`**: the check context provides a
-  diagnostic interface for truncations and skips. The current default driver
-  supplies a no-op sink, so this is an extension seam, not yet an emitted
-  telemetry source.
-- **`catch_unwind` check isolation**: every non-dataflow check (both
-  program-scoped and function-scoped) now runs inside
-  `std::panic::catch_unwind(AssertUnwindSafe(...))`. A panicking check records
-  `CheckOutcome::Panicked(msg)` in telemetry and prints to stderr; all sibling
-  checks continue running. This prevents a single malformed function from
-  aborting the entire scan.
-- **`check_all_with_registry_and_telemetry`**: a new public entry point accepts
-  an explicit `CheckRegistry`, enabling unit tests and future plugin scenarios
-  to supply a synthetic check set without touching the global registry.
-- **32 MiB worker thread stacks**: each language group scan runs on a
-  dedicated OS thread spawned with `stack_size(32 * 1024 * 1024)`. File
-  lowering also uses a scoped 32 MiB worker per file, containing unwindable
-  panics to the affected file. This reduces stack exhaustion on deeply nested
-  inputs; Rust stack overflow aborts are not recoverable by `catch_unwind` and
-  still cannot be promised to complete normally.
-- **`ScanTelemetry.checks`**: per-check telemetry (`id`, `scope`, `ran`,
-  `findings`, `millis`, `outcome`) is collected for every registered check and
-  exposed in the JSON `analysis` envelope under `analysis.checks`.
-- **`ScanStatus` enum** (`Complete | Partial | Failed`): computed from
-  `ScanTelemetry` and the `IncompleteFunction` list after every scan. Drives
-  the terminal footer and the new `--fail-on-incomplete` exit code.
+#### Telemetry Surfaces
+The engine computes `ScanTelemetry`, `ScanStatus` and per-check outcomes;
+`frensense` renders and gates on them.
 - **JSON `analysis` object**: every `--json` report now contains a top-level
   `analysis` object alongside `advisories`, carrying `status`, `coverage`
   (files scanned / partial / functions), `verdicts` (vulnerable / sanitized /
@@ -254,211 +218,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (defaulting to `info`). Also activated by the `FRENSENSE_LOG` environment
   variable. Spans and log calls emitted by engine internals are now visible
   without recompiling.
-- **Accurate scan accounting and bounded reporting**: per-thread cap counters
-  no longer mix independent concurrent scans; each file's lowering caps are
-  drained with its isolated worker. Reports distinguish submitted, scanned,
-  failed, and unsupported inputs, surface file read/lowering and worker
-  failures, and fail status when submitted inputs yield no scanned files.
-  Findings omitted by reportability, exact/shape deduplication, tier,
-  confidence, or severity gates are counted separately. Failure paths now
-  preserve cap/status information rather than returning a misleading clean
-  result. Hot-path reporting avoids cloning finding keys and shape dedup uses
-  borrowed file paths; no additional analysis work is performed for telemetry.
+- **Accurate scan accounting and bounded reporting**: reports distinguish
+  submitted, scanned, failed, and unsupported inputs, surface file
+  read/lowering and worker failures, and fail status when submitted inputs
+  yield no scanned files. Findings omitted by reportability, exact/shape
+  deduplication, tier, confidence, or severity gates are counted separately.
+  Failure paths now preserve cap/status information rather than returning a
+  misleading clean result. Hot-path reporting avoids cloning finding keys and
+  shape dedup uses borrowed file paths; no additional analysis work is
+  performed for telemetry.
 
-### Fixed
-
-#### Analysis Termination & Memory
-- **The points-to fixed point terminates on real code.** `SvfgBuilder` ran
-  `while changed { … }` inside `PointsToAnalysis::analyze_inner` with no
-  iteration cap, and on real repositories it never converged: a temporary pass
-  counter printed `passes=200000 pts=315 fields=4` - the iteration count kept
-  doubling while both set sizes stayed frozen, so nothing was being added any
-  more. The only non-monotone rule in the loop was the **strong update**: a
-  non-variable `StoreField`/`StoreElement` did `set.clear(); changed = true;`
-  while other instructions merged the same `(loc, field)` back in - a
-  clear-then-merge cycle that can never reach "no change". Field writes are now
-  weak (union-only, monotone) for a may-analysis, and the loop carries a hard
-  pass budget (`MAX_PASSES`) with a conservative fallback: on expiry the
-  analysis stops refining and reports non-convergence instead of looping.
-  `PointsToAnalysis::converged()` exposes the outcome to callers and
-  `FRENSdbg_PTS=1` prints per-pass `{pass, killed, pts, fields}` traces. The
-  three files that hung forever (`libpng/contrib/libtests/pngstest.c`,
-  `nextjs/packages/next/src/shared/lib/dynamic.tsx`, `redis/src/server.c`) now
-  converge in ≤ 5 passes, and libpng scans end-to-end in **17.6 s / 63
-  findings** where it previously never returned.
-- **SSA dominance was cubic; it is linear now.** The sequential-if-chain blowup
-  (`repros/n10_perf/gen.py N`: N=100 → 0.13 s, N=400 → 6.8 s, N=3000 never
-  finished) was not in taint analysis at all: phase taps showed
-  `SSABuilder::build()` alone going 184 ms → 1507 ms → 12 044 ms, 8× per
-  doubling, while parse+walk stayed in milliseconds. Two defects in
-  `frensense-engine/src/ir/ssa.rs`: `compute_immediate_dominators` recomputed
-  full dominator *sets* with a naive fixpoint iterated in random hash order
-  (O(B³)), and the idom search then rescanned its candidates linearly (O(B²)
-  per pass). Rewritten with the Cooper–Harvey–Kennedy iterative algorithm
-  (reverse post-order, intersect on the dominator tree): **12 044 ms → 3.4 ms
-  at N=400**, and `gen.py 3000` completes in 35.9 s / exit 0.
-- **A per-function work budget reports degraded analysis instead of hanging or
-  silently weakening it.** SSA construction is bounded by
-  `DEFAULT_SSA_BUDGET` (5 000 000 units). On expiry the function falls back to
-  its raw flow-insensitive IR, its phi placement is undone, and
-  `FunctionIR::analysis_incomplete` is set. That is surfaced end-to-end rather
-  than swallowed: the `--json` report gains an `analysis_incomplete` array
-  naming each degraded function and its file, and the CLI warns about them on
-  stderr. No function is ever dropped or silently scanned with a weaker
-  result.
-- **Taint-path reconstruction no longer clones a whole `FunctionIR` per
-  step - this is what made real C repositories run out of memory.**
-  `reconstruct_path` pushed `self.prog.functions[cf].ir.clone()` into the chain
-  for every hop, so one deep walk across the program graph retained a full
-  function IR (blocks, var metadata, string tables) per path step. On
-  `redis/src` a single `fopen` walk from `cliLoadPreferences` allocated
-  **1.47 GiB** in that reconstruction, and the whole-directory scan aborted at
-  5.65 GiB after 215 s - every individual file in the same tree scanned in
-  ≤ 4 s and ≤ 50 MB, so only the multi-file path was affected. The chain now
-  borrows the IR and reads only the byte span it needs, which takes that same
-  site from 1.47 GiB to 22 MB. Measured after the fix: the 96-file subset that
-  aborted at 5.1 GiB / 182 s now runs in **42 s / 845 MB**, `redis/src` (229
-  files) in **126 s / 2.68 GB**, and the whole `redis` checkout in **350 s /
-  2.64 GB with 64 advisories** - all exit 0.
-- **`FRENSdbg_MEM`: memory attribution from inside the process.** A new
-  debug flag (off by default, installed like the other `FRENSdbg_*` flags) dumps
-  RSS plus graph sizes at every phase boundary - lowering → SVFG → callgraph →
-  bindings → summaries → cross edges → checks → taint - and then per-function
-  and per-sink-site deltas inside the backward walk, with visited-state,
-  reached-function, context and interned-chain counts per walk. `perf`,
-  `valgrind` and `gdb` attachment are all unavailable in a restricted-ptrace
-  environment, so the scanner now reports its own allocation behaviour; this
-  is how the path-reconstruction clone above was found.
-
-#### Language Facts
-- **Cross-language sink contamination removed**: the Python, Go, C, and Rust
-  vocab tables carried large copy-pasted blocks of foreign APIs (JS DOM sinks
-  like `innerHTML`/`dangerouslySetInnerHTML`, Express `res.send`, Node
-  `spawnSync`/`readFile`, prototype-pollution `Object.assign`/`_.set`, Cloudflare
-  Workers and Prisma bindings, camelCase MongoDB driver verbs, Flask
-  `render_template` in Go/C/Rust, Rust `bincode`/`serde_json` in Python/Go/C).
-  Because the engine registers each dotted entry's last segment as a bare sink,
-  every one of these was a false-positive generator for the host language -
-  e.g. a Go `Object.assign` entry made every Go `.assign(` call a
-  prototype-pollution sink, and Go/C's `_.set` made every `.set(` call one.
-  All foreign entries are removed; each table now contains only APIs that
-  exist in its own language. Default pack 93,036 -> 82,697 bytes. OWASP score
-  unchanged (25.9%).
-- **Provider facts are language-scoped, not just language-sourced**: removing
-  foreign *entries* was not enough, because the install merged every language's
-  vocabulary into one name-keyed table (`apply_language_entries` built a
-  per-language temp table and then merged it last-wins). Any scan that contained
-  two languages shared one name space: adding a single `.rs` file to a
-  TypeScript package took the scan from 6 findings to 40, every one of them a
-  `prisma.order.create(...)` / `catalog.output(...)` / `logger.log(...)` call in
-  `.ts` files armed by Rust's `File::create`, `Command::output` and `log`
-  macros. The mirror error existed on the source side: Go's `http.ResponseWriter`
-  parameter name `w` seeded taint in TypeScript files, and TypeScript's `input`
-  did the same in Rust. Sink signatures (`lang_sink_signatures`) and source
-  vocabulary (`lang_sources`) are now keyed by `(language, call)` / `language`,
-  `FunctionIR` carries the language it was lowered from, and every match site
-  (backward walk, forward engine, sink-alert predicates) passes its own
-  language; the shared table keeps only genuinely language-agnostic knowledge
-  (`"*"` pack group, bundle facts, hand-built configs). A blanket all-args
-  placeholder seeded from `TaintConfig::sinks` never shadows the language's own
-  slot/identity knowledge. Measured on a mixed TS/Rust/Python/Go repo: 78 -> 26
-  advisories (52 removed, 0 added); each language still reports its own flows.
-  Two probes that had been passing through the leak were corrected: `probe_57`
-  (return-object-field) used a local named `w` and is now an explicit
-  `Blind spot:` (a callee-allocated container's field has no cross-function heap
-  edge), and the two-phase heap test now hands the engine its fact table.
-
-#### Engine
-- **Provider facts are language-scoped** (see *Language Facts* above):
-  `FunctionIR::language`, `FactTable::lang_sink_signatures` / `lang_sources`,
-  and language-aware `is_sink_call_scoped` / `sink_signature_for_language` /
-  `SourceScope`. The scoping rule is the second half of the merge-safety rule
-  (all-args never widens slot-restricted): a fact that knows a call's slots
-  beats a blanket name-only placeholder, whatever lane it sits in.
-- **Propagator install is consistently last-wins**: duplicate `join`/`Join`
-  propagator entries (a string/array method and a path-builder sharing one bare
-  call key) resolved by order-dependent accident. The install used first-wins
-  for the last-segment alias and an append-only receiver-block set, so a
-  `tainted_receiver: false` entry permanently blocked the receiver edge even
-  when a later `true` entry should unblock it - silently dropping the
-  string/array-`join` receiver->return flow (Python `sep.join(...)`, JS
-  `[...].join(...)`). `propagator_blocks_receiver` is now a two-way map
-  (`call -> blocked`), and both the arg slots and the receiver flag install
-  last-wins; `merge` matches. The redundant path-join duplicates (Python, Go,
-  JS) and a duplicate JS `toString` are removed, with a packgen regression test
-  asserting no duplicate propagator keys per language. OWASP score unchanged
-  (25.9%).
-- **Bare last segments stopped arming unrelated receivers**: a sink
-  declared under a module (`pickle.loads`, `subprocess.run`, `yaml.load`)
-  publishes a bare shadow of its last segment because the walker matches a
-  virtual call by method name, and that shadow used to arm every receiver in
-  the program - `json.loads` inherited unsafe deserialization, `f.read(n)`
-  inherited path traversal, `Workflow.run` inherited command injection. The
-  fact table now records which roots a qualified declaration named
-  (`receiver_qualified_sinks`) and which names a language declares bare
-  (`bare_sink_names`); a name that is only ever declared qualified arms only
-  under its own root or import origin, and a name a language never declares
-  bare is verb-gated as well. Measured on four real repositories: 111 -> 93
-  findings, every removed finding reviewed as a false positive, OWASP
-  BenchmarkPython score unchanged (TPR 38.1%, FPR 7.1%), and the Juice Shop
-  scan 3x faster (167s -> 54s) because the call graph no longer fabricates
-  same-named interprocedural edges.
-- **Minified JavaScript is skipped by content**: a single-line bundle with no
-  filename hint was lowered as ordinary source, producing findings no one
-  can act on.
-- **The last two name-based guesses in the engine are pack facts**: the
-  engine no longer assumes a call named `prepare*` creates a bound-parameter
-  statement handle, or that a literal `false` argument disclaims security use
-  of a weak digest. `HintKind::PreparedStatementPrefix` and
-  `HintKind::WeakHashDisclaimer` carry those vocabularies in the default pack
-  (and in any bundle that teaches them), so a new driver's factory spelling
-  or a codebase's own disclaimer token is taught rather than compiled in. An
-  empty set recognises nothing, so a config that teaches nothing never
-  suppresses a flow. Behaviour is unchanged on the measured corpora (OWASP
-  BenchmarkPython: TPR 38.1% / FPR 7.1%; 92 real-repo findings either side
-  of the refactor).
-- **Branch-arm-assigned variables survive the merge**: variables assigned only
-  inside a `match`/`switch` arm were dropped from the environment at the branch
-  merge (`env.pop` without hoisting), so a value defined in one arm and consumed
-  after the branch lost its taint. The lowering now hoists per-arm bindings
-  through a `hoist_arm_scope` pass, restoring flows that cross an arm boundary.
-  CWE-22 class TPR 33.8% -> 35.4%, CWE-78 class TPR 23.1% -> 30.8%.
-
-#### C Taint Precision
-
-- **C command-line false positives reduced**: name-only `argv`/`argc` references
-  no longer count as attacker-controlled sources, and path-labeled sinks only
-  inspect path-carrying arguments, not mode flags, lengths or other slots.
-- **BFS parent is now stable across multi-edge nodes**: the backward taint walk
-  kept the *last* BFS parent seen for each node rather than the first. On graphs
-  where multiple edges reach the same taint node the reported path could diverge
-  from the actual flow depending on iteration order. `record_parent` now writes
-  only when no entry exists, making the reconstructed path deterministic and
-  correct for the first-discovered route.
-- **Name-only `argv`/`argc` references are not sources**: the C source matcher
-  previously treated any identifier named `argv` or `argc` as attacker-controlled
-  input regardless of context. Name-only uses (e.g. passing `argc` as an integer
-  count) are now silent; only call-position uses of `argv` that carry a path
-  argument continue to taint. Eliminates a class of false positives on C command
-  dispatch code.
-- **Non-path sink arguments in C are silent**: path-labeled C sinks
-  (`fopen`, `open`, `stat`, etc.) previously armed every argument slot. The
-  forward predicate now restricts taint alerting to slots that actually carry a
-  path value, leaving integer flags, mode bits, and buffer-length arguments
-  clean.
-- **C destination-buffer writes preserve taint**: calls described by the
-  default pack's buffer vocabulary now connect a source argument to later
-  reads of an aliased destination buffer. This closes the missed
-  `strcpy(buf, argv[1]); system(buf)` flow without treating every call argument
-  as a write or adding analysis work to non-C functions.
+### Security
+- **docs-site lockfile**: `npm audit fix` upgraded `markdown-it` (14.3.2 ->
+  14.3.3) and `source-map-js` (1.2.1 -> 1.2.2). An `esbuild` override
+  (`^0.25.12`) plus a verified `vitepress build` cleared the esbuild advisory;
+  the remaining vite 5 dev-server advisories have no stable fix on the
+  vitepress 1.x line, so CI audits `docs-site` with a critical-only gate and
+  Dependabot now watches `/docs-site` weekly.
 
 ### Changed
 
 #### Benchmarks
 - **OWASP Benchmark for Python**: score on this branch improves from **22.4% to
-  25.9%** (TPR 23.9% -> 27.7%, FPR held flat at 1.8%) across the three fixes
-  above. Remaining false negatives are dominated by absent non-taint rules
-  (CWE-330 weak randomness, CWE-643 XPath injection) rather than dataflow gaps.
+  25.9%** (TPR 23.9% -> 27.7%, FPR held flat at 1.8%) across the fixes recorded
+  in `frensense-engine` and `frensense-packgen`. Remaining false negatives are
+  dominated by absent non-taint rules (CWE-330 weak randomness, CWE-643 XPath
+  injection) rather than dataflow gaps.
+
+#### Repository & Release Tooling
+- **Per-crate SemVer gate** (`scripts/semver-gate.py`): CI no longer answers
+  "is the workspace semver-clean". It discovers the publishable crates from
+  `cargo metadata` (`frensense`, `frensense-engine`, `frensense-lang`,
+  `frensense-bundler`; `publish = false` crates excluded), closes the changed
+  set over workspace dependents (a break in a re-exported engine/lang type
+  reaches `frensense`), and runs `cargo semver-checks check-release
+  --release-type patch` per crate against the PR base or `HEAD^`. A crate is
+  `ok`, `absorbed` (its own version moved a breaking component) or `FAIL` —
+  a break with an unchanged version — and a build error is reported as an
+  error rather than as a SemVer signal. The previous gate ran the engine only
+  and then a workspace-wide `check-release`, which skips every check while a
+  middle number moved ("major change, 0 checks, 260 skip") and was therefore
+  a no-op for the whole 0.8 line. Run by CI's `semver` job and by
+  `scripts/local-ci.sh`.
+- **Release publishes every crate by name, and proves it**
+  (`scripts/release-matrix.py`): `publish-cargo` now names all four crates in
+  dependency order instead of only `frensense`, and the job no longer waits on
+  `build-native` — a skipped dependency would silently skip publishing. Before
+  publishing, `semver-gate.py --published` asserts each crate's version already
+  covers its public-API change; afterwards `release-matrix.py
+  --require-published --wait 420` fails unless every publishable crate at its
+  manifest version is live on crates.io, so a skipped crate cannot pass on the
+  strength of the one crate that did publish. `prepare` also decides per crate
+  whether there is anything to release: if a crate version moved while the
+  root `vX.Y.Z` is already tagged, the run publishes that crate with **no new
+  tag**, and the binary/npm/GitHub-release jobs (which need a tag) stay idle.
+  A crate-only release no longer reads as "root version unchanged, nothing to
+  do". `ci.yml`'s release-graph dry run names the same crate set.
+- **Rust library quality gates**: CI and local CI now reject broken/private
+  intra-doc links in `frensense-engine`, audit workspace dependencies with
+  `cargo-machete`, and build the engine with each feature independently using
+  `cargo-hack`. CI's SemVer job gained an explicit engine gate that compares
+  against the previous commit as a patch release - it blocks newly introduced
+  breaking changes while the accepted 0.7 -> 0.8 migration breaks stay in the
+  changelogs - and local CI runs the same comparison against `HEAD`; the
+  existing workspace check against the latest published release is unchanged.
+  `cargo deny check` is the local command matching the supply-chain CI check,
+  which now runs the complete `cargo deny check` rather than three of its four
+  groups. The first dependency audit also removed unused optional `serde_json`
+  and `blake3` dependencies from the engine; grammar crates wired through
+  `frensense-lang` are narrowly documented as cargo-machete false positives.
+- **Per-crate changelogs**: the workspace no longer routes every crate's entry
+  through this file. Each shipped crate keeps its own `CHANGELOG.md` and its own
+  version, so `frensense` can ship `0.7.1` on top of a `0.8.0` engine instead of
+  forcing one version across the workspace. See `AGENTS.md` §7.1 for the rule
+  and §7.2 for the bump procedure.
+- **Exa web search for knowledge curation**: `scripts/exa-search/` wraps the
+  official Exa SDK (`exa-js` 2.26.0) so an agent or contributor can pull the
+  advisory, vendor doc or post-mortem behind a sink/source fact without
+  fetching whole pages: `node --env-file=.env scripts/exa-search/search.mjs
+  "<query>"` issues one `exa.search` call with `contents.highlights` and
+  prints each hit's relevant passages (`--num-results`, `--domain`, `--json`
+  optional). The key is read from the environment only (`EXA_API_KEY`,
+  declared empty in `.env.example`); when it is unset the script exits 1 with
+  setup instructions instead of failing with an opaque auth error.
+- **docs/mre fixtures relocated**: the 14 deliberately vulnerable minimal
+  reproduction examples moved from `docs/mre` to `tests/mre`, the directory
+  the engine already classifies as test data, so the repo's own scanner now
+  reports 0 findings from that tree (13 findings, 7 critical, gone), while
+  each file's CVE-shape header keeps its documentation value.
 
 ## [0.7.0] - 2026-10-12
 

@@ -41,7 +41,7 @@ contributors, with a few ground rules that keep main stable:
 | Engine docs | `RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links" cargo doc -p frensense-engine --all-features --no-deps` | broken or privacy-leaking intra-doc links are errors |
 | Unused dependencies | `cargo machete --with-metadata <workspace libs>` | no dead `Cargo.toml` entries |
 | Feature isolation | `cargo hack check -p frensense-engine --each-feature --locked` | every engine feature compiles alone |
-| Public API | `cargo semver-checks check-release -p frensense-engine --baseline-rev HEAD^ --release-type patch` | no newly introduced breaking change |
+| Public API (per crate) | `python3 scripts/semver-gate.py --base-ref HEAD` | each publishable crate that broke its API carries its own bump; see `AGENTS.md` §7.2 |
 | Pack drift | `cargo run -p frensense-packgen -- --check` | default pack asset must match generator |
 | Lint | `cargo clippy --all-features --all-targets -- -D warnings` | warnings are errors |
 | Tests | `cargo test --workspace --all-features` | must pass |

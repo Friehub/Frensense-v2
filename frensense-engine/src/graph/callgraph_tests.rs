@@ -172,7 +172,7 @@ pub mod callgraph_tests {
     // unrelated program function that merely shares the bare method name.
     // The bare-name binding fabricated interprocedural edges into
     // unrelated same-named functions (the dominant false-positive source
-    // in the docs/mre audit); the site stays an unresolved external call.
+    // in the tests/mre audit); the site stays an unresolved external call.
     // -------------------------------------------------------------------
     #[test]
     fn test_unknown_receiver_not_bound_by_bare_name() {

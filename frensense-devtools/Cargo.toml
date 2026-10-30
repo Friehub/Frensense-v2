@@ -1,6 +1,6 @@
 [package]
 name = "frensense-devtools"
-version = "0.8.0-beta"
+version = "0.8.0"
 authors = ["Friehub Developers"]
 edition = "2024"
 description = "Frensense devtools: corpus end-to-end runners and IR probes (not published)"
@@ -8,8 +8,8 @@ license = "GPL-3.0-only"
 publish = false
 
 [dependencies]
-frensense-engine = { path = "../frensense-engine", version = "0.8.0-beta", features = ["serialize"] }
-frensense-lang = { path = "../frensense-lang", version = "0.8.0-beta" }
+frensense-engine = { path = "../frensense-engine", version = "0.8.0", features = ["serialize"] }
+frensense-lang = { path = "../frensense-lang", version = "0.8.0" }
 rustc-hash = "1.1"
 tree-sitter = "0.23"
 tree-sitter-typescript = "0.23"

@@ -80,9 +80,13 @@ echo -e "\n${BLUE}[11/12] Supply-chain audit (cargo-deny)...${NC}"
 cargo deny check
 echo -e "${GREEN}OK cargo-deny passed${NC}"
 
-echo -e "\n${BLUE}[12/12] Engine public API compatibility (cargo-semver-checks)...${NC}"
-cargo semver-checks check-release -p frensense-engine --baseline-rev HEAD --release-type patch
-echo -e "${GREEN}OK Engine public API compatible with HEAD baseline${NC}"
+# One binary, four publishable crates, each with its own version: a break must
+# be absorbed by the crate that broke, not by moving the workspace. The script
+# runs `check-release --release-type patch` per publishable crate (a bare
+# workspace check skips every check while a middle number moved).
+echo -e "\n${BLUE}[12/12] Per-crate public API compatibility (cargo-semver-checks)...${NC}"
+python3 scripts/semver-gate.py --base-ref HEAD
+echo -e "${GREEN}OK Every changed publishable crate is SemVer-clean against HEAD${NC}"
 
 echo -e "\n${GREEN}==================================================${NC}"
 echo -e "${GREEN}   ALL LOCAL GATE CHECKS PASSED                     ${NC}"

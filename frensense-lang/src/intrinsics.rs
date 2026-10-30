@@ -17,7 +17,7 @@
 //! to a program function that merely shares the bare method name. A local
 //! `fn get()` is not `Map.prototype.get`, and the fabricated interprocedural
 //! edge drags unrelated same-named functions into the taint walk - the
-//! dominant false-positive class in the real-repo audit (docs/mre). A name
+//! dominant false-positive class in the real-repo audit (tests/mre). A name
 //! in this table is known to belong to a builtin type, so the site stays
 //! external.
 //!

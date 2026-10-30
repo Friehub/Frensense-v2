@@ -312,7 +312,7 @@ impl<'a> CallGraphBuilder<'a> {
                                     // edges, pulling unrelated same-named
                                     // functions into the taint walk. Bare-name
                                     // binding here was the dominant
-                                    // false-positive source (docs/mre audit).
+                                    // false-positive source (tests/mre audit).
                                     external_name = Some(resolved_method.to_string());
                                 }
                             }

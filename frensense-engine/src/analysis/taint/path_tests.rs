@@ -477,4 +477,73 @@ export function getAccount(req: any, repo: any): void {
             "strcpy must taint dst's later use: {findings:?}"
         );
     }
+
+    #[test]
+    fn c_strcat_destination_preserves_taint() {
+        let src = r#"
+            int system(const char *command);
+            char *strcat(char *dst, const char *src);
+            int main(int argc, char **argv) {
+                char dst[256];
+                strcat(dst, argv[1]);
+                system(dst);
+                return 0;
+            }
+        "#;
+        let findings = run_c(src);
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.verdict == BackwardVerdict::Vulnerable && f.sink == "system")
+                .count(),
+            1,
+            "c_strcat_destination_preserves_taint: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn c_snprintf_source_argument_taints_destination() {
+        let src = r#"
+            int system(const char *command);
+            int snprintf(char *dst, unsigned long n, const char *fmt, ...);
+            int main(int argc, char **argv) {
+                char dst[256];
+                snprintf(dst, sizeof dst, "ls %s", argv[1]);
+                system(dst);
+                return 0;
+            }
+        "#;
+        let findings = run_c(src);
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.verdict == BackwardVerdict::Vulnerable && f.sink == "system")
+                .count(),
+            1,
+            "c_snprintf_source_argument_taints_destination: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn c_copy_into_offset_destination_preserves_taint() {
+        let src = r#"
+            int system(const char *command);
+            char *strcpy(char *dst, const char *src);
+            int main(int argc, char **argv) {
+                char dst[256];
+                strcpy(dst + 3, argv[1]);
+                system(dst);
+                return 0;
+            }
+        "#;
+        let findings = run_c(src);
+        assert_eq!(
+            findings
+                .iter()
+                .filter(|f| f.verdict == BackwardVerdict::Vulnerable && f.sink == "system")
+                .count(),
+            1,
+            "c_copy_into_offset_destination_preserves_taint: {findings:?}"
+        );
+    }
 }

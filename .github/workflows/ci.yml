@@ -128,6 +128,20 @@ jobs:
           else
             echo "No package-lock.json in this repo; skipping npm audit."
           fi
+      # The docs site keeps its own lockfile and previously escaped every
+      # audit: its dependencies are devDependencies (so --omit=dev would see
+      # nothing) yet they execute at build time. Gate at critical because
+      # vite 5, pinned by vitepress 1.6.4, carries accepted dev-server
+      # advisories with no fix on the stable 1.x line - see CHANGELOG.
+      - name: Audit docs-site NPM dependencies
+        run: |
+          if [ -f docs-site/package-lock.json ]; then
+            cd docs-site
+            npm ci
+            npm audit --audit-level=critical
+          else
+            echo "No docs-site/package-lock.json; skipping docs-site npm audit."
+          fi
 
   # --- MSRV Check ---
   msrv:
@@ -160,6 +174,10 @@ jobs:
         with:
           egress-policy: audit
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+        with:
+          # The gate diffs against the PR base or HEAD^, which a depth-1 clone
+          # does not contain.
+          fetch-depth: 0
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
@@ -168,17 +186,30 @@ jobs:
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
       - name: Install cargo-semver-checks
         run: cargo install cargo-semver-checks --locked
-      - name: Check engine public API
-        # In the 0.8 beta line, compare against the previous commit as a patch
-        # to block newly introduced breaking changes, even while 0.7 -> 0.8
-        # contains intentionally accepted migration breaks.
-        run: cargo semver-checks check-release -p frensense-engine --baseline-rev HEAD^ --release-type patch
-      - name: Check SemVer
-        # Hard gate: fails if any publishable crate introduces a breaking
-        # public-API change relative to its latest crates.io release. The
-        # unpublished build-time crates (packgen, devtools) are excluded -
-        # they have no registry baseline.
-        run: cargo semver-checks check-release --workspace --exclude frensense-packgen --exclude frensense-devtools
+      - name: Resolve SemVer baseline commit
+        id: baseline
+        # Pull requests compare against the base commit; pushes against the
+        # commit before the push (a multi-commit push must not be judged on its
+        # last commit alone). Both need real history, hence fetch-depth: 0.
+        run: |
+          BEFORE="${{ github.event.before }}"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "ref=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$BEFORE" && "$BEFORE" != "0000000000000000000000000000000000000000" ]]; then
+            echo "ref=$BEFORE" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=HEAD^" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Per-crate SemVer gate (every publishable crate)
+        # Frensense is one binary but four registry crates, each versioned
+        # independently: a break in one crate is absorbed by that crate's own
+        # bump, not by moving the workspace. A workspace-wide check cannot
+        # express that - worse, `check-release` skips every check while the
+        # middle number moved ("major change, 0 checks, 260 skip"), so the old
+        # gate was a no-op during a bump line. The script runs
+        # `check-release --release-type patch` per publishable crate and fails
+        # only when a crate broke its API without bumping itself.
+        run: python3 scripts/semver-gate.py --base-ref "${{ steps.baseline.outputs.ref }}"
 
   # --- Release Graph Validation ---
   release-graph:
@@ -206,13 +237,15 @@ jobs:
       - name: Validate release graph (dry-run)
         # Fails if the workspace cannot be released coherently: inconsistent
         # inter-crate version requirements, missing publishable deps, etc.
-        # Versions are hand-set, so `--bump keep` validates them as-is.
+        # Versions are hand-set, so `--bump keep` validates them as-is. Every
+        # publishable crate is named, exactly as the release workflow does, so
+        # this dry run exercises the set that will actually be published.
         run: |
           cargo smart-release \
             --bump keep --bump-dependencies keep \
             --no-changelog --no-changelog-preview --no-changelog-github-release \
             --no-tag --no-push \
-            frensense
+            frensense-lang frensense-engine frensense-bundler frensense
 
   # --- Correctness (Rust) ---
   test-rust:

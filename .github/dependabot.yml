@@ -12,3 +12,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # The docs site has its own lockfile; without this entry Dependabot only
+  # looked at the repo root, where no package.json exists.
+  - package-ecosystem: npm
+    directory: /docs-site
+    schedule:
+      interval: weekly

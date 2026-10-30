@@ -677,6 +677,11 @@ impl<'a> SvfgBuilder<'a> {
                 let Some(Operand::Var(dst)) = args.get(dst_idx) else {
                     continue;
                 };
+                // `strcpy(buf + len, ...)`, `memcpy(&buf[0], ...)`, `(char *)buf`:
+                // the written object is the base variable, not the
+                // pointer-arithmetic temporary the argument lowered to.
+                let dst = Self::strip_pointer_arithmetic(self.ir, *dst);
+                let dst = &dst;
                 let Some(src_idx) = spec.src_arg else {
                     continue;
                 };
@@ -731,6 +736,47 @@ impl<'a> SvfgBuilder<'a> {
                 }
             }
         }
+    }
+
+    /// Follow `p + n`, `p - n`, `&p[i]` and casts from a temporary back to the
+    /// variable naming the object. Stops at the first definition that is not
+    /// one of these, so a pointer loaded from memory stays itself.
+    fn strip_pointer_arithmetic(ir: &FunctionIR, mut v: VarId) -> VarId {
+        for _ in 0..8 {
+            let mut next = None;
+            'search: for blk in ir.blocks.values() {
+                for instr in &blk.instructions {
+                    match instr {
+                        Instruction::BinaryOp {
+                            dest,
+                            op,
+                            lhs: Operand::Var(base),
+                            ..
+                        } if *dest == v && matches!(op.as_str(), "+" | "-" | "concat") => {
+                            next = Some(*base);
+                            break 'search;
+                        }
+                        Instruction::Cast {
+                            dest,
+                            src: Operand::Var(base),
+                            ..
+                        }
+                        | Instruction::AddressOf { dest, src: base }
+                            if *dest == v =>
+                        {
+                            next = Some(*base);
+                            break 'search;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            match next {
+                Some(n) => v = n,
+                None => break,
+            }
+        }
+        v
     }
 
     /// Alias query against the per-function cached heap analysis (R4:
