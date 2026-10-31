@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793475825081,
+  "lastUpdate": 1793478013156,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -48,6 +48,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "Scan Duration",
             "value": 5,
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bff06b31be0d34957cb43ade4263be21282fb186",
+          "message": "Merge pull request #60 from Friehub/engine/package-scoped-facts\n\nbench: fix ENOENT in blindness benchmark after full-SHA pins",
+          "timestamp": "2026-10-31T21:19:33+01:00",
+          "tree_id": "b4f67435e6144e1751dfd99f9c53eddd22ef1d96",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/bff06b31be0d34957cb43ade4263be21282fb186"
+        },
+        "date": 1793478012701,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Engine Blindness Rate (Unknown %)",
+            "value": 0,
+            "unit": "%"
+          },
+          {
+            "name": "Explored Sinks",
+            "value": 0,
+            "unit": "sinks"
+          },
+          {
+            "name": "Safety Valve Caps Fired",
+            "value": 0,
+            "unit": "caps"
+          },
+          {
+            "name": "Peak RSS Memory",
+            "value": 6,
+            "unit": "MB"
+          },
+          {
+            "name": "Scan Duration",
+            "value": 0.01,
             "unit": "s"
           }
         ]
