@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793446885076,
+  "lastUpdate": 1793475794836,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -1153,6 +1153,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/a76440a0cf6e6b6bc5e9d004a5bf4751cb8193bb"
         },
         "date": 1793446883684,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 31,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 38.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 7.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 172,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 55,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "58f43501cdc04bc312be912f119d9ef22df1ac90",
+          "message": "Merge pull request #59 from Friehub/engine/package-scoped-facts\n\nfeat(bench): group blindness challenges by stop site",
+          "timestamp": "2026-10-31T20:42:27+01:00",
+          "tree_id": "6f3c259b270433bb82e560e1f82d307f63e5fa8c",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/58f43501cdc04bc312be912f119d9ef22df1ac90"
+        },
+        "date": 1793475793737,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
