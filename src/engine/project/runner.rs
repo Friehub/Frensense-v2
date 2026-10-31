@@ -812,6 +812,7 @@ mod shape_dedup_tests {
             file: file.to_string(),
             line,
             column: 1,
+            cut_sites: Vec::new(),
         }
     }
 

@@ -88,6 +88,27 @@ pub enum FindingClass {
     Idor,
 }
 
+/// Where a backward walk gave up because it met a value the engine cannot
+/// resolve: the concrete, actionable half of the `"unresolvable"` cut reason.
+///
+/// `kind` is one of `"external-call"` (result of a call with no analysed
+/// callee: `detail` is the callee), `"param-no-caller"` (formal parameter no
+/// analysed call site feeds: `detail` is the parameter name), `"global"`
+/// (`LoadGlobal`), `"pointer-deref"` or `"indirect-call"`.
+///
+/// `#[non_exhaustive]`: an evolving diagnostic DTO.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CutSite {
+    pub kind: &'static str,
+    /// Function whose body contains the stop site.
+    pub function: String,
+    /// Callee, parameter or global name; empty when none applies.
+    pub detail: String,
+    /// Byte range of the stop site in its source file, when recorded.
+    pub span: Option<(usize, usize)>,
+}
+
 /// One explored sink argument with its verdict.
 ///
 /// `#[non_exhaustive]`: this is an evolving output DTO. New diagnostic fields
@@ -129,6 +150,10 @@ pub struct SinkFinding {
     /// empty for vulnerable findings and for walks that simply exhausted
     /// their predecessors without hitting a source.
     pub cut_reasons: Vec<&'static str>,
+    /// The concrete unresolvable values behind the `"unresolvable"` cut
+    /// reason (deduplicated, capped), so a blind spot names *what* the
+    /// engine could not see. Empty when the walk was never cut that way.
+    pub cut_sites: Vec<CutSite>,
 }
 
 impl SinkFinding {
@@ -180,6 +205,7 @@ impl SinkFinding {
             sink_span: None,
             path: TaintPath::default(),
             cut_reasons: Vec::new(),
+            cut_sites: Vec::new(),
         }
     }
 }
@@ -203,6 +229,7 @@ pub struct SinkFindingBuilder {
     sink_span: Option<(usize, usize)>,
     path: TaintPath,
     cut_reasons: Vec<&'static str>,
+    cut_sites: Vec<CutSite>,
 }
 
 impl SinkFindingBuilder {
@@ -266,6 +293,11 @@ impl SinkFindingBuilder {
         self.cut_reasons = v;
         self
     }
+    /// Set the concrete unresolvable stop sites.
+    pub fn cut_sites(mut self, v: Vec<CutSite>) -> Self {
+        self.cut_sites = v;
+        self
+    }
     /// Finish, returning the [`SinkFinding`].
     pub fn build(self) -> SinkFinding {
         SinkFinding {
@@ -281,6 +313,7 @@ impl SinkFindingBuilder {
             sink_span: self.sink_span,
             path: self.path,
             cut_reasons: self.cut_reasons,
+            cut_sites: self.cut_sites,
         }
     }
 }
@@ -425,6 +458,8 @@ struct ExploreState {
     /// Silent stop sites hit during this root's exploration, for
     /// `--explain` diagnostics (pure bookkeeping; no analysis effect).
     cuts: Vec<&'static str>,
+    /// Concrete unresolvable stop sites behind the `"unresolvable"` cut.
+    cut_sites: Vec<CutSite>,
 }
 
 /// Human-readable description of the taint origin at a source node:

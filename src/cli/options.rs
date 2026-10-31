@@ -35,6 +35,8 @@ pub struct CliOptions {
     pub diff_only: bool,
     /// Record every silent sink argument (why the engine stayed quiet).
     pub explain: bool,
+    /// Write the `--explain` records as JSON to this file (implies `--explain`).
+    pub explain_json_path: Option<PathBuf>,
     /// Include the taint-path flow (source→sink SSA steps) in the text
     /// observation. JSON/SARIF always carry the path (`taint_steps` / SARIF
     /// `codeFlows`); `--show-flows` additionally embeds it in the text
@@ -69,6 +71,7 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
         compare_baseline_path: None,
         diff_only: false,
         explain: false,
+        explain_json_path: None,
         show_flows: false,
         profile: crate::Profile::Default,
         enable_hygiene: false,
@@ -113,6 +116,14 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
             "--strict" => options.is_strict = true,
             "--diff-only" => options.diff_only = true,
             "--explain" => options.explain = true,
+            "--explain-json" => {
+                let val = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                options.explain = true;
+                options.explain_json_path = Some(PathBuf::from(val));
+                i += 1;
+            }
             "--show-flows" => options.show_flows = true,
             "--hygiene" => options.enable_hygiene = true,
             "--max-complexity" => {

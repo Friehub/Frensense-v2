@@ -494,6 +494,17 @@ pub fn print_explain(
             r.verdict, r.file, r.line, r.sink, r.arg_slot
         );
         eprintln!("      why: {}", r.reason);
+        for c in &r.cut_sites {
+            let what = if c.detail.is_empty() {
+                c.kind.to_string()
+            } else {
+                format!("{} `{}`", c.kind, c.detail)
+            };
+            eprintln!(
+                "      stopped at: {what} in {} ({}:{})",
+                c.function, c.file, c.line
+            );
+        }
         if let Some(src) = &r.source_desc {
             eprintln!("      source: {src}");
         }

@@ -243,6 +243,9 @@ fn print_help() {
     println!(
         "  --explain                  Also print every silent sink argument and why the engine stayed quiet (stderr)"
     );
+    println!(
+        "  --explain-json <file>      Write every silent sink argument, with the value the engine could not resolve, as JSON (implies --explain)"
+    );
     println!("  -h, --help                 Print this help");
     println!(
         "  -v, --version              Print version (add --json for machine-readable identity)"
@@ -943,6 +946,16 @@ fn main() -> Result<()> {
 
     if options.explain {
         print_explain(&explain_records, &hidden_by_tier);
+    }
+    if let Some(path) = &options.explain_json_path {
+        let doc = serde_json::json!({
+            "schema": 1,
+            "records": explain_records.iter().map(frensense::explain::ExplainRecord::to_json).collect::<Vec<_>>(),
+        });
+        if let Err(e) = std::fs::write(path, serde_json::to_string_pretty(&doc).unwrap_or_default())
+        {
+            eprintln!("frensense: cannot write {}: {e}", path.display());
+        }
     }
 
     let status = frensense::cli::ScanStatus::compute(&telemetry, &incomplete);

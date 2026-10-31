@@ -10,7 +10,7 @@
 
 use crate::policy::reports_finding;
 use frensense_engine::analysis::taint::engine::BackwardVerdict;
-use frensense_engine::scan::LocatedFinding;
+use frensense_engine::scan::{LocatedCutSite, LocatedFinding};
 
 /// One explored sink argument that did NOT become an advisory, with the
 /// reason the engine stayed silent. Collected under `--explain` so users
@@ -37,6 +37,37 @@ pub struct ExplainRecord {
     /// The source access path, when the walk did reach one (e.g. a
     /// `Vulnerable` flow into a safe channel).
     pub source_desc: Option<String>,
+    /// Function holding the sink call.
+    pub function: String,
+    /// Where the walk met a value it could not resolve (the actionable half
+    /// of the `unresolvable` reason): callee, parameter or global, with its
+    /// file and line.
+    pub cut_sites: Vec<LocatedCutSite>,
+}
+
+impl ExplainRecord {
+    /// Machine-readable form, for `--explain-json` (blindness challenge cards).
+    #[must_use]
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "file": self.file,
+            "line": self.line,
+            "function": self.function,
+            "sink": self.sink,
+            "arg_slot": self.arg_slot,
+            "verdict": self.verdict,
+            "cut_reasons": self.cut_reasons,
+            "reason": self.reason,
+            "source": self.source_desc,
+            "cut_sites": self.cut_sites.iter().map(|c| serde_json::json!({
+                "kind": c.kind,
+                "function": c.function,
+                "detail": c.detail,
+                "file": c.file,
+                "line": c.line,
+            })).collect::<Vec<_>>(),
+        })
+    }
 }
 
 fn verdict_label(v: &BackwardVerdict) -> &'static str {
@@ -109,6 +140,8 @@ pub fn explain_silent(loc: &LocatedFinding) -> Option<ExplainRecord> {
         cut_reasons: f.cut_reasons.clone(),
         reason,
         source_desc: f.source_desc.clone(),
+        function: f.function.clone(),
+        cut_sites: loc.cut_sites.clone(),
     })
 }
 
@@ -143,6 +176,7 @@ mod explain_tests {
             file: "app.py".to_string(),
             line: 42,
             column: 1,
+            cut_sites: Vec::new(),
         }
     }
 
@@ -208,5 +242,23 @@ mod explain_tests {
         let l = loc(BackwardVerdict::Sanitized, None, vec!["sanitizer"]);
         let rec = explain_silent(&l).expect("record");
         assert_eq!(rec.verdict, "sanitized");
+    }
+
+    #[test]
+    fn unknown_record_carries_its_stop_sites_in_json() {
+        let mut l = loc(BackwardVerdict::Unknown, None, vec!["unresolvable"]);
+        l.cut_sites = vec![LocatedCutSite {
+            kind: "external-call",
+            function: "handler".into(),
+            detail: "os.path.join".into(),
+            file: "app.py".into(),
+            line: 40,
+        }];
+        let rec = explain_silent(&l).expect("record");
+        let j = rec.to_json();
+        assert_eq!(j["function"], "handler");
+        assert_eq!(j["cut_sites"][0]["kind"], "external-call");
+        assert_eq!(j["cut_sites"][0]["detail"], "os.path.join");
+        assert_eq!(j["cut_sites"][0]["line"], 40);
     }
 }
