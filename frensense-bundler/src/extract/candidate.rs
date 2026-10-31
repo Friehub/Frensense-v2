@@ -284,12 +284,23 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
                 SinkSignature::with_args(call, &dangerous.iter().copied().collect::<Vec<_>>())
             };
             sig.package = package.clone();
-            if let Some(pkg) = package {
-                table
-                    .scoped_sink_signatures
-                    .insert((pkg.clone(), call.clone()), sig.clone());
+            match package {
+                Some(pkg) => {
+                    // Package-scoped sink: install ONLY under (package, call),
+                    // exactly as `LearnedFactEntry::apply_with` publishes it.
+                    // A universal alias here would replay the fact with
+                    // semantics no consumer loads: the gate would approve a
+                    // sink that arms on any receiver, while the shipped
+                    // bundle arms only under a resolved origin. Same rule the
+                    // sanitizer arm below spells out.
+                    table
+                        .scoped_sink_signatures
+                        .insert((pkg.clone(), call.clone()), sig);
+                }
+                None => {
+                    table.sink_signatures.insert(call.clone(), sig);
+                }
             }
-            table.sink_signatures.insert(call.clone(), sig);
         }
         Candidate::Sanitizer {
             call,

@@ -5,9 +5,9 @@
 all: fmt check audit test
 
 ## Quality & Safety
-# The canonical gate is scripts/local-ci.sh (1:1 mirror of ci.yml).
+# The canonical gate is .github/scripts/local-ci.sh (1:1 mirror of ci.yml).
 # `make check` runs only the lint step for fast iteration; use
-# `make discipline` (or ./scripts/local-ci.sh) for the full pre-PR gate.
+# `make discipline` (or ./.github/scripts/local-ci.sh) for the full pre-PR gate.
 check:
 	@echo "[CHECK] Running semantic lints (Clippy)..."
 	cargo clippy --all-targets --all-features -- -D warnings
@@ -34,8 +34,8 @@ test-update:
 ## Setup
 setup:
 	@echo "[SETUP] Installing local pre-commit hooks..."
-	chmod +x scripts/setup-hooks.sh
-	./scripts/setup-hooks.sh
+	chmod +x .github/scripts/setup-hooks.sh
+	./.github/scripts/setup-hooks.sh
 
 ## Fuzzing
 fuzz-setup:
@@ -51,11 +51,11 @@ fuzz:
 # in CI so a stale or unequipped post fails the release build.
 blog-check:
 	@echo "[DOC] Blog provenance check..."
-	python3 scripts/blog_provenance.py check
+	python3 .github/scripts/blog_provenance.py check
 
 blog-check-strict:
 	@echo "[DOC] Blog provenance check (strict)..."
-	python3 scripts/blog_provenance.py check --strict
+	python3 .github/scripts/blog_provenance.py check --strict
 
 docs: blog-check
 	@echo "[DOC] Building Frensense Documentation..."
@@ -64,7 +64,7 @@ docs: blog-check
 ## Security & Compliance
 sbom:
 	@echo "[SECURITY] Generating CycloneDX SBOM..."
-	./scripts/generate-sbom.sh
+	./.github/scripts/generate-sbom.sh
 
 ## Distribution
 dist: docs sbom
@@ -82,20 +82,16 @@ docker:
 ## Performance
 benchmark:
 	@echo "[BENCH] Running performance benchmarks..."
-	./scripts/benchmark.sh
+	python3 frensense-bench/run.py --suite all
 
 ## Corpus
 corpus-check:
 	@echo "[CORPUS] Checking pattern completeness..."
-	@python3 scripts/corpus_check.py corpus/targets/
-
-corpus-gen:
-	@echo "[CORPUS] Generating missing sidecar .toml files..."
-	@python3 scripts/corpus_check.py corpus/targets/ --generate
+	@python3 frensense-bench/suites/rules.py --list
 
 ## Discipline (full pre-PR gate: identical to CI)
 discipline:
-	./scripts/local-ci.sh
+	./.github/scripts/local-ci.sh
 	@echo "[DISCIPLINE] All stabilization checks passed."
 
 help:

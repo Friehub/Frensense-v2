@@ -15,6 +15,31 @@ impl<'a> LoweringContext<'a> {
         name_field: &str,
         value_field: &str,
     ) -> Option<Operand> {
+        // `static char *p;` / `extern char **environ;` inside a body names
+        // static storage, not a stack slot.
+        let mut cursor = node.walk();
+        let nonlocal = node.children(&mut cursor).any(|c| {
+            c.kind() == "storage_class_specifier"
+                && matches!(
+                    &self.source[c.start_byte()..c.end_byte()],
+                    "static" | "extern"
+                )
+        });
+        let prev = self.nonlocal_decl;
+        if nonlocal {
+            self.nonlocal_decl = true;
+        }
+        let out = self.visit_declaration_inner(node, name_field, value_field);
+        self.nonlocal_decl = prev;
+        out
+    }
+
+    fn visit_declaration_inner(
+        &mut self,
+        node: Node,
+        name_field: &str,
+        value_field: &str,
+    ) -> Option<Operand> {
         // `const name = value;`, bind the name in the current scope.
         // If the node itself carries a name (variable_declarator),
         // lower the value and record the binding. Container statements
@@ -182,6 +207,9 @@ impl<'a> LoweringContext<'a> {
     /// vars created at first expression use are file/module/header globals
     /// (initialized elsewhere), never never-assigned locals.
     pub(super) fn mark_declared(&mut self, var: VarId) {
+        if self.nonlocal_decl {
+            return;
+        }
         if let Some(meta) = self.ir.var_metadata.get_mut(&var) {
             meta.declared = true;
         }

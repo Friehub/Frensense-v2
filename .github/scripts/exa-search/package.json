@@ -1,0 +1,19 @@
+{
+  "name": "@friehub/exa-search",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Exa-backed web search for agent and contributor workflows",
+  "type": "module",
+  "bin": {
+    "exa-search": "search.mjs"
+  },
+  "scripts": {
+    "start": "node search.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "exa-js": "2.26.0"
+  }
+}

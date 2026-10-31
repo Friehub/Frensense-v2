@@ -137,9 +137,14 @@ impl<'a> ProgramSvfg<'a> {
                 let mut target: Option<usize> = None;
                 let mut cur = self.functions[fi].ir.enclosing_fn.clone();
                 let mut hops = 0;
-                while let Some(enc) = cur
-                    && hops < 32
-                {
+                let mut truncated = false;
+                while let Some(enc) = cur {
+                    if hops >= 32 {
+                        // Ran out of lexical chain with an enclosing
+                        // function still in hand: the name is unresolved.
+                        truncated = true;
+                        break;
+                    }
                     hops += 1;
                     let Some(&gi) = self.func_index.get(&enc) else {
                         break;
@@ -149,6 +154,9 @@ impl<'a> ProgramSvfg<'a> {
                         break;
                     }
                     cur = self.functions[gi].ir.enclosing_fn.clone();
+                }
+                if truncated {
+                    crate::telemetry::Cap::ForwardHops.record();
                 }
                 let Some(gi) = target else {
                     continue; // module scope: no analysed IR owns the name

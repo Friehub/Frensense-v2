@@ -3,7 +3,7 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 //! `LearnedFactEntry`: the learned-fact tagged union persisted in `.frc`
-//! bundles and applied into a [`FactTable`] (this module keeps only the
+//! bundles and applied into a [`super::table::FactTable`] (this module keeps only the
 //! entry type and its `apply_with` lowering; the table itself lives in
 //! `table.rs`).
 
@@ -19,7 +19,7 @@ use crate::checks::memory_summary::CapacitySpec;
 pub enum LearnedFactEntry {
     /// A taint source pattern: a call name or member-access path whose
     /// result carries attacker-controlled data. Merged into the scan's
-    /// [`TaintConfig::sources`] so bundles teach new frameworks without
+    /// [`crate::analysis::taint::config::TaintConfig::sources`] so bundles teach new frameworks without
     /// touching the built-in tables. Matches by full name or, for dotted
     /// entries, by last segment (same convention as sinks).
     Source {
@@ -178,7 +178,7 @@ pub enum LearnedFactEntry {
     // using the language-agnostic variants above.
     /// An all-arguments dangerous sink for one language, with the role the
     /// pack generator derived from its vocabulary label (snake_case
-    /// [`SinkRole`] name).
+    /// [`crate::analysis::taint::role::SinkRole`] name).
     LanguageSink {
         language: String,
         call: String,
@@ -312,7 +312,7 @@ impl LearnedFactEntry {
     /// Variant names in wire order: the serialization contract for `.frc`
     /// bundles (bincode writes the variant index first). Appending a
     /// variant changes
-    /// [`fact_vocabulary_fingerprint`](super::fact_vocabulary_fingerprint),
+    /// [`super::fact_vocabulary_fingerprint`],
     /// which invalidates every bundle built against the old vocabulary -
     /// that is the point: a bundle that uses a variant an older binary does
     /// not know must be rebuilt instead of misdecoded.

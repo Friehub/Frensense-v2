@@ -45,6 +45,22 @@ pub fn lower_source_with_facts(
     ext: &str,
     facts: Option<&FactTable>,
 ) -> Result<FxHashMap<String, FunctionIR>, String> {
+    Ok(lower_source_detailed(path, source, ext, facts)?.0)
+}
+
+/// Lower one file and report whether its parse tree contained errors.
+///
+/// tree-sitter does not fail on a syntax error: it hands back a tree full of
+/// `ERROR`/missing nodes and the lowering extracts whatever survived, so a
+/// file that is a third unparseable used to be analyzed as if it were intact
+/// and reported as clean. The second element carries that fact so the scan
+/// can say "partially analyzed" instead.
+pub fn lower_source_detailed(
+    path: &str,
+    source: &str,
+    ext: &str,
+    facts: Option<&FactTable>,
+) -> Result<(FxHashMap<String, FunctionIR>, bool), String> {
     let spec = frensense_lang::spec_for_ext(ext)
         .ok_or_else(|| format!("no language spec for extension '{ext}'"))?;
 
@@ -154,7 +170,7 @@ pub fn lower_source_with_facts(
             stack.push(k);
         }
     }
-    Ok(irs)
+    Ok((irs, tree.root_node().has_error()))
 }
 
 /// Insert an IR keyed by its name, disambiguating on collision with the
@@ -381,9 +397,37 @@ fn lower_static(
     facts: Option<&FactTable>,
 ) -> FunctionIR {
     let mut ctx = LoweringContext::new_with_facts(spec, source, name.to_string(), facts);
-    ctx.visit_node(value_node);
+    let init = ctx.visit_node(value_node);
+    // Module-level alias: `const zip = unzipper;`. An identifier has no call
+    // or literal to lower, so the visit yields only the aliased value and the
+    // pseudo-function came out empty - invisible to receiver-origin
+    // resolution, because the consuming function's IR has no def for the
+    // module-level name to walk. Record the binding as an assignment, the
+    // module-level twin of the `Assign` the declaration path emits inside a
+    // function body.
+    if value_node.kind() == "identifier"
+        && let Some(Operand::Var(src)) = init
+    {
+        let dest = ctx.ir.new_var(VarMetadata {
+            source_name: Some(name.to_string()),
+            type_name: None,
+            byte_range: Some((value_node.start_byte(), value_node.end_byte())),
+            is_memory_state: false,
+            object_keys: Vec::new(),
+            declared: true,
+        });
+        let block = ctx.current_block;
+        ctx.ir.push_instruction(
+            block,
+            Instruction::Assign {
+                dest,
+                src: Operand::Var(src),
+            },
+        );
+    }
     let mut ir = SSABuilder::new(ctx.ir).build();
     ir.language = spec.name().to_string();
+    ir.is_static_data = true;
     ir
 }
 

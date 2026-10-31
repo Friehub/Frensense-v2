@@ -42,7 +42,12 @@ use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand, VarId};
 #[inline]
 fn callee_matches(taught: &str, written: &str) -> bool {
     if !taught.contains('.') && !taught.contains("::") {
-        return super::last_segment(written) == taught;
+        let seg = super::last_segment(written);
+        // A decorated mirror of the taught operation: a `extractAllTo`
+        // trigger also governs `extractAllToAsync`, the same call in its
+        // promise form.
+        return seg == taught
+            || crate::analysis::taint::facts::mirror_call_base(seg) == Some(taught);
     }
     let norm = |s: &str| -> String { s.replace("::", ".") };
     let t = norm(taught);
@@ -430,6 +435,21 @@ fn requirement_holds(
                 // Unresolvable value: literal-only proof, so not a
                 // violation. This is the conservative direction - it can
                 // miss `secure=flag`, never invent it.
+                None => true,
+            }
+        }
+        PolicyRequirement::BannedNamedArgLiteral { name, values } => {
+            let Some(idx) = arg_names.iter().position(|n| n.eq_ignore_ascii_case(name)) else {
+                // The caller never set the flag: absent is NOT a violation.
+                return true;
+            };
+            match args
+                .get(idx)
+                .and_then(|a| extract_literal_string(a, ir, val_info))
+            {
+                // A provable literal must NOT match any of the banned values.
+                Some(s) => !values.iter().any(|v| v.eq_ignore_ascii_case(&s)),
+                // Unresolvable value: literal-only proof, conservative.
                 None => true,
             }
         }

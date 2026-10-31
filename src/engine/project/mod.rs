@@ -39,8 +39,15 @@ pub struct Engine {
     pub(crate) max_complexity: Option<usize>,
     /// Silent-finding records from the most recent `run` (when `explain`).
     pub(crate) explain_records: Vec<crate::explain::ExplainRecord>,
+    /// Functions the per-function work budget pushed into the degraded
+    /// (flow-insensitive) form, accumulated across `run` calls and surfaced
+    /// via [`Engine::take_incomplete`] so the report can list them under
+    /// `analysis_incomplete` instead of silently weakening those results.
+    pub(crate) analysis_incomplete: Vec<frensense_engine::scan::IncompleteFunction>,
     /// Hidden finding counts grouped by tier.
     pub(crate) hidden_by_tier: std::collections::BTreeMap<crate::RuleTier, usize>,
+    /// Accumulated telemetry across scanned language groups.
+    pub(crate) telemetry: frensense_engine::telemetry::ScanTelemetry,
 }
 
 impl Engine {
@@ -58,7 +65,9 @@ impl Engine {
             enable_hygiene: false,
             max_complexity: None,
             explain_records: Vec::new(),
+            analysis_incomplete: Vec::new(),
             hidden_by_tier: std::collections::BTreeMap::new(),
+            telemetry: frensense_engine::telemetry::ScanTelemetry::default(),
         }
     }
 
@@ -107,6 +116,14 @@ impl Engine {
         std::mem::take(&mut self.explain_records)
     }
 
+    /// Take the functions analyzed in degraded form because their
+    /// per-function work budget expired (accumulated across `run` calls).
+    /// Empty when every function was analyzed fully.
+    #[must_use]
+    pub fn take_incomplete(&mut self) -> Vec<frensense_engine::scan::IncompleteFunction> {
+        std::mem::take(&mut self.analysis_incomplete)
+    }
+
     /// Set the scan profile governing which rule tiers are reported.
     pub fn set_profile(&mut self, profile: crate::Profile) {
         self.profile = profile;
@@ -136,6 +153,12 @@ impl Engine {
     #[must_use]
     pub fn take_hidden_by_tier(&mut self) -> std::collections::BTreeMap<crate::RuleTier, usize> {
         std::mem::take(&mut self.hidden_by_tier)
+    }
+
+    /// Take the scan telemetry collected by the most recent `run`.
+    #[must_use]
+    pub fn take_telemetry(&mut self) -> frensense_engine::telemetry::ScanTelemetry {
+        std::mem::take(&mut self.telemetry)
     }
 
     /// Register a synthetic file id for a scanned path (used by the runner

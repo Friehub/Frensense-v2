@@ -18,7 +18,7 @@ pub struct CallBinding {
     /// deduped. Empty when every target is external/unresolved, dynamic
     /// dispatch and callbacks may resolve to several callees at once; the
     /// cross-edge installer links all of them (sound: any may run).
-    /// Resolution comes from [`callgraph`] (aliases, receiver classes,
+    /// Resolution comes from `callgraph` (aliases, receiver classes,
     /// higher-order callbacks); bare-name matching is the fallback.
     pub callees: Vec<usize>,
     /// Best-known callee name for diagnostics and external fact lookup
@@ -115,11 +115,20 @@ impl<'a> ProgramSvfg<'a> {
 
                     // Resolve targets: callgraph first (aliases, class-
                     // qualified methods, callbacks), bare-name fallback.
+                    // A module-level data binding (`const pkg =
+                    // require("pkg")`) is not a callable: `pkg(req)` calls
+                    // into the library. Resolving it here gave the site an
+                    // empty parameter list and a vacuous summary, whose
+                    // pass-through suppression deleted the only taint edge
+                    // out of a `require` binding - every such call read
+                    // Unknown while the same call to an undefined global
+                    // propagated fine.
                     let mut callees: Vec<usize> = callgraph
                         .targets_at(&fname, block.0, idx)
                         .iter()
                         .filter_map(|t| t.internal_key())
                         .filter_map(|k| self.func_index.get(&k).copied())
+                        .filter(|&gi| !self.functions[gi].ir.is_static_data)
                         .collect();
                     // A builtin method name (`m.get(k)`, `buf.write(s)`) on an
                     // unresolved receiver is the standard library's, never a
@@ -132,6 +141,7 @@ impl<'a> ProgramSvfg<'a> {
                     if callees.is_empty()
                         && !builtin_verb
                         && let Some(gi) = self.func_index.get(&callee_name).copied()
+                        && !self.functions[gi].ir.is_static_data
                     {
                         callees.push(gi);
                     }

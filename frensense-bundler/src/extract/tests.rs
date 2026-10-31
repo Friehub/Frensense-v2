@@ -1171,3 +1171,208 @@ mod scoped_candidate_install_tests {
         );
     }
 }
+
+/// Sink half of the gate/consumer parity rule: a `Candidate::Sink` carrying a
+/// package must be installed under `(package, call)` only, exactly as the
+/// engine's load path publishes it.
+mod scoped_sink_candidate_install_tests {
+    use super::*;
+
+    #[test]
+    fn scoped_sink_candidate_installs_no_universal_alias() {
+        let mut table = FactTable::default();
+        apply_candidate(
+            &mut table,
+            &Candidate::Sink {
+                call: "extractAllTo".into(),
+                package: Some("adm-zip".into()),
+                dangerous: Default::default(),
+            },
+        );
+        assert!(
+            table
+                .scoped_sink_signatures
+                .contains_key(&("adm-zip".to_string(), "extractAllTo".to_string())),
+            "the scoped entry must be installed under (package, call)"
+        );
+        assert!(
+            table.sink_signatures.get("extractAllTo").is_none(),
+            "a package-scoped sink must not install a universal alias: consumers load it \n             origin-gated, so the gate must replay the same semantics"
+        );
+    }
+
+    #[test]
+    fn unscoped_sink_candidate_stays_universal() {
+        let mut table = FactTable::default();
+        apply_candidate(
+            &mut table,
+            &Candidate::Sink {
+                call: "sinkFn".into(),
+                package: None,
+                dangerous: Default::default(),
+            },
+        );
+        assert!(
+            table.sink_signatures.contains_key("sinkFn"),
+            "an unpackage-qualified sink must stay universal"
+        );
+        assert!(
+            table.scoped_sink_signatures.is_empty(),
+            "an unpackage-qualified sink must not create a scoped entry"
+        );
+    }
+}
+
+/// Sink minimality: a positive can taint the defect AND every call that
+/// consumes its result. Both separate the pair (the negative validated the
+/// value upstream, so the echo is silent there too), so separation alone
+/// publishes a response writer / logger as a sink - the
+/// `JsonResponse`/`annotate`/`list` junk the CVE review found. The captured
+/// path names the upstream call, so the echo is rejected and the upstream
+/// candidate carries the family.
+mod downstream_echo_tests {
+    use super::*;
+
+    fn builtin() -> (TaintConfig, FactTable) {
+        let all_extensions: Vec<&str> = frensense_lang::all_specs()
+            .flat_map(|s| s.extensions().iter().copied())
+            .collect();
+        tables_from_exts_with_pack(
+            all_extensions,
+            crate::format::default_pack().learned_facts.as_slice(),
+        )
+    }
+
+    fn write(dir: &TempDir, name: &str, body: &str) {
+        fs::write(dir.path().join(name), body).unwrap();
+    }
+
+    /// The tables a consumer scans the shipped bundle under: the pack
+    /// baseline with the learned facts merged on top. `learned` alone is what
+    /// the bundle *contains*, not what the engine runs with - the pack's
+    /// propagation rules (`list` forwards its argument) are missing there, so
+    /// a defect sitting behind one reads as unresolvable and the gate looks
+    /// like it disagrees with the CLI.
+    fn as_scanned(table: &FactTable, learned: &FactTable) -> FactTable {
+        let mut merged = table.clone();
+        merged.merge(learned);
+        merged
+    }
+
+    #[test]
+    fn echo_sink_is_rejected_and_the_upstream_candidate_publishes() {
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "echo_positive.py",
+            concat!(
+                "# [frensense]\n",
+                "# cwe: CWE-89\n",
+                "def handle(request):\n",
+                "    document = request.GET.get(\"doc\")\n",
+                "    rows = fetch_document(document)\n",
+                "    render_html(rows)\n",
+            ),
+        );
+        write(
+            &dir,
+            "echo_negative.py",
+            concat!(
+                "def handle(request):\n",
+                "    document = \"curated-report\"\n",
+                "    rows = fetch_document(document)\n",
+                "    render_html(rows)\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families.len(), 1, "one family expected");
+
+        let (learned, published) = extract_facts_with_tables(&families, &config, &table);
+        let taught_sink = |call: &str| {
+            published.iter().any(|f| {
+                matches!(&f.entry, LearnedFactEntry::Sink { call: c, .. } if c == call)
+                    || matches!(&f.entry, LearnedFactEntry::LanguageSinkSlots { call: c, .. } if c == call)
+            })
+        };
+        assert!(
+            taught_sink("fetch_document"),
+            "the upstream tainted call is the defect: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+        assert!(
+            !taught_sink("render_html"),
+            "a call that only echoes `fetch_document`'s result must not become a sink: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+        let prep = gate::PreparedFamily::new(&families[0], &table).unwrap();
+        assert!(
+            prep.separates(&config, &as_scanned(&table, &learned)),
+            "the family must still separate under the facts a consumer scans with"
+        );
+    }
+
+    #[test]
+    fn a_sibling_that_fails_separation_cannot_make_the_defect_look_like_an_echo() {
+        // The mirror image of the test above, and the shape real advisories
+        // write: a wrapper composes with untrusted input in both twins (the
+        // negative still feeds it user data, it just does not reach the
+        // defect), then the defect consumes the wrapper's result.
+        //
+        // The wrapper is proposed as a sink - it is tainted - but it fires on
+        // the negative too, so it separates nothing and cannot be the
+        // upstream of anything. Reading it as one suppressed the family's own
+        // sink and the bundle taught nothing.
+        let dir = TempDir::new().unwrap();
+        write(
+            &dir,
+            "wrapper_positive.py",
+            concat!(
+                "# [frensense]\n",
+                "# cwe: CWE-89\n",
+                "def handle(request):\n",
+                "    raw = request.GET.get(\"doc\")\n",
+                "    rows = list(raw)\n",
+                "    persist_rows(rows)\n",
+            ),
+        );
+        write(
+            &dir,
+            "wrapper_negative.py",
+            concat!(
+                "def handle(request):\n",
+                "    raw = request.GET.get(\"doc\")\n",
+                "    list(raw)\n",
+                "    persist_rows(\"curated-report\")\n",
+            ),
+        );
+
+        let (config, table) = builtin();
+        let families = group_families(dir.path()).unwrap();
+        assert_eq!(families.len(), 1, "one family expected");
+
+        let (learned, published) = extract_facts_with_tables(&families, &config, &table);
+        let taught_sink = |call: &str| {
+            published.iter().any(|f| {
+                matches!(&f.entry, LearnedFactEntry::Sink { call: c, .. } if c == call)
+                    || matches!(&f.entry, LearnedFactEntry::LanguageSinkSlots { call: c, .. } if c == call)
+            })
+        };
+        assert!(
+            taught_sink("persist_rows"),
+            "the call the negative never taints is the defect: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+        assert!(
+            !taught_sink("list"),
+            "a wrapper that is tainted in the negative too explains nothing: {:?}",
+            published.iter().map(|f| &f.entry).collect::<Vec<_>>()
+        );
+        let prep = gate::PreparedFamily::new(&families[0], &table).unwrap();
+        assert!(
+            prep.separates(&config, &as_scanned(&table, &learned)),
+            "the family must separate under the facts a consumer scans with"
+        );
+    }
+}

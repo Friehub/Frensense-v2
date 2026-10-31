@@ -323,7 +323,7 @@ Run it yourself:
 
 ```bash
 # Automated benchmark reproduction runner (auto-caches OWASP suite, generates markdown/JSON scorecards)
-./scripts/reproduce_benchmark.sh
+python3 frensense-bench/run.py --suite owasp
 ```
 
 See [docs/BENCHMARKING.md](docs/BENCHMARKING.md) for full reproduction methodology and GitHub Gist sharing instructions.

@@ -411,6 +411,7 @@ fn fixpoint(ir: &FunctionIR) -> (FxHashMap<BlockId, AbsState>, bool) {
         iterations += 1;
         if iterations > MAX_ITERATIONS * (ir.blocks.len() + 1) {
             converged = false;
+            crate::telemetry::Cap::ValueIterations.record();
             break;
         }
         queued.remove(&bid);

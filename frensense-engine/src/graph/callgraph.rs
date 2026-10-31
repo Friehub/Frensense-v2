@@ -312,7 +312,7 @@ impl<'a> CallGraphBuilder<'a> {
                                     // edges, pulling unrelated same-named
                                     // functions into the taint walk. Bare-name
                                     // binding here was the dominant
-                                    // false-positive source (docs/mre audit).
+                                    // false-positive source (tests/mre audit).
                                     external_name = Some(resolved_method.to_string());
                                 }
                             }
@@ -560,8 +560,12 @@ impl<'a> CallGraphBuilder<'a> {
                 return Some(fun.clone());
             }
             let next = f.aliases.get(&cur)?;
-            if *next == cur || hops > 32 {
+            if *next == cur {
                 return None; // cycle guard
+            }
+            if hops > 32 {
+                crate::telemetry::Cap::CallgraphHops.record();
+                return None;
             }
             cur = *next;
             hops += 1;
@@ -577,7 +581,11 @@ impl<'a> CallGraphBuilder<'a> {
                 return Some(c.clone());
             }
             let next = f.aliases.get(&cur)?;
-            if *next == cur || hops > 32 {
+            if *next == cur {
+                return None;
+            }
+            if hops > 32 {
+                crate::telemetry::Cap::CallgraphHops.record();
                 return None;
             }
             cur = *next;

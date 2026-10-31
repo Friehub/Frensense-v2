@@ -19,6 +19,9 @@ use super::*;
 pub(crate) struct SourceScope<'a> {
     universal: &'a rustc_hash::FxHashSet<String>,
     language: Option<&'a rustc_hash::FxHashSet<String>>,
+    /// Names that are sources only in the program's entry point, withheld
+    /// here because this function is not it (see [`ENTRY_ONLY_PARAMS`]).
+    withheld: &'static [&'static str],
 }
 
 impl<'a> SourceScope<'a> {
@@ -26,18 +29,56 @@ impl<'a> SourceScope<'a> {
         Self {
             universal: &config.sources,
             language: facts.language_sources(&ir.language),
+            withheld: entry_only_names_withheld_for(ir),
         }
     }
 
+    /// True when `name` is, or is a field path under, a withheld name.
+    fn is_withheld(&self, name: &str) -> bool {
+        self.withheld.iter().any(|w| {
+            name == *w || (name.starts_with(w) && name.as_bytes().get(w.len()) == Some(&b'.'))
+        })
+    }
+
     pub(crate) fn contains(&self, name: &str) -> bool {
-        self.universal.contains(name) || self.language.is_some_and(|set| set.contains(name))
+        !self.is_withheld(name)
+            && (self.universal.contains(name)
+                || self.language.is_some_and(|set| set.contains(name)))
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &'a String> {
         self.universal
             .iter()
             .chain(self.language.into_iter().flatten())
+            .filter(|s| !self.is_withheld(s))
     }
+}
+
+/// Entry-point-only parameter names, per language family.
+///
+/// `argv`/`argc` are the process's command line only in the program's entry
+/// point. Everywhere else the same name is an ordinary parameter: redis
+/// alone has `robj **argv` (a client command), `sds *argv` (a config line)
+/// and `char *argv[]` (a test) in functions that never see the process
+/// arguments, and treating every one as attacker input produced 48
+/// path-traversal findings with the wrong source. Reached from `main`, the
+/// value arrives through the call-argument edge instead, which keeps the
+/// real flow and drops the name-only ones.
+const ENTRY_ONLY_PARAMS: &[(&str, &[&str], &str)] = &[
+    ("c", &["argc", "argv"], "main"),
+    ("cpp", &["argc", "argv"], "main"),
+];
+
+/// The entry-only names this function must NOT treat as sources (empty for
+/// the entry point itself and for languages with no such rule).
+fn entry_only_names_withheld_for(ir: &FunctionIR) -> &'static [&'static str] {
+    for (lang, names, entry) in ENTRY_ONLY_PARAMS {
+        if ir.language == *lang {
+            let base = ir.name.rsplit("::").next().unwrap_or(&ir.name);
+            return if base == *entry { &[] } else { names };
+        }
+    }
+    &[]
 }
 
 /// True if the node is a definition whose instruction is a configured source.
@@ -222,6 +263,24 @@ pub(crate) fn source_path_matches(sources: &SourceScope<'_>, path: &str, root: &
         })
 }
 
+/// C calls whose result does not carry the taint of their arguments:
+/// lengths (`strlen`), and allocators in every spelling the C ecosystem uses
+/// (`malloc`, `calloc`, `alloca`, `zmalloc`, `s_trymalloc_usable`,
+/// `xcalloc`, `g_malloc`). `realloc` is excluded: its result is the old
+/// object's contents.
+pub(crate) fn c_result_is_independent_of_args(func: &str) -> bool {
+    let last = func.rsplit(['.', ':']).next().unwrap_or(func);
+    let l = last.to_ascii_lowercase();
+    if matches!(l.as_str(), "strlen" | "strnlen" | "wcslen" | "alloca") {
+        return true;
+    }
+    if l.contains("realloc") {
+        return false;
+    }
+    let l = l.strip_suffix("_usable").unwrap_or(&l);
+    l.ends_with("malloc") || l.ends_with("calloc")
+}
+
 /// True if the node is a use inside a configured sanitizer call.
 pub(crate) fn is_sanitizer_use(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) -> bool {
     let NodeKey {
@@ -285,6 +344,14 @@ pub(crate) fn is_sanitizer_effective_for_role(
     }
     match &b.instructions[idx] {
         Instruction::CallStatic { func, .. } => {
+            // A fresh allocation or a length is not the data it was sized
+            // from. Allocator wrappers carry project-specific names
+            // (`zmalloc`, `s_trymalloc_usable`, `xcalloc`), so the shape of
+            // the name decides rather than a per-project list.
+            if matches!(ir.language.as_str(), "c" | "cpp") && c_result_is_independent_of_args(func)
+            {
+                return true;
+            }
             if let Some(fact) = facts.sanitizer_fact_scoped(func, origin_package) {
                 if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
                     return kind.defeats_role_and_label(role, label);
@@ -635,8 +702,20 @@ pub(crate) fn receiver_call_path(ir: &FunctionIR, recv: &Operand, method: &str) 
 
 /// Resolve an operand to a member path through its defining instructions.
 fn operand_member_path(ir: &FunctionIR, op: &Operand) -> String {
+    operand_member_path_at(ir, op, 0)
+}
+
+/// [`operand_member_path`] continuing an existing depth budget.
+///
+/// The budget must travel through EVERY edge of the walk. `Assign` used to
+/// call the entry point above, which restarts at depth 0, so a cycle of
+/// assignments (`v_a := v_b`, `v_b := v_a` - Python's `try`/`except` lowering
+/// emits these) recursed between `var_member_path` and
+/// `operand_member_path` forever and overflowed the stack instead of
+/// returning the empty path the depth guard promises.
+fn operand_member_path_at(ir: &FunctionIR, op: &Operand, depth: usize) -> String {
     match op {
-        Operand::Var(v) => var_member_path(ir, *v, 0),
+        Operand::Var(v) => var_member_path(ir, *v, depth),
         _ => String::new(),
     }
 }
@@ -651,7 +730,7 @@ fn var_member_path(ir: &FunctionIR, v: VarId, depth: usize) -> String {
         for instr in &b.instructions {
             match instr {
                 Instruction::Assign { dest, src } if *dest == v => {
-                    return operand_member_path(ir, src);
+                    return operand_member_path_at(ir, src, depth + 1);
                 }
                 Instruction::LoadField {
                     dest, base, field, ..

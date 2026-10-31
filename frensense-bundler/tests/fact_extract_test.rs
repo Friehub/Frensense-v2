@@ -3,7 +3,15 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use frensense_bundler::builder::build_facts_bundle;
-use frensense_bundler::extract::alerts;
+use frensense_bundler::extract::alerts_with_cwe;
+
+/// The gate counts a taint finding only when it names a vulnerability class,
+/// because that is what a consumer reports. These fixtures scan config-only
+/// sinks whose vocabulary declares the class, so the gate is given the CWE a
+/// corpus family would declare for them.
+fn alerts(res: &frensense_engine::scan::ScanResult) -> bool {
+    alerts_with_cwe(res, Some("CWE-94"))
+}
 use frensense_bundler::fact_extract::{
     extract_facts_with_tables, group_families, Family, FamilyMetadata,
 };
@@ -48,7 +56,16 @@ fn test_extract_sanitizer_fact_from_healthy_pair() {
     // doesn't know `test` yet → negative alerts (FP). The family proposes
     // `test` as a guard sanitizer; the replay gate verifies the family
     // separates with it and the fact is published.
+    // The family declares its class: the replay gate scores a taint finding
+    // only when it names one, because that is what a consumer reports.
     let pos = r#"
+// [frensense]
+// observation: A request field is evaluated as code
+// impact: An attacker can run arbitrary code in the process
+// improvement: Validate the value against an allowlist before evaluating it
+// cwe: CWE-94
+// severity: high
+// class: inj.code
 import express from "express";
 const router = express.Router();
 router.post("/p", (req: any, res: any) => {

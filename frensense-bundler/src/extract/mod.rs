@@ -40,7 +40,7 @@ pub use call_analysis::{
 };
 pub use candidate::{apply_candidate, fact_key, Candidate};
 pub use family::{group_families, Family, FamilyMetadata, LearnedFact};
-pub use gate::{alerts, scan_variant, separates, PreparedFamily};
+pub use gate::{alerts, alerts_with_cwe, scan_variant, separates, PreparedFamily};
 pub use noise::{guard_priority, is_exception_name, looks_taint_relevant};
 pub use propose::{propose, propose_with_trace};
 
@@ -303,6 +303,40 @@ fn extract_facts_with(
         };
         tier(&a.0).cmp(&tier(&b.0)).then_with(|| a.0.cmp(&b.0))
     });
+    // Sink candidates that separate their voting family, per family. Two
+    // different shapes produce several tainted calls in one positive:
+    //
+    // * the defect followed by an echo of its result (Django `Trunc` then
+    //   `JsonResponse`): both separate, and the later one is not a sink;
+    // * a wrapper followed by the defect (unzipper `Open.buffer` then
+    //   `extract`): only the later one separates, so it is not an echo.
+    //
+    // Separation is what distinguishes them, so the echo test may only look
+    // at siblings that prove it themselves - a candidate that fails
+    // separation cannot explain another's taint.
+    let mut separating_sinks_by_family: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeSet<String>,
+    > = std::collections::BTreeMap::new();
+    for (_, cand, _, fams) in &ordered_votes {
+        let Candidate::Sink { call, .. } = cand else {
+            continue;
+        };
+        for fam in fams {
+            let Some(p) = prepared.iter().find(|p| &p.id == fam) else {
+                continue;
+            };
+            let (f_config, f_builtin) = &fam_tables[&p.id];
+            let mut trial = f_builtin.clone();
+            apply_candidate(&mut trial, cand);
+            if p.separates(f_config, &trial) {
+                separating_sinks_by_family
+                    .entry(fam.clone())
+                    .or_default()
+                    .insert(call.clone());
+            }
+        }
+    }
     // Candidates already published in this pass (gate context for
     // regression baselines; see the non-voter regression check below).
     let mut published_cands: Vec<Candidate> = Vec::new();
@@ -396,6 +430,26 @@ fn extract_facts_with(
             };
             if voted {
                 if sep {
+                    // A downstream echo separates exactly like the defect whose
+                    // result it consumes. Publishing it teaches a sink that
+                    // fires on any tainted value of that shape, so the family's
+                    // knowledge must ride on the upstream call only.
+                    let echoed = match (&cand, separating_sinks_by_family.get(&p.id)) {
+                        (Candidate::Sink { call, .. }, Some(siblings)) => {
+                            let mut echo_trial = f_builtin.clone();
+                            apply_candidate(&mut echo_trial, &cand);
+                            p.downstream_echo(f_config, &echo_trial, call, siblings)
+                                .map(|upstream| (call.clone(), upstream))
+                        }
+                        _ => None,
+                    };
+                    if let Some((call, upstream)) = echoed {
+                        reject = Some(format!(
+                            "downstream echo: `{call}` only receives a value `{upstream}` already \
+                             carries, so it re-names the same defect with a wider blast radius"
+                        ));
+                        break;
+                    }
                     any_voter_separates = true;
                 } else if first_failing_voter.is_none() {
                     // Remember which side still fails: "does not separate"

@@ -120,6 +120,7 @@ impl ContextPool {
         let count = self.per_fn_count.entry(callee_fn).or_insert(0);
         if *count >= MAX_CONTEXTS_PER_FN {
             self.collapses += 1;
+            crate::telemetry::Cap::ContextsPerFunction.record();
             let fallback = self
                 .by_key
                 .iter()

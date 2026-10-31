@@ -275,7 +275,8 @@ export default defineConfig({
             { text: 'Overview', link: '/architecture/' },
             { text: 'The program graph', link: '/architecture/program-graph' },
             { text: 'Checkers', link: '/architecture/checkers' },
-            { text: 'Knowledge bundles (.frc)', link: '/architecture/bundles' }
+            { text: 'Knowledge bundles (.frc)', link: '/architecture/bundles' },
+            { text: 'Engine blindness & capabilities', link: '/architecture/blindness' }
           ]
         }
       ],

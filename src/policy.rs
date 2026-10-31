@@ -75,8 +75,30 @@ pub fn apply_with_profile_and_hygiene(
     profile: Profile,
     enable_hygiene: bool,
 ) -> (Vec<Advisory>, BTreeMap<RuleTier, usize>) {
+    let (kept, hidden_by_tier, _, _) = apply_with_profile_and_hygiene_counted(
+        advisories,
+        min_confidence,
+        severity_floor,
+        profile,
+        enable_hygiene,
+    );
+    (kept, hidden_by_tier)
+}
+
+/// Apply the reporting policy and also count findings dropped by confidence
+/// and severity floors. A finding is assigned to the first gate that drops it.
+#[must_use]
+pub fn apply_with_profile_and_hygiene_counted(
+    advisories: Vec<Advisory>,
+    min_confidence: f64,
+    severity_floor: Option<Severity>,
+    profile: Profile,
+    enable_hygiene: bool,
+) -> (Vec<Advisory>, BTreeMap<RuleTier, usize>, usize, usize) {
     let mut kept = Vec::new();
     let mut hidden_by_tier = BTreeMap::new();
+    let mut below_confidence = 0;
+    let mut below_severity = 0;
 
     for a in advisories {
         let tier_allowed =
@@ -86,15 +108,17 @@ pub fn apply_with_profile_and_hygiene(
             continue;
         }
         if a.confidence < min_confidence {
+            below_confidence += 1;
             continue;
         }
         if !severity_floor.is_none_or(|floor| a.severity.meets_threshold(floor)) {
+            below_severity += 1;
             continue;
         }
         kept.push(a);
     }
 
-    (kept, hidden_by_tier)
+    (kept, hidden_by_tier, below_confidence, below_severity)
 }
 
 /// Apply the reporting floor and active scan profile: drop advisories below

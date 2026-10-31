@@ -8,9 +8,19 @@
 //! of abstract memory locations that each variable can point to. This cleanly
 //! tracks deeply nested object properties and handles array/dictionary elements.
 
+use crate::debug_flags::DebugFlags;
 use crate::graph::steensgaard::Steensgaard;
 use crate::ir::function::*;
 use rustc_hash::{FxHashMap, FxHashSet};
+
+/// Hard ceiling on [`PointsToAnalysis::analyze_inner`] iterations.
+///
+/// The fixed point is monotone (instructions only ever ADD locations), so it
+/// always terminates on its own; this budget exists purely as a backstop so no
+/// future non-monotone rule can hang a scan. On expiry the analysis reports it
+/// and falls back to the conservative "every load inherits its base" answer
+/// instead of trusting a partially-propagated field map.
+const MAX_PASSES: u64 = 10_000;
 
 /// A unique identifier for an abstract memory allocation in the heap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -31,6 +41,11 @@ pub struct PointsToAnalysis {
     /// Maps local variables to their abstract memory locations (for AddressOf logic).
     pub var_locs: FxHashMap<VarId, LocId>,
 
+    /// Whether the last [`Self::analyze`] run reached a true fixed point
+    /// before the configured iteration budget. `false` means the budget expired and the
+    /// result was degraded to the conservative fallback, never a hang.
+    pub converged: bool,
+
     next_loc_id: usize,
 }
 
@@ -48,6 +63,8 @@ impl PointsToAnalysis {
             pts: FxHashMap::default(),
             fields: FxHashMap::default(),
             var_locs: FxHashMap::default(),
+            // An empty graph is trivially at a fixed point.
+            converged: true,
             next_loc_id: 1, // LocId(0) is reserved for globals
         }
     }
@@ -217,9 +234,9 @@ impl PointsToAnalysis {
                 None => false,
             }
         };
-        // Phase-2 deferrals: loads whose base is excluded from precise
-        // field tracking, resolved once after the fixed point converges.
-        let mut excluded_loads: Vec<(VarId, VarId)> = Vec::new();
+        // Phase-2 deferrals are declared with the loop below: loads whose
+        // base is excluded from precise field tracking, resolved once after
+        // the fixed point converges.
 
         // 1. Initial Pass: Allocate memory for function parameters
         // Without this, inputs like `req` would have no memory to attach properties to!
@@ -238,9 +255,36 @@ impl PointsToAnalysis {
             }
         }
 
-        // 3. Fixed-Point Iteration (Andersen's Algorithm)
+        // 3. Fixed-Point Iteration (Andersen's Algorithm).
+        //
+        // MONOTONICITY IS THE TERMINATION ARGUMENT: a pass may only insert
+        // locations into `pts`/`fields`, never remove them, so the state walks
+        // a finite lattice and must reach "no change". The strong update that
+        // used to `clear()` a field here was the one non-monotone rule: a
+        // non-variable store cleared `(loc, field)` while a variable store to
+        // the same key merged it back within the same pass, so `changed` never
+        // went false - one field was cleared and refilled every pass and the
+        // loop ran forever (observed: 183 000 passes on next.js `dynamic.tsx`,
+        // 21 000 on libpng `pngstest.c`, 68 000 on redis `server.c`, each one
+        // hanging its whole repository). See docs/REAL_REPO_BENCHMARK.md.
+        //
+        // Weak-only updates are also the sound choice for a MAY-analysis:
+        // keeping a location the overwrite would have killed only
+        // over-approximates aliasing (possible extra finding), whereas the
+        // clear could drop a location a real flow needed and lose a finding.
+        // Value-level overwrite semantics (does "safe" kill an earlier taint)
+        // belong to the taint engine, which already over-approximates them -
+        // see `ir::tests::test_clean_overwrite_known_false_positive`.
         let mut changed = true;
-        while changed {
+        let mut passes: u64 = 0;
+        // Every load seen in the IR, and the loads deferred to post-fixpoint
+        // resolution (bases excluded from precise field tracking). Sets, not
+        // vecs: both were pushed from inside the loop and would grow once per
+        // pass otherwise.
+        let mut all_loads: FxHashSet<(VarId, VarId)> = FxHashSet::default();
+        let mut excluded_loads: FxHashSet<(VarId, VarId)> = FxHashSet::default();
+        while changed && passes < MAX_PASSES {
+            passes += 1;
             changed = false;
 
             for block in ir.blocks.values() {
@@ -291,32 +335,25 @@ impl PointsToAnalysis {
                             if skip_work(*base) {
                                 continue;
                             }
-                            if let Some(base_pts) = self.pts.get(base).cloned() {
-                                match src {
-                                    Operand::Var(src_var) => {
-                                        if let Some(src_pts) = self.pts.get(src_var).cloned() {
-                                            for &loc in &base_pts {
-                                                if Self::merge_field_sets(
-                                                    &mut self.fields,
-                                                    loc,
-                                                    field.clone(),
-                                                    &src_pts,
-                                                ) {
-                                                    changed = true;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    _ => {
-                                        for &loc in &base_pts {
-                                            if let Some(set) =
-                                                self.fields.get_mut(&(loc, field.clone()))
-                                                && !set.is_empty()
-                                            {
-                                                set.clear();
-                                                changed = true;
-                                            }
-                                        }
+                            // A non-variable source (literal, closure value,
+                            // unresolved operand) contributes no abstract
+                            // location, so there is nothing to merge - and
+                            // deliberately no `clear()` either: see the
+                            // monotonicity note above. Clearing is what made
+                            // this loop non-terminating AND what could drop a
+                            // location a real flow needed.
+                            if let Some(base_pts) = self.pts.get(base).cloned()
+                                && let Operand::Var(src_var) = src
+                                && let Some(src_pts) = self.pts.get(src_var).cloned()
+                            {
+                                for &loc in &base_pts {
+                                    if Self::merge_field_sets(
+                                        &mut self.fields,
+                                        loc,
+                                        field.clone(),
+                                        &src_pts,
+                                    ) {
+                                        changed = true;
                                     }
                                 }
                             }
@@ -326,6 +363,7 @@ impl PointsToAnalysis {
                         Instruction::LoadField {
                             dest, base, field, ..
                         } => {
+                            all_loads.insert((*dest, *base));
                             if let Some(base_pts) = self.pts.get(base).cloned() {
                                 let mut field_pts = FxHashSet::default();
                                 for &loc in &base_pts {
@@ -341,7 +379,7 @@ impl PointsToAnalysis {
                                 // the fixed point. Sound: over-approximates,
                                 // never drops a relevant location.
                                 if field_pts.is_empty() && skip_work(*base) && relevance.is_some() {
-                                    excluded_loads.push((*dest, *base));
+                                    excluded_loads.insert((*dest, *base));
                                     continue;
                                 }
                                 if Self::merge_sets(&mut self.pts, *dest, &field_pts) {
@@ -363,34 +401,22 @@ impl PointsToAnalysis {
                                 } else {
                                     "*".to_string()
                                 };
-                                match src {
-                                    Operand::Var(src_var) => {
-                                        if let Some(src_pts) = self.pts.get(src_var).cloned() {
-                                            for &loc in &base_pts {
-                                                if Self::merge_field_sets(
-                                                    &mut self.fields,
-                                                    loc,
-                                                    field_name.clone(),
-                                                    &src_pts,
-                                                ) {
-                                                    changed = true;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    _ => {
-                                        // Only clear exact string indices. Wildcards (*) represent arrays which could
-                                        // hold multiple elements, so we don't strong-update (clear) the whole array.
-                                        if field_name != "*" {
-                                            for &loc in &base_pts {
-                                                if let Some(set) =
-                                                    self.fields.get_mut(&(loc, field_name.clone()))
-                                                    && !set.is_empty()
-                                                {
-                                                    set.clear();
-                                                    changed = true;
-                                                }
-                                            }
+                                // Non-variable source: no abstract location
+                                // to merge, and no strong update either -
+                                // clearing an exact index here was the second
+                                // half of the non-monotone clear/fill cycle
+                                // described above.
+                                if let Operand::Var(src_var) = src
+                                    && let Some(src_pts) = self.pts.get(src_var).cloned()
+                                {
+                                    for &loc in &base_pts {
+                                        if Self::merge_field_sets(
+                                            &mut self.fields,
+                                            loc,
+                                            field_name.clone(),
+                                            &src_pts,
+                                        ) {
+                                            changed = true;
                                         }
                                     }
                                 }
@@ -401,6 +427,7 @@ impl PointsToAnalysis {
                         Instruction::LoadElement {
                             dest, base, index, ..
                         } => {
+                            all_loads.insert((*dest, *base));
                             if let Some(base_pts) = self.pts.get(base).cloned() {
                                 let field_name = if let Operand::StringLiteral(s) = index {
                                     s.clone()
@@ -426,7 +453,7 @@ impl PointsToAnalysis {
                                 // resolved once after convergence.
                                 if element_pts.is_empty() && skip_work(*base) && relevance.is_some()
                                 {
-                                    excluded_loads.push((*dest, *base));
+                                    excluded_loads.insert((*dest, *base));
                                     continue;
                                 }
                                 if Self::merge_sets(&mut self.pts, *dest, &element_pts) {
@@ -488,16 +515,41 @@ impl PointsToAnalysis {
             }
         }
 
-        // 4. Phase-2 deferred resolution: excluded-base loads inherit the
+        // 4. Budget backstop. The loop above is monotone, so reaching the
+        // ceiling should be unreachable; if it ever happens the field map is
+        // half-propagated and keeping it would silently lose flows. Degrade
+        // EVERY load in this function to the conservative answer (inherit the
+        // base's locations, an over-approximation) and report the event.
+        let exhausted = passes >= MAX_PASSES && changed;
+        self.converged = !exhausted;
+        if exhausted {
+            crate::telemetry::Cap::PointsToPasses.record();
+            eprintln!(
+                "frensense: points-to did not converge for `{}` after {MAX_PASSES} passes; \
+                 falling back to conservative field resolution for this function",
+                ir.name
+            );
+            excluded_loads.extend(&all_loads);
+        }
+        crate::dbg_trace!(
+            DebugFlags::get().pts,
+            "points-to `{}`: passes={} pts={} fields={} exhausted={}",
+            ir.name,
+            passes,
+            self.pts.len(),
+            self.fields.len(),
+            exhausted
+        );
+
+        // 5. Deferred resolution: loads whose base was excluded from precise
+        // field tracking (and, on budget expiry, every load) inherit the
         // base's FINAL points-to set, once. This replaces per-iteration
         // fallback churn with a single merge; it is conservative (a strict
         // over-approximation of precise field tracking) and only ever adds
         // locations to an already-computed set.
-        if relevance.is_some() {
-            for (dest, base) in &excluded_loads {
-                if let Some(src_pts) = self.pts.get(base).cloned() {
-                    Self::merge_sets(&mut self.pts, *dest, &src_pts);
-                }
+        for (dest, base) in &excluded_loads {
+            if let Some(src_pts) = self.pts.get(base).cloned() {
+                Self::merge_sets(&mut self.pts, *dest, &src_pts);
             }
         }
     }
