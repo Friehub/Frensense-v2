@@ -15,10 +15,10 @@ registry, so the release workflow can:
 
 Usage
 -----
-    python3 scripts/release-matrix.py                  # human table
-    python3 scripts/release-matrix.py --json
-    python3 scripts/release-matrix.py --github-output "$GITHUB_OUTPUT"
-    python3 scripts/release-matrix.py --require-published --wait 300
+    python3 .github/scripts/release-matrix.py                  # human table
+    python3 .github/scripts/release-matrix.py --json
+    python3 .github/scripts/release-matrix.py --github-output "$GITHUB_OUTPUT"
+    python3 .github/scripts/release-matrix.py --require-published --wait 300
 
 Exit status is 1 only under `--require-published` when a crate is still missing
 (or its status could not be determined), so the post-publish step cannot pass
@@ -36,7 +36,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 CRATES_IO = "https://crates.io/api/v1/crates"
 USER_AGENT = "frensense-release-matrix (https://github.com/Friehub/Frensense-v2)"
 

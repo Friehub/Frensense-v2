@@ -25,9 +25,9 @@ strings and tables until the assertions themselves are rewritten):
                            frensense-packgen)
 
 Usage:
-  scripts/purity-ratchet.py            check against baseline (CI mode)
-  scripts/purity-ratchet.py --update   rewrite baseline with current counts
-  scripts/purity-ratchet.py --verbose  list every matching line
+  .github/scripts/purity-ratchet.py            check against baseline (CI mode)
+  .github/scripts/purity-ratchet.py --update   rewrite baseline with current counts
+  .github/scripts/purity-ratchet.py --verbose  list every matching line
 """
 
 import argparse
@@ -36,8 +36,8 @@ import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-BASELINE = ROOT / "scripts" / "purity-baseline.json"
+ROOT = Path(__file__).resolve().parent.parent.parent
+BASELINE = Path(__file__).resolve().parent / "purity-baseline.json"
 
 COUNTERS = [
     (

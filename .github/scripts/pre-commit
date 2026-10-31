@@ -2,7 +2,7 @@
 # Frensense Pre-Commit Hook (fast path)
 #
 # Runs the checks that finish in seconds-to-a-minute so committing stays
-# cheap. The full gate (what CI runs) is `./scripts/local-ci.sh` - run it
+# cheap. The full gate (what CI runs) is `./.github/scripts/local-ci.sh` - run it
 # before opening a PR.
 #
 # Policy: this hook NEVER mutates staged content. Anything it cannot fix
@@ -70,7 +70,7 @@ STAGED_CORPUS=$(git diff --cached --name-only --diff-filter=ACM \
     | grep -E '^corpus/.*(_positive|_negative|bug_classes\.json|advisories\.json)' || true)
 if [ -n "$STAGED_CORPUS" ]; then
     echo "[CHECK 5/6] Linting staged corpus families..."
-    if ! ./scripts/corpus-lint.sh; then
+    if ! ./.github/scripts/corpus-lint.sh; then
         echo "[FAIL] Corpus lint rejected a family. Fix it before committing."
         FAILURES=$((FAILURES + 1))
     fi
@@ -82,16 +82,16 @@ fi
 #    blog files are staged, so ordinary code commits stay quiet.
 STAGED_BLOGS=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^docs-site/blog/.*\.md$' || true)
 if [ -n "$STAGED_BLOGS" ]; then
-    if ! python3 scripts/blog_provenance.py check --strict; then
+    if ! python3 .github/scripts/blog_provenance.py check --strict; then
         echo "[WARN] Blog provenance is stale. Reproduce the audit, then run:"
-        echo "       python3 scripts/blog_provenance.py stamp"
+        echo "       python3 .github/scripts/blog_provenance.py stamp"
         echo "       (commit is not blocked; the pre-deploy gate enforces this strictly)."
     fi
 fi
 
 if [ "$FAILURES" -gt 0 ]; then
     echo "[FAILURE] $FAILURES pre-commit check(s) failed."
-    echo "[HINT] Run './scripts/local-ci.sh' for the full gate before opening a PR."
+    echo "[HINT] Run './.github/scripts/local-ci.sh' for the full gate before opening a PR."
     exit 1
 fi
 

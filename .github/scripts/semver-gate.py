@@ -28,15 +28,15 @@ checks, so the result tells you whether the bump was justified.
 Usage
 -----
     # PR / local gate: block breaks introduced since a commit without a bump
-    python3 scripts/semver-gate.py                       # base = HEAD (local)
-    python3 scripts/semver-gate.py --base-ref origin/main
-    python3 scripts/semver-gate.py --base-ref HEAD^
+    python3 .github/scripts/semver-gate.py                       # base = HEAD (local)
+    python3 .github/scripts/semver-gate.py --base-ref origin/main
+    python3 .github/scripts/semver-gate.py --base-ref HEAD^
 
     # Release gate: the version about to be published must cover what changed
-    python3 scripts/semver-gate.py --published
+    python3 .github/scripts/semver-gate.py --published
 
     # Inspect the plan without spending build time
-    python3 scripts/semver-gate.py --dry-run --base-ref HEAD^
+    python3 .github/scripts/semver-gate.py --dry-run --base-ref HEAD^
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 
 # Paths that belong to the root package (`frensense`), whose manifest sits at
 # the workspace root and therefore cannot be matched by a directory prefix.

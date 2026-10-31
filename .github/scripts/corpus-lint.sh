@@ -7,7 +7,7 @@
 # lint's own exit code is the verdict: 0 clean, 1 issues found, 2 unusable
 # configuration (missing registry, unreadable file) - all non-zero fail here.
 #
-# Usage: scripts/corpus-lint.sh [corpus_dir] [extra lint args...]
+# Usage: .github/scripts/corpus-lint.sh [corpus_dir] [extra lint args...]
 #        corpus_dir defaults to corpus/targets (the bundler's own default).
 #
 # Skip policy: a checkout with no corpus at all (neither the corpus directory
@@ -45,7 +45,7 @@ if [ "$HAS_FAMILIES" -eq 0 ]; then
     echo -e "${RED}FAIL corpus lint: no families at $CORPUS but a registry is present${NC}"
     echo "       A registry without families means the corpus moved or was never"
     echo "       checked out. Point the gate at the real directory:"
-    echo "       ./scripts/corpus-lint.sh <corpus_dir>"
+    echo "       ./.github/scripts/corpus-lint.sh <corpus_dir>"
     exit 1
 fi
 if [ "$HAS_REGISTRY" -eq 0 ]; then

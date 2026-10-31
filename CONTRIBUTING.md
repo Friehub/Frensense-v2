@@ -13,7 +13,7 @@ contributors, with a few ground rules that keep main stable:
 2. **The agent must run the full gate locally before the PR is opened:**
 
    ```bash
-   ./scripts/local-ci.sh
+   ./.github/scripts/local-ci.sh
    ```
 
    This script is a 1:1 mirror of CI's quality checks (purity ratchet,
@@ -36,12 +36,12 @@ contributors, with a few ground rules that keep main stable:
 
 | check | command | policy |
 |---|---|---|
-| Purity ratchet | `python3 scripts/purity-ratchet.py` | engine purity debt must not grow |
+| Purity ratchet | `python3 .github/scripts/purity-ratchet.py` | engine purity debt must not grow |
 | Style | `cargo fmt --all -- --check` | must pass |
 | Engine docs | `RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links" cargo doc -p frensense-engine --all-features --no-deps` | broken or privacy-leaking intra-doc links are errors |
 | Unused dependencies | `cargo machete --with-metadata <workspace libs>` | no dead `Cargo.toml` entries |
 | Feature isolation | `cargo hack check -p frensense-engine --each-feature --locked` | every engine feature compiles alone |
-| Public API (per crate) | `python3 scripts/semver-gate.py --base-ref HEAD` | each publishable crate that broke its API carries its own bump; see `AGENTS.md` §7.2 |
+| Public API (per crate) | `python3 .github/scripts/semver-gate.py --base-ref HEAD` | each publishable crate that broke its API carries its own bump; see `AGENTS.md` §7.2 |
 | Pack drift | `cargo run -p frensense-packgen -- --check` | default pack asset must match generator |
 | Lint | `cargo clippy --all-features --all-targets -- -D warnings` | warnings are errors |
 | Tests | `cargo test --workspace --all-features` | must pass |
@@ -95,7 +95,7 @@ Alternatives if you outgrow this: CLA Assistant (cla-assistant.io, free app, sig
 git clone https://github.com/Friehub/Frensense.git
 cd Frensense
 cargo build --workspace
-./scripts/local-ci.sh   # the full pre-PR gate (identical to CI)
+./.github/scripts/local-ci.sh   # the full pre-PR gate (identical to CI)
 make setup              # install the fast pre-commit hook (fmt/clippy/unit tests)
 ```
 

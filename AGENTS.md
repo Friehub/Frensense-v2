@@ -116,7 +116,7 @@ spec seed → default pack → consumer bundle
    that belongs to a consumer. Learned knowledge lives in `LearnedFactEntry`
    / `.frc` bundles — that is the whole point of the architecture.
 2. **The purity ratchet enforces this mechanically.** CI runs
-   `python3 scripts/purity-ratchet.py` (see
+   `python3 .github/scripts/purity-ratchet.py` (see
    [docs/ENGINE_PURITY_REFACTOR.md](docs/ENGINE_PURITY_REFACTOR.md)): it
    counts debt classes (engine `format!` prose, tier strings, policy refs
    outside lang, provider vocab in lang) and **fails if any count grows**.
@@ -134,13 +134,13 @@ spec seed → default pack → consumer bundle
 ## 5. The gate (run before every PR)
 
 ```bash
-./scripts/local-ci.sh
+./.github/scripts/local-ci.sh
 ```
 
 This mirrors the required checks in `.github/workflows/ci.yml`; a few local-only
 steps also cover security, release compatibility, and feature isolation.
 
-1. `python3 scripts/purity-ratchet.py` — engine purity debt must not grow
+1. `python3 .github/scripts/purity-ratchet.py` — engine purity debt must not grow
 2. `cargo fmt --all -- --check` — style
 3. `RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links" cargo doc -p frensense-engine --all-features --no-deps` — engine docs
 4. `cargo machete --with-metadata ...` — unused workspace dependencies
@@ -149,7 +149,7 @@ steps also cover security, release compatibility, and feature isolation.
 7. `cargo clippy --all-features --all-targets -- -D warnings` — warnings are errors
 8. `cargo test --workspace --all-features` — full regression suite
 9. `cargo deny check` — advisories, licenses, bans, and sources
-10. `python3 scripts/semver-gate.py --base-ref HEAD` — per-crate public-API compatibility for every publishable crate (one binary, four independently versioned crates)
+10. `python3 .github/scripts/semver-gate.py --base-ref HEAD` — per-crate public-API compatibility for every publishable crate (one binary, four independently versioned crates)
 
 While iterating, run individual steps; the pre-commit hook
 (`make setup`) runs the fast subset (fmt, clippy, unit tests) on every
@@ -187,7 +187,7 @@ edit → gate → fix → verify workflow.
   architectural changes need a human-driven issue first.
 - **A human opens the PR** after reading the diff; the author line says who
   (or what) wrote the change.
-- **Scripts**: `scripts/local-ci.sh` is the canonical gate; `make setup`
+- **Scripts**: `.github/scripts/local-ci.sh` is the canonical gate; `make setup`
   installs the fast pre-commit hook. Heavy analysis tooling (Miri, mutation
   testing, unsafe audits) was deliberately removed from the contributor
   path — CI's clippy + tests + `cargo deny` cover those classes.
@@ -232,7 +232,7 @@ is not done.
   reviewer should be able to tell from the changelog alone whether their
   problem is the one you fixed.
 - **`frensense-bundler/CHANGELOG.md` is contract-checked.**
-  `scripts/format-ratchet.py` fails when `BUNDLE_VERSION` moves without the new
+  `.github/scripts/format-ratchet.py` fails when `BUNDLE_VERSION` moves without the new
   number appearing in that file, because `.frc` compatibility is what the
   number governs. Ctrl that entry there, not in the root.
 
@@ -259,14 +259,14 @@ Crates version **independently**. The root `version` in `Cargo.toml` is the
 `frensense` 0.7.1 on top of `frensense-engine` 0.8.0 is supported and expected —
 the dependency requirement, not a shared version, expresses compatibility.
 
-**Bump on evidence, not on lockstep.** `scripts/semver-gate.py` is the single
-per-crate gate, used by `scripts/local-ci.sh`, CI's `semver` job and the release
+**Bump on evidence, not on lockstep.** `.github/scripts/semver-gate.py` is the single
+per-crate gate, used by `.github/scripts/local-ci.sh`, CI's `semver` job and the release
 workflow:
 
 ```bash
-python3 scripts/semver-gate.py --base-ref HEAD      # local: what did I break?
-python3 scripts/semver-gate.py --base-ref HEAD^     # CI push
-python3 scripts/semver-gate.py --published          # release pre-check
+python3 .github/scripts/semver-gate.py --base-ref HEAD      # local: what did I break?
+python3 .github/scripts/semver-gate.py --base-ref HEAD^     # CI push
+python3 .github/scripts/semver-gate.py --published          # release pre-check
 ```
 
 It discovers the publishable crates from `cargo metadata` (`publish = false`
@@ -330,7 +330,7 @@ exactly those manifest versions and skips `publish = false` crates.
 
 A release is decided per crate, not by the root version alone:
 
-- `scripts/release-matrix.py` records which publishable crates are missing
+- `.github/scripts/release-matrix.py` records which publishable crates are missing
   from crates.io at their manifest version. If any are, the run publishes even
   when the root version did not move (a crate-only release has **no new tag**).
 - The tag is `v<root version>`, created only when it does not exist, and the
@@ -344,7 +344,7 @@ A release is decided per crate, not by the root version alone:
 
 **Bundle compatibility is separate.** A `.frc` is decodable per
 `BUNDLE_VERSION` plus `FACT_VOCABULARY_FINGERPRINT` (see `docs/FORMATS.md`),
-not per crate version; `scripts/format-ratchet.py` enforces the pair. Do not
+not per crate version; `.github/scripts/format-ratchet.py` enforces the pair. Do not
 infer artifact compatibility from a version number.
 
 ### 7.3 One crate at a time
@@ -363,7 +363,7 @@ why every crate ended up on one version.
   `refactor(bundler): …`, `feat(packgen): …`, `feat(cli): …`; `cliff.toml`
   groups the changelog by exactly these scopes. `git commit -s` (DCO) as usual.
 - **Do not bump a crate you did not change.** A workspace-wide bump is not a
-  convention; `scripts/semver-gate.py` reports per crate what moved.
+  convention; `.github/scripts/semver-gate.py` reports per crate what moved.
 - **Prefer finishing a crate to starting a second one.** A crate with an
   unshipped changelog entry is not done; land it, cut its release, then move
   on. Cross-crate work in flight is what makes a release hard to reason about.

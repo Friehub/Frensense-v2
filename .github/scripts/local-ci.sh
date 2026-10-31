@@ -15,11 +15,15 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+cd "$REPO_ROOT"
+
 # 0. Artifact-format ratchet: a moved fact-vocabulary fingerprint must come
 #    with a BUNDLE_VERSION bump and a changelog note. Runs first because it is
 #    source-only (no build) and catches the contract violation cheapest.
 echo -e "\n${BLUE}[0/12] Artifact-format ratchet (fingerprint must move with bundle version)...${NC}"
-python3 scripts/format-ratchet.py
+python3 .github/scripts/format-ratchet.py
 echo -e "${GREEN}OK Artifact-format contract holds${NC}"
 
 echo -e "${BLUE}==================================================${NC}"
@@ -28,12 +32,12 @@ echo -e "${BLUE}==================================================${NC}"
 
 # 1. Purity debt ratchet (ci.yml `qa` job, runs FIRST)
 echo -e "\n${BLUE}[1/12] Engine purity ratchet (debt must not grow)...${NC}"
-python3 scripts/purity-ratchet.py
+python3 .github/scripts/purity-ratchet.py
 echo -e "${GREEN}OK Purity debt within baseline${NC}"
 
 # 1b. Blog provenance gate (ci.yml `qa` job): version-pinned claims, fresh audits
 echo -e "\n${BLUE}[2/12] Blog provenance gate (--strict)...${NC}"
-python3 scripts/blog_provenance.py check --strict
+python3 .github/scripts/blog_provenance.py check --strict
 echo -e "${GREEN}OK Blog claims version-pinned and fresh${NC}"
 
 # 3. Style (ci.yml `qa` job)
@@ -63,7 +67,7 @@ echo -e "${GREEN}OK Default pack asset is up to date${NC}"
 #     Skips only when the checkout carries no corpus at all; a half-configured
 #     corpus (families without bug_classes.json) fails here.
 echo -e "\n${BLUE}[8/12] Corpus lint (families must be teachable)...${NC}"
-./scripts/corpus-lint.sh
+./.github/scripts/corpus-lint.sh
 echo -e "${GREEN}OK Corpus lint gate passed${NC}"
 
 # Lint (ci.yml `qa` job)
@@ -85,7 +89,7 @@ echo -e "${GREEN}OK cargo-deny passed${NC}"
 # runs `check-release --release-type patch` per publishable crate (a bare
 # workspace check skips every check while a middle number moved).
 echo -e "\n${BLUE}[12/12] Per-crate public API compatibility (cargo-semver-checks)...${NC}"
-python3 scripts/semver-gate.py --base-ref HEAD
+python3 .github/scripts/semver-gate.py --base-ref HEAD
 echo -e "${GREEN}OK Every changed publishable crate is SemVer-clean against HEAD${NC}"
 
 echo -e "\n${GREEN}==================================================${NC}"

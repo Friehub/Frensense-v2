@@ -27,7 +27,7 @@ import subprocess
 import sys
 import tomllib
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 BLOG_DIR = ROOT / "docs-site" / "blog"
 CARGO_TOML = ROOT / "Cargo.toml"
 

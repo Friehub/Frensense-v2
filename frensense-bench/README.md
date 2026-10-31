@@ -24,6 +24,10 @@ python3 frensense-bench/run.py --suite owasp --workers 8
 python3 frensense-bench/run.py --suite real-repos --prepare
 python3 frensense-bench/run.py --suite real-repos --run
 
+# Run Engine Blindness & Capability Benchmark (tracks unknown sinks, bounds, and RSS)
+python3 frensense-bench/run.py --suite blindness --prepare
+python3 frensense-bench/run.py --suite blindness --run
+
 # Run static correctness assertions
 python3 frensense-bench/run.py --suite correctness
 
@@ -49,6 +53,7 @@ frensense-bench/
 │   └── cwe_416_uaf/
 │       └── cve_2026_56109_alsa/
 ├── suites/                         # Benchmark test suites
+│   ├── blindness.py                # Engine Blindness & Capability suite (telemetry & history)
 │   ├── cve.py                      # Paired CVE runner & datasheet generator
 │   ├── owasp.py                    # OWASP Benchmark for Python (1,230 cases)
 │   ├── real_repos.py               # Pinned open-source repos benchmark

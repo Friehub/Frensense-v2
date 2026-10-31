@@ -8,6 +8,7 @@ Unified Frensense Capability Benchmark Harness (`frensense-bench`).
 Runs reproducible benchmarks and evaluation suites:
   --suite cve          Curated paired real-world CVEs (Zero False-Positive contract)
   --suite owasp        OWASP Benchmark for Python (1,230 standardized cases)
+  --suite blindness    Engine Blindness & Capability Benchmark (unknown sinks, bounds, RSS)
   --suite real-repos   Scans pinned OSS projects (Django, Next.js, Redis, etc.)
   --suite correctness  Static correctness assertions on positive/negative samples
   --suite scale        Synthetic file scaling benchmark
@@ -19,6 +20,7 @@ Runs reproducible benchmarks and evaluation suites:
 Usage:
   python3 frensense-bench/run.py --suite cve
   python3 frensense-bench/run.py --suite owasp --workers 8
+  python3 frensense-bench/run.py --suite blindness --prepare --run
   python3 frensense-bench/run.py --suite real-repos --prepare
   python3 frensense-bench/run.py --suite real-repos --run
   python3 frensense-bench/run.py --suite all
@@ -153,6 +155,16 @@ def run_rules(extra_args=None) -> bool:
     return res.returncode == 0
 
 
+def run_blindness(extra_args=None) -> bool:
+    print("=" * 64)
+    print(" Running Engine Blindness & Capability Benchmark")
+    print("=" * 64)
+    script = SUITES_DIR / "blindness.py"
+    cmd = [sys.executable, str(script)] + (extra_args or [])
+    res = subprocess.run(cmd, cwd=ROOT)
+    return res.returncode == 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Frensense Unified Benchmark Runner (frensense-bench)",
@@ -160,7 +172,7 @@ def main():
     )
     parser.add_argument(
         "--suite",
-        choices=["owasp", "cve", "real-repos", "correctness", "juice-shop", "scale", "mutation", "rules", "all"],
+        choices=["owasp", "cve", "real-repos", "blindness", "correctness", "juice-shop", "scale", "mutation", "rules", "all"],
         default="all",
         help="Benchmark suite to execute (default: all [cve + owasp])",
     )
@@ -189,6 +201,10 @@ def main():
 
     if args.suite == "real-repos":
         if not run_real_repos(extra):
+            success = False
+
+    if args.suite == "blindness":
+        if not run_blindness(extra):
             success = False
 
     if args.suite == "correctness":

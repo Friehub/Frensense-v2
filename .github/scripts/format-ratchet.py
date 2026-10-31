@@ -19,7 +19,7 @@ numbers encode that contract, and this script keeps them honest:
                                 clean version gate instead of an opaque serde
                                 decode error.
 
-The invariants, checked against a committed baseline (scripts/format-baseline.json):
+The invariants, checked against a committed baseline (.github/scripts/format-baseline.json):
 
   vocabulary_moved   the fingerprint changed since the baseline was recorded.
                      Fails unless the bundle version ALSO changed in the same
@@ -32,9 +32,9 @@ lives in frensense-engine (tests::vocabulary_fingerprint_is_committed) and the
 golden v6 bundle test in frensense-bundler.
 
 Usage:
-  scripts/format-ratchet.py            check against baseline (CI mode)
-  scripts/format-ratchet.py --update   rewrite baseline with current values
-  scripts/format-ratchet.py --verbose  show the parsed constants and changelog
+  .github/scripts/format-ratchet.py            check against baseline (CI mode)
+  .github/scripts/format-ratchet.py --update   rewrite baseline with current values
+  .github/scripts/format-ratchet.py --verbose  show the parsed constants and changelog
 """
 
 import argparse
@@ -44,8 +44,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-BASELINE = ROOT / "scripts" / "format-baseline.json"
+ROOT = Path(__file__).resolve().parent.parent.parent
+BASELINE = Path(__file__).resolve().parent / "format-baseline.json"
 
 VOCAB_FILE = (
     ROOT

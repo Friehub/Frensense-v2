@@ -78,7 +78,7 @@ From the root of the repository:
 
 ```bash
 # Automated run: auto-locates binary, caches OWASP suite, generates markdown & JSON reports
-./scripts/reproduce_benchmark.sh
+python3 frensense-bench/run.py --suite owasp
 ```
 
 This generates:
@@ -91,7 +91,7 @@ You can upload the scorecard directly to a GitHub Gist to share with the communi
 
 ```bash
 # If GITHUB_TOKEN is exported in your environment:
-./scripts/reproduce_benchmark.sh --publish-gist
+python3 frensense-bench/run.py --suite owasp --publish-gist
 
 # Or manually upload the generated report:
 # Visit https://gist.github.com and paste the contents of benchmark_report.md
@@ -102,7 +102,7 @@ You can upload the scorecard directly to a GitHub Gist to share with the communi
 You can also run the underlying Python runner directly with custom parameters:
 
 ```bash
-python3 scripts/owasp_benchmark.py \
+python3 frensense-bench/suites/owasp.py \
   --bin ./target/release/frensense \
   --workers 8 \
   --md-out benchmark_report.md \

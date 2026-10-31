@@ -97,7 +97,7 @@ jobs:
       # installed because it asks `cargo metadata` for the publishable set.
       - name: Per-crate version matrix
         id: matrix
-        run: python3 scripts/release-matrix.py --github-output "$GITHUB_OUTPUT"
+        run: python3 .github/scripts/release-matrix.py --github-output "$GITHUB_OUTPUT"
 
       - name: Check version and tags
         id: check
@@ -389,7 +389,7 @@ jobs:
         # its public-API change. `check-release` compares each publishable
         # crate against its latest crates.io release and skips a crate that
         # moved its middle number (the bump absorbs the break).
-        run: python3 scripts/semver-gate.py --published
+        run: python3 .github/scripts/semver-gate.py --published
       - name: Publish workspace crates in dependency order
         # cargo-smart-release replaces the old hand-rolled publish loop
         # (curl + `sleep 35` + `cargo publish --allow-dirty`). It resolves
@@ -428,7 +428,7 @@ jobs:
         # stale registry token, a version that never moved) has to fail here
         # rather than be discovered by a user installing the crate later.
         # crates.io indexing is asynchronous, hence the bounded poll.
-        run: python3 scripts/release-matrix.py --require-published --wait 420
+        run: python3 .github/scripts/release-matrix.py --require-published --wait 420
 
   # 5. Publish to NPM
   publish-npm:
