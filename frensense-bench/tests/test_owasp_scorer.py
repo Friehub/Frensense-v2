@@ -13,7 +13,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SCORER = Path(__file__).resolve().parent / "owasp_benchmark.py"
+SCORER = Path(__file__).resolve().parent.parent / "suites" / "owasp.py"
 
 FAKE_ENGINE = r'''#!/usr/bin/env python3
 import json, os, sys

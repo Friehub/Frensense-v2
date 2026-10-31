@@ -6,7 +6,14 @@ import subprocess
 import json
 import os
 
-FRENSENSE_BIN = "./target/release/frensense"
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+FRENSENSE_BIN = os.environ.get("FRENSENSE_BIN") or (
+    str(ROOT / "target" / "release" / "frensense")
+    if (ROOT / "target" / "release" / "frensense").exists()
+    else str(ROOT / "target" / "debug" / "frensense")
+)
 
 POSITIVE_TESTS = [
     {

@@ -66,7 +66,7 @@ import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
-DEFAULT_BIN = Path(__file__).resolve().parent.parent / "target" / "release" / "frensense"
+DEFAULT_BIN = Path(__file__).resolve().parent.parent.parent / "target" / "release" / "frensense"
 
 # ---------------------------------------------------------------------------
 # Scanning (same invocation contract as owasp_benchmark.py)

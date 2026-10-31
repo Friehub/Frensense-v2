@@ -8,7 +8,9 @@ import os
 import json
 import time
 
-FRENSENSE_BIN = "./target/release/frensense"
+FRENSENSE_BIN = os.environ.get("FRENSENSE_BIN") or (
+    "./target/release/frensense" if os.path.exists("./target/release/frensense") else "./target/debug/frensense"
+)
 
 def generate_ts(depth):
     path = f"bench_samples/taint_{depth}.ts"

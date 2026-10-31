@@ -23,6 +23,14 @@ import time
 from pathlib import Path
 
 
+ROOT = Path(__file__).resolve().parent.parent.parent
+DEFAULT_BIN = os.environ.get("FRENSENSE_BIN") or (
+    str(ROOT / "target" / "release" / "frensense")
+    if (ROOT / "target" / "release" / "frensense").exists()
+    else str(ROOT / "target" / "debug" / "frensense")
+)
+
+
 def measure_scan(repo_path: str, iterations: int = 3) -> dict:
     """Measure scan time for a repo over multiple iterations."""
     times = []
@@ -31,7 +39,7 @@ def measure_scan(repo_path: str, iterations: int = 3) -> dict:
     for i in range(iterations):
         start = time.time()
         result = subprocess.run(
-            ["./target/release/frensense", repo_path, "--json", "--severity", "warning"],
+            [DEFAULT_BIN, repo_path, "--json", "--severity", "warning"],
             capture_output=True, text=True, timeout=300,
         )
         elapsed = time.time() - start

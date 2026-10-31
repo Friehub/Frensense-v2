@@ -31,7 +31,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_BIN = ROOT / "target" / "release" / "frensense"
 DEFAULT_CACHE = ROOT / "target" / "real-repos"
 SUFFIXES = {

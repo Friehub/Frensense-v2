@@ -75,7 +75,7 @@ import time
 from collections import Counter, defaultdict
 from pathlib import Path
 
-DEFAULT_BIN = Path(__file__).resolve().parent.parent / "target" / "release" / "frensense"
+DEFAULT_BIN = Path(__file__).resolve().parent.parent.parent / "target" / "release" / "frensense"
 
 # Tags whose CWE is unambiguous. Sink-role tags such as "execution" or
 # "resource" span several CWEs and are deliberately absent; extend with
@@ -281,7 +281,7 @@ def score(results: list[dict], cases: dict[str, dict], mode: str,
         "meta": {"match": mode, "tag_cwe_entries": len(tag_cwe)},
         "total": main["total"],
         "by_cwe": main["by_cwe"],
-        "legact_any": tally(per_case, "class_any"),
+        "legacy_any": tally(per_case, "class_any"),
         "attribution": {
             "advisories": advisories_total,
             "unattributed": unattributed_total,
@@ -446,11 +446,11 @@ def generate_markdown_report(s: dict, elapsed: float, binary_version: str,
         "cd frensense-v2 && cargo build --release",
         "",
         "# 2. Run the reproduction runner",
-        "./scripts/reproduce_benchmark.sh",
+        "python3 frensense-bench/run.py --suite owasp",
         "```",
         "",
         "---",
-        "*(Report generated automatically by `scripts/owasp_benchmark.py`)*",
+        "*(Report generated automatically by `frensense-bench/suites/owasp.py`)*",
     ])
     return "\n".join(lines)
 
@@ -500,7 +500,7 @@ def resolve_binary(bin_arg: str | None) -> Path | None:
         if p.exists():
             return p
     # Look in common local release/debug locations
-    repo_root = Path(__file__).resolve().parent.parent
+    repo_root = Path(__file__).resolve().parent.parent.parent
     for candidate in [
         repo_root / "target" / "release" / "frensense",
         repo_root / "target" / "debug" / "frensense",
@@ -759,8 +759,12 @@ def main() -> None:
         print(f"[ERROR] {len(errors)} scans failed; scorecard is incomplete "
               "(rerun with --allow-errors to accept).", file=sys.stderr)
         sys.exit(3)
-    if diff is not None and diff["regressions"] and args.fail_on_regression:
-        sys.exit(4)
+    if diff is not None and diff["regressions"]:
+        print("\nRegressions vs baseline:")
+        for r in diff["regressions"]:
+            print(f"  - {r}")
+        if args.fail_on_regression:
+            sys.exit(4)
 
 
 if __name__ == "__main__":

@@ -147,7 +147,7 @@ def generate_datasheet(results: list[dict], output_path: Path):
         "2. **Zero False-Positive Contract**: A fix must produce zero findings. A scanner that flags patched code introduces noise that breaks automated developer trust.",
         "3. **Deterministic Execution**: No heuristic scoring, no probabilistic LLM hallucinations. Scan verdicts are derived entirely from deterministic compiler graphs (SVFG, Control Dependence, Interval Analysis).",
         "",
-        "*(Datasheet generated automatically by `frensense-bench/cve_benchmark.py`)*",
+        "*(Datasheet generated automatically by `frensense-bench/suites/cve.py`)*",
     ])
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -157,7 +157,7 @@ def generate_datasheet(results: list[dict], output_path: Path):
 
 
 def main():
-    root = Path(__file__).resolve().parent.parent
+    root = Path(__file__).resolve().parent.parent.parent
     bench_dir = root / "frensense-bench"
     corpus_dir = bench_dir / "cve_corpus"
     datasheet_path = root / "docs" / "CVE_DATASHEET.md"

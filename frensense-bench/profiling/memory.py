@@ -6,7 +6,9 @@ import subprocess
 import os
 import time
 
-FRENSENSE_BIN = "./target/release/frensense"
+FRENSENSE_BIN = os.environ.get("FRENSENSE_BIN") or (
+    "./target/release/frensense" if os.path.exists("./target/release/frensense") else "./target/debug/frensense"
+)
 
 def generate_large_ts(size_kb):
     path = f"bench_samples/memory_stress.ts"
