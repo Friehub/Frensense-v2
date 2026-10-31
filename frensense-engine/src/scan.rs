@@ -407,11 +407,34 @@ pub fn scan_prepared(
                     (line, col)
                 })
                 .unwrap_or((0, 0));
+            let cut_sites = f
+                .cut_sites
+                .iter()
+                .map(|c| {
+                    let cfile = fn_file.get(&c.function).cloned().unwrap_or_default();
+                    let cline = c
+                        .span
+                        .and_then(|(start, _)| {
+                            let src = file_source.get(&cfile)?;
+                            let before = &src[..start.min(src.len())];
+                            Some(before.matches('\n').count() as u32 + 1)
+                        })
+                        .unwrap_or(0);
+                    LocatedCutSite {
+                        kind: c.kind,
+                        function: c.function.clone(),
+                        detail: c.detail.clone(),
+                        file: cfile,
+                        line: cline,
+                    }
+                })
+                .collect();
             Some(LocatedFinding {
                 finding: f.clone(),
                 file: file.clone(),
                 line,
                 column: col,
+                cut_sites,
             })
         })
         .collect();
@@ -587,6 +610,18 @@ pub struct LocatedChecker {
     pub end_line: u32,
 }
 
+/// A [`crate::analysis::taint::engine::CutSite`] pinned to its file and line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocatedCutSite {
+    pub kind: &'static str,
+    pub function: String,
+    pub detail: String,
+    /// File holding the stop site (empty when the function's file is unknown).
+    pub file: String,
+    /// 1-based line (0 when no span was recorded).
+    pub line: u32,
+}
+
 /// A [`SinkFinding`] pinned to its source location.
 #[derive(Debug, Clone)]
 pub struct LocatedFinding {
@@ -597,6 +632,8 @@ pub struct LocatedFinding {
     pub line: u32,
     /// 1-based column of the sink call (0 when no span recorded).
     pub column: u32,
+    /// Where the walk met a value it could not resolve (see [`SinkFinding::cut_sites`]).
+    pub cut_sites: Vec<LocatedCutSite>,
 }
 
 #[cfg(test)]

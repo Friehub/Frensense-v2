@@ -546,4 +546,28 @@ export function getAccount(req: any, repo: any): void {
             "c_copy_into_offset_destination_preserves_taint: {findings:?}"
         );
     }
+
+    #[test]
+    fn unknown_verdict_names_the_value_the_engine_could_not_resolve() {
+        let src = r#"
+            int system(const char *command);
+            char *mystery(void);
+            void run(void) {
+                char *p = mystery();
+                system(p);
+            }
+        "#;
+        let findings = run_c(src);
+        let sink = findings
+            .iter()
+            .find(|f| f.sink == "system" && f.verdict == BackwardVerdict::Unknown)
+            .unwrap_or_else(|| panic!("expected an unknown system sink: {findings:?}"));
+        assert!(
+            sink.cut_sites
+                .iter()
+                .any(|c| c.kind == "external-call" && c.detail == "mystery"),
+            "stop site must name the external callee: {:?}",
+            sink.cut_sites
+        );
+    }
 }

@@ -24,12 +24,16 @@ import csv
 import datetime
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from blindness_challenges import build_challenges, write_outputs  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BIN = ROOT / "target" / "release" / "frensense"
@@ -62,7 +66,7 @@ PINNED_REPOS: Tuple[PinnedRepo, ...] = (
     PinnedRepo(
         name="flask",
         url="https://github.com/pallets/flask.git",
-        commit="d086db8",
+        commit="d086db856be187255b8ec61ef409357393020f32",
         lang="python",
         targets=("src",),
         note="Python microframework; dynamic WSGI request routing",
@@ -70,7 +74,7 @@ PINNED_REPOS: Tuple[PinnedRepo, ...] = (
     PinnedRepo(
         name="express",
         url="https://github.com/expressjs/express.git",
-        commit="1c6f1b0",
+        commit="1c6f1b0fe4000977b9a7b4f34097e4d527dd9824",
         lang="javascript",
         targets=("lib",),
         note="Node.js middleware framework; asynchronous callback chains",
@@ -78,7 +82,7 @@ PINNED_REPOS: Tuple[PinnedRepo, ...] = (
     PinnedRepo(
         name="libpng",
         url="https://github.com/pnggroup/libpng.git",
-        commit="890812a",
+        commit="890812a28da480f84f3b0198d31ac611c864ed98",
         lang="c",
         targets=(".",),
         note="C library; memory pointers, buffers, and system IO",
@@ -86,7 +90,7 @@ PINNED_REPOS: Tuple[PinnedRepo, ...] = (
     PinnedRepo(
         name="axum",
         url="https://github.com/tokio-rs/axum.git",
-        commit="86aa615",
+        commit="86aa6153e47b7862737acdcfe3a0eb3a162b939a",
         lang="rust",
         targets=(".",),
         note="Rust async framework; trait-based handler extraction",
@@ -121,23 +125,25 @@ def get_git_commit_info() -> Dict[str, str]:
 
 
 def clone_repo(repo: PinnedRepo, cache: Path) -> Path:
+    """Fetch exactly the pinned commit (full 40-char SHA required: servers do
+    not resolve abbreviated SHAs in `git fetch`)."""
     dest = cache / repo.name
     if dest.exists():
         return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "clone", "--depth", "1", "--quiet", repo.url, str(dest)],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(dest), "fetch", "--depth", "1", "--quiet", "origin", repo.commit],
-        check=False,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(dest), "checkout", "--quiet", repo.commit],
-        check=True,
-    )
+    if len(repo.commit) != 40:
+        raise ValueError(f"{repo.name}: pin a full 40-character commit SHA, got {repo.commit!r}")
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        for cmd in (
+            ["git", "init", "--quiet"],
+            ["git", "remote", "add", "origin", repo.url],
+            ["git", "fetch", "--depth", "1", "--quiet", "origin", repo.commit],
+            ["git", "checkout", "--quiet", "FETCH_HEAD"],
+        ):
+            subprocess.run(cmd, cwd=dest, check=True)
+    except Exception:
+        shutil.rmtree(dest, ignore_errors=True)  # never leave a half-cloned cache that later runs trust
+        raise
     return dest
 
 
@@ -165,7 +171,9 @@ def scan_repo(repo: PinnedRepo, cache: Path, binary: Path, timeout: int) -> Dict
     }
 
     target_paths = [str(root / t) for t in repo.targets]
-    argv = [str(binary), *target_paths, "--json", "--explain"]
+    explain_json = cache / f"{repo.name}.explain.json"
+    explain_json.unlink(missing_ok=True)
+    argv = [str(binary), *target_paths, "--json", "--explain-json", str(explain_json)]
     rss_file = cache / f"{repo.name}.rss"
     
     # Use /usr/bin/time -f %M to record peak RSS in kilobytes if available
@@ -191,6 +199,7 @@ def scan_repo(repo: PinnedRepo, cache: Path, binary: Path, timeout: int) -> Dict
         raw = (exc.stdout or b"").decode("utf-8", "replace")
     
     meta["wall_s"] = round(time.monotonic() - started, 2)
+    meta["explain_json"] = str(explain_json)
 
     if rss_file.exists():
         try:
@@ -259,7 +268,7 @@ def generate_markdown_card(commit_info: Dict[str, str], overall: Dict[str, Any],
         "### Key Capability Metrics",
         f"- **Global Blindness Rate**: **{overall['blindness_rate']}%** ({overall['unknown_sinks']} unknown / {overall['total_sinks']} explored sinks)",
         f"- **Safety Valve Caps Fired**: **{overall['truncation_caps']}** bounds hit across scans",
-        f"- **Peak RSS**: **{overall['peak_rss_mb']} MB** | **Total Wall Time**: **{overall['wall_s']}s**",
+        f"- **Peak RSS**: **{str(overall['peak_rss_mb']) + ' MB' if overall['peak_rss_mb'] is not None else 'n/a'}** | **Total Wall Time**: **{overall['wall_s']}s**",
         "",
         "### Repository Telemetry Breakdown",
         "",
@@ -392,6 +401,7 @@ def main() -> int:
     ap.add_argument("--cache", type=Path, default=DEFAULT_CACHE, help="repo cache directory")
     ap.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR, help="output directory for reports")
     ap.add_argument("--timeout", type=int, default=300, help="per-repo timeout seconds")
+    ap.add_argument("--baseline", type=Path, default=None, help="previous challenges.json; solved/new challenges are reported against it")
     ap.add_argument("--ci-summary", action="store_true", help="write to $GITHUB_STEP_SUMMARY if present")
     args = ap.parse_args()
 
@@ -493,11 +503,35 @@ def main() -> int:
         markdown_text = generate_markdown_card(commit_info, overall, rows)
         card_md.write_text(markdown_text)
 
+        # Challenge cards: one per unknown sink argument, with a stable ID.
+        challenges: List[Dict[str, Any]] = []
+        for repo in selected:
+            ex = args.cache / f"{repo.name}.explain.json"
+            if not ex.exists():
+                continue
+            try:
+                records = json.loads(ex.read_text()).get("records", [])
+            except (json.JSONDecodeError, OSError):
+                continue
+            challenges += build_challenges(repo.name, repo.lang, args.cache / repo.name, records, repo.url, repo.commit)
+        baseline = args.baseline or (args.out_dir / "challenges.json")
+        previous = None
+        if baseline.exists():
+            try:
+                previous = json.loads(baseline.read_text()).get("challenges")
+            except (json.JSONDecodeError, OSError):
+                previous = None
+        produced = write_outputs(
+            args.out_dir, challenges, commit_info["commit"], previous, {r.name: args.cache / r.name for r in selected}
+        )
+        markdown_text += "\n" + produced["markdown"]
+
         print(f"\nArtifacts generated:")
         print(f"  - Report (JSON):   {report_json}")
         print(f"  - History (JSON):  {history_json}")
         print(f"  - Sheet (CSV):     {sheet_csv}")
         print(f"  - Card (Markdown): {card_md}")
+        print(f"  - Challenges:      {args.out_dir / 'challenges.json'} ({len(challenges)} open), challenges.html")
 
         if args.ci_summary or os.environ.get("GITHUB_STEP_SUMMARY"):
             summary_path = os.environ.get("GITHUB_STEP_SUMMARY")

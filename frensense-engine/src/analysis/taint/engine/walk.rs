@@ -115,6 +115,21 @@ fn record_cut(cuts: &mut Vec<&'static str>, reason: &'static str) {
     }
 }
 
+/// Most stop sites kept per sink argument: enough to name the blind spot,
+/// bounded so a wide fan-in cannot bloat every finding.
+const MAX_CUT_SITES: usize = 4;
+
+/// Keep stop sites distinct and bounded.
+fn record_cut_site(sites: &mut Vec<CutSite>, site: CutSite) {
+    if sites.len() < MAX_CUT_SITES
+        && !sites
+            .iter()
+            .any(|s| s.kind == site.kind && s.function == site.function && s.detail == site.detail)
+    {
+        sites.push(site);
+    }
+}
+
 /// For the Phi `dest_var` in `merge_block`, return the incoming edges whose
 /// arm block is unreachable because the branch condition is a constant
 /// comparison with a decided outcome. Empty = nothing prunable.
@@ -925,6 +940,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 source_desc: state.source_desc.clone(),
                 path,
                 cut_reasons: state.cuts.clone(),
+                cut_sites: state.cut_sites.clone(),
                 // Span of the SINK CALL itself, not the tainted operand's
                 // definition: reports must point at the line the user fixes.
                 // (Reporting the operand's def site put `search.ts` SQLi at
@@ -1200,6 +1216,9 @@ impl<'a> BackwardTaintEngine<'a> {
                 if self.node_is_unresolvable(cf, &cur) {
                     state.saw_unknown = true;
                     record_cut(&mut state.cuts, "unresolvable");
+                    if let Some(site) = self.cut_site(cf, &cur) {
+                        record_cut_site(&mut state.cut_sites, site);
+                    }
                 }
                 // Otherwise: clean root, stop.
                 continue;
@@ -1244,6 +1263,38 @@ impl<'a> BackwardTaintEngine<'a> {
                 }
             }
         }
+    }
+
+    /// Describe an unresolvable dead-end node (see [`Self::node_is_unresolvable`])
+    /// as a [`CutSite`]: what the engine could not see, and where.
+    fn cut_site(&self, fi: usize, key: &NodeKey) -> Option<CutSite> {
+        let ir = self.prog.functions[fi].ir;
+        let span = ir.var_metadata.get(&key.var).and_then(|m| m.byte_range);
+        let named = |kind: &'static str, detail: String| CutSite {
+            kind,
+            function: ir.name.clone(),
+            detail,
+            span,
+        };
+        let node = self.prog.functions[fi].svfg.node(key)?;
+        if node.kind == crate::graph::svfg::NodeKind::FormalParam {
+            let name = ir
+                .var_metadata
+                .get(&key.var)
+                .and_then(|m| m.source_name.clone())
+                .unwrap_or_default();
+            return Some(named("param-no-caller", name));
+        }
+        let idx = key.instr_idx?;
+        let ins = ir.blocks.get(&key.block)?.instructions.get(idx)?;
+        Some(match ins {
+            Instruction::CallStatic { func, .. } => named("external-call", func.clone()),
+            Instruction::CallVirtual { method, .. } => named("external-call", method.clone()),
+            Instruction::CallPointer { .. } => named("indirect-call", String::new()),
+            Instruction::LoadGlobal { name, .. } => named("global", name.clone()),
+            Instruction::Dereference { .. } => named("pointer-deref", String::new()),
+            _ => return None,
+        })
     }
 
     /// A node is unresolvable if we cannot prove its value clean within the

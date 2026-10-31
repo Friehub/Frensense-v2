@@ -15,6 +15,11 @@ permissions:
   contents: write
   pull-requests: write
 
+# Same group as the docs deploy: both push to gh-pages and must not race.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   blindness:
     name: Profile Engine Capability and Blindness
@@ -42,9 +47,19 @@ jobs:
       - name: Build Release Binary
         run: cargo build --release --bin frensense
 
+      - name: Fetch previous challenges (to report solved ones)
+        run: |
+          mkdir -p target/blindness
+          curl -fsSL https://frensense.friehub.cloud/blindness/challenges.json \
+            -o target/blindness/previous_challenges.json || rm -f target/blindness/previous_challenges.json
+
       - name: Run Engine Blindness Benchmark
         run: |
-          python3 frensense-bench/run.py --suite blindness --prepare --run --ci-summary
+          BASELINE=""
+          if [ -f target/blindness/previous_challenges.json ]; then
+            BASELINE="--baseline target/blindness/previous_challenges.json"
+          fi
+          python3 frensense-bench/run.py --suite blindness --prepare --run --ci-summary $BASELINE
 
       - name: Format Benchmark Action Results
         run: |
@@ -74,6 +89,8 @@ jobs:
             target/blindness/blindness_sheet.csv
             target/blindness/blindness_history.json
             target/blindness/blindness_report.json
+            target/blindness/challenges.json
+            target/blindness/challenges.html
 
       - name: Store and Publish Blindness Time-Series
         uses: benchmark-action/github-action-benchmark@d48d326b4ca9ba73ca0cd0d59f108f9e02a381c7 # v1.20.4
@@ -85,3 +102,20 @@ jobs:
           benchmark-data-dir-path: 'dev/bench/blindness'
           comment-on-alert: true
           fail-on-alert: false
+
+      - name: Publish challenge cards to GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p blindness-site
+          cp target/blindness/challenges.html blindness-site/index.html
+          cp target/blindness/challenges.json blindness-site/challenges.json
+
+      - name: Deploy challenge cards (gh-pages /blindness)
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@329bcc8f12caed2cefe5a5b80781499a6f3b361b # v4.0.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: blindness-site
+          publish_branch: gh-pages
+          destination_dir: blindness
+          keep_files: true
