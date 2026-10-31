@@ -1053,4 +1053,56 @@ mod named_arg_tests {
         }
         assert!(checked, "set_cookie call not lowered");
     }
+
+    #[test]
+    fn banned_named_arg_fires_on_explicit_violation_and_ignores_absent() {
+        let mut facts = FactTable::default();
+        facts.policy_facts.push((
+            PolicyFact {
+                rule: "banned_cookie_secure_false".into(),
+                when_call: "set_cookie".into(),
+                require: vec![PolicyRequirement::BannedNamedArgLiteral {
+                    name: "secure".into(),
+                    values: vec!["false".into()],
+                }],
+                scope: PolicyScope::Function,
+                message: "secure=False is forbidden".into(),
+                severity: "critical".into(),
+                package: None,
+            },
+            Provenance::Learned,
+        ));
+
+        // 1. Explicit violation fires
+        let hits = policy::check_program(
+            &lower_py("def u():\n    r.set_cookie('sid', '1', secure=False)\n"),
+            &facts,
+        );
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].rule, "banned_cookie_secure_false");
+
+        // 2. Shifted keyword args still fire
+        let hits_shifted = policy::check_program(
+            &lower_py("def u():\n    r.set_cookie('sid', '1', path='/', secure=False)\n"),
+            &facts,
+        );
+        assert_eq!(hits_shifted.len(), 1);
+
+        // 3. Absent keyword argument does NOT fire (zero false positives)
+        let hits_absent = policy::check_program(
+            &lower_py("def u():\n    r.set_cookie('theme', 'dark')\n"),
+            &facts,
+        );
+        assert!(
+            hits_absent.is_empty(),
+            "omitted argument must not be flagged by BannedNamedArgLiteral"
+        );
+
+        // 4. Compliant value does not fire
+        let hits_clean = policy::check_program(
+            &lower_py("def u():\n    r.set_cookie('sid', '1', secure=True)\n"),
+            &facts,
+        );
+        assert!(hits_clean.is_empty(), "secure=True must not be flagged");
+    }
 }

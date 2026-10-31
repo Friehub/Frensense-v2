@@ -1,0 +1,87 @@
+name: Engine Blindness & Capability Benchmark
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frensense-engine/**'
+      - 'frensense-lang/**'
+      - 'src/**'
+      - 'frensense-bench/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  blindness:
+    name: Profile Engine Capability and Blindness
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout Frensense
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: stable
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+
+      - name: Build Release Binary
+        run: cargo build --release --bin frensense
+
+      - name: Run Engine Blindness Benchmark
+        run: |
+          python3 frensense-bench/run.py --suite blindness --prepare --run --ci-summary
+
+      - name: Format Benchmark Action Results
+        run: |
+          python3 -c "
+          import json
+          with open('target/blindness/blindness_report.json') as f:
+              data = json.load(f)
+          overall = data['overall']
+          results = [
+              {'name': 'Engine Blindness Rate (Unknown %)', 'value': overall['blindness_rate'], 'unit': '%'},
+              {'name': 'Explored Sinks', 'value': overall['total_sinks'], 'unit': 'sinks'},
+              {'name': 'Safety Valve Caps Fired', 'value': overall['truncation_caps'], 'unit': 'caps'},
+              {'name': 'Peak RSS Memory', 'value': overall.get('peak_rss_mb', 0) or 0, 'unit': 'MB'},
+              {'name': 'Scan Duration', 'value': overall.get('wall_s', 0), 'unit': 's'}
+          ]
+          with open('blindness-metrics.json', 'w') as out:
+              json.dump(results, out, indent=2)
+          "
+          cat blindness-metrics.json
+
+      - name: Upload Blindness Scorecards and Sheet
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frensense-blindness-profile
+          path: |
+            target/blindness/blindness_card.md
+            target/blindness/blindness_sheet.csv
+            target/blindness/blindness_history.json
+            target/blindness/blindness_report.json
+
+      - name: Store and Publish Blindness Time-Series
+        uses: benchmark-action/github-action-benchmark@d48d326b4ca9ba73ca0cd0d59f108f9e02a381c7 # v1.20.4
+        with:
+          tool: 'customSmallerIsBetter'
+          output-file-path: blindness-metrics.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: true
+          benchmark-data-dir-path: 'dev/bench/blindness'
+          comment-on-alert: true
+          fail-on-alert: false

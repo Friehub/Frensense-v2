@@ -5,7 +5,7 @@
 //! Taint-path representation (R3c).
 //!
 //! A taint path is the ordered chain of SVFG nodes the
-//! [`BackwardTaintEngine`](super::engine::BackwardTaintEngine) walked from a
+//! [`super::engine::BackwardTaintEngine`] walked from a
 //! sink argument back to a source. It is intentionally *data*: the engine only
 //! records it; rendering (text/SARIF/LSP) lives in the consumer (see the
 //! root crate's `reporter` module). Keeping capture and rendering apart means
@@ -22,8 +22,8 @@ use crate::ir::function::{FunctionIR, Instruction};
 // ---------------------------------------------------------------------------
 
 /// One step on a taint path, in **source → sink** order (the backward engine
-/// walk runs the other way; [`BackwardTaintEngine::reconstruct_path`] follows
-/// parent links from the source toward the sink and [`TaintPath::new`] keeps
+/// walk runs the other way; the engine's private path reconstruction follows
+/// parent links from the source toward the sink and the private constructor keeps
 /// that order).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathStep {
@@ -91,18 +91,25 @@ pub struct TaintPath {
 
 impl TaintPath {
     /// Build a path from the walked chain. `chain` yields
-    /// `(function_name, function_ir, node, step)` in source→sink order (see
+    /// `(function_ir, node, step)` in source→sink order (see
     /// [`BackwardTaintEngine::reconstruct_path`]); the leading
     /// [`PathStep::Source`] must already carry its description.
     /// `fn_file` maps function names to their source files so step spans
     /// point at real files (unmapped functions, engine-internal tests
     /// without files, keep the function name as a pseudo-file).
     ///
+    /// The chain borrows each function's IR instead of taking a clone: a
+    /// whole-program walk can carry tens of thousands of steps, and cloning
+    /// a `FunctionIR` per step (blocks, var metadata, string tables) turned
+    /// one path reconstruction into a multi-gigabyte allocation - the redis
+    /// directory scan died at 5.6 GiB here. The IR is only read for the
+    /// step's byte span, which is computed immediately and owned afterwards.
+    ///
     /// ORDERING CONTRACT: steps are stored source → sink. The sink itself is
     /// not a step (the finding already reports it), so the last step is the
     /// propagation that feeds the sink argument.
     pub(crate) fn new(
-        chain: Vec<(String, FunctionIR, NodeKey, PathStep)>,
+        chain: Vec<(&FunctionIR, NodeKey, PathStep)>,
         source_desc: Option<String>,
         source_span: Option<(String, (usize, usize))>,
         fn_file: &FxHashMap<String, String>,
@@ -118,8 +125,7 @@ impl TaintPath {
         spans.push(source_span);
         // The chain is already source→sink; keep it (reversing it here used
         // to render flows sink→source, the "step 2 is the sink" bug).
-        for (fname, ir, key, step) in chain.iter() {
-            let _ = (fname, key);
+        for (ir, key, step) in chain.iter() {
             let file = fn_file
                 .get(&ir.name)
                 .cloned()
@@ -367,7 +373,7 @@ impl<'a> BackwardTaintEngine<'a> {
         source_node: Option<(usize, NodeKey)>,
         source_desc: Option<String>,
     ) -> TaintPath {
-        let mut chain: Vec<(String, FunctionIR, NodeKey, PathStep)> = Vec::new();
+        let mut chain: Vec<(&FunctionIR, NodeKey, PathStep)> = Vec::new();
         // The parent map maps each visited node → its BFS parent (the node
         // one step closer to the sink). The chain therefore runs from the
         // source (which has no parent entry, BFS stopped there) to the node
@@ -390,9 +396,12 @@ impl<'a> BackwardTaintEngine<'a> {
         let mut cur = (sf, skey);
         for _ in 0..self.current_parents.len() + 1 {
             let (cf, key) = cur;
-            let ir = self.prog.functions[cf].ir.clone();
+            // Borrow, never clone: the IR is only read for the step's span
+            // inside `TaintPath::new`, and a clone per step on a deep path
+            // is what made whole-directory C scans run out of memory.
+            let ir = self.prog.functions[cf].ir;
             let step = self.step_of(cf, &key);
-            chain.push((ir.name.clone(), ir, key, step));
+            chain.push((ir, key, step));
             match self.current_parents.get(&cur) {
                 Some(&parent) => cur = parent,
                 None => break,
@@ -403,7 +412,7 @@ impl<'a> BackwardTaintEngine<'a> {
         // byte range. The Source step now carries that location, so drop the
         // echoes instead of printing the origin two or three times.
         let origin = source_span.as_ref().map(|(_, r)| *r);
-        while let Some((_, ir, key, _)) = chain.first() {
+        while let Some((ir, key, _)) = chain.first() {
             if span_with_decl(ir, key) != origin {
                 break;
             }

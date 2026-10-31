@@ -23,9 +23,9 @@
 //! * [`HintKind::index`] and [`LearnedFactEntry::wire_index`] are exhaustive
 //!   `match`es, so *adding* a variant is a compile error that lands the
 //!   developer next to the vocabulary lists.
-//! * [`tests::vocabulary_lists_are_ratcheted`] fails until the new variant is
+//! * `tests::vocabulary_lists_are_ratcheted` fails until the new variant is
 //!   appended to [`HintKind::ALL`] / [`LearnedFactEntry::VARIANT_TAGS`], and
-//!   [`tests::vocabulary_fingerprint_is_committed`] fails until the change is
+//!   `tests::vocabulary_fingerprint_is_committed` fails until the change is
 //!   acknowledged by updating [`FACT_VOCABULARY_FINGERPRINT`] - which is also
 //!   the cue to bump `BUNDLE_VERSION` and regenerate the default pack.
 //!
@@ -84,6 +84,29 @@ pub fn fact_vocabulary_fingerprint() -> u64 {
 /// bump `BUNDLE_VERSION`, regenerate the default pack, and rebuild any
 /// corpus bundle. `docs/FORMATS.md` carries the same rule in prose.
 pub const FACT_VOCABULARY_FINGERPRINT: u64 = 0x4994_27a8_ed94_e470;
+
+/// Call-name decorators that libraries append to a base operation to name a
+/// sibling in the same family: adm-zip's `extractAllTo` / `extractAllToAsync`,
+/// Node's `readFile` / `readFileSync`, and the callback forms of the same
+/// pattern.
+///
+/// Facts are matched by call name, so without this a corpus family that
+/// teaches the base operation silently misses every decorated sibling - the
+/// held-out pair then reports a miss even though the underlying defect is
+/// identical. The suffix is only ever stripped for lookup, never published:
+/// a fact still names exactly one call.
+pub const MIRROR_CALL_SUFFIXES: &[&str] = &["Async", "Sync", "Callback", "Promise"];
+
+/// The base operation a decorated call name belongs to.
+///
+/// `extractAllToAsync` -> `extractAllTo`. Returns `None` when the name carries
+/// no known decorator, or when stripping it would leave no base at all.
+#[must_use]
+pub fn mirror_call_base(call: &str) -> Option<&str> {
+    MIRROR_CALL_SUFFIXES
+        .iter()
+        .find_map(|suffix| call.strip_suffix(suffix).filter(|base| !base.is_empty()))
+}
 
 #[cfg(test)]
 mod tests {

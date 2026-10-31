@@ -5,9 +5,11 @@
 use std::collections::BTreeSet;
 
 use frensense_engine::analysis::taint::config::TaintConfig;
-use frensense_engine::analysis::taint::engine::BackwardVerdict;
+use frensense_engine::analysis::taint::engine::{BackwardVerdict, FindingClass};
 use frensense_engine::analysis::taint::facts::FactTable;
+use frensense_engine::analysis::taint::path::PathStep;
 use frensense_engine::scan;
+use frensense_lang::rule_card::names_vulnerability_class;
 use frensense_lang::Severity;
 
 use super::call_analysis::collect_calls;
@@ -38,10 +40,35 @@ use super::family::Family;
 /// [`SinkRole::default_level`]: frensense_lang::severity::SinkRole::default_level
 #[must_use]
 pub fn alerts(result: &scan::ScanResult) -> bool {
+    alerts_with_cwe(result, None)
+}
+
+/// [`alerts`] under a family's declared CWE.
+///
+/// A learned sink has no vocabulary of its own; the family's `cwe:` is what
+/// classifies it, exactly as the published bundle does for its consumers. The
+/// gate must classify the same way, or it scores findings the CLI drops - the
+/// "gate passes, CLI is silent" disagreement.
+#[must_use]
+pub fn alerts_with_cwe(result: &scan::ScanResult, cwe: Option<&str>) -> bool {
     result.findings.iter().any(|f| {
+        let mut classified;
+        let f = match cwe {
+            Some(cwe) => {
+                classified = f.clone();
+                classified.classify_from_cwe(cwe);
+                &classified
+            }
+            None => f,
+        };
         f.verdict == BackwardVerdict::Vulnerable
             && f.alert.is_some()
             && f.role.default_level() != Severity::Info
+            && names_vulnerability_class(
+                f.label.as_deref(),
+                f.role,
+                matches!(f.finding_class, FindingClass::Idor),
+            )
     }) || !result.checker.is_empty()
 }
 
@@ -71,6 +98,9 @@ pub struct PreparedFamily {
     /// All call names appearing in any variant, used to skip gate trials
     /// for facts that cannot affect this family.
     pub calls: BTreeSet<String>,
+    /// The family's declared `cwe:` - the class its feedback is reported
+    /// under, and therefore the class the gate must score its findings with.
+    pub cwe: Option<String>,
 }
 
 impl PreparedFamily {
@@ -89,6 +119,7 @@ impl PreparedFamily {
             pos,
             neg,
             calls,
+            cwe: f.metadata.cwe.clone(),
         })
     }
 
@@ -101,7 +132,10 @@ impl PreparedFamily {
     pub fn alert_flags(&self, config: &TaintConfig, facts: &FactTable) -> (bool, bool) {
         let pos = scan::scan_prepared(&self.pos, config, facts);
         let neg = scan::scan_prepared(&self.neg, config, facts);
-        (alerts(&pos), alerts(&neg))
+        (
+            alerts_with_cwe(&pos, self.cwe.as_deref()),
+            alerts_with_cwe(&neg, self.cwe.as_deref()),
+        )
     }
 
     /// Family separation under a fact table. Reuses the lowered IRs;
@@ -109,6 +143,50 @@ impl PreparedFamily {
     pub fn separates(&self, config: &TaintConfig, facts: &FactTable) -> bool {
         let (pos_alerts, neg_alerts) = self.alert_flags(config, facts);
         pos_alerts && !neg_alerts
+    }
+
+    /// The candidate sink this call's tainted argument flows *through*, if
+    /// any.
+    ///
+    /// A positive can taint more than one call: the defect, and calls that
+    /// merely receive its result (the response writer that echoes a query's
+    /// rows, the logger that prints a deserialized document). Separation
+    /// cannot tell them apart - the negative validated the value upstream, so
+    /// every downstream echo is silent there too, and both candidates pass.
+    /// Learning the echo publishes a sink that fires on *any* tainted value of
+    /// that shape, which is exactly the false positive the corpus review found
+    /// (`JsonResponse`, `annotate`, `list` taught by the Django Trunc family).
+    ///
+    /// The captured source→sink path answers it directly: a call whose
+    /// argument path already names another candidate sink is downstream of it,
+    /// so the upstream candidate is the one carrying the family's knowledge.
+    pub fn downstream_echo(
+        &self,
+        config: &TaintConfig,
+        facts: &FactTable,
+        call: &str,
+        siblings: &BTreeSet<String>,
+    ) -> Option<String> {
+        if siblings.len() < 2 {
+            return None;
+        }
+        for f in &scan::scan_prepared(&self.pos, config, facts).findings {
+            if f.sink != call || f.verdict != BackwardVerdict::Vulnerable || f.alert.is_none() {
+                continue;
+            }
+            for step in &f.path.steps {
+                let callee = match step {
+                    PathStep::CallArgument { callee, .. } | PathStep::CallReturn { callee, .. } => {
+                        callee
+                    }
+                    _ => continue,
+                };
+                if callee != call && siblings.contains(callee) {
+                    return Some(callee.clone());
+                }
+            }
+        }
+        None
     }
 }
 

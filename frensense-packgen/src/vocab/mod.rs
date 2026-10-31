@@ -94,6 +94,14 @@ pub(crate) enum RequirementSpec {
         name: &'static str,
         values: &'static [&'static str],
     },
+    /// When the named argument is present and its value is a provable
+    /// literal, it must NOT match any of `values` (case-insensitive).
+    /// See [`PolicyRequirement::BannedNamedArgLiteral`].
+    #[allow(dead_code)]
+    BannedNamedArgLiteral {
+        name: &'static str,
+        values: &'static [&'static str],
+    },
 }
 
 /// Emit one language's provider sections from static tables - the pack's
@@ -221,6 +229,12 @@ pub(crate) fn entries_for_static(v: &'static LanguageVocab) -> Vec<LearnedFactEn
             .map(|r| match r {
                 RequirementSpec::RequireNamedArgLiteral { name, values } => {
                     PolicyRequirement::RequireNamedArgLiteral {
+                        name: (*name).to_string(),
+                        values: values.iter().map(|s| (*s).to_string()).collect(),
+                    }
+                }
+                RequirementSpec::BannedNamedArgLiteral { name, values } => {
+                    PolicyRequirement::BannedNamedArgLiteral {
                         name: (*name).to_string(),
                         values: values.iter().map(|s| (*s).to_string()).collect(),
                     }

@@ -131,9 +131,9 @@ pub struct FactTable {
     /// `axios.post`, ...). These verbs are ambiguous, `Map.get`, router
     /// `app.post`, LRU `.put` all share the names, so they match
     /// receiver-aware: the call only counts as a sink when the receiver's
-    /// root is a known client (see [`client_roots`]).
+    /// root is a known client (see [`Self::client_roots`]).
     pub verb_sinks: FxHashSet<String>,
-    /// Receiver roots that make [`verb_sinks`] real client calls, derived
+    /// Receiver roots that make `verb_sinks` real client calls, derived
     /// from the first segment of dotted verb sinks (`got`, `axios`, `http`).
     pub client_roots: FxHashSet<String>,
     /// Receiver-specific roles for dotted sinks that share their last
@@ -144,7 +144,7 @@ pub struct FactTable {
     /// SqlInjection; `shell.run` is CommandInjection. When the engine sees
     /// `kv.put(...)` and the receiver root resolves to `kv`'s declared
     /// dotted root, THIS role wins over the bare entry's, the receiver is
-    /// the disambiguator, exactly like [`verb_sinks`] for match/no-match.
+    /// the disambiguator, exactly like `verb_sinks` for match/no-match.
     pub receiver_roles: FxHashMap<(String, String), crate::analysis::taint::role::SinkRole>,
     /// Receiver-specific label slugs: (receiver_root, method) -> label slug.
     pub receiver_labels: FxHashMap<(String, String), String>,
@@ -160,7 +160,7 @@ pub struct FactTable {
     /// SSRF from `urllib.request.urlopen`.
     ///
     /// The map turns "declared qualified" into an engine-enforced
-    /// requirement: a name listed here arms only under a receiver root (or
+    /// requirement: a name listed in this map arms only under a receiver root (or
     /// an import origin) the declaration named. The engine stays
     /// mechanism-only - which roots qualify which name is pack/bundle
     /// knowledge, not engine vocabulary.
@@ -170,7 +170,7 @@ pub struct FactTable {
     /// A bare declaration is the receiver-agnostic form: it is the
     /// language builtin's own name (`eval`, `exec`, `open`). A name that
     /// is only ever declared qualified is gated by
-    /// [`receiver_qualified_sinks`]; a name declared bare is not - it keeps
+    /// `receiver_qualified_sinks`; a name declared bare is not - it keeps
     /// matching any receiver, which is correct for a builtin and wrong for
     /// a library function.
     pub bare_sink_names: FxHashSet<String>,
@@ -288,7 +288,7 @@ impl FactTable {
     /// call name) must not widen it back to "everything dangerous".
     /// Merge another table's language-keyed section under `language`.
     ///
-    /// Used by [`apply_language_entries`](crate::analysis::taint::facts::apply_language_entries)
+    /// Used by [`crate::analysis::taint::facts::apply_language_entries`]
     /// to install one pack language group: the group is built in a fresh
     /// table (exactly like the pre-scoping per-spec seed merge) and then
     /// filed under its own language instead of the shared name space, so
@@ -357,7 +357,8 @@ impl FactTable {
         }
     }
 
-    /// Exact-then-`::`-suffix lookup over one signature source.
+    /// Exact, then `::`-suffix, then decorated-mirror lookup over one
+    /// signature source.
     fn lookup_sink_shape<'a>(
         lookup: &dyn Fn(&str) -> Option<&'a SinkSignature>,
         call: &str,
@@ -373,6 +374,11 @@ impl FactTable {
                     return Some(sig);
                 }
             }
+        }
+        // A decorated mirror of a taught operation (`extractAllToAsync` for
+        // `extractAllTo`) is the same API under a conventional suffix.
+        if let Some(base) = super::mirror_call_base(call) {
+            return lookup(base);
         }
         None
     }

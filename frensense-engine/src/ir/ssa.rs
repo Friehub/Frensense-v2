@@ -11,6 +11,21 @@
 use crate::ir::function::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+/// Default per-function work budget for SSA construction, in abstract work
+/// units (dominance-fixer block visits, frontier-walk steps, phi worklist
+/// pops). One unit is a constant amount of work, so the budget bounds the
+/// whole phase for a single function.
+///
+/// Nothing legitimate reaches it: a 50 000-instruction function spends
+/// ~50 000 units. It exists because the analysis used to be UNBOUNDED - a
+/// generated parser with hundreds of sequential `if` branches (quadratic
+/// block count) spent 12 s in here at 400 branches and never finished at
+/// 3000, with no message. On expiry the IR is kept in its raw,
+/// flow-insensitive form (a sound over-approximation) and flagged
+/// `analysis_incomplete`, which the scanner reports instead of hanging or
+/// silently weakening the result.
+pub const DEFAULT_SSA_BUDGET: u64 = 5_000_000;
+
 pub struct SSABuilder {
     ir: FunctionIR,
     /// Phi rename bookkeeping: `new_dest → original variable`. Filled while
@@ -19,6 +34,13 @@ pub struct SSABuilder {
     /// the phi's dest has been renamed (the successor-fill for a later
     /// predecessor must find the same stack the rename pushed onto).
     phi_origins: FxHashMap<VarId, VarId>,
+    /// Work budget for this build (see [`DEFAULT_SSA_BUDGET`]).
+    budget: u64,
+    /// Units spent so far.
+    used: u64,
+    /// Budget exhausted: stop before starting another phase and hand back
+    /// the unversioned IR, flagged as incomplete.
+    degraded: bool,
 }
 
 impl SSABuilder {
@@ -26,105 +48,181 @@ impl SSABuilder {
         Self {
             ir,
             phi_origins: FxHashMap::default(),
+            budget: DEFAULT_SSA_BUDGET,
+            used: 0,
+            degraded: false,
+        }
+    }
+
+    /// Override the work budget. Tests use a tiny budget to exercise the
+    /// degraded path deterministically.
+    #[must_use]
+    pub fn with_budget(mut self, budget: u64) -> Self {
+        self.budget = budget;
+        self
+    }
+
+    /// Work units consumed by the last [`Self::build`] attempt.
+    #[must_use]
+    pub fn work_used(&self) -> u64 {
+        self.used
+    }
+
+    /// Charge `units` against this function's budget.
+    fn charge(&mut self, units: u64) {
+        self.used = self.used.saturating_add(units);
+        if self.used >= self.budget {
+            self.degraded = true;
         }
     }
 
     pub fn build(mut self) -> FunctionIR {
         let idoms = self.compute_immediate_dominators();
+        if self.degraded {
+            return self.finish_degraded();
+        }
         let df = self.compute_dominance_frontiers(&idoms);
-
-        self.place_phi_nodes(&df);
+        if self.degraded {
+            return self.finish_degraded();
+        }
+        if !self.place_phi_nodes(&df) {
+            return self.finish_degraded();
+        }
         self.rename_variables(&idoms);
 
         self.ir
     }
 
-    fn compute_immediate_dominators(&self) -> FxHashMap<BlockId, BlockId> {
-        // Dominance is only defined for blocks reachable from the entry.
-        // Lowering legitimately leaves dead blocks behind (the unused
-        // false_block of an if without else, a merge block after arms that
-        // all return, switch cases whose dispatch edges are not modeled).
-        // Treating them as normal blocks makes their dominator sets
-        // unconstrained (every block "dominates" them), and idom selection
-        // over those ill-defined sets can pick a cycle - which used to spin
-        // the frontier walk forever.
-        let mut reachable: FxHashSet<BlockId> = FxHashSet::default();
-        let mut stack = vec![self.ir.entry_block];
-        reachable.insert(self.ir.entry_block);
-        while let Some(b) = stack.pop() {
-            if let Some(block) = self.ir.blocks.get(&b) {
-                for &s in &block.successors {
-                    if reachable.insert(s) {
-                        stack.push(s);
-                    }
+    /// Budget exhausted: hand back the IR WITHOUT phi placement or variable
+    /// renaming (nothing of either phase survives - phi placement undoes its
+    /// pushes on failure) and flag it. The raw form is flow-insensitive:
+    /// every use sees every def of the same name, which can add spurious
+    /// flows but never loses a real one, so degrading stays in the
+    /// over-approximating direction the engine already commits to.
+    fn finish_degraded(mut self) -> FunctionIR {
+        self.ir.analysis_incomplete = true;
+        self.ir
+    }
+
+    /// Immediate dominators, Cooper-Harvey-Kennedy ("A Simple, Fast
+    /// Dominance Algorithm", 2001).
+    ///
+    /// The previous implementation kept a full dominator SET per block and
+    /// re-intersected every set from scratch in `while changed` walking
+    /// blocks in hash-map order, then searched each block's strict
+    /// dominators for the immediate one (another O(B²) of set building).
+    /// Both loops are cubic on the one CFG shape real generated code has: a
+    /// long chain of blocks, one per sequential `if` in a generated
+    /// parser/validator. Measured: 400 branches spent 12 s in SSA alone and
+    /// 3000 branches never finished, with no message.
+    ///
+    /// This version keeps ONE idom per block, visits blocks in reverse
+    /// postorder (a structured CFG converges in a single pass) and
+    /// intersects by climbing the partial dominator tree guided by
+    /// postorder numbers.
+    ///
+    /// Unreachable blocks (lowering legitimately leaves dead arms behind)
+    /// never enter the postorder, so they receive no idom - exactly the old
+    /// contract, and the reason an ill-defined dominator set can no longer
+    /// pick a cycle that spun the frontier walk forever.
+    fn compute_immediate_dominators(&mut self) -> FxHashMap<BlockId, BlockId> {
+        let entry = self.ir.entry_block;
+        if !self.ir.blocks.contains_key(&entry) {
+            return FxHashMap::default();
+        }
+
+        // 1. Iterative DFS postorder from the entry: an explicit stack,
+        //    because a chain of thousands of blocks must not recurse.
+        let mut postorder: Vec<BlockId> = Vec::new();
+        let mut seen: FxHashSet<BlockId> = FxHashSet::default();
+        let mut stack: Vec<(BlockId, usize)> = vec![(entry, 0)];
+        seen.insert(entry);
+        while let Some((b, next)) = stack.pop() {
+            let block = &self.ir.blocks[&b];
+            if next < block.successors.len() {
+                stack.push((b, next + 1));
+                let s = block.successors[next];
+                if self.ir.blocks.contains_key(&s) && seen.insert(s) {
+                    stack.push((s, 0));
                 }
-            }
-        }
-
-        let mut doms: FxHashMap<BlockId, FxHashSet<BlockId>> = FxHashMap::default();
-        for &b in &reachable {
-            if b == self.ir.entry_block {
-                let mut s = FxHashSet::default();
-                s.insert(b);
-                doms.insert(b, s);
             } else {
-                doms.insert(b, reachable.iter().copied().collect());
+                postorder.push(b);
             }
         }
+        self.charge(postorder.len() as u64);
 
+        // 2. Postorder numbers. A dominator finishes DFS after its
+        //    descendants, so it carries the HIGHER number (entry the
+        //    highest of all).
+        let mut post_idx: FxHashMap<BlockId, usize> = FxHashMap::default();
+        for (i, &b) in postorder.iter().enumerate() {
+            post_idx.insert(b, i);
+        }
+
+        // 3. Reverse-postorder fixpoint over single idoms.
+        let mut idom: FxHashMap<BlockId, BlockId> = FxHashMap::default();
+        idom.insert(entry, entry);
         let mut changed = true;
-        while changed {
+        while changed && !self.degraded {
             changed = false;
-            for (&b_id, block) in &self.ir.blocks {
-                if !reachable.contains(&b_id) || b_id == self.ir.entry_block {
+            for &b in postorder.iter().rev() {
+                self.charge(1);
+                if self.degraded || b == entry {
                     continue;
                 }
-
-                // Unreachable predecessors are not on any path from the
-                // entry and must not constrain the intersection; they are
-                // simply absent from `doms`.
-                let mut new_dom: FxHashSet<BlockId> = reachable.iter().copied().collect();
-                for &pred in &block.predecessors {
-                    if let Some(pred_doms) = doms.get(&pred) {
-                        new_dom = new_dom.intersection(pred_doms).copied().collect();
+                let Some(block) = self.ir.blocks.get(&b) else {
+                    continue;
+                };
+                let mut new_idom: Option<BlockId> = None;
+                for &p in &block.predecessors {
+                    // Unreachable predecessors are not on any path from the
+                    // entry and never received an idom; they must not
+                    // constrain the intersection.
+                    if !idom.contains_key(&p) {
+                        continue;
                     }
+                    new_idom = Some(match new_idom {
+                        None => p,
+                        Some(cur) => Self::intersect_idoms(p, cur, &idom, &post_idx),
+                    });
                 }
-                new_dom.insert(b_id);
-
-                if doms.get(&b_id) != Some(&new_dom) {
-                    doms.insert(b_id, new_dom);
+                if let Some(n) = new_idom
+                    && idom.get(&b) != Some(&n)
+                {
+                    idom.insert(b, n);
                     changed = true;
                 }
             }
         }
 
-        let mut idoms = FxHashMap::default();
-        for (&b_id, dom_set) in &doms {
-            if b_id == self.ir.entry_block {
-                continue;
-            }
-            let strict_doms: FxHashSet<BlockId> =
-                dom_set.iter().copied().filter(|&d| d != b_id).collect();
-            for &candidate in &strict_doms {
-                let candidate_strict_doms: FxHashSet<BlockId> = doms[&candidate]
-                    .iter()
-                    .copied()
-                    .filter(|&d| d != candidate)
-                    .collect();
-                let is_idom = strict_doms
-                    .iter()
-                    .all(|&other| other == candidate || candidate_strict_doms.contains(&other));
-                if is_idom {
-                    idoms.insert(b_id, candidate);
-                    break;
-                }
+        // Contract preserved: the entry carries no idom of its own, and only
+        // reachable blocks appear.
+        idom.remove(&entry);
+        idom
+    }
+
+    /// Climb both partial dominator trees until they meet. The node with the
+    /// SMALLER postorder number is the deeper one, and climbing its idom
+    /// strictly increases that number, so this terminates.
+    fn intersect_idoms(
+        mut a: BlockId,
+        mut b: BlockId,
+        idom: &FxHashMap<BlockId, BlockId>,
+        post_idx: &FxHashMap<BlockId, usize>,
+    ) -> BlockId {
+        while a != b {
+            let (ia, ib) = (post_idx[&a], post_idx[&b]);
+            if ia < ib {
+                a = idom[&a];
+            } else {
+                b = idom[&b];
             }
         }
-        idoms
+        a
     }
 
     fn compute_dominance_frontiers(
-        &self,
+        &mut self,
         idoms: &FxHashMap<BlockId, BlockId>,
     ) -> FxHashMap<BlockId, FxHashSet<BlockId>> {
         let mut df: FxHashMap<BlockId, FxHashSet<BlockId>> = FxHashMap::default();
@@ -132,20 +230,37 @@ impl SSABuilder {
             df.insert(b_id, FxHashSet::default());
         }
 
-        for (&b_id, block) in &self.ir.blocks {
-            if block.predecessors.len() >= 2 {
-                for &pred in &block.predecessors {
-                    let mut runner = pred;
-                    let mut visited = FxHashSet::default();
-                    while runner != *idoms.get(&b_id).unwrap_or(&self.ir.entry_block)
-                        && visited.insert(runner)
-                    {
-                        df.get_mut(&runner).unwrap().insert(b_id);
-                        if let Some(&next) = idoms.get(&runner) {
-                            runner = next;
-                        } else {
-                            break;
-                        }
+        // Join blocks with their predecessor lists, copied OUT of `self`:
+        // the budget is charged below through a `&mut self` method, which
+        // cannot run under an active borrow of `self.ir.blocks`.
+        let joins: Vec<(BlockId, Vec<BlockId>)> = self
+            .ir
+            .blocks
+            .iter()
+            .filter(|(_, blk)| blk.predecessors.len() >= 2)
+            .map(|(&id, blk)| (id, blk.predecessors.clone()))
+            .collect();
+
+        let entry = self.ir.entry_block;
+        for (b_id, preds) in joins {
+            for pred in preds {
+                let mut runner = pred;
+                let mut visited = FxHashSet::default();
+                while runner != *idoms.get(&b_id).unwrap_or(&entry) && visited.insert(runner) {
+                    self.charge(1);
+                    if self.degraded {
+                        return df;
+                    }
+                    match df.get_mut(&runner) {
+                        Some(set) => set.insert(b_id),
+                        // A predecessor that is not a real block (dangling
+                        // CFG edge) has no frontier to contribute to.
+                        None => break,
+                    };
+                    if let Some(&next) = idoms.get(&runner) {
+                        runner = next;
+                    } else {
+                        break;
                     }
                 }
             }
@@ -153,7 +268,14 @@ impl SSABuilder {
         df
     }
 
-    fn place_phi_nodes(&mut self, df: &FxHashMap<BlockId, FxHashSet<BlockId>>) {
+    /// Place phi nodes for every variable defined in more than one block.
+    ///
+    /// Returns `false` when the work budget expired: every phi pushed so far
+    /// is popped again, so the caller falls back to the RAW IR instead of a
+    /// half-SSA form. A missing phi would leave the merge block's uses
+    /// reading only the dominating arm - an under-approximation that loses
+    /// flows, the one direction this engine never takes.
+    fn place_phi_nodes(&mut self, df: &FxHashMap<BlockId, FxHashSet<BlockId>>) -> bool {
         let mut def_blocks: FxHashMap<VarId, FxHashSet<BlockId>> = FxHashMap::default();
 
         for (b_id, block) in &self.ir.blocks {
@@ -165,11 +287,25 @@ impl SSABuilder {
         }
 
         let mut phi_placements: FxHashMap<BlockId, FxHashSet<VarId>> = FxHashMap::default();
+        // Every phi this run pushed, in push order: undone in reverse when
+        // the budget expires.
+        let mut pushed: Vec<(BlockId, VarId)> = Vec::new();
         for (&var, blocks) in &def_blocks {
             let mut worklist: Vec<BlockId> = blocks.iter().copied().collect();
             let mut added_to_worklist = FxHashSet::default();
 
             while let Some(n) = worklist.pop() {
+                self.charge(1);
+                if self.degraded {
+                    for (b, v) in pushed.into_iter().rev() {
+                        if let Some(blk) = self.ir.blocks.get_mut(&b)
+                            && blk.phis.last().is_some_and(|p| p.dest == v)
+                        {
+                            blk.phis.pop();
+                        }
+                    }
+                    return false;
+                }
                 if let Some(frontiers) = df.get(&n) {
                     for &f in frontiers {
                         let placed = phi_placements.entry(f).or_default();
@@ -179,6 +315,7 @@ impl SSABuilder {
                                 dest: var,
                                 incoming: Vec::new(),
                             });
+                            pushed.push((f, var));
 
                             if added_to_worklist.insert(f) {
                                 worklist.push(f);
@@ -188,6 +325,7 @@ impl SSABuilder {
                 }
             }
         }
+        true
     }
 
     fn rename_variables(&mut self, idoms: &FxHashMap<BlockId, BlockId>) {

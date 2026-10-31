@@ -36,10 +36,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
 
       - name: Purity debt ratchet (engine policy debt must not grow)
-        run: python3 scripts/purity-ratchet.py
-
-      - name: Blog provenance gate (claims must be version-pinned and fresh)
-        run: python3 scripts/blog_provenance.py check --strict
+        run: python3 .github/scripts/purity-ratchet.py
 
       - name: Install Rust (stable, with rustfmt)
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
@@ -63,11 +60,24 @@ jobs:
       - name: Enforce Style (rustfmt)
         run: cargo fmt --all -- --check
 
+      - name: Check engine rustdoc
+        run: RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links" cargo doc -p frensense-engine --all-features --no-deps
+
+      - name: Check unused dependencies
+        run: |
+          cargo install cargo-machete --locked
+          cargo machete --with-metadata frensense-engine frensense-lang frensense-bundler frensense-packgen frensense-devtools
+
+      - name: Check engine features in isolation
+        run: |
+          cargo install cargo-hack --locked
+          cargo hack check -p frensense-engine --each-feature --locked
+
       - name: Default pack drift check (packgen --check)
         run: cargo run -p frensense-packgen -- --check
 
       - name: Corpus lint (families must be teachable)
-        run: ./scripts/corpus-lint.sh
+        run: ./.github/scripts/corpus-lint.sh
 
       - name: Lint (Clippy, warnings are errors)
         run: cargo clippy --all-features --all-targets -- -D warnings
@@ -87,7 +97,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1 (deny 0.20.2)
         with:
-          command: check advisories licenses bans
+          command: check
 
   # --- NPM Security Audit ---
   npm-security:
@@ -114,6 +124,20 @@ jobs:
             npm audit --omit=dev --audit-level=high
           else
             echo "No package-lock.json in this repo; skipping npm audit."
+          fi
+      # The docs site keeps its own lockfile and previously escaped every
+      # audit: its dependencies are devDependencies (so --omit=dev would see
+      # nothing) yet they execute at build time. Gate at critical because
+      # vite 5, pinned by vitepress 1.6.4, carries accepted dev-server
+      # advisories with no fix on the stable 1.x line - see CHANGELOG.
+      - name: Audit docs-site NPM dependencies
+        run: |
+          if [ -f docs-site/package-lock.json ]; then
+            cd docs-site
+            npm ci
+            npm audit --audit-level=critical
+          else
+            echo "No docs-site/package-lock.json; skipping docs-site npm audit."
           fi
 
   # --- MSRV Check ---
@@ -147,6 +171,10 @@ jobs:
         with:
           egress-policy: audit
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+        with:
+          # The gate diffs against the PR base or HEAD^, which a depth-1 clone
+          # does not contain.
+          fetch-depth: 0
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
@@ -155,12 +183,13 @@ jobs:
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
       - name: Install cargo-semver-checks
         run: cargo install cargo-semver-checks --locked
-      - name: Check SemVer
-        # Hard gate: fails if any publishable crate introduces a breaking
-        # public-API change relative to its latest crates.io release. The
-        # unpublished build-time crates (packgen, devtools) are excluded -
-        # they have no registry baseline.
-        run: cargo semver-checks check-release --workspace --exclude frensense-packgen --exclude frensense-devtools
+      - name: Per-crate SemVer gate (every publishable crate)
+        # Compares each publishable crate against its latest version on crates.io.
+        # Breaking changes are absorbed when the local version already represents
+        # a minor bump over the published version (0.7.x -> 0.8.0 absorbs all
+        # breaking changes in 0.8.0). This is the correct baseline: pre-release
+        # git SHAs on main are never published and must not be used as anchors.
+        run: python3 .github/scripts/semver-gate.py --published
 
   # --- Release Graph Validation ---
   release-graph:
@@ -188,13 +217,15 @@ jobs:
       - name: Validate release graph (dry-run)
         # Fails if the workspace cannot be released coherently: inconsistent
         # inter-crate version requirements, missing publishable deps, etc.
-        # Versions are hand-set, so `--bump keep` validates them as-is.
+        # Versions are hand-set, so `--bump keep` validates them as-is. Every
+        # publishable crate is named, exactly as the release workflow does, so
+        # this dry run exercises the set that will actually be published.
         run: |
           cargo smart-release \
             --bump keep --bump-dependencies keep \
             --no-changelog --no-changelog-preview --no-changelog-github-release \
             --no-tag --no-push \
-            frensense
+            frensense-lang frensense-engine frensense-bundler frensense
 
   # --- Correctness (Rust) ---
   test-rust:

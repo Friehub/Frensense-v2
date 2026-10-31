@@ -110,7 +110,7 @@ pub enum Instruction {
         src: Operand,
     },
 
-    /// v_dest = base[index]  @ mem_in
+    /// `v_dest = base[index]  @ mem_in`
     LoadElement {
         dest: VarId,
         mem_in: VarId,
@@ -118,7 +118,7 @@ pub enum Instruction {
         index: Operand,
     },
 
-    /// base[index] = src  -> generates mem_out
+    /// `base[index] = src` generates `mem_out`.
     StoreElement {
         mem_out: VarId,
         mem_in: VarId,
@@ -156,7 +156,7 @@ pub enum Instruction {
         /// the name of `args[i]`, or empty when that argument is
         /// positional. Shorter than `args` (or empty) means the source
         /// language, or the lowered node, carries no names - callers must
-        /// treat a missing entry as positional. See [`CallStatic::args`].
+        /// treat a missing entry as positional. See the `args` field documentation.
         arg_names: Vec<String>,
     },
 
@@ -317,6 +317,23 @@ pub struct FunctionIR {
     /// by a matching entry guard without a guard call inside the body.
     #[cfg_attr(feature = "serialize", serde(default))]
     pub entry_guards: Vec<String>,
+    /// This IR is a module-level *data* binding, not a callable function:
+    /// `const tools = {...}`, `const client = require("pkg")`. The harness
+    /// lowers such initializers so non-dataflow checkers can assert policy
+    /// over static configuration, but a call written with the binding's name
+    /// (`client(req, res)`) is a call into the library, never into this IR.
+    /// Resolving it here would hand the call an empty parameter list and a
+    /// vacuous summary, which deleted the call site's pass-through taint
+    /// edges and made every call through a `require` binding read Unknown.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub is_static_data: bool,
+    /// True when the per-function analysis budget ran out while preparing
+    /// this IR (SSA construction degraded to flow-insensitive form), so this
+    /// function was analyzed with less precision than usual. The scanner
+    /// reports every such function as `analysis_incomplete` instead of
+    /// silently producing weaker results for it.
+    #[cfg_attr(feature = "serialize", serde(default))]
+    pub analysis_incomplete: bool,
     #[cfg_attr(feature = "serialize", serde(default))]
     // legacy safety: recompute via max ids if absent
     next_var_id: usize,
@@ -340,6 +357,8 @@ impl FunctionIR {
             language: String::new(),
             enclosing_fn: None,
             entry_guards: Vec::new(),
+            is_static_data: false,
+            analysis_incomplete: false,
             next_var_id: 1,
             next_block_id: 1,
         };

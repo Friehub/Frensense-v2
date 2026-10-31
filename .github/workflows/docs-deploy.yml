@@ -43,7 +43,7 @@ jobs:
           cache-dependency-path: docs-site/package-lock.json
 
       - name: Blog provenance gate (strict, pre-deploy)
-        run: python3 scripts/blog_provenance.py check --strict
+        run: python3 .github/scripts/blog_provenance.py check --strict
 
       - name: Build v2 docs site
         working-directory: docs-site

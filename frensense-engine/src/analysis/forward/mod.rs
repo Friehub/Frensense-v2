@@ -84,7 +84,7 @@ pub struct FunctionEntry<'a> {
     pub bindings: Vec<CallBinding>,
     /// Arg use-node key → `(binding index, formal slot)`.
     pub arg_slots: FxHashMap<NodeKey, (usize, usize)>,
-    /// Filled bottom-up during [`ProgramSvfg::compute_summaries`].
+    /// Filled bottom-up while the program-level value-flow structure is built.
     pub summary: Option<TaintSummary>,
 }
 
@@ -142,7 +142,8 @@ impl<'a> ProgramSvfg<'a> {
             .iter()
             .map(|n| {
                 let ir = irs[*n];
-                let (svfg, def_site) = SvfgBuilder::new(ir).build();
+                let (svfg, def_site) =
+                    SvfgBuilder::new(ir).build_with_buffer_builtins(&facts.buffer_builtins);
                 FunctionEntry {
                     name: (*n).clone(),
                     ir,
@@ -178,12 +179,66 @@ impl<'a> ProgramSvfg<'a> {
             .with_aliases(aliases, fn_file)
             .build();
 
+        if crate::debug_flags::DebugFlags::get().mem {
+            eprintln!(
+                "[mem]   svfg:fns={} rss_kb={}",
+                prog.functions.len(),
+                crate::debug_flags::rss_kb()
+            );
+            eprintln!(
+                "[mem]   callgraph edges={} rss_kb={}",
+                callgraph.edges.values().map(Vec::len).sum::<usize>(),
+                crate::debug_flags::rss_kb()
+            );
+        }
+
         prog.discover_bindings(&callgraph);
+        if crate::debug_flags::DebugFlags::get().mem {
+            eprintln!(
+                "[mem]   bindings={} rss_kb={}",
+                prog.functions
+                    .iter()
+                    .map(|f| f.bindings.len())
+                    .sum::<usize>(),
+                crate::debug_flags::rss_kb()
+            );
+        }
         prog.compute_topological_order();
         prog.compute_summaries(config, facts);
+        if crate::debug_flags::DebugFlags::get().mem {
+            eprintln!(
+                "[mem]   summaries={} rss_kb={}",
+                prog.functions
+                    .iter()
+                    .filter(|f| f.summary.is_some())
+                    .count(),
+                crate::debug_flags::rss_kb()
+            );
+        }
         prog.install_cross_edges(facts);
+        if crate::debug_flags::DebugFlags::get().mem {
+            eprintln!(
+                "[mem]   cross_edges={} rss_kb={}",
+                prog.cross_edges.len(),
+                crate::debug_flags::rss_kb()
+            );
+        }
         prog.install_heap_cross_edges();
+        if crate::debug_flags::DebugFlags::get().mem {
+            eprintln!(
+                "[mem]   heap_cross={} rss_kb={}",
+                prog.cross_edges.len(),
+                crate::debug_flags::rss_kb()
+            );
+        }
         prog.install_closure_edges();
+        if crate::debug_flags::DebugFlags::get().mem {
+            eprintln!(
+                "[mem]   closure_cross={} rss_kb={}",
+                prog.cross_edges.len(),
+                crate::debug_flags::rss_kb()
+            );
+        }
         prog
     }
 

@@ -28,7 +28,14 @@ impl<'a> BackwardTaintEngine<'a> {
             p = self.ctx_chains[p as usize].parent;
             depth += 1;
         }
-        if p != 0 || self.ctx_chains.len() >= MAX_CTX_CHAINS {
+        if p != 0 {
+            // Depth ceiling: this walk's call-site stack is deeper than the
+            // model tracks, so it becomes k=0 from here.
+            crate::telemetry::Cap::CallContextDepth.record();
+            return 0;
+        }
+        if self.ctx_chains.len() >= MAX_CTX_CHAINS {
+            crate::telemetry::Cap::CallContextChains.record();
             return 0;
         }
         let id = self.ctx_chains.len() as u32;

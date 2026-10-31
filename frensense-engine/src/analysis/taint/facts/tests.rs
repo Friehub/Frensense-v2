@@ -656,3 +656,140 @@ fn receiver_qualification_survives_merge() {
     assert!(facts.is_receiver_qualified_only("loads"));
     assert!(facts.receiver_qualified_sinks["loads"].contains("pickle"));
 }
+
+/// A corpus family teaches one call name, but libraries name their siblings by
+/// decorating that name (`extractAllTo` / `extractAllToAsync`). A fact must
+/// cover the decorated sibling under the same package, and nothing else.
+mod mirror_call_tests {
+    use super::*;
+
+    fn scoped_table() -> FactTable {
+        let mut t = FactTable::default();
+        LearnedFactEntry::Sink {
+            call: "extractAllTo".into(),
+            package: Some("adm-zip".into()),
+            dangerous_args: Default::default(),
+            binding_args_safe: false,
+        }
+        .apply(&mut t);
+        t
+    }
+
+    #[test]
+    fn decorated_sibling_arms_under_the_same_package() {
+        let t = scoped_table();
+        assert!(
+            t.is_sink_call_scoped(
+                "extractAllToAsync",
+                None,
+                Some("adm-zip"),
+                Some("javascript")
+            ),
+            "extractAllToAsync must inherit the extractAllTo fact"
+        );
+    }
+
+    #[test]
+    fn decorated_sibling_does_not_arm_under_another_package() {
+        let t = scoped_table();
+        assert!(
+            !t.is_sink_call_scoped(
+                "extractAllToAsync",
+                None,
+                Some("another-zip-lib"),
+                Some("javascript")
+            ),
+            "the mirror must stay package-scoped"
+        );
+    }
+
+    #[test]
+    fn undecorated_unrelated_name_stays_inert() {
+        let t = scoped_table();
+        assert!(
+            !t.is_sink_call_scoped("extractEntryTo", None, Some("adm-zip"), Some("javascript")),
+            "only a known decorator suffix qualifies as a mirror"
+        );
+    }
+
+    #[test]
+    fn base_name_is_unchanged_beyond_the_strip() {
+        assert_eq!(mirror_call_base("extractAllToAsync"), Some("extractAllTo"));
+        assert_eq!(mirror_call_base("readFileSync"), Some("readFile"));
+        assert_eq!(mirror_call_base("extractAllTo"), None);
+        assert_eq!(mirror_call_base("Async"), None);
+    }
+}
+
+/// A family declares the package it teaches, but call sites import paths
+/// *into* that package: `lodash/template`, `django.db.models.functions`,
+/// `@scope/pkg/sub`. Exact-key origin matching made every such fact inert
+/// on the family's own positive even though the replay gate accepted it, so
+/// a subpath import must resolve to the root package it lives under - and
+/// nothing else.
+mod subpath_origin_tests {
+    use super::*;
+
+    fn table(package: &str, call: &str) -> FactTable {
+        let mut t = FactTable::default();
+        LearnedFactEntry::Sink {
+            call: call.into(),
+            package: Some(package.into()),
+            dangerous_args: Default::default(),
+            binding_args_safe: false,
+        }
+        .apply(&mut t);
+        t
+    }
+
+    fn sinks(t: &FactTable, call: &str, origin: &str) -> bool {
+        t.is_sink_call_scoped(call, None, Some(origin), Some("python"))
+    }
+
+    #[test]
+    fn dotted_subpath_import_resolves_to_the_root_package() {
+        let t = table("django", "Trunc");
+        assert!(
+            sinks(&t, "Trunc", "django.db.models.functions"),
+            "`from django.db.models.functions import Trunc` is a call into django"
+        );
+    }
+
+    #[test]
+    fn slash_subpath_import_resolves_to_the_root_package() {
+        let t = table("lodash", "template");
+        assert!(
+            sinks(&t, "template", "lodash/template"),
+            "`require(\"lodash/template\")` is a call into lodash"
+        );
+    }
+
+    #[test]
+    fn scoped_package_keeps_its_name_segment() {
+        let t = table("@acme/zip", "extract");
+        assert!(sinks(&t, "extract", "@acme/zip/deep/entry"));
+        assert!(
+            !sinks(&t, "extract", "@acme/other"),
+            "a bare scope must never arm another package"
+        );
+    }
+
+    #[test]
+    fn a_sibling_package_with_the_same_prefix_stays_inert() {
+        let t = table("lodash", "template");
+        assert!(
+            !sinks(&t, "template", "lodash-extra"),
+            "separator boundaries only: `lodash-extra` is not lodash"
+        );
+        assert!(!sinks(&t, "template", "mylodash/template"));
+    }
+
+    #[test]
+    fn a_deeper_fact_never_widens_to_the_root_package() {
+        let t = table("lodash/template", "template");
+        assert!(
+            !sinks(&t, "template", "lodash"),
+            "a fact proven for one subpath says nothing about the whole package"
+        );
+    }
+}

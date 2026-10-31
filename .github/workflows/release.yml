@@ -63,6 +63,10 @@ jobs:
       tag_name: ${{ steps.check.outputs.tag_name }}
       version: ${{ steps.check.outputs.version }}
       identity: ${{ steps.identity.outputs.identity }}
+      pending: ${{ steps.matrix.outputs.pending }}
+      pending_count: ${{ steps.matrix.outputs.pending_count }}
+      # Only `prepare` depends on `gate`; downstream jobs read the SHA here.
+      sha: ${{ needs.gate.outputs.sha }}
     permissions:
       contents: write
     steps:
@@ -76,41 +80,6 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.gate.outputs.sha }}
 
-      - name: Check version and tags
-        id: check
-        run: |
-          SHA="${{ needs.gate.outputs.sha }}"
-          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
-          TAG="v$VERSION"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            RAW="${{ github.event.inputs.tag }}"
-            if [[ -n "$RAW" ]]; then
-              RAW="${RAW#v}"
-              TAG="v$RAW"
-            fi
-            echo "should_release=true" >> $GITHUB_OUTPUT
-            echo "tag_name=$TAG" >> $GITHUB_OUTPUT
-          else
-            # workflow_run: release only if this commit moved the version.
-            if git rev-parse "$TAG" >/dev/null 2>&1; then
-              TAG_SHA=$(git rev-list -n1 "$TAG")
-              if [[ "$TAG_SHA" == "$SHA"* ]] || [[ "$SHA" == "$TAG_SHA"* ]]; then
-                echo "Tag $TAG already points at $SHA. Nothing new to release."
-                echo "should_release=false" >> $GITHUB_OUTPUT
-              else
-                echo "Tag $TAG exists but points at a different commit ($TAG_SHA)."
-                echo "Bump the version in Cargo.toml to cut a new release."
-                echo "should_release=false" >> $GITHUB_OUTPUT
-              fi
-            else
-              echo "New version $VERSION detected. Tag $TAG will be created."
-              echo "should_release=true" >> $GITHUB_OUTPUT
-              echo "tag_name=$TAG" >> $GITHUB_OUTPUT
-            fi
-          fi
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
@@ -121,11 +90,59 @@ jobs:
         with:
           workspaces: '. -> target'
 
+      # Frensense ships four registry crates, each with its own version. This
+      # records which of them are still missing from crates.io, so a
+      # crate-only release (no new `vX.Y.Z`) still publishes instead of being
+      # read as "root version unchanged, nothing to do". Runs after Rust is
+      # installed because it asks `cargo metadata` for the publishable set.
+      - name: Per-crate version matrix
+        id: matrix
+        run: python3 .github/scripts/release-matrix.py --github-output "$GITHUB_OUTPUT"
+
+      - name: Check version and tags
+        id: check
+        run: |
+          PENDING_COUNT="${{ steps.matrix.outputs.pending_count }}"
+          PENDING_COUNT="${PENDING_COUNT:-0}"
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          TAG="v$VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Pending crate publications: $PENDING_COUNT (${{ steps.matrix.outputs.pending }})"
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            RAW="${{ github.event.inputs.tag }}"
+            if [[ -n "$RAW" ]]; then
+              RAW="${RAW#v}"
+              TAG="v$RAW"
+            fi
+          fi
+
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            TAG_SHA=$(git rev-list -n1 "$TAG")
+            echo "Tag $TAG already exists at $TAG_SHA."
+            if [[ "$PENDING_COUNT" -gt 0 ]]; then
+              # Crates moved after the binary was tagged: publish them without
+              # creating or moving a tag.
+              echo "Releasing publishable crates without a new tag."
+              echo "should_release=true" >> $GITHUB_OUTPUT
+              echo "tag_name=" >> $GITHUB_OUTPUT
+            else
+              echo "Nothing new to publish or tag."
+              echo "should_release=false" >> $GITHUB_OUTPUT
+              echo "tag_name=" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "New version $VERSION detected. Tag $TAG will be created."
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+          fi
+
       # Pre-publish assertion: build the binary and require `--version --json`
       # to report exactly the version we are about to tag and publish. Catches
       # a tag/manifest mismatch before four crates are pushed to crates.io.
       - name: Assert build identity matches the release version
         id: identity
+        if: steps.check.outputs.should_release == 'true'
         run: |
           cargo build --bin frensense
           IDENTITY_JSON=$(./target/debug/frensense --version --json)
@@ -139,7 +156,10 @@ jobs:
           echo "identity=$(echo "$IDENTITY_JSON" | base64 -w0)" >> $GITHUB_OUTPUT
 
       - name: Create annotated tag with artifact identity
-        if: steps.check.outputs.should_release == 'true' && github.event_name == 'workflow_run'
+        if: >-
+          steps.check.outputs.should_release == 'true' &&
+          github.event_name == 'workflow_run' &&
+          steps.check.outputs.tag_name != ''
         env:
           IDENTITY_B64: ${{ steps.identity.outputs.identity }}
         run: |
@@ -163,7 +183,11 @@ jobs:
   build-native:
     name: Build Native (${{ matrix.settings.target }})
     needs: prepare
-    if: needs.prepare.outputs.should_release == 'true'
+    # Binaries only ship with a new `vX.Y.Z`. A crate-only release publishes to
+    # crates.io and leaves the existing tag and release assets untouched.
+    if: >-
+      needs.prepare.outputs.should_release == 'true' &&
+      needs.prepare.outputs.tag_name != ''
     runs-on: ${{ matrix.settings.host }}
     permissions:
       contents: read
@@ -328,7 +352,16 @@ jobs:
   publish-cargo:
     name: Publish to Crates.io
     runs-on: ubuntu-latest
-    needs: [prepare, build-native]
+    # Deliberately does not wait on build-native: a crate-only release has no
+    # new binary to build, and a skipped dependency would silently skip this
+    # job - which is exactly the skip we are guarding against.
+    needs: [prepare]
+    # Publish exactly when a crate's manifest version is not on crates.io yet;
+    # `prepare` decided that set, and the post-publish assertion below fails if
+    # any of it did not actually land.
+    if: >-
+      needs.prepare.outputs.should_release == 'true' &&
+      needs.prepare.outputs.pending_count != '0'
     environment: production
     permissions:
       contents: read
@@ -339,13 +372,24 @@ jobs:
           egress-policy: audit
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
         with:
-          ref: ${{ needs.prepare.outputs.tag_name }}
+          # The tag (when there is one) points at this commit; checking out the
+          # SHA keeps crate-only releases working with no tag at all.
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: stable
       - name: Install cargo-smart-release
         run: cargo install cargo-smart-release --locked
+      - name: Install cargo-semver-checks
+        run: cargo install cargo-semver-checks --locked
+      - name: Per-crate SemVer assertion against the published baseline
+        # Every crate about to ship must already carry a version that covers
+        # its public-API change. `check-release` compares each publishable
+        # crate against its latest crates.io release and skips a crate that
+        # moved its middle number (the bump absorbs the break).
+        run: python3 .github/scripts/semver-gate.py --published
       - name: Publish workspace crates in dependency order
         # cargo-smart-release replaces the old hand-rolled publish loop
         # (curl + `sleep 35` + `cargo publish --allow-dirty`). It resolves
@@ -363,6 +407,12 @@ jobs:
         #     tag; this job only publishes.
         #   - `frensense-packgen` / `frensense-devtools` are `publish = false`
         #     and are skipped automatically.
+        #
+        # Every publishable crate is named explicitly, in dependency order. Naming
+        # only `frensense` let smart-release decide whether its path dependencies
+        # needed publishing; naming them all makes the set this run may publish
+        # visible in the log, and `--bump keep` still publishes exactly the
+        # manifest versions (an already-published version is a no-op).
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
@@ -370,13 +420,23 @@ jobs:
             --bump keep --bump-dependencies keep \
             --no-changelog --no-changelog-preview --no-changelog-github-release \
             --no-tag --no-push \
-            frensense
+            frensense-lang frensense-engine frensense-bundler frensense
+
+      - name: Assert every publishable crate is on crates.io
+        # A release is not done when the named crate publishes: each crate
+        # versions independently, so a skipped one (an unbuilt dependency, a
+        # stale registry token, a version that never moved) has to fail here
+        # rather than be discovered by a user installing the crate later.
+        # crates.io indexing is asynchronous, hence the bounded poll.
+        run: python3 .github/scripts/release-matrix.py --require-published --wait 420
 
   # 5. Publish to NPM
   publish-npm:
     name: Publish to NPM (@friehub/frensense)
     runs-on: ubuntu-latest
     needs: [prepare, build-native]
+    # npm ships the binary, so it only moves with a new `vX.Y.Z` tag.
+    if: needs.prepare.outputs.tag_name != ''
     environment: production
     permissions:
       contents: read
@@ -459,6 +519,8 @@ jobs:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: [prepare, build-native, provenance]
+    # A crate-only release has no tag and no assets to publish.
+    if: needs.prepare.outputs.tag_name != ''
     environment: production
     permissions:
       contents: write

@@ -42,7 +42,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GIST_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          ./scripts/reproduce_benchmark.sh --workers 8 --publish-gist
+          python3 frensense-bench/run.py --suite owasp --workers 8 --publish-gist
 
           # Append Markdown report directly to GitHub Actions summary
           cat benchmark_report.md >> $GITHUB_STEP_SUMMARY

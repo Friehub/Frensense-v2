@@ -1,6 +1,6 @@
 [package]
 name = "frensense-bundler"
-version = "0.8.0-beta"
+version = "0.8.0"
 license = "GPL-3.0-only"
 edition = "2021"
 description = "Frensense corpus bundler library"
@@ -19,9 +19,14 @@ regex = "1"
 rustc-hash = "1.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-frensense-lang = { version = "0.8.0-beta", path = "../frensense-lang" }
-frensense-engine = { version = "0.8.0-beta", path = "../frensense-engine", features = ["serialize"] }
+frensense-lang = { version = "0.8.0", path = "../frensense-lang" }
+frensense-engine = { version = "0.8.0", path = "../frensense-engine", features = ["serialize"] }
 
 tree-sitter-typescript = "0.23"
+
+[package.metadata.cargo-machete]
+# The grammar is loaded through frensense-lang's language specification.
+ignored = ["tree-sitter-typescript"]
+
 [dev-dependencies]
 tempfile = "3"

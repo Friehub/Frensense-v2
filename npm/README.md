@@ -227,7 +227,7 @@ Run it yourself:
 ```bash
 cargo build --release
 git clone --depth 1 https://github.com/OWASP-Benchmark/BenchmarkPython /tmp/BenchmarkPython
-python3 scripts/owasp_benchmark.py \
+python3 frensense-bench/run.py --suite owasp \
   --owasp-csv /tmp/BenchmarkPython/expectedresults-0.1.csv \
   --owasp-testcode /tmp/BenchmarkPython/testcode
 ```

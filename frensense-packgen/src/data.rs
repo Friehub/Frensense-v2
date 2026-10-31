@@ -361,8 +361,23 @@ pub static BOOTSTRAP_BUFFER_BUILTINS: std::sync::LazyLock<Vec<BufferBuiltinSpec>
             bi("bzero", Some(0), None, 1),
             bi("memcpy", Some(0), Some(1), 2),
             bi("memmove", Some(0), Some(1), 2),
-            bi("strncpy", Some(0), None, 2),
-            bi("snprintf", Some(0), None, 1),
+            // `strcpy` has no length argument; `usize::MAX` makes the spatial
+            // checker skip length-based bounds while the SVFG still models
+            // its destination write for taint propagation.
+            bi("strcpy", Some(0), Some(1), usize::MAX),
+            bi("strncpy", Some(0), Some(1), 2),
+            bi("stpcpy", Some(0), Some(1), usize::MAX),
+            bi("strlcpy", Some(0), Some(1), 2),
+            // Appending copies: the destination keeps its old bytes and gains
+            // the source's, so a later read of it carries the source's taint.
+            bi("strcat", Some(0), Some(1), usize::MAX),
+            bi("strncat", Some(0), Some(1), 2),
+            bi("strlcat", Some(0), Some(1), 2),
+            // Formatted writes: `src_arg` is the FIRST variadic argument
+            // (the first value the format consumes); later variadic values
+            // are not modelled.
+            bi("sprintf", Some(0), Some(2), usize::MAX),
+            bi("snprintf", Some(0), Some(3), 1),
             bi("fgets", Some(0), None, 1),
             bi("read", Some(1), None, 2),
         ]

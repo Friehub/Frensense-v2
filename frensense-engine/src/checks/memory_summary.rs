@@ -252,6 +252,42 @@ impl MemorySummaryRegistry {
             None
         }
 
+        // `realloc`-family call that resizes an object this function did not
+        // allocate: its first argument does not trace back to an allocation
+        // in the same body (a load through a parameter, a global, a phi of
+        // such loads). The result is the caller's object moved, not a new
+        // one, so a function returning it is not a factory. redis
+        // `ziplistMerge(&first, &second)` does `target = zrealloc(*first or
+        // *second, n); return target;` and every caller that stored the
+        // result back into its own list was reported as leaking.
+        fn resizes_borrowed_object(ir: &FunctionIR, func: &str, args: &[Operand]) -> bool {
+            if !last_segment(func).to_ascii_lowercase().contains("realloc") {
+                return false;
+            }
+            let Some(Operand::Var(v)) = args.first() else {
+                return false;
+            };
+            let mut cur = *v;
+            let mut seen = FxHashSet::default();
+            while seen.insert(cur) {
+                match find_definition(ir, cur) {
+                    Some(Instruction::CallStatic { .. } | Instruction::Allocate { .. }) => {
+                        return false;
+                    }
+                    Some(Instruction::Assign {
+                        src: Operand::Var(next),
+                        ..
+                    })
+                    | Some(Instruction::Cast {
+                        src: Operand::Var(next),
+                        ..
+                    }) => cur = *next,
+                    _ => return true,
+                }
+            }
+            true
+        }
+
         // Fixed-point inference loop over program functions.
         let mut changed = true;
         let mut iterations = 0;
@@ -331,7 +367,8 @@ impl MemorySummaryRegistry {
                         if let Some(def) = find_alloc_root(ret_var) {
                             match def {
                                 Instruction::CallStatic { func, args, .. }
-                                    if self.returns_fresh(func) =>
+                                    if self.returns_fresh(func)
+                                        && !resizes_borrowed_object(ir, func, args) =>
                                 {
                                     returns_fresh = true;
                                     if let Some(cap_spec) = self.return_capacity(func) {

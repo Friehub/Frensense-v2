@@ -15,7 +15,8 @@
 //! * `FRENSdbg_DEADEND`   - trace dead-end classification decisions
 //! * `FRENSdbg_UNRES`     - trace unresolvable-node reasoning
 //! * `FRENSdbg_IS_SOURCE` - trace source-matching in the forward engine
-//! * `FRENSdbg_STATIC`    - harness-level static-analysis trace
+//! * `FRENSdbg_STATIC`    - harness-level static-analysis trace//! * `FRENSdbg_PTS`      - points-to fixed-point cost (passes, set sizes)
+//! * `FRENSdbg_MEM`      - phase boundary RSS + graph sizes (memory attribution)
 
 use std::ffi::OsString;
 use std::sync::OnceLock;
@@ -28,6 +29,8 @@ pub struct DebugFlags {
     pub unres: bool,
     pub is_source: bool,
     pub static_trace: bool,
+    pub pts: bool,
+    pub mem: bool,
 }
 
 static FLAGS: OnceLock<DebugFlags> = OnceLock::new();
@@ -44,6 +47,8 @@ impl DebugFlags {
             unres: lookup("FRENSdbg_UNRES").is_some(),
             is_source: lookup("FRENSdbg_IS_SOURCE").is_some(),
             static_trace: lookup("FRENSdbg_STATIC").is_some(),
+            pts: lookup("FRENSdbg_PTS").is_some(),
+            mem: lookup("FRENSdbg_MEM").is_some(),
         });
     }
 
@@ -52,6 +57,24 @@ impl DebugFlags {
     pub fn get() -> Self {
         *FLAGS.get_or_init(DebugFlags::default)
     }
+}
+
+/// Resident set size of the current process, in KiB (0 when unreadable).
+///
+/// Used only by the `FRENSdbg_MEM` phase probes: memory attribution for a
+/// whole-program scan has to come from the process itself, since no external
+/// profiler can attach in a restricted-ptrace environment.
+#[must_use]
+pub fn rss_kb() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("VmRSS:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|p| p.parse::<u64>().ok())
+        })
+        .unwrap_or(0)
 }
 
 /// Trace helper: `dbg_trace!(flags.walk, "fmt args...")`.

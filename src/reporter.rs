@@ -43,7 +43,18 @@ impl Reporter {
 
     /// Generates a SARIF report for CI/CD integration.
     #[must_use]
-    pub fn to_sarif(advisories: &[Advisory], _root_path: &Path) -> serde_json::Value {
+    pub fn to_sarif(advisories: &[Advisory], root_path: &Path) -> serde_json::Value {
+        Self::to_sarif_detailed(advisories, root_path, None, &[])
+    }
+
+    /// Generates a SARIF report with invocations and execution telemetry.
+    #[must_use]
+    pub fn to_sarif_detailed(
+        advisories: &[Advisory],
+        _root_path: &Path,
+        telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+        incomplete: &[frensense_engine::scan::IncompleteFunction],
+    ) -> serde_json::Value {
         // One SARIF rule per stable rule id (never per message): code
         // scanning groups, suppresses and trends findings by it.
         let mut rule_ids: Vec<String> = Vec::new();
@@ -101,6 +112,57 @@ impl Reporter {
         }
         let rules_list: Vec<_> = rules_map.into_values().collect();
 
+        let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
+        let telem = telemetry.unwrap_or(&empty_telem);
+        let is_complete = telem.is_complete() && incomplete.is_empty();
+
+        let mut notifications = Vec::new();
+        for inc in incomplete {
+            notifications.push(serde_json::json!({
+                "message": {
+                    "text": format!("Function `{}` in `{}` exceeded work budget and was analyzed in degraded form", inc.function, inc.file)
+                },
+                "level": "warning"
+            }));
+        }
+        for cap in &telem.caps {
+            notifications.push(serde_json::json!({
+                "message": {
+                    "text": format!("Safety cap `{}` hit {} time(s): {}", cap.cap, cap.hits, cap.effect)
+                },
+                "level": "warning"
+            }));
+        }
+        for file in &telem.input.parse_partial_files {
+            notifications.push(serde_json::json!({
+                "message": {
+                    "text": format!("File `{}` had parse tree syntax errors and was partially analyzed", file)
+                },
+                "level": "warning"
+            }));
+        }
+        for check in &telem.checks {
+            if let frensense_engine::telemetry::CheckOutcome::Panicked(msg) = &check.outcome {
+                notifications.push(serde_json::json!({
+                    "message": {
+                        "text": format!("Check `{}` panicked: {}", check.id, msg)
+                    },
+                    "level": "error"
+                }));
+            }
+        }
+        for error in &telem.errors {
+            notifications.push(serde_json::json!({
+                "message": { "text": error },
+                "level": "error"
+            }));
+        }
+
+        let invocations = serde_json::json!([{
+            "executionSuccessful": is_complete,
+            "toolExecutionNotifications": notifications,
+        }]);
+
         serde_json::json!({
             "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
             "version": "2.1.0",
@@ -120,6 +182,7 @@ impl Reporter {
                         "rules": rules_list
                     }
                 },
+                "invocations": invocations,
                 "results": advisories.iter().map(|adv| {
                     serde_json::json!({
                         "ruleId": adv.rule_id(),

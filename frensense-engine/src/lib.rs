@@ -52,6 +52,7 @@ mod probes;
 #[cfg(test)]
 mod regression_gate_tests;
 pub mod scan;
+pub mod telemetry;
 #[cfg(test)]
 mod type_source_tests;
 

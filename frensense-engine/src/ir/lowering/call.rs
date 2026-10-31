@@ -103,11 +103,26 @@ impl<'a> LoweringContext<'a> {
                     dest: Some(dest),
                     mem_out: self.memory_var, // Generates new memory state
                     mem_in: self.memory_var,
-                    func: func_name,
+                    func: func_name.clone(),
                     args,
                     arg_names,
                 },
             );
+            // `exit(1)` / `abort()` end the path: control never reaches the
+            // join after the `if`. Without this the failure branch of
+            // `if (!p) { exit(1); }` flowed back into the loop or the code
+            // below, so an allocation looked live on a path that cannot exist.
+            // `Throw` is the existing "path ends abnormally, no successors".
+            if matches!(self.spec.name(), "c" | "cpp")
+                && crate::checks::noreturn::is_noreturn(&func_name)
+            {
+                self.ir.set_terminator(
+                    self.current_block,
+                    Terminator::Throw {
+                        src: Operand::Unknown,
+                    },
+                );
+            }
         } else if let Some(LValue::Field { base, field }) = self.visit_lvalue(callee_node) {
             self.ir.push_instruction(
                 self.current_block,

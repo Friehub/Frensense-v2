@@ -104,6 +104,15 @@ impl<'a> LoweringContext<'a> {
             return Some(rhs_op);
         }
         let lval = self.visit_lvalue(left_node);
+        // The value of an assignment expression is the assigned variable:
+        // `if (!(p = malloc(n)))`, `while ((c = next()) != EOF)`,
+        // `a = b = c`. It used to be Unknown, so a condition over an
+        // assignment hid its operand and null-guard proofs never matched
+        // (the leak check reported the failed-allocation path as a leak).
+        let result = match &lval {
+            Some(LValue::Variable(dest)) => Some(Operand::Var(*dest)),
+            _ => None,
+        };
 
         match lval {
             Some(LValue::Variable(dest)) => match &compound {
@@ -213,6 +222,6 @@ impl<'a> LoweringContext<'a> {
             }
             None => {}
         }
-        None
+        result
     }
 }

@@ -308,7 +308,6 @@ def test(request):
     }
 
     #[test]
-    #[ignore = "Blind spot: C strcpy destination buffer taint propagation"]
     fn probe_21_c_pointer_strcpy_sink() {
         let src = r#"
             #include <stdlib.h>
@@ -1175,5 +1174,321 @@ def view_handler(request):
         "#;
         let res = scan_ts(src);
         assert_detected(&res, "probe_tp2", "query");
+    }
+}
+
+// ============================================================================
+// Robustness regressions: scans that must terminate
+// ============================================================================
+
+mod robustness_regressions {
+    use super::*;
+
+    /// Python's `try`/`except` lowering inside a loop region can emit a cycle
+    /// of `Assign` instructions. The member-path walk used to restart its
+    /// depth budget on every `Assign`, so that cycle recursed without bound
+    /// and aborted the process with a stack overflow (reported on
+    /// healthchecks `hc/api/views.py`, 948 lines). The walk must terminate.
+    #[test]
+    fn assign_cycle_in_member_path_walk_terminates() {
+        let src = r#"
+def bounces(request):
+    try:
+        unsigned = unsign_bounce_id(to_local, max_age=3600 * 48)
+    except BadSignature:
+        return HttpResponse("OK (bad signature)")
+    for part in msg.walk():
+        if "Status" in part and "Action" in part:
+            if diagnostic.lower().startswith("smtp; "):
+                diagnostic = diagnostic[6:]
+        try:
+            n = Notification.objects.get(code=notification_code, created__gt=cutoff)
+        except Notification.DoesNotExist:
+            return HttpResponse("OK (notification not found)")
+"#;
+        // Reaching the assertion at all is the regression check: the run that
+        // aborts on stack overflow never returns from `scan_py`.
+        let _ = scan_py(src);
+    }
+}
+
+// ============================================================================
+// Receiver origin probes: a package-scoped fact must survive the shapes real
+// code uses to reach the call, not just `pkg.method(..)` written on the import.
+// ============================================================================
+mod receiver_origin_probes {
+    use super::*;
+    use crate::analysis::taint::config::TaintConfig;
+    use crate::analysis::taint::facts::{FactTable, LearnedFactEntry};
+
+    /// Production tables plus one package-scoped sink fact.
+    fn scoped(package: &str, call: &str) -> (TaintConfig, FactTable) {
+        let (config, mut facts) = seeded_tables_all();
+        LearnedFactEntry::Sink {
+            call: call.into(),
+            package: Some(package.into()),
+            dangerous_args: Default::default(),
+            binding_args_safe: false,
+        }
+        .apply(&mut facts);
+        (config, facts)
+    }
+
+    fn scan_js_with(src: &str, (config, facts): &(TaintConfig, FactTable)) -> ScanResult {
+        let files = vec![(
+            "app/probe.js".to_string(),
+            src.to_string(),
+            "js".to_string(),
+        )];
+        scan(&files, config, facts)
+    }
+
+    fn reaches(res: &ScanResult, sink: &str) -> bool {
+        res.located
+            .iter()
+            .any(|l| l.finding.sink == sink && l.finding.verdict == BackwardVerdict::Vulnerable)
+    }
+
+    #[test]
+    fn call_written_on_the_import_arms() {
+        let src = r#"
+            const unzipper = require("unzipper");
+            exports.h = function (req, res) {
+                unzipper.extract(req.body.dest, req.body.data);
+                res.send("ok");
+            };
+        "#;
+        assert!(reaches(
+            &scan_js_with(src, &scoped("unzipper", "extract")),
+            "extract"
+        ));
+    }
+
+    #[test]
+    fn receiver_unwrapped_from_a_namespace_member_arms() {
+        // `directory` is not an import, and the producing call is a member of
+        // one: provenance has to walk back through the call's receiver.
+        let src = r#"
+            const unzipper = require("unzipper");
+            exports.h = async function (req, res) {
+                const directory = await unzipper.Open.buffer(req.body.data);
+                await directory.extract(req.body.dest);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped("unzipper", "extract")),
+                "extract"
+            ),
+            "a namespace member call must carry the package origin to its result"
+        );
+    }
+
+    #[test]
+    fn local_alias_of_the_import_arms() {
+        let src = r#"
+            const unzipper = require("unzipper");
+            exports.h = function (req, res) {
+                const zip = unzipper;
+                zip.extract(req.body.dest, req.body.data);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped("unzipper", "extract")),
+                "extract"
+            ),
+            "an alias of the imported namespace is the same origin"
+        );
+    }
+
+    #[test]
+    fn constructor_result_keeps_the_package_origin() {
+        // The receiver slot is clean here (the tainted value is an argument),
+        // so this isolates origin resolution from receiver-taint propagation.
+        let src = r#"
+            const AdmZip = require("adm-zip");
+            exports.h = function (req, res) {
+                const zip = new AdmZip(req.files.importFile.data);
+                zip.extractAllTo(req.body.dest, true);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped("adm-zip", "extractAllTo")),
+                "extractAllTo"
+            ),
+            "`new Package(...)` is the package origin's canonical shape"
+        );
+    }
+
+    #[test]
+    fn module_level_alias_of_the_import_arms() {
+        // `const zip = unzipper;` at file scope lowers into the binding's own
+        // pseudo-function. Without an assignment recorded there the origin
+        // walk has no producer edge to follow and the scoped fact stays inert
+        // for the whole module.
+        let src = r#"
+            const unzipper = require("unzipper");
+            const zip = unzipper;
+            exports.h = function (req, res) {
+                zip.extract(req.body.dest, req.body.data);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped("unzipper", "extract")),
+                "extract"
+            ),
+            "a module-level alias of the import is the same origin"
+        );
+    }
+
+    #[test]
+    fn constructor_arguments_taint_the_result() {
+        // The tainted value is only ever the constructor's ARGUMENT; the sink
+        // call's own arguments are literals, so the alert can only come from
+        // the result carrying the constructor's taint.
+        let src = r#"
+            const AdmZip = require("adm-zip");
+            exports.h = function (req, res) {
+                const zip = new AdmZip(req.files.importFile.data);
+                zip.extractAllTo("/var/data/imports", true);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped("adm-zip", "extractAllTo")),
+                "extractAllTo"
+            ),
+            "`new Package(taint)` hands the taint to everything the result reaches"
+        );
+    }
+
+    #[test]
+    fn constructor_with_a_clean_argument_stays_clean() {
+        let src = r#"
+            const AdmZip = require("adm-zip");
+            exports.h = function (req, res) {
+                const zip = new AdmZip(loadBundledArchive());
+                zip.extractAllTo("/var/data/imports", true);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            !reaches(
+                &scan_js_with(src, &scoped("adm-zip", "extractAllTo")),
+                "extractAllTo"
+            ),
+            "only a tainted constructor argument taints the result"
+        );
+    }
+
+    #[test]
+    fn decorated_sibling_is_a_taint_sink_not_just_a_policy_hit() {
+        // A held-out pair written against the `Async` sibling of the taught
+        // call: the policy checker already sees the mirror, the dataflow
+        // engine has to arm it too or the flow is reported as policy noise.
+        let src = r#"
+            const AdmZip = require("adm-zip");
+            exports.h = function (req, res) {
+                const zip = new AdmZip(req.files.importFile.data);
+                zip.extractAllToAsync("/var/data/imports", true, function (err) {
+                    res.send("ok");
+                });
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped("adm-zip", "extractAllTo")),
+                "extractAllToAsync"
+            ),
+            "a mirror sibling resolves to the same sink signature"
+        );
+    }
+
+    /// The shape a bundle actually publishes (a per-language slot fact)
+    /// installed the way the scanner installs it - through
+    /// [`apply_language_entries`], not `LearnedFactEntry::apply`, which
+    /// deliberately ignores language-keyed entries.
+    fn scoped_slots(language: &str, package: &str, call: &str) -> (TaintConfig, FactTable) {
+        let (mut config, mut facts) = seeded_tables_all();
+        let entries = vec![LearnedFactEntry::LanguageSinkSlots {
+            language: language.into(),
+            call: call.into(),
+            package: Some(package.into()),
+            dangerous_args: Default::default(),
+            binding_args_safe: false,
+        }];
+        crate::analysis::taint::facts::apply_language_entries(
+            &mut config,
+            &mut facts,
+            &entries,
+            &[language],
+        );
+        (config, facts)
+    }
+
+    #[test]
+    fn decorated_sibling_arms_a_language_slot_fact() {
+        let src = r#"
+            const AdmZip = require("adm-zip");
+            exports.h = function (req, res) {
+                const zip = new AdmZip(req.files.importFile.data);
+                zip.extractAllToAsync("/var/data/imports", true);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            reaches(
+                &scan_js_with(src, &scoped_slots("javascript", "adm-zip", "extractAllTo")),
+                "extractAllToAsync"
+            ),
+            "the mirror must resolve for the entry type bundles publish"
+        );
+    }
+
+    #[test]
+    fn an_unrelated_local_producer_does_not_arm() {
+        let src = r#"
+            const unzipper = require("unzipper");
+            function openLocal(data) { return data; }
+            exports.h = function (req, res) {
+                const directory = openLocal(req.body.data);
+                directory.extract(req.body.dest);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            !reaches(
+                &scan_js_with(src, &scoped("unzipper", "extract")),
+                "extract"
+            ),
+            "a local helper has no package origin; the scoped fact must stay inert"
+        );
+    }
+
+    #[test]
+    fn another_packages_result_does_not_arm() {
+        let src = r#"
+            const otherzip = require("other-zip");
+            exports.h = function (req, res) {
+                const directory = otherzip.open(req.body.data);
+                directory.extract(req.body.dest);
+                res.send("ok");
+            };
+        "#;
+        assert!(
+            !reaches(
+                &scan_js_with(src, &scoped("unzipper", "extract")),
+                "extract"
+            ),
+            "provenance is a package identity, not a call shape"
+        );
     }
 }
