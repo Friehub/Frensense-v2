@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793475794836,
+  "lastUpdate": 1793478018783,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -1202,6 +1202,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/58f43501cdc04bc312be912f119d9ef22df1ac90"
         },
         "date": 1793475793737,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 31,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 38.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 7.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 172,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 55,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "bff06b31be0d34957cb43ade4263be21282fb186",
+          "message": "Merge pull request #60 from Friehub/engine/package-scoped-facts\n\nbench: fix ENOENT in blindness benchmark after full-SHA pins",
+          "timestamp": "2026-10-31T21:19:33+01:00",
+          "tree_id": "b4f67435e6144e1751dfd99f9c53eddd22ef1d96",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/bff06b31be0d34957cb43ade4263be21282fb186"
+        },
+        "date": 1793478017887,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
