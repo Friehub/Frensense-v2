@@ -246,6 +246,17 @@ The engine computes `ScanTelemetry`, `ScanStatus` and per-check outcomes;
   injection) rather than dataflow gaps.
 
 #### Repository & Release Tooling
+- **CI no longer runs the blog provenance gate.** `scripts/blog_provenance.py
+  check --strict` resolves specific historical commits (for example `8a0ef9d`),
+  which `actions/checkout`'s shallow clone cannot see, so the `qa` job failed on
+  every PR while the same check passed locally ("blog provenance: all posts
+  equipped"). The script, the pre-deploy gate in `docs-deploy.yml`, the `make`
+  targets and the warn-only pre-commit hook are unchanged; a stale post is still
+  caught before the docs site deploys, it just no longer blocks Rust CI.
+- **Dropped the unused `Dockerfile` and `server.json`.** Neither was referenced
+  by any workflow, script or Makefile target, and the MCP registry manifest had
+  drifted to `0.7.1-beta`; removing them keeps the tracked tree to artifacts
+  something actually builds or publishes.
 - **Per-crate SemVer gate** (`scripts/semver-gate.py`): CI no longer answers
   "is the workspace semver-clean". It discovers the publishable crates from
   `cargo metadata` (`frensense`, `frensense-engine`, `frensense-lang`,
