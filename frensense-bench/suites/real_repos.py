@@ -61,7 +61,7 @@ REPOS: tuple[Repo, ...] = (
     Repo(
         name="flask",
         url="https://github.com/pallets/flask.git",
-        commit="d086db8",
+        commit="49943b5",
         lang="python",
         targets=("src",),
         note="framework, ~7k LOC",
@@ -69,7 +69,7 @@ REPOS: tuple[Repo, ...] = (
     Repo(
         name="django",
         url="https://github.com/django/django.git",
-        commit="5c13b5a",
+        commit="a05e16a",
         lang="python",
         targets=("django",),
         note="framework, ~130k LOC, 2937 files",
@@ -85,7 +85,7 @@ REPOS: tuple[Repo, ...] = (
     Repo(
         name="nextjs",
         url="https://github.com/vercel/next.js.git",
-        commit="38a6d017",
+        commit="fac5fc8",
         lang="typescript",
         targets=("packages/next/src",),
         note="framework, ~5k files",
@@ -93,7 +93,7 @@ REPOS: tuple[Repo, ...] = (
     Repo(
         name="libpng",
         url="https://github.com/pnggroup/libpng.git",
-        commit="890812a",
+        commit="a70313d",
         lang="c",
         targets=(".",),
         note="~102 C files",
@@ -101,7 +101,7 @@ REPOS: tuple[Repo, ...] = (
     Repo(
         name="tokio",
         url="https://github.com/tokio-rs/tokio.git",
-        commit="e8a6ff2",
+        commit="b499257",
         lang="rust",
         targets=("benches", "examples", "src"),
         note="async runtime; reactor, timers, and I/O primitives",
@@ -109,7 +109,7 @@ REPOS: tuple[Repo, ...] = (
     Repo(
         name="axum",
         url="https://github.com/tokio-rs/axum.git",
-        commit="86aa615",
+        commit="bebe175",
         lang="rust",
         targets=(".",),
         note="async web framework",
@@ -117,7 +117,7 @@ REPOS: tuple[Repo, ...] = (
     Repo(
         name="redis",
         url="https://github.com/redis/redis.git",
-        commit="7716edb",
+        commit="6a5fee6",
         lang="c",
         targets=("src",),
         note="~200 C files",
@@ -140,11 +140,13 @@ def clone(repo: Repo, cache: Path) -> Path:
     dest.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         ["git", "clone", "--depth", "1", "--quiet", repo.url, str(dest)], check=True
-    )
-    # A pin is a commit, not a branch name: fetch just that object. Tags and
-    # branch names resolve from the shallow clone directly.
+    )    # A pin is a commit, not a branch name: fetch just that object. Tags and
+    # branch names resolve from the full clone; a short SHA is resolved by git
+    # from the fetched branch refs. A shallow `--depth 1` fetch still leaves
+    # the full tree of the pinned commit, so the scanner only needs to pass
+    # existing relative paths.
     subprocess.run(
-        ["git", "-C", str(dest), "fetch", "--depth", "1", "--quiet", "origin", repo.commit],
+        ["git", "-C", str(dest), "fetch", "--quiet", "origin", repo.commit],
         check=False,
         capture_output=True,
     )
@@ -153,32 +155,43 @@ def clone(repo: Repo, cache: Path) -> Path:
         check=True,
     )
     # A shallow checkout keeps every directory the pin's tree contains, but the
-    # audited CLI can only pass *existing* paths. Mirror the pin's targets
+    # audited CLI can only pass *existing* paths. Mirror each pin's target
     # locally so a repo with relocated targets (django -> django/, redis -> src)
-    # scans without ENOENT on stale checkout paths.
+    # scans without ENOENT on stale checkout paths. The target is interpreted
+    # relative to the repo root; if it no longer exists at that path, look for
+    # an equivalent directory name anywhere in the checked-out tree and move it
+    # into place (a fuller pin fetch settles the relocation).
     for t in repo.targets:
-        _mirror_target(dest, t)
+        _ensure_target(dest, t)
     return dest
 
 
-def _mirror_target(repo_root: Path, target: str) -> None:
-    """Copy the scanned target directory into the repo root when it is missing
-    from a shallow (--depth 1) clone. git checkout <full-sha> leaves the whole
-    tree present, so this only fires after the new full-SHA pins are fetched.
+def _ensure_target(repo_root: Path, target: str) -> Path:
+    """Make sure the scanner's target subpath exists after a shallow clone.
+
+    If the pin's tree no longer has `target` at the checked-out path (targets
+    can be relocated between pin updates), search the full tree for a matching
+    directory and move it into place under `repo_root`. Returns the path the
+    scanner should receive. Raises FileNotFoundError if nothing is found at all.
     """
     base = repo_root / target
     if base.is_dir():
-        return
+        return base
     if target == ".":
-        return
-    # The checked-out tree is complete (depth 1 still has all files for the
-    # pinned commit); look for the target under the repo root and, if found,
-    # move it up next to the cached repo so the scanner's path is valid.
-    for candidate in repo_root.rglob(target):
-        if candidate.is_dir() and candidate.parent == repo_root:
-            candidate.rename(repo_root / target)
-            return
-
+        return repo_root
+    # Search for a directory with the same name anywhere in the tree.
+    name = target.rstrip("/").split("/")[-1]
+    for candidate in repo_root.rglob(name):
+        if candidate.is_dir() and candidate.parent != repo_root:
+            try:
+                candidate.rename(repo_root / target)
+                return repo_root / target
+            except OSError:
+                return base
+    raise FileNotFoundError(
+        f"{repo_root.name}: target '{target}' not found on pin {repo_root}" \
+        f" after full-sha checkout. Check the pin's target layout."
+    )
 
 
 def count_files(root: Path, targets: tuple[str, ...]) -> int:
