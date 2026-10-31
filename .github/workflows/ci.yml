@@ -183,30 +183,13 @@ jobs:
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
       - name: Install cargo-semver-checks
         run: cargo install cargo-semver-checks --locked
-      - name: Resolve SemVer baseline commit
-        id: baseline
-        # Pull requests compare against the base commit; pushes against the
-        # commit before the push (a multi-commit push must not be judged on its
-        # last commit alone). Both need real history, hence fetch-depth: 0.
-        run: |
-          BEFORE="${{ github.event.before }}"
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "ref=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
-          elif [[ -n "$BEFORE" && "$BEFORE" != "0000000000000000000000000000000000000000" ]]; then
-            echo "ref=$BEFORE" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=HEAD^" >> "$GITHUB_OUTPUT"
-          fi
       - name: Per-crate SemVer gate (every publishable crate)
-        # Frensense is one binary but four registry crates, each versioned
-        # independently: a break in one crate is absorbed by that crate's own
-        # bump, not by moving the workspace. A workspace-wide check cannot
-        # express that - worse, `check-release` skips every check while the
-        # middle number moved ("major change, 0 checks, 260 skip"), so the old
-        # gate was a no-op during a bump line. The script runs
-        # `check-release --release-type patch` per publishable crate and fails
-        # only when a crate broke its API without bumping itself.
-        run: python3 .github/scripts/semver-gate.py --base-ref "${{ steps.baseline.outputs.ref }}"
+        # Compares each publishable crate against its latest version on crates.io.
+        # Breaking changes are absorbed when the local version already represents
+        # a minor bump over the published version (0.7.x -> 0.8.0 absorbs all
+        # breaking changes in 0.8.0). This is the correct baseline: pre-release
+        # git SHAs on main are never published and must not be used as anchors.
+        run: python3 .github/scripts/semver-gate.py --published
 
   # --- Release Graph Validation ---
   release-graph:

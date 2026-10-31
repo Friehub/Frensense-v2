@@ -264,9 +264,9 @@ per-crate gate, used by `.github/scripts/local-ci.sh`, CI's `semver` job and the
 workflow:
 
 ```bash
-python3 .github/scripts/semver-gate.py --base-ref HEAD      # local: what did I break?
-python3 .github/scripts/semver-gate.py --base-ref HEAD^     # CI push
-python3 .github/scripts/semver-gate.py --published          # release pre-check
+python3 .github/scripts/semver-gate.py --base-ref HEAD      # local: what changed since last commit?
+python3 .github/scripts/semver-gate.py --published          # CI / PR gate: compare against crates.io
+python3 .github/scripts/semver-gate.py --published          # release pre-check (same command)
 ```
 
 It discovers the publishable crates from `cargo metadata` (`publish = false`

@@ -61,12 +61,31 @@ FAIL = "fail"
 ERROR = "error"
 
 VERSION_RE = re.compile(r'^\s*version\s*=\s*"([^"]+)"', re.MULTILINE)
+# cargo-semver-checks embeds the registry cache path in failure output, e.g.:
+#   .cargo/registry/src/.../frensense-engine-0.7.0/src/...
+# Parse that to recover the actual published version being compared against.
+PUBLISHED_VERSION_RE = re.compile(
+    r"/(?:frensense(?:-[a-z]+)?)-(\d+\.\d+\.\d+[^/\s]*)/src/"
+)
+
 
 
 def run(cmd: list[str], check: bool = False) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd, cwd=ROOT, capture_output=True, text=True, check=check
     )
+
+
+def published_baseline_version(output: str) -> str | None:
+    """Extract the published version from cargo-semver-checks failure output.
+
+    The tool embeds the registry cache path in failure messages, e.g.:
+      ~/.cargo/registry/src/.../frensense-engine-0.7.0/src/registry.rs
+    Parse the first match to recover the version that was compared against.
+    """
+    m = PUBLISHED_VERSION_RE.search(output)
+    return m.group(1) if m else None
+
 
 
 def cargo_metadata() -> dict:
@@ -315,13 +334,25 @@ def main() -> int:
             row["verdict"] = ERROR
             row["detail"] = "crate failed to build or document; not a SemVer signal"
         elif args.published:
-            # Against the published baseline, a residual failure means the
-            # manifest version does not cover the change that is about to ship.
-            row["verdict"] = FAIL
-            row["detail"] = (
-                f"version {row['version']} does not cover the public-API change; "
-                f"bump {row['name']} before publishing"
-            )
+            # Against the published baseline, failures are absorbed if the
+            # current version already represents a breaking bump over whatever
+            # is on the registry.  Extract the published version from the
+            # cargo-semver-checks output (it embeds the registry cache path).
+            pub_ver = published_baseline_version(row["output"])
+            row["base_version"] = pub_ver
+            if pub_ver and is_breaking_bump(pub_ver, row["version"]):
+                row["verdict"] = ABSORBED
+                row["detail"] = (
+                    f"breaking change absorbed by published {pub_ver} "
+                    f"-> {row['version']}"
+                )
+            else:
+                row["verdict"] = FAIL
+                row["detail"] = (
+                    f"version {row['version']} does not cover the public-API "
+                    f"change vs published {pub_ver or 'unknown'}; bump "
+                    f"{row['name']} before publishing"
+                )
         elif base_version and is_breaking_bump(base_version, row["version"]):
             row["verdict"] = ABSORBED
             row["detail"] = f"breaking change absorbed by {base_version} -> {row['version']}"

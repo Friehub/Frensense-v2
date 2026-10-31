@@ -19,6 +19,19 @@ Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
 
+## [Unreleased]
+
+#### Repository & Release Tooling
+- **semver-gate: fix published-mode absorbed detection.** The `--published`
+  gate now correctly marks a crate `absorbed` when the local version already
+  represents a minor bump over the crates.io baseline (e.g. `0.7.0 -> 0.8.0`
+  absorbs every breaking change in `0.8.0`). Previously the gate always marked
+  such crates `FAIL`, causing spurious failures on every PR branch that
+  introduced breaking changes alongside an appropriate version bump. CI now
+  uses `--published` instead of `--base-ref <PR-base-sha>` so the comparison
+  is always anchored to the last actually-published version, not to an
+  unpublished pre-release commit on `main`.
+
 ## [0.8.0] - 2026-10-30
 
 ### Breaking
