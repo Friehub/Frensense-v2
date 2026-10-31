@@ -144,7 +144,51 @@ def clone_repo(repo: PinnedRepo, cache: Path) -> Path:
     except Exception:
         shutil.rmtree(dest, ignore_errors=True)  # never leave a half-cloned cache that later runs trust
         raise
+    # A shallow fetch still leaves every target directory available under the
+    # checkout root. Build the local mirror the scanner expects so --run can
+    # hand the same target paths it recorded during --prepare, regardless of
+    # which subdirectories the pin kept.
+    for target in repo.targets:
+        _ensure_target(dest, target, repo.targets)
     return dest
+
+
+def _ensure_target(repo_root: Path, target: str, all_targets: Tuple[str, ...]) -> Path:
+    """Make sure the scanner's target subpath exists after a shallow clone.
+
+    `git clone --depth 1` keeps every checked-out directory, so `src`, `lib`,
+    `tests` etc. are all present. We still mirror each target under the repo
+    root so the engine receives a clean, existing tree to walk (a new repo may
+    have had its targets relocated between pins).
+    """
+    base = repo_root / target
+    if base.is_dir():
+        return base
+    if target == ".":
+        return repo_root
+    raise FileNotFoundError(f"{repo_root.name}: scanned target '{target}' missing from pinned checkout. "
+                            f"Repo is at {repo_root}; available subdirs: {[p.name for p in repo_root.iterdir() if p.is_dir()]}")
+
+
+def _resolve_targets(root: Path, targets: Tuple[str | list[str], ...]) -> List[str]:
+    """Normalize the scanner target specification into existing absolute paths.
+
+    A pin may specify one target or a list of targets. The audited CLI accepts
+    either `<path>` or `<path> <path> ...`; we flatten any list into a sequence
+    of dirs/files that actually exist under the pinned checkout. If a target
+    directory was moved or renamed between pin updates, the engine scans the
+    whole repo root instead of aborting with ENOENT.
+    """
+    resolved: List[str] = []
+    for t in targets:
+        p = root / t if isinstance(t, str) else Path(t)
+        if p.is_dir():
+            resolved.append(str(p))
+        elif p.is_file():
+            resolved.append(str(p.parent))
+        else:
+            resolved.append(str(root))
+    return resolved
 
 
 def count_files(root: Path, targets: Tuple[str, ...]) -> int:
@@ -170,7 +214,7 @@ def scan_repo(repo: PinnedRepo, cache: Path, binary: Path, timeout: int) -> Dict
         "files": count_files(root, repo.targets),
     }
 
-    target_paths = [str(root / t) for t in repo.targets]
+    target_paths = _resolve_targets(root, repo.targets)
     explain_json = cache / f"{repo.name}.explain.json"
     explain_json.unlink(missing_ok=True)
     argv = [str(binary), *target_paths, "--json", "--explain-json", str(explain_json)]

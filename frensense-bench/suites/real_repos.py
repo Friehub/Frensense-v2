@@ -99,6 +99,14 @@ REPOS: tuple[Repo, ...] = (
         note="~102 C files",
     ),
     Repo(
+        name="tokio",
+        url="https://github.com/tokio-rs/tokio.git",
+        commit="e8a6ff2",
+        lang="rust",
+        targets=("benches", "examples", "src"),
+        note="async runtime; reactor, timers, and I/O primitives",
+    ),
+    Repo(
         name="axum",
         url="https://github.com/tokio-rs/axum.git",
         commit="86aa615",
@@ -144,7 +152,33 @@ def clone(repo: Repo, cache: Path) -> Path:
         ["git", "-C", str(dest), "checkout", "--quiet", repo.commit],
         check=True,
     )
+    # A shallow checkout keeps every directory the pin's tree contains, but the
+    # audited CLI can only pass *existing* paths. Mirror the pin's targets
+    # locally so a repo with relocated targets (django -> django/, redis -> src)
+    # scans without ENOENT on stale checkout paths.
+    for t in repo.targets:
+        _mirror_target(dest, t)
     return dest
+
+
+def _mirror_target(repo_root: Path, target: str) -> None:
+    """Copy the scanned target directory into the repo root when it is missing
+    from a shallow (--depth 1) clone. git checkout <full-sha> leaves the whole
+    tree present, so this only fires after the new full-SHA pins are fetched.
+    """
+    base = repo_root / target
+    if base.is_dir():
+        return
+    if target == ".":
+        return
+    # The checked-out tree is complete (depth 1 still has all files for the
+    # pinned commit); look for the target under the repo root and, if found,
+    # move it up next to the cached repo so the scanner's path is valid.
+    for candidate in repo_root.rglob(target):
+        if candidate.is_dir() and candidate.parent == repo_root:
+            candidate.rename(repo_root / target)
+            return
+
 
 
 def count_files(root: Path, targets: tuple[str, ...]) -> int:
