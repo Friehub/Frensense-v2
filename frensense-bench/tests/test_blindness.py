@@ -492,5 +492,27 @@ class RealReposSelectionTest(unittest.TestCase):
         self.assertEqual(raised.exception.code, 2)
 
 
+
+class BoardDocTests(unittest.TestCase):
+    def test_board_is_slim_and_self_contained(self):
+        from suites.blindness_challenges import board_doc, group_challenges, BOARD_SINK_LIMIT
+        site = {"kind": "external-call", "detail": "os.system", "function": "run", "file": "a.py", "line": 3}
+        items = [
+            {"id": f"BL-{i:010d}", "repo": "r", "lang": "python", "file": "a.py", "line": 10 + i, "function": "run",
+             "sink": "exec", "slot": 0, "track": "Library call", "difficulty": "easy", "hint": "h", "reason": "x",
+             "stop_sites": [site], "repro": "frensense a.py --explain", "engine_pointer": "p", "pin": {"url": "u.git", "commit": "abc"}}
+            for i in range(BOARD_SINK_LIMIT + 5)
+        ]
+        doc = board_doc(group_challenges(items), "c1", {"solved": ["x"], "new": []}, {})
+        self.assertEqual(doc["sinks"], BOARD_SINK_LIMIT + 5)
+        self.assertEqual((doc["solved"], doc["new"]), (1, 0))
+        g = doc["groups"][0]
+        self.assertEqual(g["impact"], BOARD_SINK_LIMIT + 5)
+        self.assertEqual(len(g["sinks"]), BOARD_SINK_LIMIT)
+        self.assertEqual(g["pin"]["url"], "u")
+        self.assertEqual(g["code"], [])
+        json.dumps(doc)
+
+
 if __name__ == "__main__":
     unittest.main()

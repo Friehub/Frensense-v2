@@ -299,7 +299,7 @@ def title_for(g: Dict[str, Any]) -> str:
         "global": f"Global read: {d}",
         "pointer-deref": "Value read through a pointer",
         "indirect-call": "Call through a function value",
-    }.get(g["kind"], "Engine stopped here")
+    }.get(g["kind"], g["track"] or "Engine stopped here")
 
 
 def windows(repo_root: Optional[Path], marks: List[Dict[str, Any]], radius: int = 2) -> List[Dict[str, Any]]:
@@ -352,6 +352,60 @@ def render_markdown(groups: List[Dict[str, Any]], delta: Optional[Dict[str, List
     for g in groups[:10]:
         lines.append(f"- `{g['id']}` {g['repo']}: {title_for(g)} (unblocks {g['impact']}, {g['difficulty']})")
     return "\n".join(lines) + "\n"
+
+
+BOARD_SINK_LIMIT = 40
+
+
+def board_group(g: Dict[str, Any], roots: Dict[str, Path]) -> Dict[str, Any]:
+    """One challenge as the docs-site board shows it: self-contained, no repo checkout needed to render."""
+    rep = g["members"][0]
+    rs = rep["stop_sites"][0] if rep["stop_sites"] else {"file": "", "line": 0, "function": ""}
+    marks = [
+        {"file": rs["file"], "line": rs["line"], "label": "stop"},
+        {"file": rep["file"], "line": rep["line"], "label": "sink"},
+    ]
+    n = g["impact"]
+    what = g["detail"] or g["kind"].replace("-", " ")
+    where = f" in {rs['function']}()" if rs.get("function") else ""
+    if rep.get("kind", "unknown") == "unknown":
+        summary = f"The engine could not see through {what}{where}, so {n} sink{'s' if n != 1 else ''} stay{'s' if n == 1 else ''} unknown."
+    else:
+        summary = rep.get("reason") or g["hint"]
+    pin = g.get("pin") or {}
+    return {
+        "id": g["id"],
+        "title": title_for(g),
+        "repo": g["repo"],
+        "lang": g["lang"],
+        "kind": g["kind"],
+        "track": g["track"],
+        "difficulty": g["difficulty"],
+        "impact": n,
+        "summary": summary,
+        "hint": g["hint"],
+        "pointer": g.get("engine_pointer", ""),
+        "repro": rep["repro"],
+        "pin": {"url": (pin.get("url") or "").removesuffix(".git"), "commit": pin.get("commit", "")},
+        "fix_added": rep.get("fix_added") or [],
+        "code": windows(roots.get(g["repo"]), marks),
+        "sinks": [
+            {"id": m["id"], "sink": m["sink"], "file": m["file"], "line": m["line"]}
+            for m in g["members"][:BOARD_SINK_LIMIT]
+        ],
+    }
+
+
+def board_doc(groups: List[Dict[str, Any]], commit: str, delta: Optional[Dict[str, List[str]]], roots: Dict[str, Path]) -> Dict[str, Any]:
+    """The slim, render-ready document the docs-site challenge board loads (challenges.json stays the full record)."""
+    return {
+        "schema": 1,
+        "commit": commit,
+        "sinks": sum(g["impact"] for g in groups),
+        "solved": len(delta["solved"]) if delta else None,
+        "new": len(delta["new"]) if delta else None,
+        "groups": [board_group(g, roots) for g in groups],
+    }
 
 
 _CSS = """
@@ -599,6 +653,7 @@ def write_outputs(
         "delta": delta,
     }
     (out_dir / "challenges.json").write_text(json.dumps(doc, indent=2))
+    (out_dir / "board.json").write_text(json.dumps(board_doc(groups, commit, delta, roots or {}), separators=(",", ":")))
     (out_dir / "challenges.html").write_text(render_html(groups, commit, delta, roots, profile))
     md = render_markdown(groups, delta)
     (out_dir / "challenges.md").write_text(md)

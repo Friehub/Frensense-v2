@@ -231,6 +231,7 @@ export default defineConfig({
       { text: 'Architecture', link: '/architecture/', activeMatch: '/architecture/' },
       { text: 'Corpus', link: '/corpus/', activeMatch: '/corpus/' },
       { text: 'Bundles', link: '/bundles', activeMatch: '/bundles' },
+      { text: 'Challenges', link: '/challenges', activeMatch: '/challenges' },
       { text: 'Blog', link: '/blog/', activeMatch: '/blog/' },
       { text: 'Changelog', link: '/changelog', activeMatch: '/changelog' },
       {
@@ -276,7 +277,8 @@ export default defineConfig({
             { text: 'The program graph', link: '/architecture/program-graph' },
             { text: 'Checkers', link: '/architecture/checkers' },
             { text: 'Knowledge bundles (.frc)', link: '/architecture/bundles' },
-            { text: 'Engine blindness & capabilities', link: '/architecture/blindness' }
+            { text: 'Engine blindness & capabilities', link: '/architecture/blindness' },
+            { text: 'Blindness challenges', link: '/challenges' }
           ]
         }
       ],
