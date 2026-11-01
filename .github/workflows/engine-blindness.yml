@@ -100,6 +100,7 @@ jobs:
             target/blindness/blindness_history.json
             target/blindness/blindness_report.json
             target/blindness/challenges.json
+            target/blindness/board.json
             target/blindness/challenges.html
             target/blindness/challenges.md
 
@@ -114,14 +115,16 @@ jobs:
           comment-on-alert: true
           fail-on-alert: false
 
-      - name: Publish challenge cards to GitHub Pages
+      - name: Stage challenge data for GitHub Pages
         if: github.ref == 'refs/heads/main'
         run: |
           mkdir -p blindness-site
-          cp target/blindness/challenges.html blindness-site/index.html
+          # The board page lives in the docs site (/challenges) and loads board.json from here.
+          # No index.html: the docs deploy owns the site pages.
+          cp target/blindness/board.json blindness-site/board.json
           cp target/blindness/challenges.json blindness-site/challenges.json
 
-      - name: Deploy challenge cards (gh-pages /blindness)
+      - name: Deploy challenge data (gh-pages /blindness)
         if: github.ref == 'refs/heads/main'
         uses: peaceiris/actions-gh-pages@329bcc8f12caed2cefe5a5b80781499a6f3b361b # v4.0.0
         with:

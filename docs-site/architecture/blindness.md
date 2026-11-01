@@ -58,7 +58,7 @@ When a cap fires, the engine remains sound and safe, but may miss a deeper taint
 ## Memory & Capability Profile
 
 Blind spots are only half of a benchmark: a scan that stops early because it
-ran out of memory is not *more* precise, it is truncated. The challenge page
+ran out of memory is not *more* precise, it is truncated. The [challenge board](/challenges)
 therefore carries a profile band above the cards with, per repository:
 
 - **peak RSS** and **RSS per scanned file** — the number that turns "redis needs 2.5 GB" into a line item,
@@ -151,5 +151,6 @@ Results are saved to:
 - `target/blindness/blindness_card.md` (Markdown summary)
 - `target/blindness/blindness_sheet.csv` (Spreadsheet format)
 - `target/blindness/blindness_history.json` (Commit history time-series)
-- `target/blindness/challenges.html` (the contributor-facing blind-spot cards and memory profile)
+- `target/blindness/board.json` (the slim document the [challenge board](/challenges) loads)
+- `target/blindness/challenges.html` (standalone copy of the cards and memory profile)
 - `target/blindness/challenges.json` (the same cards, machine-readable; `--baseline` diffs against it)
