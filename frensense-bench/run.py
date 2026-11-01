@@ -56,7 +56,7 @@ def run_cve(extra_args=None) -> bool:
     cve_script = SUITES_DIR / "cve.py"
     cmd = [sys.executable, str(cve_script)] + (extra_args or [])
     res = subprocess.run(cmd, cwd=ROOT)
-    return res.returncode == 0
+    return res.returncode
 
 
 def run_owasp(workers=8, publish_gist=False, extra_args=None) -> bool:
@@ -92,7 +92,7 @@ def run_owasp(workers=8, publish_gist=False, extra_args=None) -> bool:
         cmd.extend(extra_args)
 
     res = subprocess.run(cmd, cwd=ROOT)
-    return res.returncode == 0
+    return res.returncode
 
 
 def run_real_repos(extra_args=None) -> bool:
@@ -102,7 +102,7 @@ def run_real_repos(extra_args=None) -> bool:
     script = SUITES_DIR / "real_repos.py"
     cmd = [sys.executable, str(script)] + (extra_args or [])
     res = subprocess.run(cmd, cwd=ROOT)
-    return res.returncode == 0
+    return res.returncode
 
 
 def run_correctness(extra_args=None) -> bool:
@@ -112,7 +112,7 @@ def run_correctness(extra_args=None) -> bool:
     script = SUITES_DIR / "correctness.py"
     cmd = [sys.executable, str(script)] + (extra_args or [])
     res = subprocess.run(cmd, cwd=ROOT)
-    return res.returncode == 0
+    return res.returncode
 
 
 def run_juice_shop(extra_args=None) -> bool:
@@ -122,7 +122,7 @@ def run_juice_shop(extra_args=None) -> bool:
     script = SUITES_DIR / "juice_shop.py"
     cmd = [sys.executable, str(script)] + (extra_args or [])
     res = subprocess.run(cmd, cwd=ROOT)
-    return res.returncode == 0
+    return res.returncode
 
 
 def run_scale(extra_args=None) -> bool:
@@ -132,7 +132,7 @@ def run_scale(extra_args=None) -> bool:
     script = SUITES_DIR / "scale.py"
     cmd = [sys.executable, str(script)] + (extra_args or [])
     res = subprocess.run(cmd, cwd=ROOT)
-    return res.returncode == 0
+    return res.returncode
 
 
 def run_mutation(extra_args=None) -> bool:
@@ -142,7 +142,7 @@ def run_mutation(extra_args=None) -> bool:
     script = SUITES_DIR / "mutation_ladder.py"
     cmd = [sys.executable, str(script)] + (extra_args or [])
     res = subprocess.run(cmd, cwd=ROOT)
-    return res.returncode == 0
+    return res.returncode
 
 
 def run_rules(extra_args=None) -> bool:
@@ -152,7 +152,7 @@ def run_rules(extra_args=None) -> bool:
     script = SUITES_DIR / "rules.py"
     cmd = [sys.executable, str(script)] + (extra_args or [])
     res = subprocess.run(cmd, cwd=ROOT)
-    return res.returncode == 0
+    return res.returncode
 
 
 def run_blindness(extra_args=None) -> bool:
@@ -162,7 +162,7 @@ def run_blindness(extra_args=None) -> bool:
     script = SUITES_DIR / "blindness.py"
     cmd = [sys.executable, str(script)] + (extra_args or [])
     res = subprocess.run(cmd, cwd=ROOT)
-    return res.returncode == 0
+    return res.returncode
 
 
 def main():
@@ -190,48 +190,42 @@ def main():
 
     args, extra = parser.parse_known_args()
 
-    success = True
+    # Exit codes are forwarded, not collapsed to 1: the blindness suite uses 3
+    # for "a scan failed or timed out" and 4 for "a scan exceeded --max-rss-mb",
+    # and a CI log that only says 1 loses the difference between the two.
+    codes = []
     if args.suite in ("cve", "all"):
-        if not run_cve(extra):
-            success = False
+        codes.append(run_cve(extra))
 
     if args.suite in ("owasp", "all"):
-        if not run_owasp(workers=args.workers, publish_gist=args.publish_gist, extra_args=extra):
-            success = False
+        codes.append(run_owasp(workers=args.workers, publish_gist=args.publish_gist, extra_args=extra))
 
     if args.suite == "real-repos":
-        if not run_real_repos(extra):
-            success = False
+        codes.append(run_real_repos(extra))
 
     if args.suite == "blindness":
-        if not run_blindness(extra):
-            success = False
+        codes.append(run_blindness(extra))
 
     if args.suite == "correctness":
-        if not run_correctness(extra):
-            success = False
+        codes.append(run_correctness(extra))
 
     if args.suite == "juice-shop":
-        if not run_juice_shop(extra):
-            success = False
+        codes.append(run_juice_shop(extra))
 
     if args.suite == "scale":
-        if not run_scale(extra):
-            success = False
+        codes.append(run_scale(extra))
 
     if args.suite == "mutation":
-        if not run_mutation(extra):
-            success = False
+        codes.append(run_mutation(extra))
 
     if args.suite == "rules":
-        if not run_rules(extra):
-            success = False
+        codes.append(run_rules(extra))
 
-    if not success:
+    failed = [c for c in codes if c]
+    if failed:
         print("\n[ERROR] Benchmark run completed with one or more failures.", file=sys.stderr)
-        sys.exit(1)
-    else:
-        print("\n[SUCCESS] Benchmark suite(s) completed successfully.")
+        sys.exit(max(failed))
+    print("\n[SUCCESS] Benchmark suite(s) completed successfully.")
 
 
 if __name__ == "__main__":

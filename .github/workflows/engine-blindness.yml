@@ -10,6 +10,11 @@ on:
       - 'src/**'
       - 'frensense-bench/**'
   workflow_dispatch:
+    inputs:
+      timeout:
+        description: 'Seconds allowed per scan (blank = 1800, 0 = no limit). A scan that times out fails the run.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -24,6 +29,8 @@ jobs:
   blindness:
     name: Profile Engine Capability and Blindness
     runs-on: ubuntu-latest
+    # GitHub's own default is 360 minutes; say it so a runaway scan is bounded on purpose.
+    timeout-minutes: 240
 
     steps:
       - name: Harden Runner
@@ -54,12 +61,15 @@ jobs:
             -o target/blindness/previous_challenges.json || rm -f target/blindness/previous_challenges.json
 
       - name: Run Engine Blindness Benchmark
+        env:
+          # Blank on push events: the script falls back to its 1800s default.
+          FRENSENSE_BLINDNESS_TIMEOUT: ${{ inputs.timeout }}
         run: |
           BASELINE=""
           if [ -f target/blindness/previous_challenges.json ]; then
             BASELINE="--baseline target/blindness/previous_challenges.json"
           fi
-          python3 frensense-bench/run.py --suite blindness --prepare --run --ci-summary $BASELINE
+          python3 frensense-bench/run.py --suite blindness --prepare --run --ci-summary --max-rss-mb 1024 $BASELINE
 
       - name: Format Benchmark Action Results
         run: |
@@ -91,6 +101,7 @@ jobs:
             target/blindness/blindness_report.json
             target/blindness/challenges.json
             target/blindness/challenges.html
+            target/blindness/challenges.md
 
       - name: Store and Publish Blindness Time-Series
         uses: benchmark-action/github-action-benchmark@d48d326b4ca9ba73ca0cd0d59f108f9e02a381c7 # v1.20.4

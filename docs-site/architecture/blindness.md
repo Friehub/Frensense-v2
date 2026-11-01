@@ -55,6 +55,30 @@ When a cap fires, the engine remains sound and safe, but may miss a deeper taint
 
 ---
 
+## Memory & Capability Profile
+
+Blind spots are only half of a benchmark: a scan that stops early because it
+ran out of memory is not *more* precise, it is truncated. The challenge page
+therefore carries a profile band above the cards with, per repository:
+
+- **peak RSS** and **RSS per scanned file** — the number that turns "redis needs 2.5 GB" into a line item,
+- scanned files, analysed functions, explored / unknown sinks, truncation caps, wall time,
+- the engine-reported **phase totals** (lower, graph, taint, checks) and the binary identity (`frensense 0.8.0 · engine 0.8.0`).
+
+Peak RSS is the high-water mark of the scan process (`/usr/bin/time %M`), sampled
+per repository (per case for a `--synthetic` suite). To make it a gate rather
+than an observation:
+
+```bash
+python3 frensense-bench/run.py --suite blindness --run --max-rss-mb 1024
+```
+
+A scan above the budget is highlighted on the page, named in the Markdown card,
+and the run exits **4**, so a memory regression fails like a blindness
+regression instead of being found by a user.
+
+---
+
 ## Contributing: Solving Engine Blindspots
 
 Our CI tracks blindness regressions on every commit. Open-source contributors can help drive the blindness rate down by tackling specific gaps:
@@ -67,6 +91,37 @@ If `callgraph_hops` or `call_context_depth` is high in dynamic languages like Py
 
 ### 3. Tree-sitter AST Gaps
 If `files_partial` is greater than 0, Tree-sitter encountered syntax errors or unsupported grammar constructs. Improving Tree-sitter node mappings in `frensense-lang` restores 100% clean parsing.
+
+---
+
+## Timeouts, failures and exit codes
+
+Every scan has a time limit so a runaway analysis cannot hold CI forever, but a limit must never change the answer. The rules:
+
+| What | Default | How to change it |
+| :--- | :--- | :--- |
+| Time allowed per repository scan | 1800 s | `--timeout SECONDS`, or `FRENSENSE_BLINDNESS_TIMEOUT=SECONDS`, or `timeout=` on that repo's pin in `PINNED_REPOS` |
+| No limit | n/a | `--timeout 0` (also `none`, `off`, `unlimited`) |
+| Time allowed per file in synthetic suites (OWASP) | 120 s | `--case-timeout SECONDS` |
+| Memory allowed per scan | no limit | `--max-rss-mb N` (exit **4** when exceeded) |
+| Whole CI job | 240 min | `timeout-minutes` in `.github/workflows/engine-blindness.yml` |
+
+Order of precedence for a repository: the command line, then the environment variable, then the repo's own `timeout=`, then the 1800 s default. In CI, **Run workflow** has a `timeout` box that sets the same thing for one run.
+
+```bash
+# One slow repo, give it two hours
+python3 frensense-bench/run.py --suite blindness --run --timeout 7200
+
+# Remove the limit while investigating
+FRENSENSE_BLINDNESS_TIMEOUT=0 python3 frensense-bench/run.py --suite blindness --run --only flask,express
+```
+
+A scan that times out, crashes or prints unreadable output is a **failure, not a clean result**:
+
+- the run exits with code **3** and prints `[FAILED] <repo>: <reason>`; CI goes red and nothing is published;
+- the repo contributes no challenges, and its earlier challenges are **not** reported as solved (only repos that scanned successfully can have challenges solved).
+
+There is no cap on the number of challenges: every unknown sink becomes one, grouped by what blocks it. The only filters are deliberate and visible: test, example and benchmark paths are not worth a contributor's time, and the engine itself skips test files and machine-minified JavaScript (lines averaging over 300 bytes) before scanning.
 
 ---
 
@@ -86,9 +141,15 @@ python3 frensense-bench/run.py --suite blindness --run
 
 # Run against a specific repository
 python3 frensense-bench/run.py --suite blindness --run --only flask
+
+# Score a case-isolated synthetic suite (e.g. the OWASP BenchmarkPython cases)
+python3 frensense-bench/run.py --suite blindness --run \
+  --synthetic owasp=/path/to/BenchmarkPython/testcode --workers 8
 ```
 
 Results are saved to:
 - `target/blindness/blindness_card.md` (Markdown summary)
 - `target/blindness/blindness_sheet.csv` (Spreadsheet format)
 - `target/blindness/blindness_history.json` (Commit history time-series)
+- `target/blindness/challenges.html` (the contributor-facing blind-spot cards and memory profile)
+- `target/blindness/challenges.json` (the same cards, machine-readable; `--baseline` diffs against it)
