@@ -22,6 +22,27 @@ harness and keeps no changelog.
 ## [Unreleased]
 
 #### Repository & Release Tooling
+- **docs: the challenge board now lives inside the docs site at `/challenges`.**
+  The blind-spot cards were only reachable as a standalone `challenges.html`
+  published to gh-pages `/blindness`, outside the docs theme, with no nav entry
+  — a reader had to already know the URL, and the docs deploy's own pages
+  fought with it over the site root. The board is now a VitePress page
+  (`docs-site/challenges.md` plus a `BlindnessChallenges` theme component built
+  from the docs theme variables): summary stats, type tabs, search, difficulty
+  and repo filters, a 12-at-a-time list, and a per-challenge detail view with
+  the code window, the **Where to start** command and the affected sinks, all
+  opened on demand. It is linked from the top nav and the Architecture sidebar,
+  and `architecture/blindness.md` now links to it. The blindness suite writes a
+  slim, render-ready `board.json` (schema 1: self-contained challenge records,
+  code windows inlined so no repo checkout is needed to render, sinks capped at
+  40 per challenge, `.git` stripped from pin URLs) beside the full
+  `challenges.json`; CI stages `board.json` to gh-pages `/blindness` and no
+  longer publishes an `index.html` there, so the docs deploy owns every site
+  page and the two cannot collide. A committed seed copy at
+  `docs-site/public/data/blindness_board.json` keeps the page rendering in
+  local previews; `challenges.html` is still written for local use. Covered by
+  `BoardDocTests` in `frensense-bench/tests/test_blindness.py` (27 tests pass),
+  and the VitePress build renders the new page.
 - **blindness: a typo'd `--only` no longer publishes a perfect score.** A
   selection that matched no pinned repository fell through to an empty loop and
   wrote `blindness_report.json` / `blindness_history.json` / `blindness_sheet.csv`
