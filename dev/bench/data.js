@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793568678390,
+  "lastUpdate": 1793576774543,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -1447,6 +1447,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/f522d1d2d77e07bb5dcef05a751c9bb37cd57833"
         },
         "date": 1793568677501,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 31,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 38.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 7.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 172,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 55,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a7a80a0e79cd53991edc9145f0ea3bd654ea987c",
+          "message": "Merge pull request #65 from Friehub/engine/package-scoped-facts\n\nEngine/package scoped facts",
+          "timestamp": "2026-11-02T00:45:27+01:00",
+          "tree_id": "470b431706783c67c917c0902aae285d4d3501e2",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/a7a80a0e79cd53991edc9145f0ea3bd654ea987c"
+        },
+        "date": 1793576774037,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
