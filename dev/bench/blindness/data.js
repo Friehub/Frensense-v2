@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793480405424,
+  "lastUpdate": 1793568695914,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -146,6 +146,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "Scan Duration",
             "value": 0.02,
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f522d1d2d77e07bb5dcef05a751c9bb37cd57833",
+          "message": "Merge pull request #64 from Friehub/fix/blindness-challenges-tuple\n\nRestore full blindness_challenges.py and fix missing Tuple import",
+          "timestamp": "2026-11-01T22:30:32+01:00",
+          "tree_id": "9f832e5580aaa37f3d7741cac581ce0c7b150955",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/f522d1d2d77e07bb5dcef05a751c9bb37cd57833"
+        },
+        "date": 1793568695465,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Engine Blindness Rate (Unknown %)",
+            "value": 48.48,
+            "unit": "%"
+          },
+          {
+            "name": "Explored Sinks",
+            "value": 526,
+            "unit": "sinks"
+          },
+          {
+            "name": "Safety Valve Caps Fired",
+            "value": 1640,
+            "unit": "caps"
+          },
+          {
+            "name": "Peak RSS Memory",
+            "value": 271.7,
+            "unit": "MB"
+          },
+          {
+            "name": "Scan Duration",
+            "value": 5.07,
             "unit": "s"
           }
         ]
