@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793568695914,
+  "lastUpdate": 1793576798912,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -195,6 +195,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "Scan Duration",
             "value": 5.07,
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a7a80a0e79cd53991edc9145f0ea3bd654ea987c",
+          "message": "Merge pull request #65 from Friehub/engine/package-scoped-facts\n\nEngine/package scoped facts",
+          "timestamp": "2026-11-02T00:45:27+01:00",
+          "tree_id": "470b431706783c67c917c0902aae285d4d3501e2",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/a7a80a0e79cd53991edc9145f0ea3bd654ea987c"
+        },
+        "date": 1793576798112,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Engine Blindness Rate (Unknown %)",
+            "value": 48.48,
+            "unit": "%"
+          },
+          {
+            "name": "Explored Sinks",
+            "value": 526,
+            "unit": "sinks"
+          },
+          {
+            "name": "Safety Valve Caps Fired",
+            "value": 1640,
+            "unit": "caps"
+          },
+          {
+            "name": "Peak RSS Memory",
+            "value": 271.6,
+            "unit": "MB"
+          },
+          {
+            "name": "Scan Duration",
+            "value": 5.08,
             "unit": "s"
           }
         ]
