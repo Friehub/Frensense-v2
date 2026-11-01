@@ -1,0 +1,70 @@
+[
+  {
+    "commit": "8a0ef9db81bc7ce2c040bb0642faeb53242ea8ff",
+    "short_sha": "8a0ef9d",
+    "branch": "main",
+    "author": "Frensense Maintainers <maintainers@friehub.cloud>",
+    "date": "2026-10-30T14:22:10+00:00",
+    "message": "feat(engine): add package-scoped facts and compiler purity boundary",
+    "overall": {
+      "blindness_rate": 11.8,
+      "total_sinks": 1640,
+      "unknown_sinks": 194,
+      "clean_sinks": 1380,
+      "sanitized_sinks": 42,
+      "vulnerable_sinks": 24,
+      "truncation_caps": 88,
+      "caps_breakdown": {
+        "call_context_depth": 54,
+        "forward_hops": 16,
+        "value_iterations": 18
+      },
+      "files_scanned": 128,
+      "files_partial": 3,
+      "peak_rss_mb": 218.4,
+      "wall_s": 24.6
+    },
+    "by_repo": {
+      "flask": {
+        "files_scanned": 42,
+        "files_partial": 0,
+        "total_sinks": 84,
+        "unknown_sinks": 4,
+        "blindness_rate": 4.8,
+        "truncation_caps": 0,
+        "peak_rss_mb": 78.2,
+        "wall_s": 1.8
+      },
+      "express": {
+        "files_scanned": 35,
+        "files_partial": 0,
+        "total_sinks": 62,
+        "unknown_sinks": 5,
+        "blindness_rate": 8.1,
+        "truncation_caps": 2,
+        "peak_rss_mb": 64.0,
+        "wall_s": 0.9
+      },
+      "libpng": {
+        "files_scanned": 102,
+        "files_partial": 1,
+        "total_sinks": 210,
+        "unknown_sinks": 22,
+        "blindness_rate": 10.5,
+        "truncation_caps": 8,
+        "peak_rss_mb": 114.5,
+        "wall_s": 3.4
+      },
+      "axum": {
+        "files_scanned": 88,
+        "files_partial": 2,
+        "total_sinks": 180,
+        "unknown_sinks": 15,
+        "blindness_rate": 8.3,
+        "truncation_caps": 6,
+        "peak_rss_mb": 142.1,
+        "wall_s": 4.2
+      }
+    }
+  }
+]

@@ -26,6 +26,8 @@ Static analysis without the rules. Frensense lowers every file to a program grap
 - [The program graph](https://frensense.friehub.cloud/architecture/program-graph.md)
 - [Checkers](https://frensense.friehub.cloud/architecture/checkers.md)
 - [Knowledge bundles (.frc)](https://frensense.friehub.cloud/architecture/bundles.md)
+- [Engine Blindness & Capability Profile](https://frensense.friehub.cloud/architecture/blindness.md): Real-world static analysis limits, safety valve truncations, and commit-by-commit dataflow tracking across open-source codebases.
+- [Engine Blindness Challenges](https://frensense.friehub.cloud/challenges.md): Every place the Frensense engine is silent on real code, as a challenge anyone can fix.
 
 ### Corpus
 
