@@ -114,6 +114,23 @@ def _unqualified(function: str) -> str:
     return function.rsplit("::", 1)[-1]
 
 
+def _site_order(site: Dict[str, Any]) -> Tuple[str, str, str, str, int]:
+    """Stable order for stop sites.
+
+    The engine may emit several cut sites for one record, and their order is not
+    part of its contract. The card's track, difficulty and group are derived from
+    the first one, so sorting here keeps a card from flipping between "easy /
+    Library call" and "medium / Unseen caller" on an unrelated engine change.
+    """
+    return (
+        str(site.get("kind", "")),
+        str(site.get("detail", "")),
+        str(site.get("function", "")),
+        str(site.get("file", "")),
+        int(site.get("line", 0) or 0),
+    )
+
+
 def challenge_id(repo: str, rel_file: str, function: str, sink: str, slot: int, sites: Iterable[Dict[str, Any]]) -> str:
     """Stable across line shifts and unrelated edits; changes when the sink or its blind spot changes."""
     parts = [repo, rel_file, _unqualified(function), sink, str(slot)]
@@ -173,6 +190,7 @@ def build_challenges(
         if cid in seen:
             continue
         seen.add(cid)
+        sites.sort(key=_site_order)
         primary = sites[0]["kind"] if sites else ""
         meta = TRACKS.get(primary, DEFAULT_TRACK)
         slot = "receiver/return" if r["arg_slot"] == SLOT_NONE else f"arg {r['arg_slot']}"
@@ -205,6 +223,30 @@ def diff_against(previous: Optional[List[Dict[str, Any]]], current: List[Dict[st
     before = {c["id"] for c in previous or []}
     now = {c["id"] for c in current}
     return {"solved": sorted(before - now), "new": sorted(now - before) if previous is not None else []}
+
+
+def restrict_previous(previous: Optional[List[Dict[str, Any]]], scanned: set) -> Optional[List[Dict[str, Any]]]:
+    """Only repos this run scanned successfully can have challenges "solved": the rest are unknown."""
+    if previous is None:
+        return None
+    return [c for c in previous if c.get("group_repo", c.get("repo")) in scanned]
+
+
+def carry_forward(previous: Optional[List[Dict[str, Any]]], scanned: set) -> List[Dict[str, Any]]:
+    """Challenges belonging to repos this run did not scan.
+
+    `--only flask` is a debugging switch, so its output must not read as "the
+    rest of the backlog was solved". These keep their IDs and are marked
+    `carried` so the page can say they were last seen in an earlier run.
+    """
+    if previous is None:
+        return []
+    out: List[Dict[str, Any]] = []
+    for c in previous:
+        if c.get("group_repo", c.get("repo")) in scanned:
+            continue
+        out.append({**c, "carried": True})
+    return out
 
 
 def sort_challenges(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -300,9 +342,12 @@ def windows(repo_root: Optional[Path], marks: List[Dict[str, Any]], radius: int 
 
 def render_markdown(groups: List[Dict[str, Any]], delta: Optional[Dict[str, List[str]]] = None) -> str:
     total = sum(g["impact"] for g in groups)
+    carried = sum(1 for g in groups for m in g["members"] if m.get("carried"))
     head = f"**{len(groups)}** open challenges blocking **{total}** sinks"
     if delta and (delta["solved"] or delta["new"]):
         head += f" (sinks solved since last run: **{len(delta['solved'])}**, new: **{len(delta['new'])}**)"
+    if carried:
+        head += f" — **{carried}** carried from an earlier run because their repo was not scanned"
     lines = ["### Open engine blind spots", "", head, "", "Biggest wins first:", ""]
     for g in groups[:10]:
         lines.append(f"- `{g['id']}` {g['repo']}: {title_for(g)} (unblocks {g['impact']}, {g['difficulty']})")
@@ -348,6 +393,17 @@ details[open] summary::before{content:"-"}
 .body li span{color:var(--mute);font:12px ui-monospace,Menlo,monospace}
 .mono{font:12px ui-monospace,Menlo,monospace;color:var(--mute);word-break:break-all}
 .id{background:none;border:0;color:var(--mute);font:12px ui-monospace,Menlo,monospace;cursor:pointer;padding:0;text-align:left}
+section.prof{max-width:1000px;margin:0 auto 18px;padding:0 16px}
+section.prof h2{font-size:15px;margin:0 0 6px;letter-spacing:.01em}
+section.prof table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+section.prof th{text-align:left;color:var(--mute);font-weight:600;border-bottom:1px solid var(--line);padding:4px 8px 4px 0;white-space:nowrap}
+section.prof td{padding:4px 8px 4px 0;border-bottom:1px dashed var(--line);white-space:nowrap}
+.rsscell{min-width:120px}
+.rssbar{display:block;height:4px;background:var(--line);border-radius:2px;margin-top:3px}
+.rssbar i{display:block;height:4px;border-radius:2px;background:var(--accent)}
+tr.over td{color:var(--hard)}
+.tag{font-size:10.5px;color:var(--mute);border:1px solid var(--line);border-radius:999px;padding:0 6px;margin-left:4px}
+.caution{margin:10px 0 0;padding:8px 12px;border-left:3px solid var(--hard);background:var(--code);border-radius:6px;font-size:13px}
 """
 
 _JS = """
@@ -393,6 +449,10 @@ def _card(g: Dict[str, Any], roots: Dict[str, Path]) -> str:
         f"{e(pin['url'].removesuffix('.git'))} @ {e(pin['commit'][:7])}" if pin.get("url") and pin.get("commit") else ""
     )
     pointer = f"<div>{e(g['engine_pointer'])}</div>" if g.get("engine_pointer") else ""
+    if rep.get("fix_added"):
+        pointer += "<div>The upstream fix added:</div><pre class=win>" + "".join(
+            f"<span class=l><i></i>{e(t)}</span>" for t in rep["fix_added"]
+        ) + "</pre>"
     text = " ".join([g["id"], g["repo"], g["detail"], g["track"]] + [m["file"] for m in g["members"]]).lower()
     return (
         f"<article class=card data-track='{e(g['track'])}' data-diff='{g['difficulty']}' data-text='{e(text)}'>"
@@ -408,27 +468,109 @@ def _card(g: Dict[str, Any], roots: Dict[str, Path]) -> str:
     )
 
 
-def render_html(groups: List[Dict[str, Any]], commit: str, delta: Optional[Dict[str, List[str]]] = None, roots: Optional[Dict[str, Path]] = None) -> str:
+def render_html(
+    groups: List[Dict[str, Any]],
+    commit: str,
+    delta: Optional[Dict[str, List[str]]] = None,
+    roots: Optional[Dict[str, Path]] = None,
+    profile: Optional[Dict[str, Any]] = None,
+) -> str:
     roots = roots or {}
     tracks = sorted({g["track"] for g in groups})
     total = sum(g["impact"] for g in groups)
+    carried = sum(1 for g in groups for m in g["members"] if m.get("carried"))
     solved = f" · {len(delta['solved'])} sinks solved since last run" if delta and delta["solved"] else ""
+    older = f" · {carried} carried from an earlier run" if carried else ""
     btns = "".join(f"<button data-f=diff data-v={d}>{d}</button>" for d in ("easy", "medium", "hard"))
     btns += "".join(f"<button data-f=track data-v='{html.escape(t)}'>{html.escape(t)}</button>" for t in tracks)
     cards = "".join(_card(g, roots) for g in groups) or "<p>No open challenges. The engine sees everything here.</p>"
     return (
         "<!doctype html><html lang=en><head><meta charset=utf-8>"
         "<meta name=viewport content='width=device-width,initial-scale=1'>"
-        "<title>Engine Blind Spots</title><style>" + _CSS + "</style></head><body>"
-        f"<header><h1>Engine blind spots</h1><p>{len(groups)} challenges block {total} sinks at "
-        f"<code>{html.escape(commit[:7])}</code>{solved}. Fix one and its card shrinks or disappears on the next run.</p></header>"
-        f"<div class=bar>{btns}<input id=q placeholder='Filter'><span class=meta id=n></span></div>"
+        "<title>Frensense engine blind spots</title><style>" + _CSS + "</style></head><body>"
+        f"<header><h1>Frensense engine blind spots</h1><p>{len(groups)} challenges block {total} sinks at "
+        f"<code>{html.escape(commit[:7])}</code>{solved}{older}. Fix one and its card shrinks or disappears on the next run.</p></header>"
+        + _profile_html(profile)
+        + f"<div class=bar>{btns}<input id=q placeholder='Filter'><span class=meta id=n></span></div>"
         f"<main>{cards}</main><script>{_JS}</script></body></html>"
     )
 
 
-def sort_challenges(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return sorted(items, key=lambda c: (DIFFICULTY_ORDER[c["difficulty"]], c["repo"], c["file"], c["line"], c["id"]))
+def _profile_html(profile: Optional[Dict[str, Any]]) -> str:
+    """The capability/memory band above the cards.
+
+    Contributors need to know what the scan cost, not only where it stopped: a
+    repo whose peak RSS jumps from 300 MB to 2.5 GB is a bug report of its own,
+    and it is invisible in a page that only lists unknown sinks.
+    """
+    if not profile:
+        return ""
+    e = html.escape
+    rows = [r for r in (profile.get("rows") or []) if r.get("name")]
+    if not rows:
+        return ""
+    overall = profile.get("overall") or {}
+    ident = profile.get("identity") or {}
+    peak = max((r.get("peak_rss_mb") or 0) for r in rows) or 0
+    budget = overall.get("max_rss_mb")
+    over = set(overall.get("over_budget") or [])
+
+    body = (
+        "<tr><th>Repository</th><th>Lang</th><th>Files</th><th>Functions</th>"
+        "<th>Sinks</th><th>Unknown</th><th>Caps</th><th>Peak RSS</th><th>RSS / file</th><th>Wall</th></tr>"
+    )
+    for r in sorted(rows, key=lambda x: -(x.get("peak_rss_mb") or 0)):
+        rss = r.get("peak_rss_mb")
+        files = r.get("files_scanned") or 0
+        per_file = f"{rss / files:.2f} MB" if rss is not None and files else "-"
+        width = round((rss or 0) / peak * 100) if peak else 0
+        tag = " <span class=tag>synthetic</span>" if r.get("synthetic") else ""
+        if r.get("failed"):
+            # A failed scan reports zeros, which on a page of rates reads as a
+            # clean result. Say it failed instead.
+            tag += " <span class=tag>failed</span>"
+        body += (
+            f"<tr{' class=over' if r['name'] in over else ''}>"
+            f"<td><b>{e(r['name'])}</b>{tag}</td><td>{e(str(r.get('lang', '')))}</td>"
+            f"<td>{files}</td><td>{r.get('functions', 0)}</td>"
+            f"<td>{r.get('total_sinks', 0)}</td><td>{r.get('unknown_sinks', 0)}</td>"
+            f"<td>{r.get('truncation_caps', 0)}</td>"
+            f"<td class=rsscell>{'-' if rss is None else f'{rss:g} MB' + (' /case' if r.get('synthetic') else '')}"
+            f"<span class=rssbar><i style='width:{width}%'></i></span></td>"
+            f"<td>{per_file}</td><td>{r.get('wall_s', 0)}s</td></tr>"
+        )
+
+    phases = overall.get("phases") or {}
+    phase_txt = " · ".join(
+        f"<b>{e(str(k))}</b> {v / 1000:.2f}s"
+        for k, v in sorted(phases.items(), key=lambda kv: -kv[1])
+        if k != "total"
+    )
+    caution = ""
+    if over or (budget is None and peak >= 1024):
+        worst = max(rows, key=lambda x: x.get("peak_rss_mb") or 0)
+        worst_peak = worst.get("peak_rss_mb") or 0
+        over_txt = f", above the {budget:g} MB budget" if over else ""
+        caution = (
+            f"<p class=caution>Memory ceiling: <b>{e(worst['name'])}</b> peaked at "
+            f"<b>{worst_peak:g} MB</b>{e(over_txt)}. Reproduce with "
+            f"<code>/usr/bin/time -v ./target/release/frensense {e(worst['name'])} --json</code>.</p>"
+        )
+    peak_txt = "-" if overall.get("peak_rss_mb") is None else f"{overall['peak_rss_mb']:g} MB"
+    version = e(str(ident.get("version") or overall.get("engine_version") or "unknown"))
+    engine = e(str(ident.get("engine_version") or "unknown"))
+    return (
+        "<section class=prof><h2>Capability &amp; memory profile</h2>"
+        f"<p class=sub>frensense <b>{version}</b> · engine <b>{engine}</b> · "
+        f"{int(overall.get('files_scanned') or 0)} files · "
+        f"{int(overall.get('total_sinks') or 0)} explored sinks · peak RSS <b>{peak_txt}</b></p>"
+        f"<table>{body}</table>"
+        + (f"<p class=sub>Phase totals (engine CPU, summed across scans): {phase_txt}</p>" if phase_txt else "")
+        + caution
+        + "<p class=sub>Peak RSS is the scan process high-water mark (<code>/usr/bin/time %M</code>), "
+        "not the whole pipeline. A rising ceiling per file is what makes a large repository expensive.</p>"
+        "</section>"
+    )
 
 
 def write_outputs(
@@ -437,20 +579,26 @@ def write_outputs(
     commit: str,
     previous: Optional[List[Dict[str, Any]]] = None,
     roots: Optional[Dict[str, Path]] = None,
+    carried: Optional[List[Dict[str, Any]]] = None,
+    profile: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
+    carried = carried or []
     delta = diff_against(previous, challenges) if previous is not None else None
-    groups = group_challenges(challenges)
+    items = sort_challenges(challenges + carried)
+    groups = group_challenges(items)
     doc = {
-        "schema": 2,
+        "schema": 3,
         "commit": commit,
-        "count": len(challenges),
+        "count": len(items),
+        "scanned": len(challenges),
+        "carried": len(carried),
         "groups": [{k: v for k, v in g.items() if k != "members"} | {"sinks": [m["id"] for m in g["members"]]} for g in groups],
-        "challenges": sort_challenges(challenges),
+        "challenges": items,
         "delta": delta,
     }
     (out_dir / "challenges.json").write_text(json.dumps(doc, indent=2))
-    (out_dir / "challenges.html").write_text(render_html(groups, commit, delta, roots))
+    (out_dir / "challenges.html").write_text(render_html(groups, commit, delta, roots, profile))
     md = render_markdown(groups, delta)
     (out_dir / "challenges.md").write_text(md)
-    return {"markdown": md, "delta": delta}
+    return {"markdown": md, "delta": delta, "count": len(items), "carried": len(carried)}

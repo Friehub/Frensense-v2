@@ -577,7 +577,7 @@ def load_tag_cwe_map(path: str | None) -> dict[str, str]:
 
 
 def scan_case(binary: Path, case: dict, bundle: Path | None = None,
-              env: dict | None = None) -> dict:
+              env: dict | None = None, timeout: int = 120) -> dict:
     """Scan one case file in isolation (own process: no cross-case state)."""
     cid = case["file"].stem
     try:
@@ -587,7 +587,7 @@ def scan_case(binary: Path, case: dict, bundle: Path | None = None,
         cmd += ["--json"]
         proc = subprocess.run(
             cmd,
-            capture_output=True, text=True, timeout=120, env=env,
+            capture_output=True, text=True, timeout=timeout, env=env,
         )
         # 0 = clean run; 1 = findings under --strict / baseline regression.
         # Anything else (2 = engine error, negative = killed by signal) is a
@@ -610,6 +610,8 @@ def main() -> None:
         description="Score Frensense against the OWASP Benchmark for Python.")
     ap.add_argument("--bin", default=None, help="frensense binary path (auto-detected if omitted)")
     ap.add_argument("--workers", type=int, default=8, help="concurrent scan threads (default: 8)")
+    ap.add_argument("--case-timeout", type=int, default=120,
+                    help="seconds allowed per test-case scan (default: 120)")
     ap.add_argument("--json-out", default=None, help="write machine-readable scorecard JSON here")
     ap.add_argument("--md-out", default=None, help="write markdown summary report here")
     ap.add_argument("--publish-gist", action="store_true", help="upload report to a public GitHub Gist via GITHUB_TOKEN")
@@ -713,7 +715,7 @@ def main() -> None:
     print(f"[INFO] Scanning with {args.workers} workers...")
     t0 = time.time()
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
-        results = list(ex.map(lambda c: scan_case(binary, c, bundle, scan_env), cases_list))
+        results = list(ex.map(lambda c: scan_case(binary, c, bundle, scan_env, args.case_timeout), cases_list))
     elapsed = time.time() - t0
 
     errors = [r for r in results if "error" in r]

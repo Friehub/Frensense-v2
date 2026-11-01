@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Copyright (c) 2024-2026 Friehub. All rights reserved.
+#
+# Shared clippy configuration. Lint *levels* live in `[workspace.lints]` in the
+# root Cargo.toml; this file only tunes thresholds and bans calls whose
+# alternative the diagnostic can name.
+
+# A function that needs more than this many lines has usually stopped being one
+# responsibility. The previous "~500 lines per file" heuristic is not
+# lintable; this is, and it points at the function that hurts review.
+too-many-lines-threshold = 120
+
+# Default is 250. Lowered so nested map/slice signatures (e.g. per-file import
+# tables) surface instead of silently becoming unreadable parameters.
+type-complexity-threshold = 150
+
+# `disallowed_*` is the purpose-built mechanism for "do not call this here":
+# the diagnostic carries the reason and the replacement, so an agent can act on
+# it without reading prose.
+disallowed-macros = [
+    { path = "std::eprintln", reason = "library code reports through DiagnosticSink or tracing", replacement = "tracing::warn!" },
+    { path = "std::println", reason = "library code reports through DiagnosticSink or tracing", replacement = "tracing::info!" },
+    { path = "std::dbg", reason = "no debug output in library code" },
+]
+
+disallowed-methods = [
+    { path = "std::thread::Builder::stack_size", reason = "stack depth is bounded or stacker-grown, never raised per call site", replacement = "stacker::maybe_grow" },
+]

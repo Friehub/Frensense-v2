@@ -8,6 +8,26 @@ members = [
 ]
 resolver = "2"
 
+# Lint contract (workspace-wide). A crate opts in with `[lints] workspace = true`.
+# Every rule here is enforced by clippy/rustc, never by a hand-written counter.
+# See frensense-engine/AGENTS.md for the rationale and the review-only rules.
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "warn"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+# Contract integrity: a library reports, it does not panic or print.
+unwrap_used = "warn"
+expect_used = "warn"
+missing_panics_doc = "warn"
+missing_errors_doc = "warn"
+allow_attributes_without_reason = "warn"
+# Structure: one responsibility per function.
+too_many_lines = "warn"
+implicit_clone = "warn"
+needless_pass_by_value = "warn"
+
 [package]
 name = "frensense"
 version = "0.8.0"

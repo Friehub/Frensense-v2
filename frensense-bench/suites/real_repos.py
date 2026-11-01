@@ -27,9 +27,11 @@ import json
 import os
 import subprocess
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from scanproc import run_scan, time_wrapped  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_BIN = ROOT / "target" / "release" / "frensense"
@@ -217,37 +219,21 @@ def scan(repo: Repo, cache: Path, binary: Path, timeout: int) -> dict:
     meta = {"name": repo.name, "lang": repo.lang, "commit": repo.commit, "note": repo.note}
     meta["files"] = count_files(root, repo.targets)
     target_paths = [str(root / t) for t in repo.targets]
-    argv = [str(binary), *target_paths, "--json"]
     rss_file = cache / f"{repo.name}.rss"
-    if Path("/usr/bin/time").exists():
-        argv = ["/usr/bin/time", "-f", "%M", "-o", str(rss_file), *argv]
-    started = time.monotonic()
-    try:
-        proc = subprocess.run(
-            argv,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        meta["exit"] = proc.returncode
-        meta["stderr_tail"] = proc.stderr.strip().splitlines()[-3:]
-        raw = proc.stdout
-    except subprocess.TimeoutExpired as exc:
-        meta["exit"] = None
+
+    run = run_scan(time_wrapped(binary, target_paths, rss_file, ["--json"]), timeout, rss_file)
+    meta["exit"] = run["exit"]
+    meta["stderr_tail"] = run["stderr_tail"]
+    meta["wall_s"] = run["wall_s"]
+    meta["peak_rss_mb"] = run["peak_rss_mb"]
+    if run["timeout"]:
         meta["timeout"] = True
-        meta["stderr_tail"] = (exc.stderr or b"").decode("utf-8", "replace").strip().splitlines()[-3:]
-        raw = (exc.stdout or b"").decode("utf-8", "replace")
-    meta["wall_s"] = round(time.monotonic() - started, 2)
-    if rss_file.exists():
-        try:
-            meta["peak_rss_mb"] = round(int(rss_file.read_text().strip()) / 1024, 1)
-        except ValueError:
-            pass
-        rss_file.unlink()
+        meta["exit"] = None
+    raw = run["stdout"]
     try:
         report = json.loads(raw) if raw.strip() else {}
     except json.JSONDecodeError:
-        meta["exit"], meta["bad_json"] = meta.get("exit"), True
+        meta["bad_json"] = True
         report = {}
     advisories = report.get("advisories", [])
     by_rule: dict[str, int] = {}
@@ -268,11 +254,25 @@ def main() -> int:
     ap.add_argument("--binary", type=Path, default=DEFAULT_BIN)
     ap.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
     ap.add_argument("--timeout", type=int, default=600, help="per-repository cap, seconds")
+    ap.add_argument("--max-rss-mb", type=float, default=None, help="fail (exit 4) when any scan peaks above this many MB")
     args = ap.parse_args()
     if not (args.prepare or args.run):
         ap.error("pass --prepare and/or --run")
 
-    selected = [r for r in REPOS if not args.only or r.name in args.only.split(",")]
+    # Same rule as the blindness suite: a name that matches nothing is a typo,
+    # not an empty run. `--only redis` silently scanning zero repositories and
+    # exiting 0 reads exactly like a clean result.
+    known = {r.name for r in REPOS}
+    wanted = [n.strip() for n in args.only.split(",") if n.strip()]
+    unknown_names = [n for n in wanted if n not in known]
+    if unknown_names:
+        ap.error(f"unknown repository name(s): {', '.join(unknown_names)}; known: {', '.join(sorted(known))}")
+    if args.max_rss_mb is not None and args.max_rss_mb <= 0:
+        ap.error("--max-rss-mb must be a positive number of megabytes")
+
+    selected = [r for r in REPOS if not wanted or r.name in wanted]
+    if not selected:
+        ap.error("nothing to scan: name a repository with --only")
     if args.prepare:
         for repo in selected:
             clone(repo, args.cache)
@@ -286,9 +286,10 @@ def main() -> int:
             meta = scan(repo, args.cache, args.binary, args.timeout)
             rows.append(meta)
             status = "TIMEOUT" if meta.get("timeout") else f"exit {meta['exit']}"
+            rss = f"{meta['peak_rss_mb']}MB" if meta.get("peak_rss_mb") is not None else "?"
             print(
                 f"{repo.name:12} {repo.lang:11} {meta['files']:>5} files "
-                f"{meta['wall_s']:>7.1f}s  {meta['advisories']:>4} findings  {status}"
+                f"{meta['wall_s']:>7.1f}s  {meta['advisories']:>4} findings  {rss:>9}  {status}"
             )
         print()
         print("| repo | lang | files | wall | peak RSS | findings | status |")
@@ -296,11 +297,20 @@ def main() -> int:
         for row in rows:
             status = "TIMEOUT" if row.get("timeout") else f"exit {row['exit']}"
             top = ", ".join(f"{k} x{v}" for k, v in list(row["by_rule"].items())[:3]) or "-"
-            rss = f"{row['peak_rss_mb']}MB" if "peak_rss_mb" in row else "?"
+            rss = f"{row['peak_rss_mb']}MB" if row.get("peak_rss_mb") is not None else "?"
             print(
                 f"| {row['name']} | {row['lang']} | {row['files']} | "
                 f"{row['wall_s']}s | {rss} | {row['advisories']} ({top}) | {status} |"
             )
+        if args.max_rss_mb is not None:
+            over = [r for r in rows if (r.get("peak_rss_mb") or 0) > args.max_rss_mb]
+            for row in over:
+                print(
+                    f"[RSS] {row['name']}: {row['peak_rss_mb']} MB exceeds --max-rss-mb {args.max_rss_mb}",
+                    file=sys.stderr,
+                )
+            if over:
+                return 4
     return 0
 
 

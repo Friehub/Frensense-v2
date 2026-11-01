@@ -24,6 +24,76 @@ Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
 
+## [Unreleased]
+
+#### Repository & Release Tooling
+- **blindness: a typo'd `--only` no longer publishes a perfect score.** A
+  selection that matched no pinned repository fell through to an empty loop and
+  wrote `blindness_report.json` / `blindness_history.json` / `blindness_sheet.csv`
+  with `total_sinks: 0`, `blindness_rate: 0.0`, `by_repo: {}` and exit code 0 —
+  indistinguishable from a scan that found nothing to analyse. The same shape
+  appeared when a pin was renamed. `--only` now rejects unknown names (exit 2)
+  and writes nothing; the history and sheet are updated only by a run that
+  covers the full pinned suite and has no failed scan, so a debugging
+  `--only flask` cannot downgrade the published row for a commit.
+- **blindness: the per-scan timeout now kills the scanner, not its wrapper.**
+  Scans are launched as `/usr/bin/time -f %M frensense …`; `subprocess.run(timeout=)`
+  killed `time` and left `frensense` running with its heap still resident, which
+  on a large repository is exactly the 2.5 GB the run was trying to bound. The
+  scan now starts its own process group and the group is `SIGKILL`ed on timeout.
+- **bench: `real_repos` and `blindness` share one scan runner.** `real_repos.py`
+  — the suite that scans redis, django and juice-shop — carried its own copy of
+  the `/usr/bin/time` wrapper and `subprocess.run(timeout=)`, so it had the same
+  orphaned-scanner bug and could report a previous run's RSS when a scan wrote
+  no sample. Both suites now call `suites/scanproc.py`: one process-group kill,
+  one stale-sample reset, one `read_rss`. `real_repos` also gains the
+  `--max-rss-mb` gate (exit 4) and rejects an unknown `--only` name (exit 2)
+  instead of scanning zero repositories and exiting 0.
+- **bench: `run.py` forwards the suite's exit code.** The wrapper compared
+  `returncode == 0` and exited 1, so the blindness suite's new 3 (a scan failed
+  or timed out) and 4 (over `--max-rss-mb`) both arrived as a bare 1 in CI. The
+  highest code from the suites it ran is now the process's exit status.
+- **blindness: measurements are pinned, or refused.** A cache hit was trusted
+  unconditionally, so a checkout left at another commit (or a half-cloned tree)
+  was measured and published under the pin's SHA; a missing scan target widened
+  the input to the whole repository, changing both the blindness rate and the
+  memory profile without saying so. The checkout's `HEAD` is now verified on
+  `--prepare` and again on `--run` (re-cloned or failed), and a missing target is
+  an error.
+- **blindness: the capability page shows what a scan costs.**
+  `challenges.html` now carries a capability/memory band above the cards:
+  per-repository peak RSS with a relative bar, RSS per scanned file, functions,
+  explored/unknown sinks, truncation caps, wall time, the engine-reported phase
+  totals, and the binary identity (`frensense 0.8.0 · engine 0.8.0`). A row over
+  the new `--max-rss-mb` budget is highlighted and named in a callout, and the
+  run exits 4. Measured on the pinned suite: libpng 272.1 MB / 2.59 MB per file
+  is the current ceiling; express pegs 1,538 `call_context_depth` caps on 6
+  files, so its 43.2% blindness is a truncated lower bound.
+- **blindness: `--case-timeout` is no longer a dead flag, and `--synthetic`
+  scores case-isolated suites.** The documented but unimplemented synthetic path
+  is now `--synthetic [NAME=]DIR` (repeatable, `--workers`, default 8): every
+  case is scanned in its own process so one case's symbols cannot change the
+  next one's verdict, and each unknown becomes a challenge card. Measured on
+  OWASP BenchmarkPython: 1,230 cases, 943 explored sinks, 21 unknown (2.23%),
+  0 truncation caps, 7.5 s at 8 workers, and **one** open challenge —
+  `Unmodelled call: len`, which blocks all 21 sinks. The standalone `owasp.py`
+  suite exposes the same `--case-timeout` so the two paths agree.
+- **blindness: `--only` keeps the rest of the backlog on the page.** Cards for
+  repositories the run did not scan are carried forward (marked `carried`) instead
+  of vanishing, so a partial run cannot read as "everything else was solved";
+  `challenges.json` schema moves to 3 with `scanned`/`carried` counts. A card's
+  track and difficulty are derived from a deterministically ordered stop site, so
+  they no longer flip when the engine changes the order of `cut_sites`.
+- **semver-gate: fix published-mode absorbed detection.** The `--published`
+  gate now correctly marks a crate `absorbed` when the local version already
+  represents a minor bump over the crates.io baseline (e.g. `0.7.0 -> 0.8.0`
+  absorbs every breaking change in `0.8.0`). Previously the gate always marked
+  such crates `FAIL`, causing spurious failures on every PR branch that
+  introduced breaking changes alongside an appropriate version bump. CI now
+  uses `--published` instead of `--base-ref <PR-base-sha>` so the comparison
+  is always anchored to the last actually-published version, not to an
+  unpublished pre-release commit on `main`.
+
 ## [0.8.0] - 2026-10-30
 
 ### Breaking
@@ -251,6 +321,17 @@ The engine computes `ScanTelemetry`, `ScanStatus` and per-check outcomes;
   injection) rather than dataflow gaps.
 
 #### Repository & Release Tooling
+- **CI no longer runs the blog provenance gate.** `scripts/blog_provenance.py
+  check --strict` resolves specific historical commits (for example `8a0ef9d`),
+  which `actions/checkout`'s shallow clone cannot see, so the `qa` job failed on
+  every PR while the same check passed locally ("blog provenance: all posts
+  equipped"). The script, the pre-deploy gate in `docs-deploy.yml`, the `make`
+  targets and the warn-only pre-commit hook are unchanged; a stale post is still
+  caught before the docs site deploys, it just no longer blocks Rust CI.
+- **Dropped the unused `Dockerfile` and `server.json`.** Neither was referenced
+  by any workflow, script or Makefile target, and the MCP registry manifest had
+  drifted to `0.7.1-beta`; removing them keeps the tracked tree to artifacts
+  something actually builds or publishes.
 - **Per-crate SemVer gate** (`scripts/semver-gate.py`): CI no longer answers
   "is the workspace semver-clean". It discovers the publishable crates from
   `cargo metadata` (`frensense`, `frensense-engine`, `frensense-lang`,
