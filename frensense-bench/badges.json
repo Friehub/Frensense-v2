@@ -1,0 +1,12 @@
+{
+  "_comment": "A badge is earned when EVERY listed stat reaches its number. Stats: prs (merged PRs that solved something), points, sinks (engine blind spots removed), cleared (challenges taken to zero), hard_cleared (hard ones among them), languages (distinct languages fixed in). Edit the numbers freely; badges are recomputed from the ledger on every run.",
+  "points": {"easy": 2, "medium": 4, "hard": 8},
+  "badges": [
+    {"id": "first-light", "name": "First Light", "description": "First merged fix for an engine challenge", "all": {"prs": 1}},
+    {"id": "sharp-eye", "name": "Sharp Eye", "description": "Removed 10 blind spots", "all": {"sinks": 10}},
+    {"id": "clean-sweep", "name": "Clean Sweep", "description": "Took 3 challenges all the way to zero", "all": {"cleared": 3}},
+    {"id": "deep-diver", "name": "Deep Diver", "description": "Cleared a hard challenge", "all": {"hard_cleared": 1}},
+    {"id": "polyglot", "name": "Polyglot", "description": "Fixed the engine in 3 different languages", "all": {"languages": 3}},
+    {"id": "core-contributor", "name": "Core Contributor", "description": "5 merged fixes and 50 points: you are shaping the engine", "all": {"prs": 5, "points": 50}}
+  ]
+}

@@ -94,6 +94,31 @@ If `files_partial` is greater than 0, Tree-sitter encountered syntax errors or u
 
 ---
 
+## Choosing what gets scanned
+
+No repository is listed in code. Everything the suites scan comes from [`frensense-bench/repos.toml`](https://github.com/Friehub/Frensense-v2/blob/main/frensense-bench/repos.toml), so adding one is a single entry:
+
+```toml
+[[repo]]
+name = "zlib"
+url = "https://github.com/madler/zlib.git"
+commit = "51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf"   # full 40-character SHA; a tag's SHA works
+lang = "c"
+targets = ["."]
+note = "C compression library; hand-rolled buffers"
+```
+
+- `suites` (optional) picks where it runs: `"blindness"` for blind-spot challenges, `"real"` for timing, peak memory and findings. The default is both.
+- `timeout` (optional) raises the limit for one slow repository.
+- A bad entry (short SHA, unknown language, a target outside the repo, a duplicate name) stops the run before anything is scanned.
+- `--manifest PATH` (or `FRENSENSE_BENCH_REPOS`) points both suites at another file, which is how you try a repo locally before sending the entry.
+
+The current set covers Python (flask, django), JavaScript (express), C (libpng, zlib, curl, redis), Rust (axum, tokio, ripgrep) and Go (gin). The C and Rust entries matter for memory as much as blindness: pointer-heavy code is where peak RSS and the truncation caps move.
+
+### Labelled sources
+
+`--labelled` also scores apps whose flaws are known, so the board shows **missed bugs** and **false alarms**, not only unknown sinks. Those are the `[[labelled]]` entries (Juice Shop, NodeGoat, OWASP BenchmarkPython) plus the recent-CVE set in `frensense-bench/labels/recent_cves.json`, each case pinned to the commit that fixed it. A labelled source that fails to scan fails the run; it is never counted as "found nothing".
+
 ## Timeouts, failures and exit codes
 
 Every scan has a time limit so a runaway analysis cannot hold CI forever, but a limit must never change the answer. The rules:
@@ -138,6 +163,12 @@ python3 frensense-bench/run.py --suite blindness --prepare
 
 # 3. Run the scan and generate the scorecard, CSV sheet, and history JSON
 python3 frensense-bench/run.py --suite blindness --run
+
+# Same, plus missed bugs and false alarms from the labelled sources
+python3 frensense-bench/run.py --suite blindness --run --labelled
+
+# Only some repos (names come from repos.toml)
+python3 frensense-bench/run.py --suite blindness --prepare --run --only zlib,redis
 
 # Run against a specific repository
 python3 frensense-bench/run.py --suite blindness --run --only flask

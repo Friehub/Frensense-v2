@@ -69,7 +69,38 @@ jobs:
           if [ -f target/blindness/previous_challenges.json ]; then
             BASELINE="--baseline target/blindness/previous_challenges.json"
           fi
-          python3 frensense-bench/run.py --suite blindness --prepare --run --ci-summary --max-rss-mb 1024 $BASELINE
+          python3 frensense-bench/run.py --suite blindness --prepare --run --labelled --ci-summary --max-rss-mb 1024 $BASELINE
+
+      - name: Award credit for merged challenge fixes
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          out=target/blindness
+          # The ledger is the only record of who solved what. Never start over because a fetch hiccuped:
+          # 404 means "first run", anything else stops the job before the ledger is overwritten.
+          code=$(curl -sS -o $out/previous_ledger.json -w '%{http_code}' https://frensense.friehub.cloud/blindness/ledger.json || echo 000)
+          case "$code" in
+            200) ;;
+            404) rm -f $out/previous_ledger.json ;;
+            *) echo "could not read the published ledger (HTTP $code); refusing to overwrite it" >&2; exit 1 ;;
+          esac
+          if [ -f $out/previous_challenges.json ]; then
+            base=$(jq -r '.commit // empty' $out/previous_challenges.json)
+            if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then range="$base..HEAD"; else range="-1"; fi
+            : > $out/prs.ndjson
+            for sha in $(git rev-list $range); do
+              gh api "repos/$GITHUB_REPOSITORY/commits/$sha/pulls" --jq '.[] | select(.merged_at != null and .base.ref == "main")
+                | {number, title, body, author: .user.login, url: .html_url, merged_at, sha: .merge_commit_sha}' >> $out/prs.ndjson
+            done
+            jq -s 'unique_by(.number)' $out/prs.ndjson > $out/prs.json
+            python3 frensense-bench/contrib.py ledger \
+              --ledger $out/previous_ledger.json --prs $out/prs.json \
+              --baseline $out/previous_challenges.json --current $out/challenges.json --out $out/ledger.json
+          elif [ -f $out/previous_ledger.json ]; then
+            cp $out/previous_ledger.json $out/ledger.json   # no baseline to compare with: keep what is recorded
+          fi
 
       - name: Format Benchmark Action Results
         run: |
@@ -101,6 +132,7 @@ jobs:
             target/blindness/blindness_report.json
             target/blindness/challenges.json
             target/blindness/board.json
+            target/blindness/ledger.json
             target/blindness/challenges.html
             target/blindness/challenges.md
 
@@ -123,6 +155,7 @@ jobs:
           # No index.html: the docs deploy owns the site pages.
           cp target/blindness/board.json blindness-site/board.json
           cp target/blindness/challenges.json blindness-site/challenges.json
+          [ -f target/blindness/ledger.json ] && cp target/blindness/ledger.json blindness-site/ledger.json || true
 
       - name: Deploy challenge data (gh-pages /blindness)
         if: github.ref == 'refs/heads/main'

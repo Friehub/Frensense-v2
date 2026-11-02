@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
+import BlindnessScores from './BlindnessScores.vue'
+import BlindnessLeaderboard from './BlindnessLeaderboard.vue'
 
 interface CodeLine { n: number; text: string; mark: string }
 interface CodeWindow { file: string; lines: CodeLine[] }
@@ -10,10 +12,11 @@ interface Challenge {
   pointer: string; repro: string; pin: { url: string; commit: string }
   fix_added: string[]; code: CodeWindow[]; sinks: Sink[]
 }
-interface Board { commit: string; sinks: number; solved: number | null; new: number | null; groups: Challenge[] }
+interface Board { commit: string; sinks: number; solved: number | null; new: number | null; scores?: any[]; groups: Challenge[] }
 
 const PAGE = 12
 const board = ref<Board | null>(null)
+const view = ref<'challenges' | 'scores' | 'leaders'>('challenges')
 const loading = ref(true)
 const failed = ref(false)
 const query = ref('')
@@ -112,6 +115,16 @@ function pinLink(c: Challenge) {
         <div v-if="board.new !== null"><b>{{ board.new }}</b><span>new last run</span></div>
       </div>
 
+      <div class="bc-views" role="tablist">
+        <button :class="{ on: view === 'challenges' }" role="tab" :aria-selected="view === 'challenges'" @click="view = 'challenges'">Challenges</button>
+        <button :class="{ on: view === 'scores' }" role="tab" :aria-selected="view === 'scores'" @click="view = 'scores'">Scoreboard</button>
+        <button :class="{ on: view === 'leaders' }" role="tab" :aria-selected="view === 'leaders'" @click="view = 'leaders'">Leaderboard</button>
+      </div>
+
+      <BlindnessScores v-if="view === 'scores'" :scores="board.scores ?? []" />
+      <BlindnessLeaderboard v-else-if="view === 'leaders'" />
+
+      <template v-else>
       <div class="bc-tabs" role="tablist">
         <button v-for="t in typeTabs" :key="t.key" role="tab" :aria-selected="type === t.key"
                 :class="{ on: type === t.key }" @click="type = t.key">
@@ -180,7 +193,8 @@ function pinLink(c: Challenge) {
             </details>
 
             <div class="foot">
-              <button class="id" title="Copy challenge ID" @click="copy(c.id, c.id)">{{ copied === c.id ? 'Copied' : c.id }}</button>
+              <button class="claim" title="Paste this line into your pull request description" @click="copy('Solves: ' + c.id, c.id)">{{ copied === c.id ? 'Copied' : 'Copy claim line' }}</button>
+              <code class="idtext">{{ c.id }}</code>
               <a v-if="pinLink(c)" :href="pinLink(c)" target="_blank" rel="noopener noreferrer">
                 {{ c.pin.url.replace('https://github.com/', '') }}<template v-if="c.pin.commit"> @ {{ c.pin.commit.slice(0, 7) }}</template>
               </a>
@@ -193,6 +207,7 @@ function pinLink(c: Challenge) {
         <button @click="shown += PAGE">Show {{ Math.min(PAGE, filtered.length - visible.length) }} more</button>
         <span>{{ visible.length }} of {{ filtered.length }}</span>
       </div>
+      </template>
     </template>
   </div>
 </template>
@@ -207,6 +222,10 @@ function pinLink(c: Challenge) {
 .bc-stats b.good { color: var(--vp-c-brand-1); }
 .bc-stats span { font-size: .78rem; color: var(--vp-c-text-2); }
 
+.bc-views { display: inline-flex; gap: 2px; padding: 3px; margin-bottom: 1.1rem; background: var(--vp-c-bg-soft); border-radius: 8px; max-width: 100%; }
+.bc-views button { background: none; border: 0; border-radius: 6px; padding: .35rem .9rem; font-size: .88rem; font-weight: 500; color: var(--vp-c-text-2); cursor: pointer; }
+.bc-views button:hover { color: var(--vp-c-text-1); }
+.bc-views button.on { background: var(--vp-c-bg); color: var(--vp-c-brand-1); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
 .bc-tabs { display: flex; gap: .25rem; border-bottom: 1px solid var(--vp-c-divider); margin-bottom: 1rem; overflow-x: auto; }
 .bc-tabs button { background: none; border: 0; border-bottom: 2px solid transparent; color: var(--vp-c-text-2); padding: .5rem .8rem; font-size: .9rem; font-weight: 500; cursor: pointer; white-space: nowrap; margin-bottom: -1px; }
 .bc-tabs button:hover { color: var(--vp-c-text-1); }
@@ -257,8 +276,8 @@ function pinLink(c: Challenge) {
 
 .repro { display: flex; align-items: center; gap: .5rem; background: var(--vp-code-block-bg); border: 1px solid var(--vp-c-divider); border-radius: 6px; padding: .35rem .35rem .35rem .7rem; }
 .repro code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: .8rem; background: none; color: var(--vp-c-text-1); padding: 0; }
-.repro button, .id { background: var(--vp-c-bg-soft); border: 1px solid var(--vp-c-border); color: var(--vp-c-text-1); border-radius: 5px; padding: .2rem .6rem; font-size: .78rem; cursor: pointer; }
-.repro button:hover, .id:hover { border-color: var(--vp-c-brand-1); color: var(--vp-c-brand-1); }
+.repro button { background: var(--vp-c-bg-soft); border: 1px solid var(--vp-c-border); color: var(--vp-c-text-1); border-radius: 5px; padding: .2rem .6rem; font-size: .78rem; cursor: pointer; }
+.repro button:hover { border-color: var(--vp-c-brand-1); color: var(--vp-c-brand-1); }
 
 details { margin-top: .9rem; }
 summary { cursor: pointer; font-size: .88rem; color: var(--vp-c-text-1); font-weight: 500; }
@@ -269,7 +288,9 @@ summary { cursor: pointer; font-size: .88rem; color: var(--vp-c-text-1); font-we
 .more { font-size: .78rem; margin: .4rem 0 0; }
 
 .foot { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: 1rem; font-size: .8rem; }
-.id { font-family: var(--vp-font-family-mono); }
+.idtext { font-size: .75rem; color: var(--vp-c-text-2); background: none; padding: 0; }
+.claim { background: var(--vp-c-brand-1); border: 0; color: #fff; border-radius: 5px; padding: .25rem .75rem; font-size: .8rem; font-weight: 600; cursor: pointer; }
+.claim:hover { background: var(--vp-c-brand-2); }
 
 .bc-more { display: flex; align-items: center; justify-content: center; gap: 1rem; margin-top: 1.25rem; color: var(--vp-c-text-2); font-size: .85rem; }
 .bc-more button { background: var(--vp-button-alt-bg); border: 1px solid var(--vp-c-border); color: var(--vp-c-text-1); border-radius: 20px; padding: .4rem 1.1rem; cursor: pointer; font-size: .88rem; }

@@ -59,6 +59,8 @@ from blindness_challenges import (  # noqa: E402
     restrict_previous,
     write_outputs,
 )
+import blindness_labelled as labelled  # noqa: E402
+import manifest  # noqa: E402
 from scanproc import run_scan, time_wrapped  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -88,41 +90,43 @@ class PinnedRepo:
     timeout: Optional[int] = None  # seconds; a slow repo can raise its own limit (None: the default)
 
 
-# Pinned commits representing diverse language ecosystems and programming patterns
-PINNED_REPOS: Tuple[PinnedRepo, ...] = (
-    PinnedRepo(
-        name="flask",
-        url="https://github.com/pallets/flask.git",
-        commit="d086db856be187255b8ec61ef409357393020f32",
-        lang="python",
-        targets=("src",),
-        note="Python microframework; dynamic WSGI request routing",
-    ),
-    PinnedRepo(
-        name="express",
-        url="https://github.com/expressjs/express.git",
-        commit="1c6f1b0fe4000977b9a7b4f34097e4d527dd9824",
-        lang="javascript",
-        targets=("lib",),
-        note="Node.js middleware framework; asynchronous callback chains",
-    ),
-    PinnedRepo(
-        name="libpng",
-        url="https://github.com/pnggroup/libpng.git",
-        commit="890812a28da480f84f3b0198d31ac611c864ed98",
-        lang="c",
-        targets=(".",),
-        note="C library; memory pointers, buffers, and system IO",
-    ),
-    PinnedRepo(
-        name="axum",
-        url="https://github.com/tokio-rs/axum.git",
-        commit="86aa6153e47b7862737acdcfe3a0eb3a162b939a",
-        lang="rust",
-        targets=(".",),
-        note="Rust async framework; trait-based handler extraction",
-    ),
-)
+@dataclass(frozen=True)
+class LabelledRepo:
+    """An app with known flaws: scored against ground truth, not just counted."""
+
+    name: str
+    url: str
+    commit: str
+    lang: str
+    targets: Tuple[str, ...]
+    labels: str  # juice | owasp | anchored (see repos.toml)
+    per_file: bool = False
+    tolerance: int = 3
+
+
+def load_pinned(manifest_file: Optional[Path] = None) -> Tuple[PinnedRepo, ...]:
+    """The repos to scan, from repos.toml. Nothing is listed in code."""
+    return tuple(
+        PinnedRepo(
+            name=e["name"], url=e["url"], commit=e["commit"], lang=e["lang"],
+            targets=tuple(e["targets"]), note=e.get("note", ""), timeout=e.get("timeout"),
+        )
+        for e in manifest.repos_for("blindness", manifest_file)
+    )
+
+
+def load_labelled(manifest_file: Optional[Path] = None) -> Tuple[LabelledRepo, ...]:
+    return tuple(
+        LabelledRepo(
+            name=e["name"], url=e["url"], commit=e["commit"], lang=e["lang"],
+            targets=tuple(e["targets"]), labels=e["labels"], per_file=bool(e.get("per_file", False)),
+            tolerance=int(e.get("tolerance", 3)),
+        )
+        for e in manifest.load(manifest_file)["labelled"]
+    )
+
+
+PINNED_REPOS: Tuple[PinnedRepo, ...] = load_pinned()
 
 
 DEFAULT_TIMEOUT_S = 1800
@@ -150,6 +154,60 @@ def effective_timeout(explicit: Optional[str], repo_timeout: Optional[int]) -> O
     if repo_timeout is not None:
         return repo_timeout
     return DEFAULT_TIMEOUT_S
+
+
+def collect_labelled(
+    labelled_repos: Tuple[LabelledRepo, ...],
+    binary: Path,
+    cache: Path,
+    only: str = "",
+    timeout: Optional[int] = DEFAULT_TIMEOUT_S,
+    case_timeout: int = 120,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Path], List[str], List[Dict[str, Any]]]:
+    """Missed / false-alarm challenges from every labelled source.
+
+    Returns (challenges, repo roots, names scanned, scorecards). A source that fails to scan raises: a labelled
+    scan that silently found nothing would turn every labelled flaw into a "missed" challenge.
+    """
+    wanted = set(filter(None, only.split(",")))
+    challenges: List[Dict[str, Any]] = []
+    roots: Dict[str, Path] = {}
+    scanned: List[str] = []
+    scores: List[Dict[str, Any]] = []
+    for lr in labelled_repos:
+        if wanted and lr.name not in wanted:
+            continue
+        root = clone_repo(PinnedRepo(lr.name, lr.url, lr.commit, lr.lang, lr.targets), cache)
+        roots[lr.name] = root
+        if lr.labels == "juice":
+            labels = labelled.juice_labels(root)
+        elif lr.labels == "owasp":
+            labels = labelled.owasp_labels(root)
+        else:
+            labels = labelled.anchored_labels(root, labelled.LABELS_DIR / f"{lr.name}.json")
+        if lr.per_file:
+            files = sorted({l["file"] for l in labels})
+            advisories, records = labelled.run_scan_each(binary, root, files, cache, case_timeout=case_timeout)
+        else:
+            advisories, records = labelled.run_scan(binary, root, list(lr.targets), cache / f"{lr.name}.explain.json", timeout=timeout)
+        result = labelled.match(labels, advisories, lr.tolerance)
+        scores.append(labelled.scorecard(lr.name, lr.lang, result))
+        print(
+            f"  {lr.name:13} labels={len(labels):>4} detected={len(result['detected']):>4} "
+            f"missed={len(result['missed']):>4} false-alarms={len(result['false_alarms']):>4}"
+        )
+        challenges += labelled.make_challenges(lr.name, lr.lang, result, records, {"url": lr.url, "commit": lr.commit}, root=root)
+        scanned.append(lr.name)
+    if not wanted or "recent-cves" in wanted:
+        cve_results: List[Dict[str, Any]] = []
+        cves, cve_roots = labelled.recent_cve_challenges(binary, cache, case_timeout=case_timeout, results=cve_results)
+        if cve_results:
+            scores.append(labelled.scorecard("recent-cves", "mixed", labelled.merge_results(cve_results)))
+        roots.update(cve_roots)
+        challenges += cves
+        scanned.append("recent-cves")
+        print(f"  {'recent-cves':13} cases={len(cve_roots):>4} challenges={len(cves):>4}")
+    return challenges, roots, scanned, scores
 
 
 def get_git_commit_info() -> Dict[str, str]:
@@ -773,13 +831,18 @@ def emit_artifacts(
     commit_info: Dict[str, str],
     overall: Dict[str, Any],
     baseline: Optional[Path] = None,
+    pinned: Optional[Tuple[PinnedRepo, ...]] = None,
+    extra_challenges: Optional[List[Dict[str, Any]]] = None,
+    extra_roots: Optional[Dict[str, Path]] = None,
+    extra_scanned: Optional[List[str]] = None,
+    scores: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Write the report, time series, Markdown card and the challenge page.
 
     Only a full, failure-free pinned run touches the history and CSV: a debugging
     `--only` run must never publish a row for the commit.
     """
-    full_suite = not synthetic and {r.name for r in selected} == {r.name for r in PINNED_REPOS} \
+    full_suite = not synthetic and {r.name for r in selected} == {r.name for r in (pinned or PINNED_REPOS)} \
         and not overall["failed_repos"]
     identity = next((r.get("producer") for r in rows if r.get("producer")), {})
     record = {
@@ -831,6 +894,7 @@ def emit_artifacts(
             continue
         challenges += build_challenges(name, lang, root, records, url, commit)
 
+    challenges += extra_challenges or []
     baseline = baseline or (out_dir / "challenges.json")
     previous = None
     if baseline.exists():
@@ -838,7 +902,7 @@ def emit_artifacts(
             previous = json.loads(baseline.read_text()).get("challenges")
         except (json.JSONDecodeError, OSError):
             previous = None
-    scanned = {r["name"] for r in rows if not r.get("failed")}
+    scanned = {r["name"] for r in rows if not r.get("failed")} | set(extra_scanned or [])
     # Only a repo this run scanned can have a challenge solved; cards for the
     # rest stay on the page so --only cannot read as "the backlog is empty".
     previous_scanned = restrict_previous(previous, scanned) if previous is not None else None
@@ -848,8 +912,9 @@ def emit_artifacts(
         challenges,
         commit_info["commit"],
         previous_scanned,
-        roots={r.name: cache / r.name for r in PINNED_REPOS} | {name: root for name, root in synthetic},
+        roots={r.name: cache / r.name for r in (pinned or PINNED_REPOS)} | {name: root for name, root in synthetic} | (extra_roots or {}),
         carried=carried,
+        scores=scores,
         profile={"identity": identity, "rows": rows, "overall": overall},
     )
     markdown += "\n" + produced["markdown"]
@@ -882,6 +947,8 @@ def main() -> int:
     ap.add_argument("--case-timeout", type=int, default=120, help="seconds allowed per file in a --synthetic suite (default 120)")
     ap.add_argument("--workers", type=int, default=8, help="concurrent scans for --synthetic (default 8)")
     ap.add_argument("--max-rss-mb", type=float, default=None, help="fail (exit 4) when any scan peaks above this many MB")
+    ap.add_argument("--manifest", type=Path, default=None, help=f"repo manifest (default: frensense-bench/repos.toml; env {manifest.MANIFEST_ENV})")
+    ap.add_argument("--labelled", action="store_true", help="also score the labelled apps in the manifest and the recent-CVE set (missed bugs and false alarms)")
     ap.add_argument("--baseline", type=Path, default=None, help="previous challenges.json; solved/new challenges are reported against it")
     ap.add_argument("--ci-summary", action="store_true", help="write to $GITHUB_STEP_SUMMARY if present")
     args = ap.parse_args()
@@ -907,12 +974,17 @@ def main() -> int:
     # A name that matches nothing must be an error, not an empty run: it used to
     # write a 0-sink row into the history and sheet, which reads exactly like a
     # perfect scan (0% blindness) on a commit nobody measured.
-    known = {r.name for r in PINNED_REPOS}
+    try:
+        pinned = load_pinned(args.manifest)
+        labelled_repos = load_labelled(args.manifest)
+    except manifest.ManifestError as exc:
+        ap.error(str(exc))
+    known = {r.name for r in pinned} | ({l.name for l in labelled_repos} | {"recent-cves"} if args.labelled else set())
     wanted = [n.strip() for n in args.only.split(",") if n.strip()]
     unknown_names = [n for n in wanted if n not in known]
     if unknown_names:
         ap.error(f"unknown repository name(s): {', '.join(unknown_names)}; known: {', '.join(sorted(known))}")
-    selected = [r for r in PINNED_REPOS if not wanted or r.name in wanted]
+    selected = [r for r in pinned if not wanted or r.name in wanted]
 
     synthetic: List[Tuple[str, Path]] = []
     for spec in args.synthetic:
@@ -922,8 +994,10 @@ def main() -> int:
             ap.error(str(exc))
     if synthetic and not wanted:
         selected = []  # a synthetic run is about that suite, not about the pinned repos
-    if not selected and not synthetic:
-        ap.error("nothing to scan: name a pinned repo with --only, or pass --synthetic DIR")
+    if args.labelled and wanted and not any(r.name in wanted for r in pinned):
+        selected = []  # `--only owasp-python --labelled` is about the labelled source alone
+    if not selected and not synthetic and not args.labelled:
+        ap.error("nothing to scan: name a pinned repo with --only, or pass --synthetic DIR or --labelled")
 
     if args.max_rss_mb is not None and args.max_rss_mb <= 0:
         ap.error("--max-rss-mb must be a positive number of megabytes")
@@ -971,12 +1045,28 @@ def main() -> int:
                 f"RSS: {rss:>7} | {status}  [{meta['cases']} cases]"
             )
 
+        extra: List[Dict[str, Any]] = []
+        extra_roots: Dict[str, Path] = {}
+        extra_scanned: List[str] = []
+        extra_scores: List[Dict[str, Any]] = []
+        if args.labelled:
+            print("\nLabelled sources (ground truth):")
+            try:
+                extra, extra_roots, extra_scanned, extra_scores = collect_labelled(
+                    labelled_repos, binary, args.cache, args.only,
+                    effective_timeout(explicit_timeout, None), args.case_timeout,
+                )
+            except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
+                print(f"[FAILED] labelled scan: {exc}", file=sys.stderr)
+                return 3
+
         # Aggregate overall statistics
         overall = aggregate(rows, args.max_rss_mb)
         commit_info = get_git_commit_info()
 
         produced = emit_artifacts(
-            args.out_dir, args.cache, rows, selected, synthetic, commit_info, overall, args.baseline
+            args.out_dir, args.cache, rows, selected, synthetic, commit_info, overall, args.baseline,
+            pinned=pinned, extra_challenges=extra, extra_roots=extra_roots, extra_scanned=extra_scanned, scores=extra_scores,
         )
         markdown_text = produced["markdown"]
 

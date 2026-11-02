@@ -1,0 +1,923 @@
+{
+ "note": "Fix commits published 2024-2026. The changed lines of the vulnerable file are the label; the fixed file is the safe control.",
+ "cases": [
+  {
+   "id": "CVE-2023-37469",
+   "ghsa": "GHSA-92vc-4fcw-g68q",
+   "class": "inj.shell_metachar",
+   "ecosystem": "Go",
+   "published": "2024-08-05",
+   "commit": "https://github.com/IceWhaleTech/CasaOS/commit/af440eac5563644854ff33f72041e52d3fd1f47c",
+   "summary": "CasaOS Command Injection vulnerability"
+  },
+  {
+   "id": "CVE-2024-10833",
+   "ghsa": "GHSA-j9g7-mqhh-9hxf",
+   "class": "file.zip_slip",
+   "ecosystem": "PyPI",
+   "published": "2025-03-20",
+   "commit": "https://github.com/eosphoros-ai/DB-GPT/commit/780ce803e325b87f4ddfbe5824451e379aeee56c",
+   "summary": "DB-GPT Absolute Path Traversal in knowledge/{space_name}/document/upload"
+  },
+  {
+   "id": "CVE-2024-22199",
+   "ghsa": "GHSA-4mq2-gc4j-cmw6",
+   "class": "web.xss",
+   "ecosystem": "Go",
+   "published": "2024-01-11",
+   "commit": "https://github.com/gofiber/template/commit/28cff3ac4d4c117ab25b5396954676d624b6cb46",
+   "summary": "Django Template Engine Vulnerable to XSS"
+  },
+  {
+   "id": "CVE-2024-22203",
+   "ghsa": "GHSA-q97g-c29h-x2p7",
+   "class": "net.ssrf",
+   "ecosystem": "PyPI",
+   "published": "2024-03-14",
+   "commit": "https://github.com/benbusby/whoogle-search/commit/3a2e0b262e4a076a20416b45e6b6f23fd265aeda",
+   "summary": "Whoogle Search Path Traversal vulnerability"
+  },
+  {
+   "id": "CVE-2024-22205",
+   "ghsa": "GHSA-3q6g-qmpx-rqw4",
+   "class": "net.ssrf",
+   "ecosystem": "PyPI",
+   "published": "2024-03-14",
+   "commit": "https://github.com/benbusby/whoogle-search/commit/3a2e0b262e4a076a20416b45e6b6f23fd265aeda",
+   "summary": "Whoogle Search Server-Side Request Forgery vulnerability"
+  },
+  {
+   "id": "CVE-2024-23346",
+   "ghsa": "GHSA-vgv8-5cpj-qj2f",
+   "class": "inj.shell_metachar",
+   "ecosystem": "PyPI",
+   "published": "2024-02-21",
+   "commit": "https://github.com/materialsproject/pymatgen/commit/c231cbd3d5147ee920a37b6ee9dd236b376bcf5a",
+   "summary": "pymatgen vulnerable to arbitrary code execution when parsing a maliciously crafted JonesFaithfulTransformation"
+  },
+  {
+   "id": "CVE-2024-27133",
+   "ghsa": "GHSA-3v79-q7ph-j75h",
+   "class": "web.xss",
+   "ecosystem": "PyPI",
+   "published": "2024-02-24",
+   "commit": "https://github.com/mlflow/mlflow/commit/c43823750bffa5b6abcc086683b15a068513b67b",
+   "summary": "MLFlow Cross-site Scripting vulnerability leads to client-side Remote Code Execution"
+  },
+  {
+   "id": "CVE-2024-3271",
+   "ghsa": "GHSA-r6gp-rff2-p3hf",
+   "class": "inj.shell_metachar",
+   "ecosystem": "PyPI",
+   "published": "2024-04-16",
+   "commit": "https://github.com/run-llama/llama_index/commit/2c92e88838a5f481d50840240b1dd3180066c6f5",
+   "summary": "llama-index-core Command Injection vulnerability"
+  },
+  {
+   "id": "CVE-2024-32964",
+   "ghsa": "GHSA-mxhq-xw3g-rphc",
+   "class": "net.ssrf",
+   "ecosystem": "npm",
+   "published": "2024-05-10",
+   "commit": "https://github.com/lobehub/lobe-chat/commit/465665a735556669ee30446c7ea9049a20cc7c37",
+   "summary": "lobe-chat `/api/proxy` endpoint Server-Side Request Forgery vulnerability"
+  },
+  {
+   "id": "CVE-2024-35225",
+   "ghsa": "GHSA-fvcq-4x64-hqxr",
+   "class": "web.xss",
+   "ecosystem": "PyPI",
+   "published": "2024-06-11",
+   "commit": "https://github.com/jupyterhub/jupyter-server-proxy/commit/7abc9dc5bbb0b4b440548a5375261b8b8192fc22",
+   "summary": "Jupyter Server Proxy has a reflected XSS issue in host parameter"
+  },
+  {
+   "id": "CVE-2024-3817",
+   "ghsa": "GHSA-q64h-39hv-4cf7",
+   "class": "inj.argument",
+   "ecosystem": "Go",
+   "published": "2024-04-17",
+   "commit": "https://github.com/hashicorp/go-getter/commit/268c11cae8cf0d9374783e06572679796abe9ce9",
+   "summary": "HashiCorp go-getter Vulnerable to Argument Injection When Fetching Remote Default Git Branches"
+  },
+  {
+   "id": "CVE-2024-39933",
+   "ghsa": "GHSA-m27m-h5gj-wwmg",
+   "class": "inj.argument",
+   "ecosystem": "Go",
+   "published": "2024-12-23",
+   "commit": "https://github.com/gogs/gogs/commit/76831d0d06c44c5cf46dc22b380440b7507c2f07",
+   "summary": "Gogs allows argument Injection when tagging new releases"
+  },
+  {
+   "id": "CVE-2024-48914",
+   "ghsa": "GHSA-r9mq-3c9r-fmjq",
+   "class": "file.traversal",
+   "ecosystem": "npm",
+   "published": "2024-10-15",
+   "commit": "https://github.com/vendure-ecommerce/vendure/commit/e2ee0c43159b3d13b51b78654481094fdd4850c5",
+   "summary": "Vendure asset server plugin has local file read vulnerability with AssetServerPlugin & LocalAssetStorageStrate"
+  },
+  {
+   "id": "CVE-2024-5023",
+   "ghsa": "GHSA-3783-62vc-jr7x",
+   "class": "inj.shell_metachar",
+   "ecosystem": "PyPI",
+   "published": "2024-05-16",
+   "commit": "https://github.com/Netflix/consoleme/commit/2795a2bd553938a21c0643b37452971625ce67f5",
+   "summary": "ConsoleMe has an Arbitrary File Read Vulnerability via Limited Git command"
+  },
+  {
+   "id": "CVE-2024-56198",
+   "ghsa": "GHSA-94p5-r7cc-3rpr",
+   "class": "file.traversal",
+   "ecosystem": "npm",
+   "published": "2025-01-02",
+   "commit": "https://github.com/cabraviva/path-sanitizer/commit/b6d2319eac910dffdfacc8460f5b5cc5a1518ead",
+   "summary": "path-sanitizer allows bypassing the existing filters to achieve path-traversal vulnerability "
+  },
+  {
+   "id": "CVE-2024-6257",
+   "ghsa": "GHSA-xfhp-jf8p-mh5w",
+   "class": "inj.shell_metachar",
+   "ecosystem": "Go",
+   "published": "2024-06-25",
+   "commit": "https://github.com/hashicorp/go-getter/commit/268c11cae8cf0d9374783e06572679796abe9ce9",
+   "summary": "HashiCorp go-getter Vulnerable to Code Execution On Git Update Via Git Config Manipulation"
+  },
+  {
+   "id": "CVE-2025-12613",
+   "ghsa": "GHSA-g4mf-96x5-5m2c",
+   "class": "inj.argument",
+   "ecosystem": "npm",
+   "published": "2025-11-10",
+   "commit": "https://github.com/cloudinary/cloudinary_npm/commit/ec4b65f2b3461365c569198ed6d2cfa61cca4050",
+   "summary": "Cloudinary Node SDK is vulnerable to Arbitrary Argument Injection through parameters that include an ampersand"
+  },
+  {
+   "id": "CVE-2025-15379",
+   "ghsa": "GHSA-r23q-823p-vmf7",
+   "class": "inj.shell_metachar",
+   "ecosystem": "PyPI",
+   "published": "2026-03-30",
+   "commit": "https://github.com/mlflow/mlflow/commit/361b6f620adf98385c6721e384fb5ef9a30bb05e",
+   "summary": "MLflow Command Injection vulnerability"
+  },
+  {
+   "id": "CVE-2025-1793",
+   "ghsa": "GHSA-v3c8-3pr6-gr7p",
+   "class": "inj.sql",
+   "ecosystem": "PyPI",
+   "published": "2025-06-05",
+   "commit": "https://github.com/run-llama/llama_index/commit/0008041e8dde8e519621388e5d6f558bde6ef42e",
+   "summary": "llama_index vulnerable to SQL Injection"
+  },
+  {
+   "id": "CVE-2025-24786",
+   "ghsa": "GHSA-9r4c-jwx3-3j76",
+   "class": "file.traversal",
+   "ecosystem": "Go",
+   "published": "2025-02-06",
+   "commit": "https://github.com/clidey/whodb/commit/547336ac73c8d17929c18c3941c0d5b0099753cc",
+   "summary": "WhoDB has a path traversal opening Sqlite3 database"
+  },
+  {
+   "id": "CVE-2025-52477",
+   "ghsa": "GHSA-h3qp-hwvr-9xcq",
+   "class": "net.ssrf",
+   "ecosystem": "Go",
+   "published": "2025-06-26",
+   "commit": "https://github.com/octo-sts/app/commit/0f177fde54f9318e33f0bba6abaea9463a7c3afd",
+   "summary": "Octo STS Unauthenticated SSRF by abusing fields in OpenID Connect tokens"
+  },
+  {
+   "id": "CVE-2025-53632",
+   "ghsa": "GHSA-3gv2-v3jx-r9fh",
+   "class": "file.zip_slip",
+   "ecosystem": "Go",
+   "published": "2025-07-10",
+   "commit": "https://github.com/ctfer-io/chall-manager/commit/47d188fda5e3f86285e820f12ad9fb6f9930662c",
+   "summary": "Chall-Manager is vulnerable to Path Traversal when extracting/decoding a zip archive"
+  },
+  {
+   "id": "CVE-2025-58180",
+   "ghsa": "GHSA-49mj-x8jp-qvfc",
+   "class": "inj.argument",
+   "ecosystem": "PyPI",
+   "published": "2025-09-09",
+   "commit": "https://github.com/OctoPrint/OctoPrint/commit/be4201ef58d9a7c03593252398c16eada90a258b",
+   "summary": "OctoPrint is Vulnerable to RCE Attacks via Unsanitized Filename in File Upload"
+  },
+  {
+   "id": "CVE-2025-61141",
+   "ghsa": "GHSA-f9f4-5859-29mf",
+   "class": "inj.shell_metachar",
+   "ecosystem": "Go",
+   "published": "2025-10-30",
+   "commit": "https://github.com/sqls-server/sqls/commit/468a23fc89af89f632cc023a10c031e4bc781797",
+   "summary": "sqls-server/sqls is vulnerable to command injection in the config command "
+  },
+  {
+   "id": "CVE-2025-64459",
+   "ghsa": "GHSA-frmv-pr5f-9mcr",
+   "class": "inj.sql",
+   "ecosystem": "PyPI",
+   "published": "2025-11-05",
+   "commit": "https://github.com/django/django/commit/06dd38324ac3d60d83d9f3adabf0dcdf423d2a85",
+   "summary": "Django vulnerable to SQL injection via _connector keyword argument in QuerySet and Q objects."
+  },
+  {
+   "id": "CVE-2025-65025",
+   "ghsa": "GHSA-h3mw-4f23-gwpw",
+   "class": "file.zip_slip",
+   "ecosystem": "Go",
+   "published": "2025-11-19",
+   "commit": "https://github.com/esm-dev/esm.sh/commit/9d77b88c320733ff6689d938d85d246a3af9af16",
+   "summary": "esm.sh CDN service has arbitrary file write via tarslip"
+  },
+  {
+   "id": "CVE-2025-67494",
+   "ghsa": "GHSA-7wfc-4796-gmg5",
+   "class": "net.ssrf",
+   "ecosystem": "Go",
+   "published": "2025-12-08",
+   "commit": "https://github.com/zitadel/zitadel/commit/4c879b47334e01d4fcab921ac1b44eda39acdb96",
+   "summary": "ZITADEL Vulnerable to Unauthenticated Full-Read SSRF via V2 Login"
+  },
+  {
+   "id": "CVE-2025-67511",
+   "ghsa": "GHSA-4c65-9gqf-4w8h",
+   "class": "inj.shell_metachar",
+   "ecosystem": "PyPI",
+   "published": "2025-12-09",
+   "commit": "https://github.com/aliasrobotics/cai/commit/09ccb6e0baccf56c40e6cb429c698750843a999c",
+   "summary": "Cybersecurity AI (CAI) vulnerable to Command Injection in run_ssh_command_with_credentials Agent tool"
+  },
+  {
+   "id": "CVE-2026-104252",
+   "ghsa": "GHSA-v75v-6fpf-gvw8",
+   "class": "web.xss",
+   "ecosystem": "Go",
+   "published": "2026-10-15",
+   "commit": "https://github.com/vitessio/vitess/commit/3140c1846cd120db34f33b2083139b4ab638aed2",
+   "summary": "Vitess vttablet /twopcz reflected XSS"
+  },
+  {
+   "id": "CVE-2026-1115",
+   "ghsa": "GHSA-8wrq-fv5f-pfp2",
+   "class": "web.xss",
+   "ecosystem": "PyPI",
+   "published": "2026-04-10",
+   "commit": "https://github.com/parisneo/lollms/commit/9767b882dbc893c388a286856beeaead69b8292a",
+   "summary": "parisneo/lollms vulnerable to stored XSS in the social feature"
+  },
+  {
+   "id": "CVE-2026-112944",
+   "ghsa": "GHSA-r825-w8mm-5pxw",
+   "class": "inj.argument",
+   "ecosystem": "npm",
+   "published": "2026-10-20",
+   "commit": "https://github.com/vitejs/launch-editor/commit/f6e6701bb1f16f2dd242b321374f1b6cca6eb6d4",
+   "summary": "launch-editor: Editor CLI flag misinterpretation causing arbitrary command execution for some editors"
+  },
+  {
+   "id": "CVE-2026-11332",
+   "ghsa": "GHSA-w8p5-mx5w-cpqj",
+   "class": "inj.argument",
+   "ecosystem": "PyPI",
+   "published": "2026-06-05",
+   "commit": "https://github.com/ansible/ansible/commit/edee59aa15abcc74d920bb3e9c3835ab8db05a2f",
+   "summary": "ansible-core: Argument injection in ansible-galaxy role install leads to arbitrary code execution"
+  },
+  {
+   "id": "CVE-2026-114140",
+   "ghsa": "GHSA-pjvx-prjx-h659",
+   "class": "file.zip_slip",
+   "ecosystem": "PyPI",
+   "published": "2026-10-22",
+   "commit": "https://github.com/jupyter/nbconvert/commit/ce4bd99aec31d81d759fa8eeb8643179392ec66f",
+   "summary": "nbconvert: Arbitrary file write through path traversal in cell output filenames when exporting to md, latex, r"
+  },
+  {
+   "id": "CVE-2026-115324",
+   "ghsa": "GHSA-7587-9684-52r6",
+   "class": "inj.sql",
+   "ecosystem": "PyPI",
+   "published": "2026-10-22",
+   "commit": "https://github.com/mem0ai/mem0/commit/a2ffca32660537b7b304305f36774ae2a13452cb",
+   "summary": "mem0ai Databricks vector store vulnerable to SQL injection"
+  },
+  {
+   "id": "CVE-2026-16796",
+   "ghsa": "GHSA-j6g5-3hh3-pgw8",
+   "class": "inj.argument",
+   "ecosystem": "PyPI",
+   "published": "2026-07-24",
+   "commit": "https://github.com/aws/bedrock-agentcore-sdk-python/commit/3c4b4ee6b8730e6313a82c743ac37dbcc1c21cdb",
+   "summary": "AWS Bedrock AgentCore: Improper neutralization of argument delimiters in the Python SDK install_packages()"
+  },
+  {
+   "id": "CVE-2026-21440",
+   "ghsa": "GHSA-gvq6-hvvp-h34h",
+   "class": "file.zip_slip",
+   "ecosystem": "npm",
+   "published": "2026-01-02",
+   "commit": "https://github.com/adonisjs/bodyparser/commit/143a16f35602be8561215611582211dec280cae6",
+   "summary": "AdonisJS Path Traversal in Multipart File Handling"
+  },
+  {
+   "id": "CVE-2026-22785",
+   "ghsa": "GHSA-mwr6-3gp8-9jmj",
+   "class": "inj.shell_metachar",
+   "ecosystem": "npm",
+   "published": "2026-01-13",
+   "commit": "https://github.com/orval-labs/orval/commit/80b5fe73b94f120a3a5561952d6d4b0f8d7e928d",
+   "summary": "orval MCP client is vulnerable to a code injection attack."
+  },
+  {
+   "id": "CVE-2026-23644",
+   "ghsa": "GHSA-2657-3c98-63jq",
+   "class": "file.zip_slip",
+   "ecosystem": "Go",
+   "published": "2026-01-20",
+   "commit": "https://github.com/esm-dev/esm.sh/commit/9d77b88c320733ff6689d938d85d246a3af9af16",
+   "summary": "esm.sh has a path traversal in extractPackageTarball enables file writes from malicious packages"
+  },
+  {
+   "id": "CVE-2026-25891",
+   "ghsa": "GHSA-m3c2-496v-cw3v",
+   "class": "file.zip_slip",
+   "ecosystem": "Go",
+   "published": "2026-02-24",
+   "commit": "https://github.com/gofiber/fiber/commit/59133702301c2ab7b776dd123b474cbd995f2c86",
+   "summary": "Fiber has an Arbitrary File Read in Static Middleware on Windows"
+  },
+  {
+   "id": "CVE-2026-25895",
+   "ghsa": "GHSA-88qh-cphv-996c",
+   "class": "file.zip_slip",
+   "ecosystem": "npm",
+   "published": "2026-02-05",
+   "commit": "https://github.com/frangoteam/FUXA/commit/22c2192f5d9beef8a787c45eff3a14c24dbb5f96",
+   "summary": "FUXA Unauthenticated Remote Code Execution via Arbitrary File Write in Upload API"
+  },
+  {
+   "id": "CVE-2026-26194",
+   "ghsa": "GHSA-v9vm-r24h-6rqm",
+   "class": "inj.argument",
+   "ecosystem": "Go",
+   "published": "2026-03-05",
+   "commit": "https://github.com/gogs/gogs/commit/a000f0c7a632ada40e6829abdeea525db4c0fc2d",
+   "summary": "Gogs: Release tag option injection in release deletion"
+  },
+  {
+   "id": "CVE-2026-26198",
+   "ghsa": "GHSA-xxh2-68g9-8jqr",
+   "class": "inj.sql",
+   "ecosystem": "PyPI",
+   "published": "2026-02-23",
+   "commit": "https://github.com/collerek/ormar/commit/a03bae14fe01358d3eaf7e319fcd5db2e4956b16",
+   "summary": "ormar is vulnerable to SQL Injection through aggregate functions min() and max()"
+  },
+  {
+   "id": "CVE-2026-27699",
+   "ghsa": "GHSA-5rq4-664w-9x2c",
+   "class": "file.traversal",
+   "ecosystem": "npm",
+   "published": "2026-02-25",
+   "commit": "https://github.com/patrickjuchli/basic-ftp/commit/2a2a0e6514357b9eda07c2f8afbd3f04727a7cd9",
+   "summary": "Basic FTP has Path Traversal Vulnerability in its downloadToDir()\u00a0method"
+  },
+  {
+   "id": "CVE-2026-27728",
+   "ghsa": "GHSA-jmhp-5558-qxh5",
+   "class": "inj.shell_metachar",
+   "ecosystem": "npm",
+   "published": "2026-02-25",
+   "commit": "https://github.com/OneUptime/oneuptime/commit/f2cce35a04fac756cecc7a4c55e23758b99288c1",
+   "summary": "OneUptime: OS Command Injection in Probe NetworkPathMonitor via unsanitized destination in traceroute exec()"
+  },
+  {
+   "id": "CVE-2026-29608",
+   "ghsa": "GHSA-h3rm-6x7g-882f",
+   "class": "inj.argument",
+   "ecosystem": "npm",
+   "published": "2026-03-03",
+   "commit": "https://github.com/openclaw/openclaw/commit/dded569626b0d8e7bdab10b5e7528b6caf73a0f1",
+   "summary": "OpenClaw's Node system.run approval hardening wrapper semantic drift can execute unintended local scripts"
+  },
+  {
+   "id": "CVE-2026-31818",
+   "ghsa": "GHSA-7r9j-r86q-7g45",
+   "class": "net.ssrf",
+   "ecosystem": "npm",
+   "published": "2026-04-03",
+   "commit": "https://github.com/Budibase/budibase/commit/5b0fe83d4ece52696b62589cba89ef50cc009732",
+   "summary": "Budibase: Server-Side Request Forgery via REST Connector with Empty Default Blacklist"
+  },
+  {
+   "id": "CVE-2026-31886",
+   "ghsa": "GHSA-m4q3-457p-hh2x",
+   "class": "file.traversal",
+   "ecosystem": "Go",
+   "published": "2026-03-13",
+   "commit": "https://github.com/dagu-org/dagu/commit/12c2e5395bd9331d49ca103593edfd0db39c4f38",
+   "summary": "Dagu: Path Traversal via `dagRunId` in Inline DAG Execution"
+  },
+  {
+   "id": "CVE-2026-32013",
+   "ghsa": "GHSA-fgvx-58p6-gjwc",
+   "class": "file.zip_slip",
+   "ecosystem": "npm",
+   "published": "2026-03-02",
+   "commit": "https://github.com/openclaw/openclaw/commit/125f4071bcbc0de32e769940d07967db47f09d3d",
+   "summary": "OpenClaw gateway agents.files symlink escape allowed out-of-workspace file read/write"
+  },
+  {
+   "id": "CVE-2026-32714",
+   "ghsa": "GHSA-rh5m-2482-966c",
+   "class": "inj.sql",
+   "ecosystem": "PyPI",
+   "published": "2026-03-31",
+   "commit": "https://github.com/scitokens/scitokens/commit/3dba108853f2f4a6c0f2325c03779bf083c41cf2",
+   "summary": "SciTokens is vulnerable to SQL Injection in KeyCache"
+  },
+  {
+   "id": "CVE-2026-32767",
+   "ghsa": "GHSA-j7wh-x834-p3r7",
+   "class": "inj.sql",
+   "ecosystem": "Go",
+   "published": "2026-03-16",
+   "commit": "https://github.com/siyuan-note/siyuan/commit/d5e2d0bce0dffef5f61bd8066954bc2d41181fc5",
+   "summary": "SiYuan: Authorization Bypass Allows Arbitrary SQL Execution via Search API"
+  },
+  {
+   "id": "CVE-2026-32871",
+   "ghsa": "GHSA-vv7q-7jx5-f767",
+   "class": "net.ssrf",
+   "ecosystem": "PyPI",
+   "published": "2026-03-31",
+   "commit": "https://github.com/PrefectHQ/fastmcp/commit/40bdfb6b1de0ce30609ee9ba5bb95ecd04a9fb71",
+   "summary": "FastMCP OpenAPI Provider has an SSRF & Path Traversal Vulnerability"
+  },
+  {
+   "id": "CVE-2026-33054",
+   "ghsa": "GHSA-8qvf-mr4w-9x2c",
+   "class": "file.zip_slip",
+   "ecosystem": "PyPI",
+   "published": "2026-03-18",
+   "commit": "https://github.com/mesop-dev/mesop/commit/c6b382f363b73ac32c402a2db3aadc7784f66a5b",
+   "summary": "Mesop has a Path Traversal utilizing `FileStateSessionBackend` leads to Application Denial of Service and File"
+  },
+  {
+   "id": "CVE-2026-33476",
+   "ghsa": "GHSA-hhgj-gg9h-rjp7",
+   "class": "file.traversal",
+   "ecosystem": "Go",
+   "published": "2026-03-20",
+   "commit": "https://github.com/siyuan-note/siyuan/commit/009bb598b3beccc972aa5f1ed88b3b224326bf2a",
+   "summary": "Siyuan has an Unauthenticated Arbitrary File Read via Path Traversal"
+  },
+  {
+   "id": "CVE-2026-35569",
+   "ghsa": "GHSA-855c-r2vq-c292",
+   "class": "web.xss",
+   "ecosystem": "npm",
+   "published": "2026-04-16",
+   "commit": "https://github.com/apostrophecms/apostrophe/commit/0e57dd07a56ae1ba1e3af646ba026db4d0ab5bb3",
+   "summary": "Stored XSS in SEO Fields Leads to Authenticated API Data Exposure in ApostropheCMS"
+  },
+  {
+   "id": "CVE-2026-40281",
+   "ghsa": "GHSA-q7r4-hc83-hf2q",
+   "class": "inj.argument",
+   "ecosystem": "Go",
+   "published": "2026-04-30",
+   "commit": "https://github.com/gotenberg/gotenberg/commit/405f1069c026bb08f319fb5a44e5c67c33208318",
+   "summary": "Gotenberg has ExifTool stdin argument injection via metadata value newlines (bypass of key sanitization fix)"
+  },
+  {
+   "id": "CVE-2026-41179",
+   "ghsa": "GHSA-jfwf-28xr-xw6q",
+   "class": "inj.argument",
+   "ecosystem": "Go",
+   "published": "2026-04-22",
+   "commit": "https://github.com/rclone/rclone/commit/2a9e952b38e03a96bf40c9eb6e8e22199865ee3b",
+   "summary": "RClone: Unauthenticated operations/fsinfo allows attacker-controlled backend instantiation and local command e"
+  },
+  {
+   "id": "CVE-2026-41500",
+   "ghsa": "GHSA-wxw2-rwmh-vr8f",
+   "class": "inj.shell_metachar",
+   "ecosystem": "npm",
+   "published": "2026-04-16",
+   "commit": "https://github.com/electerm/electerm/commit/59708b38c8a52f5db59d7d4eff98e31d573128ee",
+   "summary": "electerm: electerm_install_script_CommandInjection Vulnerability Report"
+  },
+  {
+   "id": "CVE-2026-41501",
+   "ghsa": "GHSA-8x35-hph8-37hq",
+   "class": "inj.shell_metachar",
+   "ecosystem": "npm",
+   "published": "2026-04-24",
+   "commit": "https://github.com/electerm/electerm/commit/59708b38c8a52f5db59d7d4eff98e31d573128ee",
+   "summary": "electerm has Command Injection via runLinux funtion"
+  },
+  {
+   "id": "CVE-2026-41894",
+   "ghsa": "GHSA-hjh7-r5w8-5872",
+   "class": "file.traversal",
+   "ecosystem": "Go",
+   "published": "2026-04-22",
+   "commit": "https://github.com/siyuan-note/siyuan/commit/bb481e1290c4a34255652ede85a546504505d2a7",
+   "summary": "SiYuan: Path Traversal via Double URL Encoding in `/export/` Endpoint (Incomplete Fix Bypass for CVE-2026-3086"
+  },
+  {
+   "id": "CVE-2026-42615",
+   "ghsa": "GHSA-h4hv-92pp-pcjg",
+   "class": "web.xss",
+   "ecosystem": "npm",
+   "published": "2026-04-29",
+   "commit": "https://github.com/gchq/CyberChef/commit/9641ae07f92e9af50f10e978385465b2f4a36c4d",
+   "summary": "CyberChef has a Cross-site Scripting issue"
+  },
+  {
+   "id": "CVE-2026-44307",
+   "ghsa": "GHSA-2h4p-vjrc-8xpq",
+   "class": "file.traversal",
+   "ecosystem": "PyPI",
+   "published": "2026-05-06",
+   "commit": "https://github.com/sqlalchemy/mako/commit/72e10c573ca0fbcbddd4455abca8ce92a61780d7",
+   "summary": "Mako vulnerable to path traversal via backslash URI on Windows in TemplateLookup"
+  },
+  {
+   "id": "CVE-2026-47179",
+   "ghsa": "GHSA-c3px-h233-h6fq",
+   "class": "file.traversal",
+   "ecosystem": "Go",
+   "published": "2026-05-28",
+   "commit": "https://github.com/getarcaneapp/arcane/commit/b6cbffabf61dbc3f12a28d3b5830e3c6b7e67daf",
+   "summary": "Arcane Has an Authenticated Arbitrary Host File Read via Docker Compose Include Directives"
+  },
+  {
+   "id": "CVE-2026-47267",
+   "ghsa": "GHSA-c4v7-xg93-qf8g",
+   "class": "net.ssrf",
+   "ecosystem": "Go",
+   "published": "2026-06-22",
+   "commit": "https://github.com/gogs/gogs/commit/199cf4fd5bbe40b92f6dc8d649e241fd7a8d0018",
+   "summary": "Gogs has SSRF in webhook deliveries"
+  },
+  {
+   "id": "CVE-2026-47708",
+   "ghsa": "GHSA-4p62-hqp5-g644",
+   "class": "inj.shell_metachar",
+   "ecosystem": "PyPI",
+   "published": "2026-06-04",
+   "commit": "https://github.com/SepineTam/mcp-for-stata/commit/e6f945941ae0c7cf5e74a428e0b3dc82b396382f",
+   "summary": "MCP-for-Stata: Command injection via log_file_name parameter in Stata command wrapper"
+  },
+  {
+   "id": "CVE-2026-49119",
+   "ghsa": "GHSA-j36p-7w88-g82j",
+   "class": "file.traversal",
+   "ecosystem": "PyPI",
+   "published": "2026-07-01",
+   "commit": "https://github.com/gradio-app/gradio/commit/97d541f3d5fd05b2587a69ecc94b68fe5d2d7004",
+   "summary": " Gradio FileExplorer preprocess path traversal allows files outside root_dir to reach callbacks"
+  },
+  {
+   "id": "CVE-2026-50289",
+   "ghsa": "GHSA-5xpp-75jx-m839",
+   "class": "inj.argument",
+   "ecosystem": "npm",
+   "published": "2026-07-15",
+   "commit": "https://github.com/sebhildebrandt/systeminformation/commit/bbfddde48672d0ee124fefdb3cb4442fd9dd4f03",
+   "summary": "systeminformation: OS command injection in networkInterfaces() via interfaces(5) source-directive path on Linu"
+  },
+  {
+   "id": "CVE-2026-50553",
+   "ghsa": "GHSA-rqrh-8wpv-x7hh",
+   "class": "file.traversal",
+   "ecosystem": "Go",
+   "published": "2026-07-09",
+   "commit": "https://github.com/enchant97/note-mark/commit/67b7de04308a858ef27ceff87b514067b6d667e5",
+   "summary": "Note Mark: Path traversal via unsanitized book/note slug in migrate export (sibling of GHSA-g49p)"
+  },
+  {
+   "id": "CVE-2026-52806",
+   "ghsa": "GHSA-qf6p-p7ww-cwr9",
+   "class": "inj.shell_metachar",
+   "ecosystem": "Go",
+   "published": "2026-06-23",
+   "commit": "https://github.com/gogs/gogs/commit/a9dbafbfd8e1020bacc626420238c01d75d03364",
+   "summary": "Gogs vulnerable to RCE via git rebase --exec argument injection in pull request merge"
+  },
+  {
+   "id": "CVE-2026-53474",
+   "ghsa": "GHSA-vf2h-7x3w-97fr",
+   "class": "inj.sql",
+   "ecosystem": "Go",
+   "published": "2026-06-10",
+   "commit": "https://github.com/kubev2v/migration-planner/commit/6110711b1b71bb0d15348b934a490a5932b41f83",
+   "summary": "Openshift Migration Advisor: Improper input sanitization allows specially crafted RVTools .xlsx files to inclu"
+  },
+  {
+   "id": "CVE-2026-53502",
+   "ghsa": "GHSA-cj54-hpcc-gj6h",
+   "class": "file.traversal",
+   "ecosystem": "PyPI",
+   "published": "2026-07-31",
+   "commit": "https://github.com/thumbor/thumbor/commit/3b986d13677b30fe6651c8c72ebb25957ac0a40d",
+   "summary": "Thumbor has path traversal via post-validation URL decoding bypass in file_loader"
+  },
+  {
+   "id": "CVE-2026-54267",
+   "ghsa": "GHSA-rgjc-h3x7-9mwg",
+   "class": "web.xss",
+   "ecosystem": "npm",
+   "published": "2026-06-15",
+   "commit": "https://github.com/angular/angular/commit/6bde84fa8e6a5770b54040fbbc9bf10d5d0386fa",
+   "summary": "Angular Client Hydration DOM Clobbering & Response-Cache Poisoning"
+  },
+  {
+   "id": "CVE-2026-54910",
+   "ghsa": "GHSA-vvp7-h4fj-m28w",
+   "class": "file.traversal",
+   "ecosystem": "Go",
+   "published": "2026-07-31",
+   "commit": "https://github.com/gtsteffaniak/filebrowser/commit/f3f4bbe80cb569d664174aea874d7bfa008c3b5a",
+   "summary": "FileBrowser Quantum's path traversal issue in subtitle handler allows any authenticated user to read arbitrary"
+  },
+  {
+   "id": "CVE-2026-55061",
+   "ghsa": "GHSA-qmcq-xw74-w667",
+   "class": "inj.argument",
+   "ecosystem": "Go",
+   "published": "2026-08-17",
+   "commit": "https://github.com/uniget-org/cli/commit/7b4f18a9f00f0955f830c7ccf266ed0de5f9fd91",
+   "summary": "uniget CLI has an EDITOR Command Injection"
+  },
+  {
+   "id": "CVE-2026-55092",
+   "ghsa": "GHSA-mcj4-mphf-j9ff",
+   "class": "file.traversal",
+   "ecosystem": "Go",
+   "published": "2026-08-25",
+   "commit": "https://github.com/aquasecurity/trivy/commit/39e0b132260c60d59fa746c3f6dd10374b0ff6e4",
+   "summary": "Trivy has a path traversal via a crafted vulnerability database or other downloaded artifacts"
+  },
+  {
+   "id": "CVE-2026-57496",
+   "ghsa": "GHSA-hxpf-9xvq-wph8",
+   "class": "file.zip_slip",
+   "ecosystem": "PyPI",
+   "published": "2026-06-18",
+   "commit": "https://github.com/Labs64/NetLicensing-MCP/commit/b8fd0ea76d533202573eb24add9fb2fbd9331496",
+   "summary": "netlicensing-mcp: REST Path Traversal Bypasses Token Redaction"
+  },
+  {
+   "id": "CVE-2026-59832",
+   "ghsa": "GHSA-275h-v5h9-vr82",
+   "class": "file.traversal",
+   "ecosystem": "Go",
+   "published": "2026-09-02",
+   "commit": "https://github.com/siyuan-note/siyuan/commit/68cc0f537dfa4502496dfa794e71835421c25c09",
+   "summary": "Siyuan: Authenticated path traversal in /snippets/ static handler (serveSnippets) leaks conf/conf.json secrets"
+  },
+  {
+   "id": "CVE-2026-61559",
+   "ghsa": "GHSA-2h44-8472-frjj",
+   "class": "net.ssrf",
+   "ecosystem": "npm",
+   "published": "2026-09-15",
+   "commit": "https://github.com/zereight/gitlab-mcp/commit/6ffb4cc70706fd05b1ab80901676bc2998b6db6d",
+   "summary": "@zereight/mcp-gitlab Vulnerable to Server-Side Request Forgery"
+  },
+  {
+   "id": "CVE-2026-62385",
+   "ghsa": "GHSA-568f-pv23-39p4",
+   "class": "file.zip_slip",
+   "ecosystem": "PyPI",
+   "published": "2026-09-08",
+   "commit": "https://github.com/nltk/nltk/commit/7d1389d0789c1eca56bd0ed444089e0a3972e3ed",
+   "summary": "NLTK: Stable FrameNet and NKJP readers parse outside-root XML"
+  },
+  {
+   "id": "CVE-2026-63188",
+   "ghsa": "GHSA-rxjr-6c9q-h67x",
+   "class": "file.traversal",
+   "ecosystem": "npm",
+   "published": "2026-08-19",
+   "commit": "https://github.com/logto-io/logto/commit/5686815955534f803d3d50738259efd0f741e62c",
+   "summary": "logto-tunnel serves files outside --experience-path via path traversal"
+  },
+  {
+   "id": "CVE-2026-6437",
+   "ghsa": "GHSA-mph4-q2vm-w2pw",
+   "class": "inj.argument",
+   "ecosystem": "Go",
+   "published": "2026-04-18",
+   "commit": "https://github.com/kubernetes-sigs/aws-efs-csi-driver/commit/51806c22c5754bfbdeca6910f15571a07921b784",
+   "summary": "Amazon EFS CSI Driver has mount option injection via unsanitized volumeHandle and mounttargetip fields"
+  },
+  {
+   "id": "CVE-2026-67309",
+   "ghsa": "GHSA-8rxv-jg7p-wvg3",
+   "class": "file.zip_slip",
+   "ecosystem": "Go",
+   "published": "2026-08-06",
+   "commit": "https://github.com/traefik/traefik/commit/759515bec1b9f628b21ea8968ef63da853be5e29",
+   "summary": "Traefik: Kubernetes Ingress NGINX RewriteTarget Path Traversal Allows Route-Level Authentication Bypass"
+  },
+  {
+   "id": "CVE-2026-69240",
+   "ghsa": "GHSA-v8fg-2rw7-q452",
+   "class": "inj.sql",
+   "ecosystem": "npm",
+   "published": "2026-08-03",
+   "commit": "https://github.com/sequelize/sequelize/commit/5deadd2410ae9136a21fb652db206d27bb715f26",
+   "summary": "Sequelize: SQL Injection (Oracle DB)"
+  },
+  {
+   "id": "CVE-2026-71312",
+   "ghsa": "GHSA-2m8m-jhrm-w6j2",
+   "class": "inj.shell_metachar",
+   "ecosystem": "Go",
+   "published": "2026-08-05",
+   "commit": "https://github.com/rclone/rclone/commit/e122fba1a57641b63a580aa26c026903a84e2e88",
+   "summary": "rclone: PowerShell Smart-Quote Filename Injection Enables SFTP Server-Side Command Execution"
+  },
+  {
+   "id": "CVE-2026-72811",
+   "ghsa": "GHSA-q2vg-7qgx-x5fc",
+   "class": "inj.sql",
+   "ecosystem": "Go",
+   "published": "2026-09-03",
+   "commit": "https://github.com/siyuan-note/siyuan/commit/1a5b3431d5ab3036b19c1cc79486fedd6906fb57",
+   "summary": "SiYuan: SQL injection in backlink/mention search via unescaped stored and client input (publish mode): first-o"
+  },
+  {
+   "id": "CVE-2026-73294",
+   "ghsa": "GHSA-xp7j-h7jc-4w8p",
+   "class": "inj.argument",
+   "ecosystem": "Go",
+   "published": "2026-09-08",
+   "commit": "https://github.com/semaphoreui/semaphore/commit/7e8a9434bd81b82cf42220151c74801ea97542d6",
+   "summary": "Semaphore U: OS Command Injection"
+  },
+  {
+   "id": "CVE-2026-73509",
+   "ghsa": "GHSA-95cv-r8x4-vh75",
+   "class": "file.zip_slip",
+   "ecosystem": "Go",
+   "published": "2026-07-24",
+   "commit": "https://github.com/OpenListTeam/OpenList/commit/651da18da4c647d96648d4bb64462baac1c37e04",
+   "summary": "OpenList: Authenticated users can rename files outside their base path via batch rename `src_name` traversal"
+  },
+  {
+   "id": "CVE-2026-7474",
+   "ghsa": "GHSA-hx53-77qj-8663",
+   "class": "file.zip_slip",
+   "ecosystem": "Go",
+   "published": "2026-05-12",
+   "commit": "https://github.com/hashicorp/nomad/commit/cd7240c4099ad33eda279924fb3a9459b162d120",
+   "summary": "HashiCorp Nomad vulnerable to a path traversal"
+  },
+  {
+   "id": "CVE-2026-76219",
+   "ghsa": "GHSA-4gmw-gg2m-w46p",
+   "class": "inj.argument",
+   "ecosystem": "PyPI",
+   "published": "2026-08-07",
+   "commit": "https://github.com/gitpython-developers/GitPython/commit/9b5dcaf85da5946dbf69dcd53f9edba08f760b32",
+   "summary": "GitPython: Unguarded git read-tree option forwarding in IndexFile.from_tree/reset/merge_tree enables arbitrary"
+  },
+  {
+   "id": "CVE-2026-76220",
+   "ghsa": "GHSA-wvpp-8hx9-p66j",
+   "class": "inj.argument",
+   "ecosystem": "PyPI",
+   "published": "2026-08-07",
+   "commit": "https://github.com/gitpython-developers/GitPython/commit/96a888f4d782cb2f80452148e48e60ce4af6d541",
+   "summary": "GitPython: Unsafe git option guard bypass via split_single_char_options=False short-option token smuggling ena"
+  },
+  {
+   "id": "CVE-2026-76222",
+   "ghsa": "GHSA-hmq2-w58f-27jc",
+   "class": "file.traversal",
+   "ecosystem": "PyPI",
+   "published": "2026-08-07",
+   "commit": "https://github.com/gitpython-developers/GitPython/commit/4299c990e1ca21896f9485277caf7bb0ae5b404c",
+   "summary": "GitPython: Arbitrary Git Repository Creation Outside the Working Tree via Unvalidated .gitmodules Submodule Na"
+  },
+  {
+   "id": "CVE-2026-76844",
+   "ghsa": "GHSA-g84c-rxfj-3j2c",
+   "class": "file.zip_slip",
+   "ecosystem": "npm",
+   "published": "2026-09-29",
+   "commit": "https://github.com/webpack/webpack-dev-middleware/commit/13344e78b26d88fe9b7c8381a3860e248a52359b",
+   "summary": "webpack-dev-middleware vulnerable to Path Traversal via non-slash-terminated publicPath"
+  },
+  {
+   "id": "CVE-2026-79675",
+   "ghsa": "GHSA-m4rf-3fr8-xwx3",
+   "class": "inj.argument",
+   "ecosystem": "PyPI",
+   "published": "2026-09-01",
+   "commit": "https://github.com/nltk/nltk/commit/8fa9650b6009aacfdebbc33d2a08d32c0858ea6c",
+   "summary": "NLTK: JVM argument injection bypass via per-call options in the NLTK Stanford wrappers (incomplete fix of CVE-"
+  },
+  {
+   "id": "CVE-2026-81726",
+   "ghsa": "GHSA-8mgp-746c-j5xp",
+   "class": "file.zip_slip",
+   "ecosystem": "PyPI",
+   "published": "2026-09-02",
+   "commit": "https://github.com/nltk/nltk/commit/2a92b71827d754ae8920261e7ed0c4bb283ab2d7",
+   "summary": "NLTK: Model-artifact APIs bypass pathsec and touch files outside allowed roots"
+  },
+  {
+   "id": "CVE-2026-85061",
+   "ghsa": "GHSA-jrc7-96c5-q579",
+   "class": "web.xss",
+   "ecosystem": "npm",
+   "published": "2026-09-08",
+   "commit": "https://github.com/maplibre/maplibre-gl-js/commit/1da69f3cd913a39fa948708e01478663bf48bc27",
+   "summary": "MapLibre GL JS: XSS Sanitizer Bypass in DOM.sanitize() via Live NamedNodeMap Removal Skip"
+  },
+  {
+   "id": "CVE-2026-94483",
+   "ghsa": "GHSA-cjq9-62q9-8jv4",
+   "class": "net.ssrf",
+   "ecosystem": "npm",
+   "published": "2026-10-07",
+   "commit": "https://github.com/vercel/next.js/commit/e002ad68bd676bb0ed0c87bb22e3590304763e0b",
+   "summary": "Next.js has Server-Side Request Forgery in Image Optimization"
+  },
+  {
+   "id": "GHSA-2mf3-mr2r-r4vf",
+   "ghsa": "GHSA-2mf3-mr2r-r4vf",
+   "class": "file.zip_slip",
+   "ecosystem": "npm",
+   "published": "2026-08-18",
+   "commit": "https://github.com/gina-io/swig/commit/381bdc305e0b10e45368d56324328b9b4f7017fc",
+   "summary": "@rhinostone/swig: arbitrary local file read via include/extends path traversal"
+  },
+  {
+   "id": "GHSA-3f7w-8rr8-f37f",
+   "ghsa": "GHSA-3f7w-8rr8-f37f",
+   "class": "file.zip_slip",
+   "ecosystem": "PyPI",
+   "published": "2026-08-03",
+   "commit": "https://github.com/gitpython-developers/GitPython/commit/3af0c2516c5e18c829da30338614688f6b69b49c",
+   "summary": "GitPython: Unguarded git option forwarding in IndexFile.checkout() and TagReference.create() enables arbitrary"
+  },
+  {
+   "id": "GHSA-8mcx-5rqc-vhmf",
+   "ghsa": "GHSA-8mcx-5rqc-vhmf",
+   "class": "file.traversal",
+   "ecosystem": "PyPI",
+   "published": "2026-10-02",
+   "commit": "https://github.com/jelmer/dulwich/commit/4ca77f9f470742ba246cd6fa07beb6d735045664",
+   "summary": "Dulwich: Arbitrary File Write (RCE) on Windows via Unvalidated Drive Letters in Tree Paths"
+  },
+  {
+   "id": "GHSA-fjr4-x663-mwxc",
+   "ghsa": "GHSA-fjr4-x663-mwxc",
+   "class": "inj.argument",
+   "ecosystem": "PyPI",
+   "published": "2026-07-24",
+   "commit": "https://github.com/gitpython-developers/GitPython/commit/1d51b891d7f236044a6aa17498ec682b63dad6e6",
+   "summary": "GitPython: Arbitrary file overwrite via git diff --output argument injection in Diffable.diff (key- and value-"
+  },
+  {
+   "id": "GHSA-pmpg-2mxq-6xwr",
+   "ghsa": "GHSA-pmpg-2mxq-6xwr",
+   "class": "inj.sql",
+   "ecosystem": "npm",
+   "published": "2026-07-24",
+   "commit": "https://github.com/Budibase/budibase/commit/dd8c0654b35cd89ce3645f2355f4bf2ff9a5dd80",
+   "summary": " Budibase: NoSQL injection in MongoDB integration: collection dump, $where JS exec, cross-collection pivot, ar"
+  },
+  {
+   "id": "GHSA-q67q-549q-p849",
+   "ghsa": "GHSA-q67q-549q-p849",
+   "class": "file.traversal",
+   "ecosystem": "npm",
+   "published": "2025-09-15",
+   "commit": "https://github.com/FlowiseAI/Flowise/commit/8bd3de41533de78e4ef6c980e5704a1f9cb7ae6f",
+   "summary": "Flowise has arbitrary file access due to missing chat flow id validation"
+  },
+  {
+   "id": "GHSA-rm43-82j9-r4mj",
+   "ghsa": "GHSA-rm43-82j9-r4mj",
+   "class": "file.zip_slip",
+   "ecosystem": "PyPI",
+   "published": "2026-08-13",
+   "commit": "https://github.com/dep0we/atomic-agents-stack/commit/ec474f458122c5c0ca718d0df3078c8080338b2c",
+   "summary": "atomic-agents-stack: Dashboard HTTP server path traversal allows arbitrary file read"
+  }
+ ]
+}
