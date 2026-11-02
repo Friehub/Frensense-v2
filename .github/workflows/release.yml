@@ -148,7 +148,7 @@ jobs:
           IDENTITY_JSON=$(./target/debug/frensense --version --json)
           echo "$IDENTITY_JSON"
           REPORTED=$(echo "$IDENTITY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')
-          EXPECTED="${{ needs.check.outputs.version }}"
+          EXPECTED="${{ steps.check.outputs.version }}"
           if [[ "$REPORTED" != "$EXPECTED" ]]; then
             echo "::error::Binary reports version '$REPORTED' but the release tag expects '$EXPECTED'. Refusing to release."
             exit 1
@@ -555,4 +555,3 @@ jobs:
           files: release-binaries/*
           generate_release_notes: true
           prerelease: ${{ contains(needs.prepare.outputs.tag_name, 'preview') || contains(needs.prepare.outputs.tag_name, 'alpha') || contains(needs.prepare.outputs.tag_name, 'beta') || contains(needs.prepare.outputs.tag_name, 'rc') }}
-
