@@ -1,0 +1,97 @@
+name: Challenge check
+
+# Runs the PR's engine over the repos of the challenges it claims (`Solves: BG-...` in the
+# description) and uploads what it found. It is deliberately powerless: read-only token, no secrets,
+# and it only reports. The trusted `Challenge check (report)` workflow turns the upload into the
+# comment and the commit status, and credit is only ever awarded by the main-branch run after merge.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: challenge-verify-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Rescan claimed challenges
+    if: contains(github.event.pull_request.body, 'BG-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout the pull request
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: stable
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+
+      - name: Build Release Binary
+        run: cargo build --release --bin frensense
+
+      - name: Read claims and fetch the baseline
+        id: claims
+        env:
+          # Through the environment, never interpolated into the script: the description is attacker text.
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          mkdir -p verify
+          printf '%s' "$PR_BODY" > verify/body.md
+          code=$(curl -sS -o verify/baseline.json -w '%{http_code}' https://frensense.friehub.cloud/blindness/challenges.json || echo 000)
+          if [ "$code" != "200" ]; then
+            echo "status=no_baseline" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 frensense-bench/contrib.py claims --body-file verify/body.md --baseline verify/baseline.json --out verify/claims.json > verify/repos.txt
+          echo "status=ok" >> "$GITHUB_OUTPUT"
+          echo "repos=$(cat verify/repos.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Scan the claimed repos with this branch's engine
+        id: scan
+        if: steps.claims.outputs.status == 'ok' && steps.claims.outputs.repos != ''
+        continue-on-error: true
+        env:
+          REPOS: ${{ steps.claims.outputs.repos }}
+        run: |
+          python3 frensense-bench/run.py --suite blindness --prepare --run --labelled \
+            --only "$REPOS" --baseline verify/baseline.json --out-dir verify/out
+
+      - name: Package the result
+        if: always()
+        env:
+          CLAIMS: ${{ steps.claims.outputs.status }}
+          SCAN: ${{ steps.scan.outcome }}
+          REPOS: ${{ steps.claims.outputs.repos }}
+        run: |
+          mkdir -p verify/upload
+          if [ "$CLAIMS" != "ok" ]; then status=no_baseline
+          elif [ -z "$REPOS" ]; then status=unknown_claims
+          elif [ "$SCAN" != "success" ]; then status=scan_failed
+          else status=scanned; cp verify/out/challenges.json verify/upload/current.json; fi
+          echo "$status" > verify/upload/status.txt
+          echo "${{ github.event.pull_request.number }}" > verify/upload/pr.txt
+          echo "### Challenge check: $status" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: challenge-verify
+          path: verify/upload/
+          retention-days: 7

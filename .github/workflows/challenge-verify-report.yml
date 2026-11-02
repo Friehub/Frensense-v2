@@ -1,0 +1,89 @@
+name: Challenge check (report)
+
+# Trusted half of the challenge check. It runs from the default branch, so it never executes code from
+# the pull request: it downloads the scan's raw challenges.json, re-reads the claims from the PR itself,
+# and recomputes the verdict with the default branch's own contrib.py. The comment text and the commit
+# status come from that recomputation, not from anything the PR produced.
+
+on:
+  workflow_run:
+    workflows: ["Challenge check"]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+  statuses: write
+
+jobs:
+  report:
+    name: Post the result
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event.workflow_run.event == 'pull_request'
+
+    steps:
+      - name: Checkout the default branch (trusted code only)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+        with:
+          persist-credentials: false
+
+      - name: Download the scan result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          mkdir -p art
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n challenge-verify -D art || echo "no artifact"
+
+      - name: Verify and report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -u
+          [ -f art/pr.txt ] || { echo "nothing to report"; exit 0; }
+          pr=$(tr -dc '0-9' < art/pr.txt)
+          [ -n "$pr" ] || exit 0
+          # The PR number came from the artifact: believe it only if that PR's head is the commit that was scanned.
+          head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" --jq .head.sha)
+          [ "$head" = "$HEAD_SHA" ] || { echo "stale or mismatched run ($head vs $HEAD_SHA)"; exit 0; }
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$pr" --jq '.body // ""' > body.md
+          status=$(tr -dc 'a-z_' < art/status.txt)
+
+          state=failure
+          marker='<!-- frensense-challenge-verify -->'
+          case "$status" in
+            scanned)
+              curl -sS -fo baseline.json https://frensense.friehub.cloud/blindness/challenges.json
+              python3 frensense-bench/contrib.py claims --body-file body.md --baseline baseline.json --out claims.json > /dev/null
+              if python3 frensense-bench/contrib.py verify --baseline baseline.json --current art/current.json \
+                   --claims claims.json --out result.json --comment comment.md > /dev/null; then state=success; fi
+              desc=$(python3 -c "import json;r=json.load(open('result.json'));print(('verified: ' if r['ok'] else 'not verified: ')+', '.join(f\"{c['id']} {c['status']}\" for c in r['claims'])[:100])")
+              ;;
+            scan_failed)
+              printf '%s\n### Challenge check\n\nThe scan of the claimed repos did not finish, so nothing was verified. See the [run](%s).\n' "$marker" "$RUN_URL" > comment.md
+              desc="scan did not finish"
+              ;;
+            unknown_claims)
+              printf '%s\n### Challenge check\n\nNone of the `BG-...` IDs in the description is an open challenge on the board. They may already be solved. Pick one from the [challenge board](https://frensense.friehub.cloud/challenges).\n' "$marker" > comment.md
+              desc="no open challenge claimed"
+              ;;
+            *)
+              printf '%s\n### Challenge check\n\nThe published baseline could not be fetched, so this PR cannot be verified yet. Re-run the check in a few minutes.\n' "$marker" > comment.md
+              desc="baseline unavailable"
+              ;;
+          esac
+
+          # One sticky comment, updated in place.
+          id=$(gh api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" --paginate \
+                 --jq "[.[] | select(.user.type==\"Bot\" and (.body | startswith(\"$marker\")))][0].id // empty")
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@comment.md > /dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/issues/$pr/comments" -F body=@comment.md > /dev/null
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state="$state" -f context="Challenge check" \
+            -f description="$desc" -f target_url="$RUN_URL" > /dev/null

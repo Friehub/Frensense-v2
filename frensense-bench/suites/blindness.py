@@ -163,16 +163,17 @@ def collect_labelled(
     only: str = "",
     timeout: Optional[int] = DEFAULT_TIMEOUT_S,
     case_timeout: int = 120,
-) -> Tuple[List[Dict[str, Any]], Dict[str, Path], List[str]]:
+) -> Tuple[List[Dict[str, Any]], Dict[str, Path], List[str], List[Dict[str, Any]]]:
     """Missed / false-alarm challenges from every labelled source.
 
-    Returns (challenges, repo roots, names scanned). A source that fails to scan raises: a labelled
+    Returns (challenges, repo roots, names scanned, scorecards). A source that fails to scan raises: a labelled
     scan that silently found nothing would turn every labelled flaw into a "missed" challenge.
     """
     wanted = set(filter(None, only.split(",")))
     challenges: List[Dict[str, Any]] = []
     roots: Dict[str, Path] = {}
     scanned: List[str] = []
+    scores: List[Dict[str, Any]] = []
     for lr in labelled_repos:
         if wanted and lr.name not in wanted:
             continue
@@ -190,6 +191,7 @@ def collect_labelled(
         else:
             advisories, records = labelled.run_scan(binary, root, list(lr.targets), cache / f"{lr.name}.explain.json", timeout=timeout)
         result = labelled.match(labels, advisories, lr.tolerance)
+        scores.append(labelled.scorecard(lr.name, lr.lang, result))
         print(
             f"  {lr.name:13} labels={len(labels):>4} detected={len(result['detected']):>4} "
             f"missed={len(result['missed']):>4} false-alarms={len(result['false_alarms']):>4}"
@@ -197,12 +199,15 @@ def collect_labelled(
         challenges += labelled.make_challenges(lr.name, lr.lang, result, records, {"url": lr.url, "commit": lr.commit}, root=root)
         scanned.append(lr.name)
     if not wanted or "recent-cves" in wanted:
-        cves, cve_roots = labelled.recent_cve_challenges(binary, cache, case_timeout=case_timeout)
+        cve_results: List[Dict[str, Any]] = []
+        cves, cve_roots = labelled.recent_cve_challenges(binary, cache, case_timeout=case_timeout, results=cve_results)
+        if cve_results:
+            scores.append(labelled.scorecard("recent-cves", "mixed", labelled.merge_results(cve_results)))
         roots.update(cve_roots)
         challenges += cves
         scanned.append("recent-cves")
         print(f"  {'recent-cves':13} cases={len(cve_roots):>4} challenges={len(cves):>4}")
-    return challenges, roots, scanned
+    return challenges, roots, scanned, scores
 
 
 def get_git_commit_info() -> Dict[str, str]:
@@ -830,6 +835,7 @@ def emit_artifacts(
     extra_challenges: Optional[List[Dict[str, Any]]] = None,
     extra_roots: Optional[Dict[str, Path]] = None,
     extra_scanned: Optional[List[str]] = None,
+    scores: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Write the report, time series, Markdown card and the challenge page.
 
@@ -908,6 +914,7 @@ def emit_artifacts(
         previous_scanned,
         roots={r.name: cache / r.name for r in (pinned or PINNED_REPOS)} | {name: root for name, root in synthetic} | (extra_roots or {}),
         carried=carried,
+        scores=scores,
         profile={"identity": identity, "rows": rows, "overall": overall},
     )
     markdown += "\n" + produced["markdown"]
@@ -1041,10 +1048,11 @@ def main() -> int:
         extra: List[Dict[str, Any]] = []
         extra_roots: Dict[str, Path] = {}
         extra_scanned: List[str] = []
+        extra_scores: List[Dict[str, Any]] = []
         if args.labelled:
             print("\nLabelled sources (ground truth):")
             try:
-                extra, extra_roots, extra_scanned = collect_labelled(
+                extra, extra_roots, extra_scanned, extra_scores = collect_labelled(
                     labelled_repos, binary, args.cache, args.only,
                     effective_timeout(explicit_timeout, None), args.case_timeout,
                 )
@@ -1058,7 +1066,7 @@ def main() -> int:
 
         produced = emit_artifacts(
             args.out_dir, args.cache, rows, selected, synthetic, commit_info, overall, args.baseline,
-            pinned=pinned, extra_challenges=extra, extra_roots=extra_roots, extra_scanned=extra_scanned,
+            pinned=pinned, extra_challenges=extra, extra_roots=extra_roots, extra_scanned=extra_scanned, scores=extra_scores,
         )
         markdown_text = produced["markdown"]
 

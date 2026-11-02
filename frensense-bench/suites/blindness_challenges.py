@@ -405,7 +405,13 @@ def board_group(g: Dict[str, Any], roots: Dict[str, Path]) -> Dict[str, Any]:
     }
 
 
-def board_doc(groups: List[Dict[str, Any]], commit: str, delta: Optional[Dict[str, List[str]]], roots: Dict[str, Path]) -> Dict[str, Any]:
+def board_doc(
+    groups: List[Dict[str, Any]],
+    commit: str,
+    delta: Optional[Dict[str, List[str]]],
+    roots: Dict[str, Path],
+    scores: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     """The slim, render-ready document the docs-site challenge board loads (challenges.json stays the full record)."""
     return {
         "schema": 1,
@@ -413,6 +419,7 @@ def board_doc(groups: List[Dict[str, Any]], commit: str, delta: Optional[Dict[st
         "sinks": sum(g["impact"] for g in groups),
         "solved": len(delta["solved"]) if delta else None,
         "new": len(delta["new"]) if delta else None,
+        "scores": scores or [],
         "groups": [board_group(g, roots) for g in groups],
     }
 
@@ -661,6 +668,7 @@ def write_outputs(
     roots: Optional[Dict[str, Path]] = None,
     carried: Optional[List[Dict[str, Any]]] = None,
     profile: Optional[Dict[str, Any]] = None,
+    scores: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     carried = carried or []
@@ -673,12 +681,16 @@ def write_outputs(
         "count": len(items),
         "scanned": len(challenges),
         "carried": len(carried),
-        "groups": [{k: v for k, v in g.items() if k != "members"} | {"sinks": [m["id"] for m in g["members"]]} for g in groups],
+        "groups": [
+            {k: v for k, v in g.items() if k != "members"} | {"title": title_for(g), "sinks": [m["id"] for m in g["members"]]}
+            for g in groups
+        ],
         "challenges": items,
         "delta": delta,
+        "scores": scores or [],
     }
     (out_dir / "challenges.json").write_text(json.dumps(doc, indent=2))
-    (out_dir / "board.json").write_text(json.dumps(board_doc(groups, commit, delta, roots or {}), separators=(",", ":")))
+    (out_dir / "board.json").write_text(json.dumps(board_doc(groups, commit, delta, roots or {}, scores or []), separators=(",", ":")))
     (out_dir / "challenges.html").write_text(render_html(groups, commit, delta, roots, profile))
     md = render_markdown(groups, delta)
     (out_dir / "challenges.md").write_text(md)

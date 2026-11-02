@@ -201,7 +201,7 @@ def match(labels: List[Dict[str, Any]], advisories: List[Dict[str, Any]], tol: i
     by_file: Dict[str, List[Dict[str, Any]]] = {}
     for a in advisories:
         by_file.setdefault(_norm(a.get("file_path", "")), []).append(a)
-    detected, missed, false_alarms = [], [], []
+    detected, missed, false_alarms, clean = [], [], [], []
     for lab in labels:
         hits = by_file.get(lab["file"], [])
         if lab["line"] > 0 and lab["vulnerable"]:
@@ -210,7 +210,30 @@ def match(labels: List[Dict[str, Any]], advisories: List[Dict[str, Any]], tol: i
             (detected if hits else missed).append(dict(lab, advisory=hits[0] if hits else None))
         elif hits:
             false_alarms.append(dict(lab, advisory=hits[0]))
-    return {"detected": detected, "missed": missed, "false_alarms": false_alarms}
+        else:
+            clean.append(lab)  # labelled safe and left alone: a true negative
+    return {"detected": detected, "missed": missed, "false_alarms": false_alarms, "clean": clean}
+
+
+def _rates(tp: int, fn: int, fp: int, tn: int) -> Dict[str, float]:
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    fpr = fp / (fp + tn) if fp + tn else 0.0
+    # OWASP Benchmark's own score: true-positive rate minus false-positive rate. 0 is a coin flip.
+    return {"recall": round(recall, 4), "fpr": round(fpr, 4), "score": round(recall - fpr, 4)}
+
+
+def scorecard(name: str, lang: str, result: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
+    """Confusion counts for one labelled source, in total and per vulnerability category."""
+    buckets = (("tp", "detected"), ("fn", "missed"), ("fp", "false_alarms"), ("tn", "clean"))
+    total = {k: len(result.get(key, [])) for k, key in buckets}
+    cats: Dict[str, Dict[str, int]] = {}
+    for k, key in buckets:
+        for lab in result.get(key, []):
+            c = cats.setdefault(cwe_name(lab.get("cwe", "")), {"tp": 0, "fn": 0, "fp": 0, "tn": 0})
+            c[k] += 1
+    categories = [dict(name=n, **c, **_rates(**c)) for n, c in cats.items()]
+    categories.sort(key=lambda c: (-(c["fn"] + c["fp"]), c["name"]))
+    return {"name": name, "lang": lang, **total, **_rates(**total), "categories": categories}
 
 
 def drop_caught(res: Dict[str, List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
@@ -415,7 +438,25 @@ EXT = {"PyPI": (".py",), "npm": (".js", ".ts", ".mjs", ".cjs"), "Go": (".go",)}
 LANG = {"PyPI": "python", "npm": "javascript", "Go": "go"}
 
 
-def recent_cve_challenges(binary: Path, cache: Path, tol: int = 8, case_timeout: int = 120) -> Tuple[List[Dict[str, Any]], Dict[str, Path]]:
+def merge_results(parts: List[Dict[str, List[Dict[str, Any]]]]) -> Dict[str, List[Dict[str, Any]]]:
+    out: Dict[str, List[Dict[str, Any]]] = {"detected": [], "missed": [], "false_alarms": [], "clean": []}
+    for part in parts:
+        for k in out:
+            out[k] += part.get(k, [])
+    return out
+
+
+def merge_results(parts: List[Dict[str, List[Dict[str, Any]]]]) -> Dict[str, List[Dict[str, Any]]]:
+    out: Dict[str, List[Dict[str, Any]]] = {"detected": [], "missed": [], "false_alarms": [], "clean": []}
+    for part in parts:
+        for k in out:
+            out[k] += part.get(k, [])
+    return out
+
+
+def recent_cve_challenges(
+    binary: Path, cache: Path, tol: int = 8, case_timeout: int = 120, results: Optional[List[Dict[str, List[Dict[str, Any]]]]] = None
+) -> Tuple[List[Dict[str, Any]], Dict[str, Path]]:
     """Missed (vulnerable file silent near the fixed lines) and still-flagged-after-fix challenges."""
     spec = json.loads((LABELS_DIR / "recent_cves.json").read_text())["cases"]
     challenges: List[Dict[str, Any]] = []
@@ -472,6 +513,10 @@ def recent_cve_challenges(binary: Path, cache: Path, tol: int = 8, case_timeout:
             hits = [a for a in advisories if a["file_path"] == lab["file"] and abs(a.get("line", 0) - lab["line"]) <= tol]
             if hits:
                 res["false_alarms"].append(dict(lab, advisory=hits[0]))
+            else:
+                res.setdefault("clean", []).append(lab)
+        if results is not None:
+            results.append(res)
         pin = {"url": case["commit"], "commit": case["commit"].rsplit("/", 1)[-1]}
         challenges += make_challenges(repo, LANG[case["ecosystem"]], res, records, pin, group_repo="recent-cves", root=root)
     return challenges, roots
