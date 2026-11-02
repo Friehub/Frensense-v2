@@ -247,7 +247,7 @@ jobs:
 
       - name: Upload FRC Artifact
         if: matrix.settings.host == 'ubuntu-latest' && hashFiles('corpus/targets/**') != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: frensense-corpus
           path: frensense-corpus.frc
@@ -304,7 +304,7 @@ jobs:
           PYEOF
 
       - name: Upload CLI Artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cli-${{ matrix.settings.target }}
           path: target/${{ matrix.settings.target }}/release/${{ matrix.settings.bin_name }}
