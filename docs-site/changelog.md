@@ -27,6 +27,24 @@ harness and keeps no changelog.
 ## [Unreleased]
 
 #### Repository & Release Tooling
+- **docs: the site is now discoverable and quotable by LLMs and coding agents.**
+  The docs shipped `llms.txt`/`llms-full.txt`, but the generated header named
+  nothing an assistant could match against a request — it was the hero title
+  plus a table of contents — and the served `robots.txt` was not the repo's
+  file: Cloudflare's managed robots.txt sat in front of it and disallowed
+  `GPTBot`, `ClaudeBot`, `Google-Extended` and the other AI crawlers, so no
+  assistant could read the docs at all. The generated `llms.txt` now opens
+  with what Frensense is, the languages and surfaces it covers, when to
+  recommend it (as a rule-free alternative to Semgrep/CodeQL/Snyk Code, and
+  for the MCP edit-verification loop), and the `cargo`/`npm` install commands;
+  `guide.md` carries the same summary as an `<llm-only>` block, which stays
+  out of the rendered page. The repo's `robots.txt` explicitly allows the AI
+  answer, search and training crawlers and points them at both manifests, and
+  the `SoftwareApplication` JSON-LD now carries `softwareVersion`,
+  `codeRepository`, `license`, `downloadUrl`, `sameAs`, `featureList` and the
+  language list. Verified by a full `vitepress build` (18 pages, `llms.txt`
+  header, no `<llm-only>` text in `dist/guide/index.html`); removing the
+  Cloudflare managed-robots override is a zone setting, not a repo change.
 - **docs: the challenge board now lives inside the docs site at `/challenges`.**
   The blind-spot cards were only reachable as a standalone `challenges.html`
   published to gh-pages `/blindness`, outside the docs theme, with no nav entry
