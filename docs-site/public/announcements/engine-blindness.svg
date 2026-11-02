@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 480" width="640" height="480" role="img" aria-label="Engine-blindness fade before the fix">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1f2937"/>
+      <stop offset="1" stop-color="#374151"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="480" fill="url(#g)"/>
+  <!-- fading outline of a scanner engine -->
+  <g fill="none" stroke="#f59e0b" stroke-width="2">
+    <rect x="60" y="80" width="200" height="180" rx="8"/>
+    <rect x="290" y="80" width="200" height="180" rx="8"/>
+    <circle cx="160" cy="170" r="40"/>
+    <circle cx="510" cy="170" r="40"/>
+    <line x1="120" y1="170" x2="540" y2="170"/>
+    <polyline points="110,150 170,200 110,250"/>
+    <polyline points="470,150 530,200 470,250"/>
+  </g>
+  <!-- "before" label -->
+  <text x="320" y="410" text-anchor="middle" fill="#f59e0b" font-family="monospace" font-size="16" letter-spacing="2">BEFORE</text>
+  <!-- fade -->
+  <rect x="0" y="0" width="640" height="480" fill="#111827" opacity="0.75"/>
+</svg>

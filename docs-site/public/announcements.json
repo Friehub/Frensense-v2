@@ -1,0 +1,23 @@
+{
+  "announcements": [
+    {
+      "id": "engine-blindness-challenge",
+      "display": "popup",
+      "title": "Engine Blindness Challenge",
+      "message": "Fix what Frensense can't see. Pick a challenge, send a pull request, earn badges.",
+      "image": { "src": "/announcements/engine-blindness.svg", "alt": "A code window where the engine loses a value mid-flow" },
+      "link": { "text": "See the challenges", "href": "/challenges" },
+      "start": "2026-11-02",
+      "end": "2026-12-31"
+    },
+    {
+      "id": "release-v0.8.0",
+      "display": "bar",
+      "title": "Frensense v0.8.0 is out",
+      "message": "The v0.8.0 release ships the engine purity refactor, scoped package-level facts, and a rebuilt corpus pipeline. See the <a href=\"/changelog\">changelog</a> for the full list of changes.</p>",
+      "level": "info",
+      "link": { "text": "Read the changelog", "href": "/changelog" },
+      "iconColor": "#3b82f6"
+    }
+  ]
+}

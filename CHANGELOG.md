@@ -22,6 +22,23 @@ harness and keeps no changelog.
 ## [Unreleased]
 
 #### Repository & Release Tooling
+- **docs: engine-blindness pop-up announcement on the docs site, embeddable on any Friehub site.**
+  The announcement feed gains a `display` type (`bar` or `popup`) with a popup
+  image (top half of the card) and headline, the default popup being the Engine
+  Blindness Challenge with a generated SVG of a value the engine loses mid-flow.
+  The banner now actually mounts: `theme/index.ts` registers the VitePress layout
+  and wires the banner through the default theme's `layout-top` slot, while the
+  dead `layout-top` block was removed from `Layout.vue`. `public/announce.js`
+  (the embeddable script) renders the same feed in a shadow root, so the host
+  page's CSS can neither break it nor be broken by it, and text is set with
+  `textContent` only while URLs must be root-scoped paths or `https://`.
+  `scripts/check_announcements.py` validates the feed (image needs alt text, is
+  popup-only, and a root-scoped or `https://` src) with an internal-vs-client
+  cross-check, overridable via `ANNOUNCEMENTS_TS`, `ANNOUNCEMENTS_JSON` and
+  `ANNOUNCEMENTS_JS`; `scripts/test_check_announcements.py` covers the
+  validator's per-announcement rules and the cross-source consistency of
+  `main()` end to end (15 tests, green).
+
 - **docs: the site is now discoverable and quotable by LLMs and coding agents.**
   The docs shipped `llms.txt`/`llms-full.txt`, but the generated header named
   nothing an assistant could match against a request — it was the hero title
