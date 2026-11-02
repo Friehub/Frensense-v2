@@ -69,7 +69,7 @@ jobs:
           if [ -f target/blindness/previous_challenges.json ]; then
             BASELINE="--baseline target/blindness/previous_challenges.json"
           fi
-          python3 frensense-bench/run.py --suite blindness --prepare --run --ci-summary --max-rss-mb 1024 $BASELINE
+          python3 frensense-bench/run.py --suite blindness --prepare --run --labelled --ci-summary --max-rss-mb 1024 $BASELINE
 
       - name: Format Benchmark Action Results
         run: |

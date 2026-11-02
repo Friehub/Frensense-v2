@@ -1,0 +1,30 @@
+{
+  "repo": "https://github.com/OWASP/NodeGoat",
+  "commit": "c5cb68a7084e4ae7dcc60e6a98768720a81841e8",
+  "labels": [
+    {
+      "file": "app/routes/contributions.js",
+      "anchor": "const preTax = eval(req.body.preTax);",
+      "cwe": "95",
+      "case": "eval-contributions"
+    },
+    {
+      "file": "app/data/allocations-dao.js",
+      "anchor": "$where: `this.userId == ${parsedUserId} && this.stocks > '${threshold}'`",
+      "cwe": "943",
+      "case": "nosql-where-allocations"
+    },
+    {
+      "file": "app/routes/index.js",
+      "anchor": "return res.redirect(req.query.url);",
+      "cwe": "601",
+      "case": "open-redirect-learn"
+    },
+    {
+      "file": "app/routes/research.js",
+      "anchor": "const url = req.query.url + req.query.symbol;",
+      "cwe": "918",
+      "case": "ssrf-research"
+    }
+  ]
+}

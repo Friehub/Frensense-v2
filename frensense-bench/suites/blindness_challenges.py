@@ -258,6 +258,8 @@ def sort_challenges(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def group_key(c: Dict[str, Any]) -> str:
     """Sinks blocked by the same unseen thing in the same repo are one challenge."""
+    if c.get("group_key"):  # labelled challenges group by category and track, not by stop site
+        return c["group_key"]
     site = c["stop_sites"][0] if c["stop_sites"] else {"kind": "unclassified", "detail": ""}
     return f"{c['repo']}|{site['kind']}|{site['detail']}"
 
@@ -269,12 +271,14 @@ def group_challenges(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         g = groups.get(k)
         if g is None:
             site = c["stop_sites"][0] if c["stop_sites"] else {"kind": "unclassified", "detail": "", "function": "", "file": "", "line": 0}
+            kind = c.get("kind", "unknown")
             g = groups[k] = {
                 "id": "BG-" + hashlib.sha1(k.encode()).hexdigest()[:10],
-                "repo": c["repo"],
+                "challenge_kind": kind,
+                "repo": c.get("group_repo", c["repo"]),
                 "lang": c["lang"],
-                "kind": site["kind"],
-                "detail": site["detail"],
+                "kind": site["kind"] if kind == "unknown" else kind,
+                "detail": site["detail"] if kind == "unknown" else c.get("group_detail", ""),
                 "track": c["track"],
                 "difficulty": c["difficulty"],
                 "hint": c["hint"],
@@ -293,6 +297,10 @@ def group_challenges(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def title_for(g: Dict[str, Any]) -> str:
     d = g["detail"]
+    if g["kind"] == "missed":
+        return f"Missed {d}"
+    if g["kind"] == "false-alarm":
+        return f"False alarm on {d}"
     return {
         "external-call": f"Unmodelled call: {d}",
         "param-no-caller": f"No caller feeds parameter: {d or 'unnamed'}",
@@ -361,17 +369,18 @@ def board_group(g: Dict[str, Any], roots: Dict[str, Path]) -> Dict[str, Any]:
     """One challenge as the docs-site board shows it: self-contained, no repo checkout needed to render."""
     rep = g["members"][0]
     rs = rep["stop_sites"][0] if rep["stop_sites"] else {"file": "", "line": 0, "function": ""}
-    marks = [
-        {"file": rs["file"], "line": rs["line"], "label": "stop"},
-        {"file": rep["file"], "line": rep["line"], "label": "sink"},
-    ]
+    labelled = g.get("challenge_kind", "unknown") != "unknown"
+    marks = [{"file": rep["file"], "line": rep["line"], "label": "sink"}]
+    if not labelled:
+        marks.insert(0, {"file": rs["file"], "line": rs["line"], "label": "stop"})
     n = g["impact"]
     what = g["detail"] or g["kind"].replace("-", " ")
     where = f" in {rs['function']}()" if rs.get("function") else ""
-    if rep.get("kind", "unknown") == "unknown":
+    if not labelled:
         summary = f"The engine could not see through {what}{where}, so {n} sink{'s' if n != 1 else ''} stay{'s' if n == 1 else ''} unknown."
     else:
-        summary = rep.get("reason") or g["hint"]
+        word = "labelled vulnerable" if g["kind"] == "missed" else "labelled safe"
+        summary = f"{n} {word} case{'s' if n != 1 else ''}. Example ({rep['label']['case']}): {rep['reason'].rstrip('. ')}."
     pin = g.get("pin") or {}
     return {
         "id": g["id"],
@@ -390,7 +399,7 @@ def board_group(g: Dict[str, Any], roots: Dict[str, Path]) -> Dict[str, Any]:
         "fix_added": rep.get("fix_added") or [],
         "code": windows(roots.get(g["repo"]), marks),
         "sinks": [
-            {"id": m["id"], "sink": m["sink"], "file": m["file"], "line": m["line"]}
+            {"id": m["id"], "sink": (m.get("label") or {}).get("case") or m["sink"], "file": m["file"], "line": m["line"]}
             for m in g["members"][:BOARD_SINK_LIMIT]
         ],
     }
@@ -485,19 +494,36 @@ def _card(g: Dict[str, Any], roots: Dict[str, Path]) -> str:
     n = g["impact"]
     rep = g["members"][0]
     rs = rep["stop_sites"][0] if rep["stop_sites"] else {"file": "", "line": 0, "function": ""}
-    marks = [
-        {"file": rs["file"], "line": rs["line"], "label": "stop"},
-        {"file": rep["file"], "line": rep["line"], "label": "sink"},
-    ]
-    wins = windows(roots.get(g["repo"]), marks)
-    legend = "<div class=legend><span class='k stop'></span>engine lost the value here<span class='k sink'></span>sink it blocks</div>"
+    labelled = g.get("challenge_kind", "unknown") != "unknown"
+    root = roots.get(rep["repo"]) or roots.get(g["repo"])
+    if labelled:
+        marks = [{"file": rep["file"], "line": rep["line"], "label": "sink"}]
+        file_level = bool((rep.get("label") or {}).get("file_level"))
+        what = {
+            ("missed", True): "file is labelled vulnerable; the flow starts here",
+            ("missed", False): "labelled vulnerable line",
+        }.get((g["kind"], file_level), "labelled safe, still flagged")
+        legend_html = f"<span class='k sink'></span>{what}"
+        word = "labelled vulnerable" if g["kind"] == "missed" else "labelled safe"
+        summary = f"{n} {word} case{'s' if n != 1 else ''}. Example ({e(rep['label']['case'])}): {e(rep['reason'].rstrip('. '))}."
+    else:
+        marks = [
+            {"file": rs["file"], "line": rs["line"], "label": "stop"},
+            {"file": rep["file"], "line": rep["line"], "label": "sink"},
+        ]
+        legend_html = "<span class='k stop'></span>engine lost the value here<span class='k sink'></span>sink it blocks"
+        fn = f" in <code>{e(rs['function'])}()</code>" if rs.get("function") else ""
+        summary = (
+            f"The engine could not see through <code>{e(g['detail'] or g['kind'].replace('-', ' '))}</code>{fn}, "
+            f"so {n} sink{'s' if n != 1 else ''} stay{'s' if n == 1 else ''} unknown."
+        )
+    wins = windows(root, marks)
+    legend = f"<div class=legend>{legend_html}</div>"
     code = legend + "<div class=win>" + "".join(_window_html(w) for w in wins) + "</div>" if wins else ""
-    fn = f" in <code>{e(rs['function'])}()</code>" if rs.get("function") else ""
-    summary = (
-        f"The engine could not see through <code>{e(g['detail'] or g['kind'].replace('-', ' '))}</code>{fn}, "
-        f"so {n} sink{'s' if n != 1 else ''} stay{'s' if n == 1 else ''} unknown."
+    sinks = "".join(
+        f"<li><b>{e(m['label']['case'] if m.get('label') else m['sink'])}</b><span>{e(m['file'])}:{m['line']}</span></li>"
+        for m in g["members"]
     )
-    sinks = "".join(f"<li><b>{e(m['sink'])}</b><span>{e(m['file'])}:{m['line']}</span></li>" for m in g["members"])
     pin = g.get("pin") or {}
     where = (
         f"{e(pin['url'].removesuffix('.git'))} @ {e(pin['commit'][:7])}" if pin.get("url") and pin.get("commit") else ""
@@ -511,10 +537,10 @@ def _card(g: Dict[str, Any], roots: Dict[str, Path]) -> str:
     return (
         f"<article class=card data-track='{e(g['track'])}' data-diff='{g['difficulty']}' data-text='{e(text)}'>"
         f"<div class=meta><span class='dot {g['difficulty']}'></span>{g['difficulty']} · {e(g['track'])} · {e(g['repo'])}"
-        f"<span class=impact>unblocks {n} sink{'s' if n != 1 else ''}</span></div>"
+        f"<span class=impact>{('%d case' % n + ('s' if n != 1 else '')) if labelled else 'unblocks %d sink' % n + ('s' if n != 1 else '')}</span></div>"
         f"<h2>{e(title_for(g))}</h2>"
         f"<p class=sub>{summary}</p>{code}"
-        f"<details><summary>Affected sinks ({n})</summary><div class=body><ul>{sinks}</ul></div></details>"
+        f"<details><summary>{'Cases' if labelled else 'Affected sinks'} ({n})</summary><div class=body><ul>{sinks}</ul></div></details>"
         f"<details><summary>Where to start</summary><div class=body><div>{e(g['hint'])}</div>{pointer}"
         f"<div class=mono>{where}</div><div class=mono>$ {e(rep['repro'])}</div>"
         f"<button class=id data-id='{g['id']}' title='copy'>{g['id']}</button></div></details>"

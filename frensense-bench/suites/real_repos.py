@@ -27,10 +27,12 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
+from typing import Optional, Tuple
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import manifest  # noqa: E402
+from blindness import PinnedRepo, clone_repo  # noqa: E402
 from scanproc import run_scan, time_wrapped  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -46,154 +48,26 @@ SKIP_DIRS = {
 }
 
 
-@dataclass(frozen=True)
-class Repo:
-    name: str
-    url: str
-    commit: str
-    lang: str
-    #: Paths passed to the scanner, relative to the clone. Several paths are
-    #: scanned in one invocation so the cross-file callgraph links them.
-    targets: tuple[str, ...] = (".",)
-    note: str = ""
-
-
-# Pinned commits. Updating a pin is a deliberate act: it moves the baseline.
-REPOS: tuple[Repo, ...] = (
-    Repo(
-        name="flask",
-        url="https://github.com/pallets/flask.git",
-        commit="49943b5",
-        lang="python",
-        targets=("src",),
-        note="framework, ~7k LOC",
-    ),
-    Repo(
-        name="django",
-        url="https://github.com/django/django.git",
-        commit="a05e16a",
-        lang="python",
-        targets=("django",),
-        note="framework, ~130k LOC, 2937 files",
-    ),
-    Repo(
-        name="express",
-        url="https://github.com/expressjs/express.git",
-        commit="1c6f1b0",
-        lang="javascript",
-        targets=("lib",),
-        note="framework core only; examples/ are deliberately insecure demos",
-    ),
-    Repo(
-        name="nextjs",
-        url="https://github.com/vercel/next.js.git",
-        commit="fac5fc8",
-        lang="typescript",
-        targets=("packages/next/src",),
-        note="framework, ~5k files",
-    ),
-    Repo(
-        name="libpng",
-        url="https://github.com/pnggroup/libpng.git",
-        commit="a70313d",
-        lang="c",
-        targets=(".",),
-        note="~102 C files",
-    ),
-    Repo(
-        name="tokio",
-        url="https://github.com/tokio-rs/tokio.git",
-        commit="b499257",
-        lang="rust",
-        targets=("benches", "examples", "src"),
-        note="async runtime; reactor, timers, and I/O primitives",
-    ),
-    Repo(
-        name="axum",
-        url="https://github.com/tokio-rs/axum.git",
-        commit="bebe175",
-        lang="rust",
-        targets=(".",),
-        note="async web framework",
-    ),
-    Repo(
-        name="redis",
-        url="https://github.com/redis/redis.git",
-        commit="6a5fee6",
-        lang="c",
-        targets=("src",),
-        note="~200 C files",
-    ),
-    Repo(
-        name="juice-shop",
-        url="https://github.com/juice-shop/juice-shop.git",
-        commit="717f5ef",
-        lang="typescript",
-        targets=("routes", "lib", "models"),
-        note="deliberately vulnerable app; ground truth via vuln-line markers",
-    ),
-)
-
-
-def clone(repo: Repo, cache: Path) -> Path:
-    dest = cache / repo.name
-    if dest.exists():
-        return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "clone", "--depth", "1", "--quiet", repo.url, str(dest)], check=True
-    )    # A pin is a commit, not a branch name: fetch just that object. Tags and
-    # branch names resolve from the full clone; a short SHA is resolved by git
-    # from the fetched branch refs. A shallow `--depth 1` fetch still leaves
-    # the full tree of the pinned commit, so the scanner only needs to pass
-    # existing relative paths.
-    subprocess.run(
-        ["git", "-C", str(dest), "fetch", "--quiet", "origin", repo.commit],
-        check=False,
-        capture_output=True,
+def load_repos(manifest_file: Optional[Path] = None) -> Tuple[PinnedRepo, ...]:
+    """The repos for this suite, from repos.toml (entries whose `suites` include "real")."""
+    return tuple(
+        PinnedRepo(
+            name=e["name"], url=e["url"], commit=e["commit"], lang=e["lang"],
+            targets=tuple(e["targets"]), note=e.get("note", ""), timeout=e.get("timeout"),
+        )
+        for e in manifest.repos_for("real", manifest_file)
     )
-    subprocess.run(
-        ["git", "-C", str(dest), "checkout", "--quiet", repo.commit],
-        check=True,
-    )
-    # A shallow checkout keeps every directory the pin's tree contains, but the
-    # audited CLI can only pass *existing* paths. Mirror each pin's target
-    # locally so a repo with relocated targets (django -> django/, redis -> src)
-    # scans without ENOENT on stale checkout paths. The target is interpreted
-    # relative to the repo root; if it no longer exists at that path, look for
-    # an equivalent directory name anywhere in the checked-out tree and move it
-    # into place (a fuller pin fetch settles the relocation).
-    for t in repo.targets:
-        _ensure_target(dest, t)
-    return dest
 
 
-def _ensure_target(repo_root: Path, target: str) -> Path:
-    """Make sure the scanner's target subpath exists after a shallow clone.
+# Pinned commits live in repos.toml. Updating a pin is a deliberate act: it moves the baseline.
+Repo = PinnedRepo
+REPOS: Tuple[PinnedRepo, ...] = load_repos()
 
-    If the pin's tree no longer has `target` at the checked-out path (targets
-    can be relocated between pin updates), search the full tree for a matching
-    directory and move it into place under `repo_root`. Returns the path the
-    scanner should receive. Raises FileNotFoundError if nothing is found at all.
-    """
-    base = repo_root / target
-    if base.is_dir():
-        return base
-    if target == ".":
-        return repo_root
-    # Search for a directory with the same name anywhere in the tree.
-    name = target.rstrip("/").split("/")[-1]
-    for candidate in repo_root.rglob(name):
-        if candidate.is_dir() and candidate.parent != repo_root:
-            try:
-                candidate.rename(repo_root / target)
-                return repo_root / target
-            except OSError:
-                return base
-    raise FileNotFoundError(
-        f"{repo_root.name}: target '{target}' not found on pin {repo_root}" \
-        f" after full-sha checkout. Check the pin's target layout."
-    )
+
+def clone(repo: PinnedRepo, cache: Path) -> Path:
+    # One implementation for both suites: full-SHA pin, verified cache hit, fails loudly on a
+    # missing target (the old copy here moved directories around to hide ENOENT).
+    return clone_repo(repo, cache)
 
 
 def count_files(root: Path, targets: tuple[str, ...]) -> int:
@@ -214,7 +88,7 @@ def count_files(root: Path, targets: tuple[str, ...]) -> int:
     return total
 
 
-def scan(repo: Repo, cache: Path, binary: Path, timeout: int) -> dict:
+def scan(repo: PinnedRepo, cache: Path, binary: Path, timeout: int) -> dict:
     root = cache / repo.name
     meta = {"name": repo.name, "lang": repo.lang, "commit": repo.commit, "note": repo.note}
     meta["files"] = count_files(root, repo.targets)
@@ -251,6 +125,7 @@ def main() -> int:
     ap.add_argument("--prepare", action="store_true", help="clone the pinned repositories")
     ap.add_argument("--run", action="store_true", help="scan them")
     ap.add_argument("--only", default="", help="comma-separated repository names")
+    ap.add_argument("--manifest", type=Path, default=None, help="repo manifest (default: frensense-bench/repos.toml)")
     ap.add_argument("--binary", type=Path, default=DEFAULT_BIN)
     ap.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
     ap.add_argument("--timeout", type=int, default=600, help="per-repository cap, seconds")
@@ -262,7 +137,11 @@ def main() -> int:
     # Same rule as the blindness suite: a name that matches nothing is a typo,
     # not an empty run. `--only redis` silently scanning zero repositories and
     # exiting 0 reads exactly like a clean result.
-    known = {r.name for r in REPOS}
+    try:
+        repos = load_repos(args.manifest)
+    except manifest.ManifestError as exc:
+        ap.error(str(exc))
+    known = {r.name for r in repos}
     wanted = [n.strip() for n in args.only.split(",") if n.strip()]
     unknown_names = [n for n in wanted if n not in known]
     if unknown_names:
@@ -270,7 +149,7 @@ def main() -> int:
     if args.max_rss_mb is not None and args.max_rss_mb <= 0:
         ap.error("--max-rss-mb must be a positive number of megabytes")
 
-    selected = [r for r in REPOS if not wanted or r.name in wanted]
+    selected = [r for r in repos if not wanted or r.name in wanted]
     if not selected:
         ap.error("nothing to scan: name a repository with --only")
     if args.prepare:

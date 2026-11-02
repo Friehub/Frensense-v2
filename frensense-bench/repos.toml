@@ -1,0 +1,150 @@
+# The repositories the benchmark suites scan. Adding a repo is an edit to this file only:
+# no Python changes, and a new entry shows up in `--only`, the history sheet and the challenge board.
+#
+# Every entry pins a full 40-character commit SHA (a tag's SHA is fine). Moving a pin moves the
+# baseline, so do it on purpose and say so in the commit.
+#
+#   name      unique short name; used by --only and as the challenge repo name
+#   url       git URL
+#   commit    full 40-char SHA
+#   lang      python | javascript | typescript | c | rust | go
+#   targets   paths scanned in ONE invocation (so the cross-file call graph links them)
+#   note      why this repo is here
+#   timeout   optional per-repo scan limit in seconds (the default is 1800)
+#   suites    which suites scan it: "blindness" (blind-spot challenges) and/or "real"
+#             (timing, peak RSS and findings). Default: both.
+#
+# C and Rust entries are here for the memory side as much as the blindness side:
+# pointer-heavy code is where peak RSS and the truncation caps move.
+
+[[repo]]
+name = "flask"
+url = "https://github.com/pallets/flask.git"
+commit = "d086db856be187255b8ec61ef409357393020f32"
+lang = "python"
+targets = ["src"]
+note = "Python microframework; dynamic WSGI request routing"
+
+[[repo]]
+name = "django"
+url = "https://github.com/django/django.git"
+commit = "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+lang = "python"
+targets = ["django"]
+note = "Python framework, ~130k LOC; ORM string building, templates, middleware (tag 5.2.9)"
+
+[[repo]]
+name = "express"
+url = "https://github.com/expressjs/express.git"
+commit = "1c6f1b0fe4000977b9a7b4f34097e4d527dd9824"
+lang = "javascript"
+targets = ["lib"]
+note = "Node.js middleware framework; asynchronous callback chains. examples/ are deliberately insecure demos"
+
+[[repo]]
+name = "libpng"
+url = "https://github.com/pnggroup/libpng.git"
+commit = "890812a28da480f84f3b0198d31ac611c864ed98"
+lang = "c"
+targets = ["."]
+note = "C library; memory pointers, buffers, and system IO"
+
+[[repo]]
+name = "zlib"
+url = "https://github.com/madler/zlib.git"
+commit = "51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf"
+lang = "c"
+targets = ["."]
+note = "C compression library; hand-rolled buffers and bit twiddling (tag v1.3.1)"
+
+[[repo]]
+name = "curl"
+url = "https://github.com/curl/curl.git"
+commit = "8c908d2d0a6d32abdedda2c52e90bd56ec76c24d"
+lang = "c"
+targets = ["lib", "src"]
+note = "C network library and tool; parsers, string handling, protocol state machines (tag curl-8_19_0)"
+
+[[repo]]
+name = "redis"
+url = "https://github.com/redis/redis.git"
+commit = "bab5911b2e3114b98b6ae1533c1a15a57ba539a8"
+lang = "c"
+targets = ["src"]
+note = "C server, ~200 files; custom allocators, command dispatch, function pointers (tag 8.8.4)"
+
+[[repo]]
+name = "axum"
+url = "https://github.com/tokio-rs/axum.git"
+commit = "86aa6153e47b7862737acdcfe3a0eb3a162b939a"
+lang = "rust"
+targets = ["."]
+note = "Rust async framework; trait-based handler extraction"
+
+[[repo]]
+name = "tokio"
+url = "https://github.com/tokio-rs/tokio.git"
+commit = "e3b89bbefa7564e2eba2fb9f849ef7bf87d60fad"
+lang = "rust"
+targets = ["tokio/src"]
+suites = ["real"]
+note = "Rust async runtime; reactor, timers and I/O primitives, unsafe-heavy (tag tokio-1.49.0)"
+
+[[repo]]
+name = "ripgrep"
+url = "https://github.com/BurntSushi/ripgrep.git"
+commit = "4649aa9700619f94cf9c66876e9549d83420e16c"
+lang = "rust"
+targets = ["crates"]
+note = "Rust CLI; file IO, regex and glob handling, process spawning (tag 14.1.1)"
+
+[[repo]]
+name = "gin"
+url = "https://github.com/gin-gonic/gin.git"
+commit = "b5af7796535d97d9c7af42539af01d787fcb3b4d"
+lang = "go"
+targets = ["."]
+note = "Go web framework; context-carried request data, binding, rendering (tag v1.10.1)"
+
+[[repo]]
+name = "nextjs"
+url = "https://github.com/vercel/next.js.git"
+commit = "c5de33e93ccccaf3bee60cf50603e2152f9886e1"
+lang = "typescript"
+targets = ["packages/next/src"]
+suites = ["real"]
+timeout = 3600
+note = "TypeScript framework, ~5k files; the scale test (tag v15.5.9)"
+
+# Apps whose flaws are known. These score the engine against ground truth (missed bugs and
+# false alarms) instead of only counting unknown sinks. `labels` picks how the ground truth is read:
+#   juice     vuln-line markers in the source
+#   owasp     the benchmark's expected-results CSV (file-level labels)
+#   anchored  frensense-bench/labels/<name>.json
+# `per_file = true` scans one file per process, as the benchmark suite defines its cases.
+# The recent-CVE set lives in labels/recent_cves.json, which carries its own pins.
+
+[[labelled]]
+name = "juice-shop"
+url = "https://github.com/juice-shop/juice-shop.git"
+commit = "717f5efa886b0417eeecb52378b03cf10567b7e2"
+lang = "typescript"
+targets = ["routes", "lib", "models"]
+labels = "juice"
+
+[[labelled]]
+name = "nodegoat"
+url = "https://github.com/OWASP/NodeGoat.git"
+commit = "c5cb68a7084e4ae7dcc60e6a98768720a81841e8"
+lang = "javascript"
+targets = ["app"]
+labels = "anchored"
+
+[[labelled]]
+name = "owasp-python"
+url = "https://github.com/OWASP-Benchmark/BenchmarkPython.git"
+commit = "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
+lang = "python"
+targets = ["testcode"]
+labels = "owasp"
+per_file = true
