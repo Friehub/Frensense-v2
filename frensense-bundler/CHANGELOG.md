@@ -11,20 +11,10 @@ its replay gate, the corpus `lint` checks, and the embedded default-pack asset.
 in *this* file, so a format change - not the root changelog - is what records
 artifact compatibility.
 
-## [Unreleased]
-
-### Changed
-- **Corpus lint accepts the module-container extensions**: `vue` now joins
-  `ts`/`tsx`/`js`/`jsx`/`mjs`/`cjs`/`mts`/`cts` in `lint`'s supported
-  extension set (previously only the core list), so a corpus can author Vue
-  SFC families — and the docs-site scanner's `mjs`/`cjs` twins no longer
-  need the old `ts`/`js` sidestep. The fact extractor lowers every family
-  through the shared harness, so a `.vue` positive/negative pair is facted
-  from exactly the IR the engine scans.
-
-## [0.8.0] - 2026-10-30
+## [0.8.0]
 
 ### Breaking
+
 - **`BUNDLE_VERSION` 6 -> 7: bundles now record the fact-vocabulary
   fingerprint and the engine that built them.** A `.frc` stores fact entries by
   variant position (bincode is positional), so it is only decodable by an
@@ -53,6 +43,7 @@ artifact compatibility.
   failing for these.
 
 ### Added
+
 - **`frensense-bundler lint` / `frensense lint <corpus>`**: a corpus pre-flight
   that exits `0` when the corpus is acceptable, `1` when any error (or any
   warning under `--strict`) is found, and `2` on a usage error. The `frensense`
@@ -95,6 +86,15 @@ artifact compatibility.
   learned-fact counts by kind, pattern count, payload size and BLAKE3 checksum.
 
 ### Changed
+
+- **Corpus lint accepts the module-container extensions**: `vue` now joins
+  `ts`/`tsx`/`js`/`jsx`/`mjs`/`cjs`/`mts`/`cts` in `lint`'s supported
+  extension set (previously only the core list), so a corpus can author Vue
+  SFC families — and the docs-site scanner's `mjs`/`cjs` twins no longer
+  need the old `ts`/`js` sidestep. The fact extractor lowers every family
+  through the shared harness, so a `.vue` positive/negative pair is facted
+  from exactly the IR the engine scans.
+
 - **Regenerated embedded default-pack asset** (`assets/frensense-default.frc`):
   stripped cross-language sink contamination from the Python/Go/C/Rust vocab
   tables (foreign JS/Node/Express/Prisma/Cloudflare APIs that were false-positive

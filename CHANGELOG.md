@@ -19,9 +19,34 @@ Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
 
-## [Unreleased]
+## [0.8.0]
+
+### Breaking
+
+- **Version bump to 0.8.0** (from 0.7.0). This release adds fields to public
+  types (`CliOptions.explain`, `SinkFinding.cut_reasons`,
+  `Candidate::Check.package`). Under Cargo's `0.x` rules any field addition to
+  a constructible public type is a breaking change, so the crates that changed
+  move to the `0.8.0` line. To keep future additions minor-compatible, the
+  evolving output/option DTOs are now `#[non_exhaustive]`: `CliOptions`,
+  `Advisory`, `ExplainRecord`, `SinkFinding`, `BackwardStats`, and `Candidate`.
+  Consumers read fields (and match `Candidate` with a wildcard arm); they no
+  longer construct these types via literals.
+- **`reporting` module removed; two helpers moved to `policy`.**
+  `frensense::reporting::{reports_finding, apply}` are now
+  `frensense::policy::{reports_finding, apply}`, and `print_results` (in
+  `cli::print_results` and `cli::reporting::print_results`) takes one more
+  parameter (6 instead of 5) for the explain record. Library consumers calling
+  either helper must update the path and the call.
+- `frensense-engine`, `frensense-lang` and `frensense-bundler` carry their own
+  breaking entries. `cargo semver-checks check-release --release-type patch`
+  against the published `0.7.0` reports **4** major checks failing for this
+  crate (module removed, two functions moved/renamed, arity change,
+  `Advisory` now `non_exhaustive`), **6** for the engine, **3** for the language
+  specs and **3** for the bundler.
 
 ### Added
+
 - **Scanning a docs project root covers the theme code.`collect_files`
   skipped every hidden directory, and Vite/VitePress keeps a site's real
   application code — the theme (now Vue SFCs), config and typed loaders —
@@ -45,6 +70,22 @@ harness and keeps no changelog.
   `import './Comp.vue'` imports.
 
 #### Repository & Release Tooling
+- **docs: the docs site summarizes releases instead of mirroring the changelog.**
+  `docs-site/changelog.md` was a byte-identical copy of the root file behind a
+  five-line front matter, so every entry had to be written twice and the page
+  grew to 858 lines of release narrative a visitor cannot skim. Mirroring now
+  ends at `0.7.0` (frozen history, untouched); from `0.8.0` onward the site
+  gets a short "what this version is" section that links to the full changelog,
+  and the root `CHANGELOG.md` stays the single source of truth. `AGENTS.md`
+  §7.1 states the new rule and drops the regeneration one-liner, along with the
+  `## [Unreleased]` heading convention: `0.8.0` was never tagged or published
+  (`git tag` stops at `v0.7.0`) yet every changelog carried an `[Unreleased]`
+  section plus a dated `## [0.8.0] - 2026-10-30` one, splitting a single version
+  across two headings and putting a version that does not exist on the site.
+  The five changelogs now carry one undated `## [0.8.0]` heading, with each
+  section's entries preserved verbatim (checked by comparing the non-heading
+  line sets before and after the fold).
+
 - **docs: engine-blindness pop-up announcement on the docs site, embeddable on any Friehub site.**
   The announcement feed gains a `display` type (`bar` or `popup`) with a popup
   image (top half of the card) and headline, the default popup being the Engine
@@ -167,33 +208,6 @@ harness and keeps no changelog.
   uses `--published` instead of `--base-ref <PR-base-sha>` so the comparison
   is always anchored to the last actually-published version, not to an
   unpublished pre-release commit on `main`.
-
-## [0.8.0] - 2026-10-30
-
-### Breaking
-- **Version bump to 0.8.0** (from 0.7.0). This release adds fields to public
-  types (`CliOptions.explain`, `SinkFinding.cut_reasons`,
-  `Candidate::Check.package`). Under Cargo's `0.x` rules any field addition to
-  a constructible public type is a breaking change, so the crates that changed
-  move to the `0.8.0` line. To keep future additions minor-compatible, the
-  evolving output/option DTOs are now `#[non_exhaustive]`: `CliOptions`,
-  `Advisory`, `ExplainRecord`, `SinkFinding`, `BackwardStats`, and `Candidate`.
-  Consumers read fields (and match `Candidate` with a wildcard arm); they no
-  longer construct these types via literals.
-- **`reporting` module removed; two helpers moved to `policy`.**
-  `frensense::reporting::{reports_finding, apply}` are now
-  `frensense::policy::{reports_finding, apply}`, and `print_results` (in
-  `cli::print_results` and `cli::reporting::print_results`) takes one more
-  parameter (6 instead of 5) for the explain record. Library consumers calling
-  either helper must update the path and the call.
-- `frensense-engine`, `frensense-lang` and `frensense-bundler` carry their own
-  breaking entries. `cargo semver-checks check-release --release-type patch`
-  against the published `0.7.0` reports **4** major checks failing for this
-  crate (module removed, two functions moved/renamed, arity change,
-  `Advisory` now `non_exhaustive`), **6** for the engine, **3** for the language
-  specs and **3** for the bundler.
-
-### Added
 
 #### Code Hygiene & Complexity Controls
 - **`--hygiene` flag**: enables code hygiene and structural health rules (such
@@ -378,6 +392,7 @@ The engine computes `ScanTelemetry`, `ScanStatus` and per-check outcomes;
   performed for telemetry.
 
 ### Security
+
 - **docs-site lockfile**: `npm audit fix` upgraded `markdown-it` (14.3.2 ->
   14.3.3) and `source-map-js` (1.2.1 -> 1.2.2). An `esbuild` override
   (`^0.25.12`) plus a verified `vitepress build` cleared the esbuild advisory;

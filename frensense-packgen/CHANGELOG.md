@@ -16,7 +16,7 @@ are the reasons the asset moved.
 There is no semver contract here (nothing is published, and
 `cargo semver-checks` excludes it). The version tracks the workspace line.
 
-## [0.8.0] - 2026-10-30
+## [0.8.0]
 
 ### Changed
 - **Cross-language sink contamination removed from the vocabulary tables**: the
