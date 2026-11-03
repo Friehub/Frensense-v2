@@ -14,6 +14,8 @@
 //! - [`packages`] - npm package → [`PackageCategory`] knowledge
 //! - [`params`] - parameter → [`TaintOrigin`](crate::spec::TaintOrigin) classification
 //! - [`spec_ts`] / [`spec_js`] - the two `LanguageSpec` impls
+//! - [`spec_vue`] - the Vue SFC spec (template blanked in place by its
+//!   `preprocess`, script blocks parsed by the TSX grammar)
 //!
 //! Security vocabulary (sinks, sources, sanitizers, propagators, session
 //! roots, route patterns) lives in `frensense-packgen` since Phase 6.3;
@@ -25,6 +27,8 @@ mod packages;
 mod params;
 mod spec_js;
 mod spec_ts;
+mod spec_vue;
 
 pub use spec_js::JavaScriptSpec;
 pub use spec_ts::TypeScriptSpec;
+pub use spec_vue::VueSpec;
