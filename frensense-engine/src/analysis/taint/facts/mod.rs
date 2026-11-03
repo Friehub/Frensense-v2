@@ -95,11 +95,10 @@ pub fn seeded_tables_all() -> (crate::analysis::taint::config::TaintConfig, Fact
     let exts: Vec<&str> = frensense_lang::all_specs()
         .flat_map(|s| s.extensions().iter().copied())
         .collect();
-    let from_exts: std::collections::BTreeSet<&str> = config::languages_for_exts(
-        exts.iter().copied(),
-    )
-    .into_iter()
-    .collect();
+    let from_exts: std::collections::BTreeSet<&str> =
+        config::languages_for_exts(exts.iter().copied())
+            .into_iter()
+            .collect();
     let from_specs: std::collections::BTreeSet<&str> = frensense_lang::all_specs()
         .map(|s| s.fact_language())
         .collect();

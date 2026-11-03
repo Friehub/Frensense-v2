@@ -62,7 +62,8 @@ const SEVERITIES: &[&str] = &["critical", "high", "medium", "low", "warning", "i
 const PURPOSES: &[&str] = &["knowledge", "precision", "anchor"];
 
 const SUPPORTED_EXTS: &[&str] = &[
-    "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "vue", "py", "go", "rs", "c", "cpp", "h", "hpp",
+    "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "vue", "py", "go", "rs", "c", "cpp", "h",
+    "hpp",
 ];
 
 /// Calls that are everyday method names. A fact keyed on one of these without
