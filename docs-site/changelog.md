@@ -26,6 +26,18 @@ harness and keeps no changelog.
 
 ## [Unreleased]
 
+### Added
+- **Vue single-file components are scanned.** `frensense` now reads `.vue`
+  SFCs: the template and style sections are blanked in place and only the
+  script blocks reach the TypeScript parser, so findings land on the exact
+  line of the original file. A `vue` SFC belongs to the same scan family as
+  JavaScript/TypeScript (they import each other), so the built-in TS/JS
+  vocabulary — `eval`, `req.body`, `innerHTML` and the rest — applies to
+  `.vue` code as well, and consumer `.frc` knowledge bundles teach Vue files
+  the same way they teach a `.ts` one. The language list in the CLI help,
+  MCP and LSP now includes `vue`, and module resolution understands
+  `import './Comp.vue'` imports.
+
 #### Repository & Release Tooling
 - **docs: engine-blindness pop-up announcement on the docs site, embeddable on any Friehub site.**
   The announcement feed gains a `display` type (`bar` or `popup`) with a popup
