@@ -88,16 +88,24 @@ pub fn seeded_tables<'a>(
 
 /// Production tables for every registered language: extensions collected
 /// from `all_specs()` in registry order, which is the same order the
-/// per-spec merge uses (extensions are disjoint across specs).
+/// per-spec merge uses (extensions are disjoint across fact languages;
+/// a container spec like Vue shares its code language's facts).
 #[cfg(test)]
 pub fn seeded_tables_all() -> (crate::analysis::taint::config::TaintConfig, FactTable) {
     let exts: Vec<&str> = frensense_lang::all_specs()
         .flat_map(|s| s.extensions().iter().copied())
         .collect();
+    let from_exts: std::collections::BTreeSet<&str> = config::languages_for_exts(
+        exts.iter().copied(),
+    )
+    .into_iter()
+    .collect();
+    let from_specs: std::collections::BTreeSet<&str> = frensense_lang::all_specs()
+        .map(|s| s.fact_language())
+        .collect();
     debug_assert_eq!(
-        config::languages_for_exts(exts.iter().copied()).len(),
-        frensense_lang::all_specs().count(),
-        "extensions must cover every registered language exactly once"
+        from_exts, from_specs,
+        "extensions must cover every fact language"
     );
     seeded_tables(exts)
 }

@@ -10,6 +10,38 @@ Built-in vocabulary tables live in `frensense-packgen`; the `.frc` envelope
 lives in `frensense-bundler`. Their changes appear here only when they alter
 what this crate does.
 
+## [Unreleased]
+
+### Added
+- **The harness understands single-file containers: source passing through
+  `lower_source_detailed` is now rewritten by the spec's new `preprocess`
+  stage before parsing.** The default is the identity, so nothing changes
+  for the six existing languages; the new Vue spec uses it to blank
+  template/style markup into same-length whitespace, which keeps every byte
+  offset — and every sink span and reported line/column — anchored to the
+  original `.vue` file. There is exactly one call site, on the shared
+  harness path the scanner, MCP, LSP and the bundler's fact extractor all
+  lower through.
+
+### Changed
+- **Fact-table language keys come from `LanguageSpec::fact_language`**
+  instead of `spec.name()`. For the six registered languages this is the
+  same string (the default), so existing `.ts`/`.py`/`.c`… scans are
+  byte-for-byte unchanged; for the new Vue container spec the key is
+  `typescript`, which is what makes the default pack's typescript section
+  and consumer-bundle facts apply to `.vue` script bodies — before this,
+  a `vue` key excluded a `.vue` file from every language-scoped fact table
+  (the pack's `eval`, `req.body` and `innerHTML` furniture was silent on
+  SFC code). Four call sites moved to the new key: the per-IR `language`
+  stamp in both lowering entry points (which drives every scoped fact
+  lookup in the backward and forward engines), the route-pattern lookup,
+  and `languages_for_exts`, whose seeding-wide debug assertion now checks
+  distinct fact languages rather than a 1:1 spec-to-language map.
+- **Module-resolution candidate extensions include the container formats
+  they resolve**: `import ... from './Comp.vue'` now resolves alongside
+  the TS/JS candidates, and the previously missing `.mts`/`.cts` are
+  candidates too.
+
 ## [0.8.0] - 2026-10-30
 
 ### Breaking

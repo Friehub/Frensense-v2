@@ -298,7 +298,8 @@ pub struct FunctionIR {
     pub blocks: FxHashMap<BlockId, BasicBlock>,
     pub entry_block: BlockId,
     pub var_metadata: FxHashMap<VarId, VarMetadata>,
-    /// Language key this IR was lowered from (`spec.name()`: `"typescript"`,
+    /// Language key this IR was lowered from (`spec.fact_language()`:
+    /// `"typescript"`,
     /// `"rust"`, ...). Sink and sanitizer facts are language-keyed, so every
     /// call site must know its own language: without this, a Rust
     /// `File::create` signature would fire on a JavaScript `prisma.create`
