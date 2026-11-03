@@ -11,6 +11,17 @@ its replay gate, the corpus `lint` checks, and the embedded default-pack asset.
 in *this* file, so a format change - not the root changelog - is what records
 artifact compatibility.
 
+## [Unreleased]
+
+### Changed
+- **Corpus lint accepts the module-container extensions**: `vue` now joins
+  `ts`/`tsx`/`js`/`jsx`/`mjs`/`cjs`/`mts`/`cts` in `lint`'s supported
+  extension set (previously only the core list), so a corpus can author Vue
+  SFC families — and the docs-site scanner's `mjs`/`cjs` twins no longer
+  need the old `ts`/`js` sidestep. The fact extractor lowers every family
+  through the shared harness, so a `.vue` positive/negative pair is facted
+  from exactly the IR the engine scans.
+
 ## [0.8.0] - 2026-10-30
 
 ### Breaking
