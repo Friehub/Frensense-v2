@@ -27,6 +27,17 @@ harness and keeps no changelog.
 ## [Unreleased]
 
 ### Added
+- **Scanning a docs project root covers the theme code.`collect_files`
+  skipped every hidden directory, and Vite/VitePress keeps a site's real
+  application code — the theme (now Vue SFCs), config and typed loaders —
+  under `.vitepress`, so `frensense docs-site` reported the 12-file theme
+  tree as an invisible 0 findings. Hidden source directories are now an
+  explicit allowlist (`.vitepress`); every other hidden directory stays
+  excluded, and so do Vite's build artifacts even when they live inside the
+  allowed tree (plain-named `cache` and the existing `dist` rules, matching
+  the vendored-bundle hygiene `.min.js` and `looks_minified` already
+  enforce).  `frensense docs-site` now scans 20 files (314 functions) instead of the
+  5 outside the dot directory.
 - **Vue single-file components are scanned.** `frensense` now reads `.vue`
   SFCs: the template and style sections are blanked in place and only the
   script blocks reach the TypeScript parser, so findings land on the exact

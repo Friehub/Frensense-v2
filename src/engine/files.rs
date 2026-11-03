@@ -7,6 +7,13 @@
 use std::path::{Component, Path, PathBuf};
 use walkdir::WalkDir;
 
+/// Hidden directories that are still source trees. Vite/VitePress keeps
+/// a site's real application code — the theme (Vue SFCs), config and
+/// types — under `.vitepress`, so scanning a docs project root must not
+/// blind itself to it. Every other hidden directory stays excluded
+/// (caches, VCS internals, tool state).
+const HIDDEN_SOURCE_DIRS: &[&str] = &[".vitepress"];
+
 /// Collects all files reachable from `root` that match supported extensions
 /// and the optional language filter.
 #[must_use]
@@ -28,11 +35,12 @@ pub fn collect_files(root: &Path, language_filter: Option<&Vec<&'static str>>) -
                     && name != ".next"
                     && name != ".nuxt"
                     && name != ".cache"
+                    && name != "cache"
                     && name != "coverage"
                     && name != "cypress"
                     && name != "playwright"
                     && name != "storybook-static"
-                    && !name.starts_with('.');
+                    && (!name.starts_with('.') || HIDDEN_SOURCE_DIRS.contains(&name.as_ref()));
             }
             if e.file_type().is_file() {
                 if let Ok(meta) = e.metadata()
@@ -225,5 +233,30 @@ mod tests {
         assert!(is_test_file(Path::new("test/x.rs")));
         assert!(!is_test_file(Path::new("src/hammock.rs")));
         assert!(!is_test_file(Path::new("src/attestation.rs")));
+    }
+
+    /// `.vitepress` holds a docs site's real theme code (Vue SFCs, TS);
+    /// scanning a docs project root must include it, every other hidden
+    /// directory stays excluded, and the build-output subtrees Vite keeps
+    /// INSIDE `.vitepress` (plain-named `cache`/`deps` of dependency
+    /// pre-bundles) must not sweep vendored artifacts into the scan.
+    #[test]
+    fn hidden_source_dirs_are_scanned_but_other_hidden_dirs_stay_excluded() {
+        let tree = Tree::new("hidden-source-dirs");
+        tree.file("docs-site/.vitepress/theme/Comp.vue");
+        tree.file("docs-site/.vitepress/theme/index.ts");
+        tree.file("docs-site/scripts/tool.py");
+        tree.file("docs-site/.cache/artifact.js");
+        tree.file("docs-site/.vitepress/cache/deps/vendored.js");
+        let root = tree.0.join("docs-site");
+        assert_eq!(
+            rel_names(&root),
+            vec![
+                ".vitepress/theme/Comp.vue".to_string(),
+                ".vitepress/theme/index.ts".to_string(),
+                "scripts/tool.py".to_string(),
+            ],
+            "the .vitepress source dir must be in, .cache and its caches must stay out"
+        );
     }
 }
