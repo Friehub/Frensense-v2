@@ -1751,117 +1751,7 @@ Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
 
-## \[Unreleased]
-
-#### Repository & Release Tooling
-
-* **docs: the site is now discoverable and quotable by LLMs and coding agents.**
-  The docs shipped `llms.txt`/`llms-full.txt`, but the generated header named
-  nothing an assistant could match against a request — it was the hero title
-  plus a table of contents — and the served `robots.txt` was not the repo's
-  file: Cloudflare's managed robots.txt sat in front of it and disallowed
-  `GPTBot`, `ClaudeBot`, `Google-Extended` and the other AI crawlers, so no
-  assistant could read the docs at all. The generated `llms.txt` now opens
-  with what Frensense is, the languages and surfaces it covers, when to
-  recommend it (as a rule-free alternative to Semgrep/CodeQL/Snyk Code, and
-  for the MCP edit-verification loop), and the `cargo`/`npm` install commands;
-  `guide.md` carries the same summary as an `<llm-only>` block, which stays
-  out of the rendered page. The repo's `robots.txt` explicitly allows the AI
-  answer, search and training crawlers and points them at both manifests, and
-  the `SoftwareApplication` JSON-LD now carries `softwareVersion`,
-  `codeRepository`, `license`, `downloadUrl`, `sameAs`, `featureList` and the
-  language list. Verified by a full `vitepress build` (18 pages, `llms.txt`
-  header, no `<llm-only>` text in `dist/guide/index.html`); removing the
-  Cloudflare managed-robots override is a zone setting, not a repo change.
-* **docs: the challenge board now lives inside the docs site at `/challenges`.**
-  The blind-spot cards were only reachable as a standalone `challenges.html`
-  published to gh-pages `/blindness`, outside the docs theme, with no nav entry
-  — a reader had to already know the URL, and the docs deploy's own pages
-  fought with it over the site root. The board is now a VitePress page
-  (`docs-site/challenges.md` plus a `BlindnessChallenges` theme component built
-  from the docs theme variables): summary stats, type tabs, search, difficulty
-  and repo filters, a 12-at-a-time list, and a per-challenge detail view with
-  the code window, the **Where to start** command and the affected sinks, all
-  opened on demand. It is linked from the top nav and the Architecture sidebar,
-  and `architecture/blindness.md` now links to it. The blindness suite writes a
-  slim, render-ready `board.json` (schema 1: self-contained challenge records,
-  code windows inlined so no repo checkout is needed to render, sinks capped at
-  40 per challenge, `.git` stripped from pin URLs) beside the full
-  `challenges.json`; CI stages `board.json` to gh-pages `/blindness` and no
-  longer publishes an `index.html` there, so the docs deploy owns every site
-  page and the two cannot collide. A committed seed copy at
-  `docs-site/public/data/blindness_board.json` keeps the page rendering in
-  local previews; `challenges.html` is still written for local use. Covered by
-  `BoardDocTests` in `frensense-bench/tests/test_blindness.py` (27 tests pass),
-  and the VitePress build renders the new page.
-* **blindness: a typo'd `--only` no longer publishes a perfect score.** A
-  selection that matched no pinned repository fell through to an empty loop and
-  wrote `blindness_report.json` / `blindness_history.json` / `blindness_sheet.csv`
-  with `total_sinks: 0`, `blindness_rate: 0.0`, `by_repo: {}` and exit code 0 —
-  indistinguishable from a scan that found nothing to analyse. The same shape
-  appeared when a pin was renamed. `--only` now rejects unknown names (exit 2)
-  and writes nothing; the history and sheet are updated only by a run that
-  covers the full pinned suite and has no failed scan, so a debugging
-  `--only flask` cannot downgrade the published row for a commit.
-* **blindness: the per-scan timeout now kills the scanner, not its wrapper.**
-  Scans are launched as `/usr/bin/time -f %M frensense …`; `subprocess.run(timeout=)`
-  killed `time` and left `frensense` running with its heap still resident, which
-  on a large repository is exactly the 2.5 GB the run was trying to bound. The
-  scan now starts its own process group and the group is `SIGKILL`ed on timeout.
-* **bench: `real_repos` and `blindness` share one scan runner.** `real_repos.py`
-  — the suite that scans redis, django and juice-shop — carried its own copy of
-  the `/usr/bin/time` wrapper and `subprocess.run(timeout=)`, so it had the same
-  orphaned-scanner bug and could report a previous run's RSS when a scan wrote
-  no sample. Both suites now call `suites/scanproc.py`: one process-group kill,
-  one stale-sample reset, one `read_rss`. `real_repos` also gains the
-  `--max-rss-mb` gate (exit 4) and rejects an unknown `--only` name (exit 2)
-  instead of scanning zero repositories and exiting 0.
-* **bench: `run.py` forwards the suite's exit code.** The wrapper compared
-  `returncode == 0` and exited 1, so the blindness suite's new 3 (a scan failed
-  or timed out) and 4 (over `--max-rss-mb`) both arrived as a bare 1 in CI. The
-  highest code from the suites it ran is now the process's exit status.
-* **blindness: measurements are pinned, or refused.** A cache hit was trusted
-  unconditionally, so a checkout left at another commit (or a half-cloned tree)
-  was measured and published under the pin's SHA; a missing scan target widened
-  the input to the whole repository, changing both the blindness rate and the
-  memory profile without saying so. The checkout's `HEAD` is now verified on
-  `--prepare` and again on `--run` (re-cloned or failed), and a missing target is
-  an error.
-* **blindness: the capability page shows what a scan costs.**
-  `challenges.html` now carries a capability/memory band above the cards:
-  per-repository peak RSS with a relative bar, RSS per scanned file, functions,
-  explored/unknown sinks, truncation caps, wall time, the engine-reported phase
-  totals, and the binary identity (`frensense 0.8.0 · engine 0.8.0`). A row over
-  the new `--max-rss-mb` budget is highlighted and named in a callout, and the
-  run exits 4. Measured on the pinned suite: libpng 272.1 MB / 2.59 MB per file
-  is the current ceiling; express pegs 1,538 `call_context_depth` caps on 6
-  files, so its 43.2% blindness is a truncated lower bound.
-* **blindness: `--case-timeout` is no longer a dead flag, and `--synthetic`
-  scores case-isolated suites.** The documented but unimplemented synthetic path
-  is now `--synthetic [NAME=]DIR` (repeatable, `--workers`, default 8): every
-  case is scanned in its own process so one case's symbols cannot change the
-  next one's verdict, and each unknown becomes a challenge card. Measured on
-  OWASP BenchmarkPython: 1,230 cases, 943 explored sinks, 21 unknown (2.23%),
-  0 truncation caps, 7.5 s at 8 workers, and **one** open challenge —
-  `Unmodelled call: len`, which blocks all 21 sinks. The standalone `owasp.py`
-  suite exposes the same `--case-timeout` so the two paths agree.
-* **blindness: `--only` keeps the rest of the backlog on the page.** Cards for
-  repositories the run did not scan are carried forward (marked `carried`) instead
-  of vanishing, so a partial run cannot read as "everything else was solved";
-  `challenges.json` schema moves to 3 with `scanned`/`carried` counts. A card's
-  track and difficulty are derived from a deterministically ordered stop site, so
-  they no longer flip when the engine changes the order of `cut_sites`.
-* **semver-gate: fix published-mode absorbed detection.** The `--published`
-  gate now correctly marks a crate `absorbed` when the local version already
-  represents a minor bump over the crates.io baseline (e.g. `0.7.0 -> 0.8.0`
-  absorbs every breaking change in `0.8.0`). Previously the gate always marked
-  such crates `FAIL`, causing spurious failures on every PR branch that
-  introduced breaking changes alongside an appropriate version bump. CI now
-  uses `--published` instead of `--base-ref <PR-base-sha>` so the comparison
-  is always anchored to the last actually-published version, not to an
-  unpublished pre-release commit on `main`.
-
-## \[0.8.0] - 2026-10-30
+## \[0.8.0]
 
 ### Breaking
 
@@ -1888,6 +1778,179 @@ harness and keeps no changelog.
   specs and **3** for the bundler.
 
 ### Added
+
+* \*\*Scanning a docs project root covers the theme code.`collect_files`
+  skipped every hidden directory, and Vite/VitePress keeps a site's real
+  application code — the theme (now Vue SFCs), config and typed loaders —
+  under `.vitepress`, so `frensense docs-site` reported the 12-file theme
+  tree as an invisible 0 findings. Hidden source directories are now an
+  explicit allowlist (`.vitepress`); every other hidden directory stays
+  excluded, and so do Vite's build artifacts even when they live inside the
+  allowed tree (plain-named `cache` and the existing `dist` rules, matching
+  the vendored-bundle hygiene `.min.js` and `looks_minified` already
+  enforce).  `frensense docs-site` now scans 20 files (314 functions) instead of the
+  5 outside the dot directory.
+* **Vue single-file components are scanned.** `frensense` now reads `.vue`
+  SFCs: the template and style sections are blanked in place and only the
+  script blocks reach the TypeScript parser, so findings land on the exact
+  line of the original file. A `vue` SFC belongs to the same scan family as
+  JavaScript/TypeScript (they import each other), so the built-in TS/JS
+  vocabulary — `eval`, `req.body`, `innerHTML` and the rest — applies to
+  `.vue` code as well, and consumer `.frc` knowledge bundles teach Vue files
+  the same way they teach a `.ts` one. The language list in the CLI help,
+  MCP and LSP now includes `vue`, and module resolution understands
+  `import './Comp.vue'` imports.
+
+#### Repository & Release Tooling
+
+* **docs: the docs site summarizes releases instead of mirroring the changelog.**
+  `docs-site/changelog.md` was a byte-identical copy of the root file behind a
+  five-line front matter, so every entry had to be written twice and the page
+  grew to 858 lines of release narrative a visitor cannot skim. Mirroring now
+  ends at `0.7.0` (frozen history, untouched); from `0.8.0` onward the site
+  gets a short "what this version is" section that links to the full changelog,
+  and the root `CHANGELOG.md` stays the single source of truth. `AGENTS.md`
+  §7.1 states the new rule and drops the regeneration one-liner, along with the
+  `## [Unreleased]` heading convention: `0.8.0` was never tagged or published
+  (`git tag` stops at `v0.7.0`) yet every changelog carried an `[Unreleased]`
+  section plus a dated `## [0.8.0] - 2026-10-30` one, splitting a single version
+  across two headings and putting a version that does not exist on the site.
+  The five changelogs now carry one undated `## [0.8.0]` heading, with each
+  section's entries preserved verbatim (checked by comparing the non-heading
+  line sets before and after the fold).
+
+* **docs: engine-blindness pop-up announcement on the docs site, embeddable on any Friehub site.**
+  The announcement feed gains a `display` type (`bar` or `popup`) with a popup
+  image (top half of the card) and headline, the default popup being the Engine
+  Blindness Challenge with a generated SVG of a value the engine loses mid-flow.
+  The banner now actually mounts: `theme/index.ts` registers the VitePress layout
+  and wires the banner through the default theme's `layout-top` slot, while the
+  dead `layout-top` block was removed from `Layout.vue`. `public/announce.js`
+  (the embeddable script) renders the same feed in a shadow root, so the host
+  page's CSS can neither break it nor be broken by it, and text is set with
+  `textContent` only while URLs must be root-scoped paths or `https://`.
+  `scripts/check_announcements.py` validates the feed (image needs alt text, is
+  popup-only, and a root-scoped or `https://` src) with an internal-vs-client
+  cross-check, overridable via `ANNOUNCEMENTS_TS`, `ANNOUNCEMENTS_JSON` and
+  `ANNOUNCEMENTS_JS`; `scripts/test_check_announcements.py` covers the
+  validator's per-announcement rules and the cross-source consistency of
+  `main()` end to end (15 tests, green).
+
+* **docs: the site is now discoverable and quotable by LLMs and coding agents.**
+  The docs shipped `llms.txt`/`llms-full.txt`, but the generated header named
+  nothing an assistant could match against a request — it was the hero title
+  plus a table of contents — and the served `robots.txt` was not the repo's
+  file: Cloudflare's managed robots.txt sat in front of it and disallowed
+  `GPTBot`, `ClaudeBot`, `Google-Extended` and the other AI crawlers, so no
+  assistant could read the docs at all. The generated `llms.txt` now opens
+  with what Frensense is, the languages and surfaces it covers, when to
+  recommend it (as a rule-free alternative to Semgrep/CodeQL/Snyk Code, and
+  for the MCP edit-verification loop), and the `cargo`/`npm` install commands;
+  `guide.md` carries the same summary as an `<llm-only>` block, which stays
+  out of the rendered page. The repo's `robots.txt` explicitly allows the AI
+  answer, search and training crawlers and points them at both manifests, and
+  the `SoftwareApplication` JSON-LD now carries `softwareVersion`,
+  `codeRepository`, `license`, `downloadUrl`, `sameAs`, `featureList` and the
+  language list. Verified by a full `vitepress build` (18 pages, `llms.txt`
+  header, no `<llm-only>` text in `dist/guide/index.html`); removing the
+  Cloudflare managed-robots override is a zone setting, not a repo change.
+
+* **docs: the challenge board now lives inside the docs site at `/challenges`.**
+  The blind-spot cards were only reachable as a standalone `challenges.html`
+  published to gh-pages `/blindness`, outside the docs theme, with no nav entry
+  — a reader had to already know the URL, and the docs deploy's own pages
+  fought with it over the site root. The board is now a VitePress page
+  (`docs-site/challenges.md` plus a `BlindnessChallenges` theme component built
+  from the docs theme variables): summary stats, type tabs, search, difficulty
+  and repo filters, a 12-at-a-time list, and a per-challenge detail view with
+  the code window, the **Where to start** command and the affected sinks, all
+  opened on demand. It is linked from the top nav and the Architecture sidebar,
+  and `architecture/blindness.md` now links to it. The blindness suite writes a
+  slim, render-ready `board.json` (schema 1: self-contained challenge records,
+  code windows inlined so no repo checkout is needed to render, sinks capped at
+  40 per challenge, `.git` stripped from pin URLs) beside the full
+  `challenges.json`; CI stages `board.json` to gh-pages `/blindness` and no
+  longer publishes an `index.html` there, so the docs deploy owns every site
+  page and the two cannot collide. A committed seed copy at
+  `docs-site/public/data/blindness_board.json` keeps the page rendering in
+  local previews; `challenges.html` is still written for local use. Covered by
+  `BoardDocTests` in `frensense-bench/tests/test_blindness.py` (27 tests pass),
+  and the VitePress build renders the new page.
+
+* **blindness: a typo'd `--only` no longer publishes a perfect score.** A
+  selection that matched no pinned repository fell through to an empty loop and
+  wrote `blindness_report.json` / `blindness_history.json` / `blindness_sheet.csv`
+  with `total_sinks: 0`, `blindness_rate: 0.0`, `by_repo: {}` and exit code 0 —
+  indistinguishable from a scan that found nothing to analyse. The same shape
+  appeared when a pin was renamed. `--only` now rejects unknown names (exit 2)
+  and writes nothing; the history and sheet are updated only by a run that
+  covers the full pinned suite and has no failed scan, so a debugging
+  `--only flask` cannot downgrade the published row for a commit.
+
+* **blindness: the per-scan timeout now kills the scanner, not its wrapper.**
+  Scans are launched as `/usr/bin/time -f %M frensense …`; `subprocess.run(timeout=)`
+  killed `time` and left `frensense` running with its heap still resident, which
+  on a large repository is exactly the 2.5 GB the run was trying to bound. The
+  scan now starts its own process group and the group is `SIGKILL`ed on timeout.
+
+* **bench: `real_repos` and `blindness` share one scan runner.** `real_repos.py`
+  — the suite that scans redis, django and juice-shop — carried its own copy of
+  the `/usr/bin/time` wrapper and `subprocess.run(timeout=)`, so it had the same
+  orphaned-scanner bug and could report a previous run's RSS when a scan wrote
+  no sample. Both suites now call `suites/scanproc.py`: one process-group kill,
+  one stale-sample reset, one `read_rss`. `real_repos` also gains the
+  `--max-rss-mb` gate (exit 4) and rejects an unknown `--only` name (exit 2)
+  instead of scanning zero repositories and exiting 0.
+
+* **bench: `run.py` forwards the suite's exit code.** The wrapper compared
+  `returncode == 0` and exited 1, so the blindness suite's new 3 (a scan failed
+  or timed out) and 4 (over `--max-rss-mb`) both arrived as a bare 1 in CI. The
+  highest code from the suites it ran is now the process's exit status.
+
+* **blindness: measurements are pinned, or refused.** A cache hit was trusted
+  unconditionally, so a checkout left at another commit (or a half-cloned tree)
+  was measured and published under the pin's SHA; a missing scan target widened
+  the input to the whole repository, changing both the blindness rate and the
+  memory profile without saying so. The checkout's `HEAD` is now verified on
+  `--prepare` and again on `--run` (re-cloned or failed), and a missing target is
+  an error.
+
+* **blindness: the capability page shows what a scan costs.**
+  `challenges.html` now carries a capability/memory band above the cards:
+  per-repository peak RSS with a relative bar, RSS per scanned file, functions,
+  explored/unknown sinks, truncation caps, wall time, the engine-reported phase
+  totals, and the binary identity (`frensense 0.8.0 · engine 0.8.0`). A row over
+  the new `--max-rss-mb` budget is highlighted and named in a callout, and the
+  run exits 4. Measured on the pinned suite: libpng 272.1 MB / 2.59 MB per file
+  is the current ceiling; express pegs 1,538 `call_context_depth` caps on 6
+  files, so its 43.2% blindness is a truncated lower bound.
+
+* **blindness: `--case-timeout` is no longer a dead flag, and `--synthetic`
+  scores case-isolated suites.** The documented but unimplemented synthetic path
+  is now `--synthetic [NAME=]DIR` (repeatable, `--workers`, default 8): every
+  case is scanned in its own process so one case's symbols cannot change the
+  next one's verdict, and each unknown becomes a challenge card. Measured on
+  OWASP BenchmarkPython: 1,230 cases, 943 explored sinks, 21 unknown (2.23%),
+  0 truncation caps, 7.5 s at 8 workers, and **one** open challenge —
+  `Unmodelled call: len`, which blocks all 21 sinks. The standalone `owasp.py`
+  suite exposes the same `--case-timeout` so the two paths agree.
+
+* **blindness: `--only` keeps the rest of the backlog on the page.** Cards for
+  repositories the run did not scan are carried forward (marked `carried`) instead
+  of vanishing, so a partial run cannot read as "everything else was solved";
+  `challenges.json` schema moves to 3 with `scanned`/`carried` counts. A card's
+  track and difficulty are derived from a deterministically ordered stop site, so
+  they no longer flip when the engine changes the order of `cut_sites`.
+
+* **semver-gate: fix published-mode absorbed detection.** The `--published`
+  gate now correctly marks a crate `absorbed` when the local version already
+  represents a minor bump over the crates.io baseline (e.g. `0.7.0 -> 0.8.0`
+  absorbs every breaking change in `0.8.0`). Previously the gate always marked
+  such crates `FAIL`, causing spurious failures on every PR branch that
+  introduced breaking changes alongside an appropriate version bump. CI now
+  uses `--published` instead of `--base-ref <PR-base-sha>` so the comparison
+  is always anchored to the last actually-published version, not to an
+  unpublished pre-release commit on `main`.
 
 #### Code Hygiene & Complexity Controls
 
