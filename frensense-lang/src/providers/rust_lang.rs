@@ -343,8 +343,29 @@ fn rust_package_category(pkg: &str) -> Option<PackageCategory> {
 
 fn rust_classify_param(_name: Option<&str>, ann: Option<&str>) -> Option<TaintOrigin> {
     let a = ann?.split('<').next().unwrap_or(ann?).trim();
-    // Strip leading reference / mut
-    let a = a.trim_start_matches('&').trim_start_matches("mut").trim();
+    // The borrow marker is MEANINGFUL: `Path<P>` is axum's extractor (the
+    // framework fills it from the URL), while `&Path` borrows
+    // `std::path::Path` - a filesystem path a helper was handed. Dropping
+    // the `&` made every helper taking `&Path` a taint source once the
+    // engine started consulting this hook. Strip only a leading lifetime
+    // (`&'a Path`) and `mut`, and name the borrowed request handles
+    // explicitly.
+    let borrowed = a.starts_with('&');
+    let a = a.trim_start_matches('&').trim();
+    let a = a
+        .strip_prefix('\'')
+        .map_or(a, |rest| match rest.find(char::is_whitespace) {
+            Some(i) => rest[i..].trim(),
+            None => rest,
+        });
+    let a = a.strip_prefix("mut").map_or(a, str::trim);
+    if borrowed {
+        return match a {
+            // Rocket passes the request handle by reference.
+            "RocketRequest" => Some(TaintOrigin::UserInput),
+            _ => None,
+        };
+    }
     match a {
         // Axum extractors
         "Json" | "Form" | "Query" | "Path" | "Bytes" | "Multipart" | "TypedHeader"
@@ -353,7 +374,7 @@ fn rust_classify_param(_name: Option<&str>, ann: Option<&str>) -> Option<TaintOr
         "web::Json" | "web::Form" | "web::Query" | "web::Path" | "web::Bytes" | "web::Payload"
         | "HttpRequest" => Some(TaintOrigin::UserInput),
         // Rocket
-        "&RocketRequest" | "Form" | "Json" | "Data" => Some(TaintOrigin::UserInput),
+        "Form" | "Json" | "Data" => Some(TaintOrigin::UserInput),
         _ => None,
     }
 }
@@ -496,5 +517,31 @@ impl LanguageSpec for RustSpec {
             name,
             "get" | "post" | "put" | "delete" | "patch" | "options" | "head" | "route"
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Owned extractors are attacker input; a borrowed `&Path` is
+    /// `std::path::Path`, and treating it as an axum extractor turned every
+    /// filesystem helper into a taint source.
+    #[test]
+    fn rust_param_classifier_preserves_the_borrow_marker() {
+        assert_eq!(
+            rust_classify_param(Some("q"), Some("web::Query<P>")),
+            Some(TaintOrigin::UserInput)
+        );
+        assert_eq!(
+            rust_classify_param(Some("p"), Some("Path<P>")),
+            Some(TaintOrigin::UserInput)
+        );
+        assert_eq!(rust_classify_param(Some("path"), Some("&Path")), None);
+        assert_eq!(rust_classify_param(Some("path"), Some("&'a Path")), None);
+        assert_eq!(
+            rust_classify_param(Some("req"), Some("&RocketRequest")),
+            Some(TaintOrigin::UserInput)
+        );
     }
 }
