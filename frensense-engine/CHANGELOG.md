@@ -122,6 +122,30 @@ what this crate does.
 
 ### Fixed
 
+- **A handler parameter is a source when the language spec classifies it, and
+  Python's annotated parameters are bound again.** Two gaps kept framework
+  handlers silent. `bind_params` had no arm for Python's `typed_parameter`
+  (its binding is the node's first child, not a `name` field) or for the
+  defaulted/splat wrappers, so `def h(x: Request)` never recorded `x` as a
+  parameter at all and the body reference was lowered as an undeclared name.
+  Separately, the hook that answers "is this parameter attacker input?"
+  (`LanguageSpec::classify_param_taint`, implemented by every provider) had no
+  caller in the engine - only the pack's name/type vocabulary seeded a
+  parameter. `SourceScope::classifies_param` now consults the hook with the
+  parameter's name and annotation, so FastAPI's `Request` type - which no pack
+  source pattern enumerates - starts the flow:
+  `def run(x: Request): os.system("echo " + x.query_params.get("c"))` goes from
+  **0 findings to 1** with the binding renamed, matching the `request`-named
+  shape that already fired. Only `UserInput` origins seed backward taint (the
+  environment/filesystem/network categories are not yet distinguished by the
+  analysis, and honouring them would turn every parameter named `config` or
+  `env` into a source), and entry-only names stay withheld, so the classifier
+  cannot re-widen `argv` outside `main`. Scalar handler parameters
+  (`def run(cmd: str)`) remain non-sources: whether a scalar carries request
+  data depends on route registration, which the spec hook cannot see. Wiring
+  the hook also activates the sibling `frensense-lang` fix that keeps the
+  borrow marker in the Rust classifier (`&Path` is a filesystem path, not the
+  axum `Path` extractor).
 - **The points-to fixed point terminates on real code.** `SvfgBuilder` ran
   `while changed { … }` inside `PointsToAnalysis::analyze_inner` with no
   iteration cap, and on real repositories it never converged: a temporary pass

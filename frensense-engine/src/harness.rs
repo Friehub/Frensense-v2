@@ -443,7 +443,8 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
     for p in params.children(&mut pc) {
         // Language-dependent parameter shapes:
         // - JS/TS: `required_parameter`/`optional_parameter` with `pattern` field
-        // - Python: plain `identifier` children of `parameters`
+        // - Python: plain `identifier` children of `parameters`, plus the
+        //   annotated/defaulted wrappers (`x: T`, `x=v`, `x: T = v`, `*x`)
         // - Rust: `parameter` node wrapping the name identifier as first child
         // - Go: `parameter_declaration` with the name as first child
         if p.kind() == "self_parameter" {
@@ -478,6 +479,18 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             // the body reference `p` unbound, so the extractor parameter
             // could never be a source nor feed one.
             "parameter" | "variadic_parameter" => param_binding(p),
+            // Python annotated/defaulted parameters. `typed_parameter` has no
+            // `name` field (the binding is its first child, possibly wrapped
+            // in a `*`/`**` splat pattern), while the default forms expose
+            // `name`. Without these arms every annotated handler parameter
+            // stayed unbound: `def h(x: Request)` never recorded `x` as a
+            // parameter at all, so neither the type annotation nor the
+            // language's parameter classification could ever see it.
+            "typed_parameter"
+            | "default_parameter"
+            | "typed_default_parameter"
+            | "list_splat_pattern"
+            | "dictionary_splat_pattern" => python_param_binding(p),
             _ => None,
         };
         if let Some(id) = id {
@@ -518,6 +531,33 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
 fn param_binding<'t>(p: tree_sitter::Node<'t>) -> Option<tree_sitter::Node<'t>> {
     let pattern = p.child_by_field_name("pattern").or_else(|| p.child(0))?;
     Some(extractor_binding(pattern).unwrap_or(pattern))
+}
+
+/// The binding identifier of a Python parameter node.
+///
+/// Python wraps annotated and defaulted parameters: `typed_parameter` has no
+/// `name` field (its first child is the binding), while
+/// `default_parameter`/`typed_default_parameter` expose `name`. A splat
+/// parameter (`*args`, `**kwargs`, with or without an annotation) wraps the
+/// identifier in `list_splat_pattern`/`dictionary_splat_pattern`. Only an
+/// identifier is a binding: a tuple pattern (`def f((a, b))`) has no single
+/// name, and naming the parameter after the pattern text would bind a name
+/// the body never references.
+fn python_param_binding<'t>(p: tree_sitter::Node<'t>) -> Option<tree_sitter::Node<'t>> {
+    let binding = p.child_by_field_name("name").or_else(|| match p.kind() {
+        "list_splat_pattern" | "dictionary_splat_pattern" => p.named_child(0),
+        _ => p.child(0),
+    })?;
+    match binding.kind() {
+        "identifier" => Some(binding),
+        "list_splat_pattern" | "dictionary_splat_pattern" => {
+            let mut cursor = binding.walk();
+            binding
+                .named_children(&mut cursor)
+                .find(|c| c.kind() == "identifier")
+        }
+        _ => None,
+    }
 }
 
 fn extractor_binding<'t>(pattern: tree_sitter::Node<'t>) -> Option<tree_sitter::Node<'t>> {
