@@ -175,10 +175,10 @@ edit → gate → fix → verify workflow.
 
 - **The changelog is the only documentation you update for a change** — see
   §7.1 below. Update the changelog of the crate you changed (the root
-  `CHANGELOG.md` for `src/`) and, when the root moved, regenerate its mirror at
-  `docs-site/changelog.md`; those are the only documentation files to change.
-  Do not write new prose docs, and do not edit other `docs/*.md` files to
-  describe a change; that directory is background reading for humans, not a
+  `CHANGELOG.md` for `src/`); those are the only documentation files to change,
+  and the docs site's release summary is written at release time, not per
+  change. Do not write new prose docs, and do not edit other `docs/*.md` files
+  to describe a change; that directory is background reading for humans, not a
   per-change obligation. Version bumps follow §7.2.
 - **SPDX header**: every source file starts with
   `// SPDX-License-Identifier: GPL-3.0-only` (+ the copyright line). Copy
@@ -236,20 +236,31 @@ is not done.
   number appearing in that file, because `.frc` compatibility is what the
   number governs. Ctrl that entry there, not in the root.
 
-[`docs-site/changelog.md`](docs-site/changelog.md) mirrors the **root** file
-behind a five-line YAML front matter, and the two must stay byte-identical
-below that front matter. Regenerate it whenever the root moves — never
-hand-edit it, and never add an entry only there:
+**The docs site summarizes releases; it does not mirror the root file.**
+[`docs-site/changelog.md`](docs-site/changelog.md) is a "what each version
+is" page: one short section per release — a few bullets on the capability that
+landed and a link to the full changelog — not a copy. The root `CHANGELOG.md`
+is the full, per-crate-accurate history for `frensense` and stays the source
+of truth. Do not regenerate the site page from the root file, and never add a
+release entry only there: the site may summarize, it may not claim something
+the changelog does not say.
 
-```bash
-{ printf -- '---\ntitle: Changelog\ndescription: Complete release history and preview releases for Frensense\n---\n\n'; cat CHANGELOG.md; } > docs-site/changelog.md
-diff CHANGELOG.md <(tail -n +6 docs-site/changelog.md)   # empty output = in sync
-```
+- **Mirroring ended with `0.7.0`.** Everything from `## [0.7.0]` down in the
+  site file is frozen copied history and is not rewritten, reformatted or
+  deleted. From `0.8.0` onward, a release gets a summary section written for a
+  reader deciding whether to upgrade, with the detail a click away.
+- **One open version heading, named for the version it will ship as.** The
+  heading above a run of entries is the number that run will be released
+  under, with no date (`## [0.8.0]`); a release adds the date when the tag is
+  cut. The older `## [Unreleased]` heading above a dated release section is
+  retired — it split one unreleased version across two headings and left the
+  web page with a version that never existed.
 
 When updating agent instructions, keep this rule explicit: the crate changelogs
 are the source of truth for their crate, the root file is the source of truth
-for `frensense` and its docs-site mirror must stay in sync, and no other
-documentation is changed for routine code changes.
+for `frensense`, the docs site summarizes releases from `0.8.0` onward instead
+of mirroring them, and no other documentation is changed for routine code
+changes.
 
 ### 7.2 Versioning and the bump strategy
 

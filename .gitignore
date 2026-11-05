@@ -132,6 +132,11 @@ docs-site/.vitepress/cache/
 !docs/TEACHABILITY.md
 !docs/SPEC_FALSE_POSITIVE_REDUCTION.md
 !docs-site/**
+# The re-include above is a whole-subtree negation, so it also re-includes the
+# `__pycache__/` rules further up. Interpreter bytecode is rebuilt by running
+# `docs-site/scripts/*.py` and is never an input to a build, so it stays out of
+# the tree (a stale `translate_docs` .pyc had been committed this way).
+docs-site/**/__pycache__/
 docs-site/node_modules/
 **/node_modules/
 

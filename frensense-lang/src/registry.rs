@@ -60,6 +60,9 @@ impl LanguageRegistry {
         #[cfg(feature = "typescript")]
         reg.register(Arc::new(crate::providers::javascript::TypeScriptSpec));
 
+        #[cfg(feature = "typescript")]
+        reg.register(Arc::new(crate::providers::javascript::VueSpec));
+
         #[cfg(feature = "javascript")]
         reg.register(Arc::new(crate::providers::javascript::JavaScriptSpec));
 

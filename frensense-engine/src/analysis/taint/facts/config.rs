@@ -56,14 +56,19 @@ pub fn tables_from_exts_with_pack<'a>(
 /// appearance order - the exact per-spec merge order the seeding pipeline
 /// uses. Feed the result to [`apply_language_entries`] so its group merges
 /// land in the same order as the seed.
+///
+/// Language keys are the specs' `fact_language()` keys (see
+/// `frensense_lang::spec::LanguageSpec::fact_language`): a container spec
+/// (Vue SFC → `typescript`) lands on the vocabulary of its code's
+/// language, never a container-language section no bundle fills.
 pub fn languages_for_exts<'a>(exts: impl IntoIterator<Item = &'a str>) -> Vec<&'static str> {
     let mut seen: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
     let mut out = Vec::new();
     for ext in exts {
         if let Some(spec) = frensense_lang::spec_for_ext(ext)
-            && seen.insert(spec.name())
+            && seen.insert(spec.fact_language())
         {
-            out.push(spec.name());
+            out.push(spec.fact_language());
         }
     }
     out

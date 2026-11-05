@@ -3,7 +3,6 @@
 <script setup lang="ts">
 import DefaultTheme from 'vitepress/theme'
 import LanguagePicker from './LanguagePicker.vue'
-
 const { Layout } = DefaultTheme
 </script>
 

@@ -64,6 +64,13 @@ pub fn lower_source_detailed(
     let spec = frensense_lang::spec_for_ext(ext)
         .ok_or_else(|| format!("no language spec for extension '{ext}'"))?;
 
+    // Single-file-container formats (e.g. Vue SFCs) rewrite the source
+    // before parsing: the spec blanks non-code markup into same-length
+    // whitespace, so every byte offset — and every reported line/column —
+    // still points at the original file.
+    let rewritten = spec.preprocess(source);
+    let source: &str = rewritten.as_ref();
+
     let mut parser = tree_sitter::Parser::new();
     parser
         .set_language(&spec.tree_sitter_language())
@@ -319,7 +326,7 @@ pub(crate) fn is_route_registration(
     // default pack installs them into `FactTable::route_patterns` keyed by
     // language, so bare lowering without facts gets verbs only.
     facts
-        .and_then(|f| f.route_patterns.get(spec.name()))
+        .and_then(|f| f.route_patterns.get(spec.fact_language()))
         .is_some_and(|pats| {
             pats.iter()
                 .any(|p| callee_text.ends_with(p.trim_end_matches('(')))
@@ -364,7 +371,7 @@ fn lower_one(
         }
     }
     let mut ir = SSABuilder::new(ctx.ir).build();
-    ir.language = spec.name().to_string();
+    ir.language = spec.fact_language().to_string();
     ir.entry_guards = spec
         .decorator_guard_calls(fn_node, source)
         .into_iter()
@@ -426,7 +433,7 @@ fn lower_static(
         );
     }
     let mut ir = SSABuilder::new(ctx.ir).build();
-    ir.language = spec.name().to_string();
+    ir.language = spec.fact_language().to_string();
     ir.is_static_data = true;
     ir
 }
@@ -737,5 +744,110 @@ export function outer (cmd: string) {
             vec!["inner".to_string(), "outer".to_string()],
             "got: {ks:?}"
         );
+    }
+
+    // ── Vue SFC lowering (the `vue` spec blanks the template in place) ─────
+
+    const VUE_POSITIVE: &str = r#"<template>
+  <div id="surface"></div>
+</template>
+<script setup lang="ts">
+// FIXTURE: taint from a DOM location member into a code-execution sink.
+function run() {
+  const payload = location.hash;
+  eval(payload);
+}
+</script>
+<style scoped>
+#surface { color: red; }
+</style>
+"#;
+
+    const VUE_NEGATIVE: &str = r#"<template>
+  <div id="surface"></div>
+</template>
+<script setup lang="ts">
+// FIXTURE (safe twin): the evaluated string is a compile-time literal, so
+// no taint source reaches the sink.
+function run() {
+  eval("1 + 1");
+}
+</script>
+<style scoped>
+#surface { color: red; }
+</style>
+"#;
+
+    fn taint_findings(src: &str) -> Vec<crate::analysis::taint::engine::SinkFinding> {
+        use crate::analysis::forward::ProgramSvfg;
+        use crate::analysis::taint::config::TaintConfig;
+        use crate::analysis::taint::engine::BackwardTaintEngine;
+        use crate::ir::function::FunctionIR;
+        use rustc_hash::FxHashMap;
+
+        let fns = lower_source("probe.vue", src, "vue").expect("sfc must lower");
+        let owned: Vec<FunctionIR> = fns.into_values().collect();
+        let mut statics: FxHashMap<String, &FunctionIR> = FxHashMap::default();
+        for ir in &owned {
+            statics.insert(ir.name.clone(), ir);
+        }
+        let mut config = TaintConfig::default();
+        config.sources.insert("location.hash".into());
+        config.sinks.insert("eval".into());
+        let prog = ProgramSvfg::new(&statics, &config);
+        let mut engine = BackwardTaintEngine::new(&prog, &config);
+        engine.run();
+        engine.findings
+    }
+
+    /// The positive twin: a `.vue` script block taints `eval` from
+    /// `location.hash`. The blanked template must not lose, duplicate or
+    /// shift the finding: the sink span must still point INTO the script
+    /// body of the ORIGINAL file (the position contract).
+    #[test]
+    fn vue_sfc_script_taint_is_found() {
+        use crate::analysis::taint::engine::BackwardVerdict;
+        let findings = taint_findings(VUE_POSITIVE);
+        let vuln: Vec<_> = findings
+            .iter()
+            .filter(|f| f.verdict == BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            !vuln.is_empty(),
+            "eval(location.hash) must alert: {findings:?}"
+        );
+
+        // Position contract: the sink span sits inside the `<script>` body
+        // of the original SFC, not in blanked-out template/style bytes.
+        let body = "eval(payload)";
+        let expected = VUE_POSITIVE.find(body).expect("fixture shape");
+        let span = vuln[0]
+            .sink_span
+            .expect("lowering must record the sink span");
+        assert!(
+            span.0 >= expected && span.0 <= expected + body.len(),
+            "sink span {:?} must cover the eval call at byte {expected}",
+            span
+        );
+    }
+
+    /// The negative twin: the same sink, untainted argument, stays silent.
+    /// Template-only components with no script block lower to nothing at
+    /// all - never a phantom finding.
+    #[test]
+    fn vue_sfc_negative_stays_silent_and_template_only_lower_to_nothing() {
+        let findings = taint_findings(VUE_NEGATIVE);
+        let vuln: Vec<_> = findings
+            .iter()
+            .filter(|f| f.verdict == crate::analysis::taint::engine::BackwardVerdict::Vulnerable)
+            .collect();
+        assert!(
+            vuln.is_empty(),
+            "literal eval must stay silent: {findings:?}"
+        );
+
+        let template_only = "<template>\n  <button>go</button>\n</template>\n";
+        let fns = lower_source("t.vue", template_only, "vue").unwrap();
+        assert!(fns.is_empty(), "template-only SFC lowered: {fns:?}");
     }
 }

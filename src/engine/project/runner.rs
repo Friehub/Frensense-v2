@@ -111,7 +111,7 @@ impl Engine {
         for f in &files {
             if let Some(spec) = frensense_lang::spec_for_ext(&f.2) {
                 let family = match spec.name() {
-                    "javascript" | "typescript" => "javascript",
+                    "javascript" | "typescript" | "vue" => "javascript",
                     other => other,
                 };
                 groups.entry(family).or_default().push(f.clone());

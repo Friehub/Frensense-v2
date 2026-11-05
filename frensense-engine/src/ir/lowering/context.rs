@@ -90,7 +90,7 @@ impl<'a> LoweringContext<'a> {
 
     /// Dynamic node role query: consults learned bundle facts, then falls back to `LanguageSpec::classify`.
     pub fn classify_node(&self, kind: &str) -> NodeRole {
-        let lang = self.spec.name();
+        let lang = self.spec.fact_language();
         if let Some(facts) = self.facts
             && let Some(role) = facts.get_grammar_role(lang, kind)
         {
@@ -101,7 +101,7 @@ impl<'a> LoweringContext<'a> {
 
     /// Dynamic cast query: consults learned bundle facts, then falls back to `LanguageSpec::is_cast`.
     pub fn is_cast(&self, kind: &str) -> bool {
-        let lang = self.spec.name();
+        let lang = self.spec.fact_language();
         if let Some(facts) = self.facts
             && let Some(has_feat) = facts.has_grammar_feature(lang, kind, GrammarFeature::Cast)
         {
@@ -112,7 +112,7 @@ impl<'a> LoweringContext<'a> {
 
     /// Dynamic template string query.
     pub fn is_template_string(&self, kind: &str) -> bool {
-        let lang = self.spec.name();
+        let lang = self.spec.fact_language();
         if let Some(facts) = self.facts
             && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::TemplateString)
@@ -124,7 +124,7 @@ impl<'a> LoweringContext<'a> {
 
     /// Dynamic template fragment query.
     pub fn is_template_fragment(&self, kind: &str) -> bool {
-        let lang = self.spec.name();
+        let lang = self.spec.fact_language();
         if let Some(facts) = self.facts
             && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::TemplateFragment)
@@ -136,7 +136,7 @@ impl<'a> LoweringContext<'a> {
 
     /// Dynamic destructuring pattern query.
     pub fn is_destructuring_pattern(&self, kind: &str) -> bool {
-        let lang = self.spec.name();
+        let lang = self.spec.fact_language();
         if let Some(facts) = self.facts
             && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::DestructuringPattern)
@@ -148,7 +148,7 @@ impl<'a> LoweringContext<'a> {
 
     /// Dynamic pair pattern query.
     pub fn is_pair_pattern(&self, kind: &str) -> bool {
-        let lang = self.spec.name();
+        let lang = self.spec.fact_language();
         if let Some(facts) = self.facts
             && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::PairPattern)
@@ -160,7 +160,7 @@ impl<'a> LoweringContext<'a> {
 
     /// Dynamic pair entry query.
     pub fn is_pair_entry(&self, kind: &str) -> bool {
-        let lang = self.spec.name();
+        let lang = self.spec.fact_language();
         if let Some(facts) = self.facts
             && let Some(has_feat) = facts.has_grammar_feature(lang, kind, GrammarFeature::PairEntry)
         {
@@ -171,7 +171,7 @@ impl<'a> LoweringContext<'a> {
 
     /// Dynamic straight-line ternary query.
     pub fn is_ternary_straight_line(&self, kind: &str) -> bool {
-        let lang = self.spec.name();
+        let lang = self.spec.fact_language();
         if let Some(facts) = self.facts
             && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::TernaryStraightLine)
@@ -183,7 +183,7 @@ impl<'a> LoweringContext<'a> {
 
     /// Dynamic declaration assignment query.
     pub fn is_declaration_assignment(&self, kind: &str) -> bool {
-        let lang = self.spec.name();
+        let lang = self.spec.fact_language();
         if let Some(facts) = self.facts
             && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::DeclarationAssignment)
@@ -195,7 +195,7 @@ impl<'a> LoweringContext<'a> {
 
     /// Dynamic property kind query.
     pub fn is_property_kind(&self, kind: &str) -> bool {
-        let lang = self.spec.name();
+        let lang = self.spec.fact_language();
         if let Some(facts) = self.facts
             && let Some(has_feat) =
                 facts.has_grammar_feature(lang, kind, GrammarFeature::PropertyKind)

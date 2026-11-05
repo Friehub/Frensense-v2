@@ -1,4 +1,6 @@
+import { h } from 'vue'
 import DefaultTheme from 'vitepress/theme'
+import AnnouncementBanner from './AnnouncementBanner.vue'
 import BlogIndex from './BlogIndex.vue'
 import DownloadStrip from './DownloadStrip.vue'
 import BlindnessSheet from './BlindnessSheet.vue'
@@ -7,6 +9,9 @@ import './custom.css'
 
 export default {
   extends: DefaultTheme,
+  // Layout.vue (language picker) is not wired in; the banner mounts through the
+  // default theme's layout-top slot without touching it.
+  Layout: () => h(DefaultTheme.Layout, null, { 'layout-top': () => h(AnnouncementBanner) }),
   enhanceApp({ app, router }) {
     app.component('BlogIndex', BlogIndex)
     app.component('DownloadStrip', DownloadStrip)

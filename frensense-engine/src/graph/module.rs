@@ -97,7 +97,8 @@ pub fn resolve_module_path(
             return Some(kf.clone());
         }
         for ext in &[
-            ".ts", ".js", ".tsx", ".jsx", ".py", ".rs", ".go", ".c", ".mjs", ".cjs",
+            ".ts", ".js", ".tsx", ".jsx", ".mts", ".cts", ".vue", ".py", ".rs", ".go", ".c",
+            ".mjs", ".cjs",
         ] {
             if kf_norm == concat2(&candidate_base, ext) {
                 return Some(kf.clone());
