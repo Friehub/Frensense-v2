@@ -66,6 +66,8 @@ impl<'a> LoweringContext<'a> {
                         src: rhs.clone(),
                     },
                 );
+                // A tuple element is not the whole RHS value.
+                self.forget_const(dest);
             }
         }
     }
@@ -135,12 +137,17 @@ impl<'a> LoweringContext<'a> {
                             src: Operand::Var(tmp),
                         },
                     );
+                    self.forget_const(dest);
                 }
                 None => {
                     self.ir.push_instruction(
                         self.current_block,
-                        Instruction::Assign { dest, src: rhs_op },
+                        Instruction::Assign {
+                            dest,
+                            src: rhs_op.clone(),
+                        },
                     );
+                    self.record_const(dest, right_node, &rhs_op);
                 }
             },
             Some(LValue::Field { base, field }) => {

@@ -12,6 +12,7 @@
 
 pub mod assign;
 pub mod call;
+mod const_eval;
 pub mod context;
 pub mod control_flow;
 pub mod decl;
@@ -83,6 +84,8 @@ impl<'a> LoweringContext<'a> {
             NodeRole::Match => self.visit_match(node),
 
             NodeRole::Return => self.visit_return(node),
+
+            NodeRole::Try => self.visit_try(node),
 
             // ─── OPERATORS ────────────────────────────────────────────────────
             NodeRole::BinaryOp => self.visit_binary_op(node),

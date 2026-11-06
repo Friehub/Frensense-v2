@@ -61,8 +61,12 @@ impl<'a> LoweringContext<'a> {
                     self.mark_declared(dest);
                     self.ir.push_instruction(
                         self.current_block,
-                        Instruction::Assign { dest, src: rhs_op },
+                        Instruction::Assign {
+                            dest,
+                            src: rhs_op.clone(),
+                        },
                     );
+                    self.record_const(dest, value_node, &rhs_op);
                 }
                 None
             }
@@ -108,6 +112,8 @@ impl<'a> LoweringContext<'a> {
                                         field,
                                     },
                                 );
+                                // A destructured element is not the whole RHS.
+                                self.forget_const(dest);
                             }
                         }
                     }
@@ -126,8 +132,12 @@ impl<'a> LoweringContext<'a> {
                             self.mark_declared(dest);
                             self.ir.push_instruction(
                                 self.current_block,
-                                Instruction::Assign { dest, src: rhs_op },
+                                Instruction::Assign {
+                                    dest,
+                                    src: rhs_op.clone(),
+                                },
                             );
+                            self.record_const(dest, value_node, &rhs_op);
                         }
                         LValue::Field { base, field } => {
                             self.ir.push_instruction(

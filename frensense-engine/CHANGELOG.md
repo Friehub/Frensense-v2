@@ -122,6 +122,30 @@ what this crate does.
 
 ### Fixed
 
+- **A branch or `match` arm whose condition is fixed at compile time is no
+  longer lowered.** Every arm used to be lowered and merged, so an assignment
+  in an arm that can never execute reached the join and the backward walk
+  reported taint no execution can produce. A table lookup that selects a fixed
+  label is the everyday shape: `possible = "ABC"; guess = possible[1]; match
+  guess: case 'A': bar = param; case 'B': bar = 'bob'; ...`, where the dead
+  `case 'A'` / `case 'C' | 'D'` assignments tainted `bar` although `guess` is
+  `'B'`. A small evaluator (`ir/lowering/const_eval.rs`) now answers for
+  literals, variables bound to a literal (or another decidable value) earlier
+  in the same straight-line region, and the operators whose result on those
+  values is unambiguous (arithmetic, comparison, `in`/`not in`, `is`,
+  `and`/`or`). `visit_branch` lowers only the taken arm, and `visit_match`
+  lowers only the selected Python arm - literal, union, and `_` patterns, no
+  guards; an arm whose pattern is a capture/class/dict/constant reference, or
+  any construct the evaluator cannot decide, keeps the old over-approximate
+  lowering. Constants are invalidated at every join (`if`, loop, `switch`,
+  `match`, ternary, preprocessor chain, `try`), so a variable assigned on one
+  path is never treated as constant after the merge. Measured on OWASP
+  BenchmarkPython: score **31.0% -> 32.9%** (FP **55 -> 40**, TP unchanged at
+  **172**); the 15 fixed cases are lookups broken by an unreachable tainted
+  arm. The remaining lookup-shaped alerts have an arm that really is taken
+  (`guess = possible[0]`) or come from guard/sink semantics, not folding.
+  The classification half (Python `match_statement` reaching `visit_match` at
+  all) is in `frensense-lang`.
 - **A handler parameter is a source when the language spec classifies it, and
   Python's annotated parameters are bound again.** Two gaps kept framework
   handlers silent. `bind_params` had no arm for Python's `typed_parameter`

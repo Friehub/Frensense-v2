@@ -46,6 +46,13 @@ pub struct LoweringContext<'a> {
     /// (zero-initialised, or defined elsewhere), so it is not a function-local
     /// that can be read uninitialised and is not marked `declared`.
     pub nonlocal_decl: bool,
+
+    /// Compile-time value of every variable whose current binding is fixed
+    /// (see [`const_eval`](super::const_eval)). Consulted to prune a branch or
+    /// `match` arm that cannot execute. A variable is dropped here whenever
+    /// control flow can have changed it, so an entry means "the value at this
+    /// point is this, on every path that reaches here".
+    pub(super) const_values: FxHashMap<VarId, super::const_eval::ConstValue>,
 }
 
 impl<'a> LoweringContext<'a> {
@@ -73,6 +80,7 @@ impl<'a> LoweringContext<'a> {
             labels: FxHashMap::default(),
             loop_stack: Vec::new(),
             nonlocal_decl: false,
+            const_values: FxHashMap::default(),
             facts,
         }
     }

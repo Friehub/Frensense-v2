@@ -3,6 +3,7 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use crate::ir::function::*;
+use crate::ir::lowering::const_eval::{match_arm_body, match_arm_pattern};
 use crate::ir::lowering::{LoopTarget, LoweringContext};
 use rustc_hash::FxHashMap;
 use tree_sitter::Node;
@@ -44,6 +45,10 @@ impl<'a> LoweringContext<'a> {
         let loop_header = self.ir.new_block();
         let loop_body = self.ir.new_block();
         let loop_exit = self.ir.new_block();
+        // The body may assign a variable that was constant on entry (and may
+        // run zero times), so no constant survives the loop unless the body
+        // never touches it.
+        let const_before = self.const_snapshot();
 
         // A preceding `break`/`return` already terminated this block.
         if self
@@ -98,6 +103,7 @@ impl<'a> LoweringContext<'a> {
         self.env.pop();
         self.loop_stack.pop();
 
+        self.const_join(&const_before);
         self.current_block = loop_exit;
         None
     }
@@ -155,6 +161,10 @@ impl<'a> LoweringContext<'a> {
             // Not a recognized switch shape: keep the coarse generic walk.
             return self.visit_children_generic(node);
         }
+
+        // Case bodies may assign any variable; nothing stays constant across
+        // the dispatch unless every case agrees.
+        let const_before = self.const_snapshot();
 
         let cond_op = cond_node
             .and_then(|c| self.visit_node(c))
@@ -257,6 +267,7 @@ impl<'a> LoweringContext<'a> {
 
         self.env.pop();
         self.loop_stack.pop();
+        self.const_join(&const_before);
         self.current_block = merge_block;
         None
     }
@@ -276,6 +287,7 @@ impl<'a> LoweringContext<'a> {
         // Condition and both arms evaluated in the current block.
         // Side effects in the condition/arms still lower to their
         // instructions; only control-flow precision is lost.
+        let const_before = self.const_snapshot();
         let _ = self.visit_node(children[0]).unwrap_or(Operand::Unknown);
         let true_val = self.visit_node(children[1]);
         let false_val = self.visit_node(children[2]);
@@ -283,7 +295,7 @@ impl<'a> LoweringContext<'a> {
         // Merge: prefer a fresh var assigned from the first var-valued
         // arm (preserves one def site for SVFG edges). A literal arm
         // carries no taint, so the var arm dominates the may-analysis.
-        match (true_val, false_val) {
+        let result = match (true_val, false_val) {
             (Some(Operand::Var(tv)), Some(Operand::Var(fv))) => {
                 let dest = self.ir.new_var(VarMetadata {
                     source_name: None,
@@ -307,6 +319,8 @@ impl<'a> LoweringContext<'a> {
                         src: Operand::Var(fv),
                     },
                 );
+                // Two arms merge into one variable: its value is not fixed.
+                self.forget_const(dest);
                 Some(Operand::Var(dest))
             }
             // One arm is a var, other is a constant: the var survives;
@@ -318,7 +332,11 @@ impl<'a> LoweringContext<'a> {
             (None, None) => None,
             // Both constants: fold to the first, neither carries taint.
             (a, b) => a.or(b),
-        }
+        };
+        // Only one arm executes at runtime, so a value set by exactly one of
+        // them is not constant after the expression.
+        self.const_join(&const_before);
+        result
     }
 
     pub fn visit_conditional(&mut self, node: Node) -> Option<Operand> {
@@ -342,6 +360,7 @@ impl<'a> LoweringContext<'a> {
         };
 
         let cond_op = self.visit_node(cond_node).unwrap_or(Operand::Unknown);
+        let const_before = self.const_snapshot();
 
         let dest = self.ir.new_var(VarMetadata {
             source_name: None,
@@ -391,6 +410,10 @@ impl<'a> LoweringContext<'a> {
             .set_terminator(self.current_block, Terminator::Jump(merge_block));
         self.ir.add_edge(self.current_block, merge_block);
         self.env.pop();
+
+        // The two arms merge into `dest`, whose value is whichever arm ran.
+        self.forget_const(dest);
+        self.const_join(&const_before);
 
         self.current_block = merge_block;
         Some(Operand::Var(dest))
@@ -445,6 +468,9 @@ impl<'a> LoweringContext<'a> {
         }
 
         let alt_node = node.child_by_field_name("alternative");
+        // The alternatives are exclusive configurations: a variable assigned
+        // in one is not constant after the chain.
+        let const_before = self.const_snapshot();
         let true_block = self.ir.new_block();
         let false_block = self.ir.new_block();
         let merge_block = self.ir.new_block();
@@ -480,6 +506,7 @@ impl<'a> LoweringContext<'a> {
             Self::hoist_arm_scope(&mut self.env);
         }
 
+        self.const_join(&const_before);
         self.current_block = merge_block;
         None
     }
@@ -547,9 +574,38 @@ impl<'a> LoweringContext<'a> {
             self.visit_node(init);
         }
 
+        // Go-style switches lower here as a branch; C/JS `switch` goes to
+        // `visit_switch`. An unlabeled `break` inside such a branch must
+        // exit the switch (jump to the merge), not the enclosing loop.
+        let is_switch = node.kind().contains("switch");
+
+        // A condition whose value is fixed before the program runs selects
+        // exactly one arm. Lowering the unreachable arm anyway puts its
+        // assignments into the join, and the backward walk then reports taint
+        // no execution can reach:
+        //
+        //     bar = "This should never happen"
+        //     if 'should' in bar:   bar = param   # dead, but merged into bar
+        //
+        // The condition expression is pure by construction when its value is
+        // known (a literal, a variable bound to one, or an operator over
+        // those), so skipping its lowering loses no side effect. The taken
+        // arm is lowered inline: it is the only path, so its bindings are not
+        // a join and stay constant.
+        if !is_switch && let Some(truth) = cond_node.and_then(|c| self.const_truth(c)) {
+            let taken = if truth { cons_node } else { alt_node };
+            if let Some(arm) = taken {
+                self.env.push(FxHashMap::default());
+                self.visit_node(arm);
+                Self::hoist_arm_scope(&mut self.env);
+            }
+            return None;
+        }
+
         let cond_op = cond_node
             .and_then(|c| self.visit_node(c))
             .unwrap_or(Operand::Unknown);
+        let const_before = self.const_snapshot();
 
         let true_block = self.ir.new_block();
         let false_block = self.ir.new_block();
@@ -572,10 +628,6 @@ impl<'a> LoweringContext<'a> {
         self.ir.add_edge(self.current_block, true_block);
         self.ir.add_edge(self.current_block, false_target);
 
-        // Go-style switches lower here as a branch; C/JS `switch` goes to
-        // `visit_switch`. An unlabeled `break` inside such a branch must
-        // exit the switch (jump to the merge), not the enclosing loop.
-        let is_switch = node.kind().contains("switch");
         if is_switch {
             self.loop_stack.push(LoopTarget {
                 break_target: merge_block,
@@ -623,8 +675,23 @@ impl<'a> LoweringContext<'a> {
             self.loop_stack.pop();
         }
 
+        // Either arm may have assigned a variable, so a value is constant
+        // after the merge only if both paths left it alone.
+        self.const_join(&const_before);
+
         self.current_block = merge_block;
         None
+    }
+
+    /// `try` / `except` / `finally` lower as one straight-line region: every
+    /// body executes in source order. No constant survives it either - the
+    /// `try` body may be abandoned by an exception, and a handler may never
+    /// run - so the region is wrapped in a const join.
+    pub fn visit_try(&mut self, node: Node) -> Option<Operand> {
+        let const_before = self.const_snapshot();
+        let out = self.visit_children_generic(node);
+        self.const_join(&const_before);
+        out
     }
 
     pub fn visit_return(&mut self, node: Node) -> Option<Operand> {
@@ -797,6 +864,27 @@ impl<'a> LoweringContext<'a> {
             return self.visit_children_generic(node);
         }
 
+        // A Python `match` on a value fixed before the program runs executes
+        // exactly one arm. Lowering every arm merged an unreachable tainted
+        // arm into the name read after the `match`; see `const_eval`.
+        // Restricted to the statement form: an expression-shaped `match`
+        // (Rust) produces a value its caller consumes, which the pruned path
+        // does not synthesise.
+        if node.kind() == "match_statement"
+            && let Some(subject) = value_node.and_then(|v| self.const_value(v))
+            && let Some(selected) = self.select_const_arm(&arms, &subject)
+        {
+            if let Some(arm) = selected {
+                self.env.push(FxHashMap::default());
+                if let Some(body) = match_arm_body(arms[arm]) {
+                    self.visit_node(body);
+                }
+                Self::hoist_arm_scope(&mut self.env);
+            }
+            return None;
+        }
+
+        let const_before = self.const_snapshot();
         let dispatch_block = self.current_block;
         let merge_block = self.ir.new_block();
         let dest = self.ir.new_var(VarMetadata {
@@ -836,26 +924,11 @@ impl<'a> LoweringContext<'a> {
             self.current_block = arm_blocks[i];
             self.env.push(FxHashMap::default());
 
-            let pat_node = arm.child_by_field_name("pattern").or_else(|| {
-                let mut ac = arm.walk();
-                arm.children(&mut ac)
-                    .find(|c| c.is_named() && c.kind().contains("pattern"))
-            });
-
-            if let Some(pat) = pat_node {
+            if let Some(pat) = match_arm_pattern(*arm) {
                 self.bind_match_pattern(pat, &scrutinee_op);
             }
 
-            let arm_body = arm
-                .child_by_field_name("value")
-                .or_else(|| arm.child_by_field_name("body"))
-                .or_else(|| {
-                    let mut ac = arm.walk();
-                    let kids: Vec<_> = arm.children(&mut ac).filter(|c| c.is_named()).collect();
-                    kids.last().copied()
-                });
-
-            if let Some(body) = arm_body
+            if let Some(body) = match_arm_body(*arm)
                 && let Some(res_op) = self.visit_node(body)
             {
                 self.ir.push_instruction(
@@ -875,8 +948,17 @@ impl<'a> LoweringContext<'a> {
                 self.ir.add_edge(self.current_block, merge_block);
             }
 
-            self.env.pop();
+            // Python case blocks are function-scoped: a name first bound in
+            // one arm is visible after the `match`, exactly like an `if` arm.
+            // Popping the scope dropped those bindings, so a later read of the
+            // arm-assigned variable resolved to a fresh unknown var and a
+            // reachable tainted arm stopped feeding the sink.
+            Self::hoist_arm_scope(&mut self.env);
         }
+
+        // An arm may have assigned a variable; only values every arm left
+        // alone (or set to the same literal) survive the join.
+        self.const_join(&const_before);
 
         self.current_block = merge_block;
         Some(Operand::Var(dest))

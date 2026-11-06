@@ -83,6 +83,7 @@ pub fn assert_clean(res: &ScanResult, probe_name: &str) {
 }
 
 mod async_concurrency_tests;
+mod const_branch_tests;
 mod cve_reproductions_tests;
 mod extractor_source_tests;
 mod financial_enterprise_tests;
