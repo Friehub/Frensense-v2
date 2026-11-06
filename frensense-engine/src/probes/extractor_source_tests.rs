@@ -173,3 +173,45 @@ async fn h(Query(p): Query<P>) -> String {
         "read_to_string",
     );
 }
+
+/// Python's typed request object: the ANNOTATION decides that the parameter
+/// carries attacker input, so renaming the binding must not change the
+/// verdict. Two engine gaps kept this silent: `bind_params` had no arm for
+/// Python's `typed_parameter` (the name is the node's first child, not a
+/// `name` field), and the language spec's `classify_param_taint` hook was
+/// never consulted, so `Request` - which no pack source pattern names - was
+/// invisible. `query_params` has no pack source either: the whole flow starts
+/// at the classified parameter.
+#[test]
+fn probe_python_typed_request_param_is_a_source() {
+    let src = r#"
+from fastapi import FastAPI, Request
+import os
+
+app = FastAPI()
+
+@app.get("/run")
+async def run(x: Request):
+    cmd = x.query_params.get("c")
+    os.system("echo " + cmd)
+"#;
+    assert_detected(&scan_py(src), "python_typed_request_param", "system");
+}
+
+/// Control: a scalar `str` annotation is not a request object. The spec hook
+/// and the pack both decline it, so an annotated handler parameter must not
+/// become a source on its own - that would taint every FastAPI scalar.
+#[test]
+fn probe_python_plain_typed_param_is_not_a_source() {
+    let src = r#"
+from fastapi import FastAPI
+import os
+
+app = FastAPI()
+
+@app.get("/run")
+def run(cmd: str):
+    os.system("echo " + cmd)
+"#;
+    assert_clean(&scan_py(src), "python_plain_typed_param");
+}

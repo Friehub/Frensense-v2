@@ -197,6 +197,8 @@ fn end_to_end_git_diff_in_temp_repo() {
             "user.email=t@t",
             "-c",
             "user.name=t",
+            "-c",
+            "commit.gpgsign=false",
             "commit",
             "-qm",
             "init",

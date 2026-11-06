@@ -22,6 +22,10 @@ pub(crate) struct SourceScope<'a> {
     /// Names that are sources only in the program's entry point, withheld
     /// here because this function is not it (see [`ENTRY_ONLY_PARAMS`]).
     withheld: &'static [&'static str],
+    /// The IR's own language spec, when that grammar is compiled in. Its
+    /// `classify_param_taint` hook is the provider's knowledge of which
+    /// handler parameters the framework fills with request data.
+    spec: Option<&'static dyn frensense_lang::LanguageSpec>,
 }
 
 impl<'a> SourceScope<'a> {
@@ -30,6 +34,7 @@ impl<'a> SourceScope<'a> {
             universal: &config.sources,
             language: facts.language_sources(&ir.language),
             withheld: entry_only_names_withheld_for(ir),
+            spec: frensense_lang::LanguageRegistry::global().for_name(&ir.language),
         }
     }
 
@@ -44,6 +49,36 @@ impl<'a> SourceScope<'a> {
         !self.is_withheld(name)
             && (self.universal.contains(name)
                 || self.language.is_some_and(|set| set.contains(name)))
+    }
+
+    /// Does the language spec classify this function parameter as
+    /// attacker-controlled input?
+    ///
+    /// This is the spec-level counterpart to the pack's name/type source
+    /// vocabulary: `classify_param_taint` is where a provider states that a
+    /// framework fills a handler parameter with request data (`def h(x:
+    /// Request)`, `fn h(r *http.Request)`). The check is name-agnostic for
+    /// typed languages because the type, not the author's identifier,
+    /// decides. A parameter that entry-point rules withhold (`argv` outside
+    /// `main`) is never classified, so the classifier cannot re-widen the
+    /// name-only matches those rules exist to suppress.
+    ///
+    /// Only `UserInput` origins seed backward taint: the engine models one
+    /// kind of untrusted value, and the environment/filesystem/network
+    /// categories are classifications the analysis does not yet distinguish.
+    /// Honouring them here would turn every parameter named `config` or `env`
+    /// into a source.
+    fn classifies_param(&self, name: &str, type_name: Option<&str>) -> bool {
+        if self.is_withheld(name) {
+            return false;
+        }
+        let Some(spec) = self.spec else {
+            return false;
+        };
+        matches!(
+            spec.classify_param_taint(Some(name), type_name),
+            Some(frensense_lang::spec::TaintOrigin::UserInput)
+        )
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &'a String> {
@@ -101,19 +136,23 @@ pub(crate) fn is_source(
         return false;
     };
     if idx >= b.instructions.len() {
-        // Sentinel node: function parameter. Two pack-driven ways a parameter
-        // is a source:
+        // Sentinel node: function parameter. Three ways a parameter is a
+        // source:
         //   1. its conventional NAME is a source ("req", "input", "body");
         //   2. its TYPE annotation names one of the framework's request
-        //      value types (`Query<P>`, `web::Query<P>`, `*http.Request`).
+        //      value types (`Query<P>`, `web::Query<P>`, `*http.Request`);
+        //   3. the language spec classifies it as user input from either the
+        //      name or the annotation (`classify_param_taint`).
         // (2) exists because for typed languages the extractor type - not
         // the author's variable name - decides that the argument carries
-        // attacker input. Matching the type keeps the knowledge in the
-        // pack's source vocabulary while the mechanism stays name-agnostic.
+        // attacker input. (3) is the spec's own framework knowledge: it is
+        // what makes `def h(x: Request)` a source when `x` is the author's
+        // rename and the pack lists only member paths under `request`.
         if let Some(meta) = ir.var_metadata.get(&var) {
-            if let Some(name) = &meta.source_name
-                && sources.contains(name)
-            {
+            let classified = meta.source_name.as_deref().is_some_and(|name| {
+                sources.contains(name) || sources.classifies_param(name, meta.type_name.as_deref())
+            });
+            if classified {
                 return true;
             }
             return meta.type_name.as_deref().is_some_and(|ty| {

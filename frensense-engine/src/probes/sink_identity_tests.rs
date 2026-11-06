@@ -153,3 +153,42 @@ def u():
 "#;
     assert_detected(&scan_py(src), "py_unguarded_digits_concat", "execute");
 }
+
+/// Quote-denylist guard: an early return on an injection delimiter (`'`)
+/// sanitizes the string-concatenation sink on the surviving branch.
+#[test]
+fn probe_py_single_quote_guard_silences_sql_concat() {
+    let src = r#"
+from flask import Flask, request
+import sqlite3
+
+app = Flask(__name__)
+
+@app.route("/u")
+def u():
+    uid = request.args.get("id")
+    if "'" in uid:
+        return "bad", 400
+    return str(sqlite3.connect("x").execute("SELECT * FROM t WHERE id = " + uid).fetchall())
+"#;
+    assert_clean(&scan_py(src), "py_single_quote_guard");
+}
+
+/// Quote-denylist guard with double quote: `"` rejection also silences the concat.
+#[test]
+fn probe_py_double_quote_guard_silences_sql_concat() {
+    let src = r#"
+from flask import Flask, request
+import sqlite3
+
+app = Flask(__name__)
+
+@app.route("/u")
+def u():
+    uid = request.args.get("id")
+    if '"' in uid:
+        return "bad", 400
+    return str(sqlite3.connect("x").execute("SELECT * FROM t WHERE id = " + uid).fetchall())
+"#;
+    assert_clean(&scan_py(src), "py_double_quote_guard");
+}

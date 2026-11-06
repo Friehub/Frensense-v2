@@ -818,9 +818,10 @@ impl FactTable {
     /// `GuardDenylistPattern` entries, extended by learned
     /// `GuardDenylistPattern` facts) - the engine ships no built-in list.
     pub fn is_guard_denylist(&self, literal: &str) -> bool {
+        let unquoted = strip_quotes(literal);
         self.guard_denylist_patterns
             .iter()
-            .any(|p| literal.contains(p.as_str()))
+            .any(|p| unquoted.contains(p.as_str()))
     }
 
     /// Source patterns to merge into the scan's `TaintConfig`: the union of
@@ -829,4 +830,17 @@ impl FactTable {
     pub fn source_patterns(&self) -> impl Iterator<Item = &str> {
         self.learned_sources.iter().map(|s| s.as_str())
     }
+}
+
+fn strip_quotes(lit: &str) -> &str {
+    let lit = lit.trim();
+    let bytes = lit.as_bytes();
+    if bytes.len() >= 2 {
+        let first = bytes[0];
+        let last = bytes[bytes.len() - 1];
+        if (first == b'\'' || first == b'"' || first == b'`') && first == last {
+            return &lit[1..bytes.len() - 1];
+        }
+    }
+    lit
 }

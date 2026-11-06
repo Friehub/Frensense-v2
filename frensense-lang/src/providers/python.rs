@@ -83,7 +83,13 @@ fn classify_python(kind: &str) -> NodeRole {
         },
 
         // ── Control flow ─────────────────────────────────────────────────
-        "if_statement" | "conditional_expression" | "match_statement" => NodeRole::Branch,
+        // `match_statement` is matched below as `NodeRole::Match`, next to
+        // Rust's `match_expression` and Go's switch statements: it dispatches
+        // on one subject and executes exactly one arm. Leaving it in this
+        // Branch arm (a duplicate pattern) made it lower as a plain `if` whose
+        // "consequence" was the whole case block, so every arm executed and
+        // an unreachable tainted arm tainted the join.
+        "if_statement" | "conditional_expression" => NodeRole::Branch,
         "for_statement" | "while_statement" => NodeRole::Loop,
         "return_statement" => NodeRole::Return,
         "try_statement" => NodeRole::Try,
@@ -675,5 +681,29 @@ fn collect_python_strings(node: Node<'_>, source: &str, out: &mut Vec<String>) {
         if let Some(child) = node.named_child(i) {
             collect_python_strings(child, source, out);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A Python `match` dispatches on one subject and executes exactly one
+    /// arm. Classifying it as a plain branch made the whole case block the
+    /// branch consequence, so every arm executed unconditionally.
+    #[test]
+    fn python_match_statement_is_a_match() {
+        assert!(
+            matches!(PythonSpec.classify("match_statement"), NodeRole::Match),
+            "match_statement must classify as Match"
+        );
+        assert!(matches!(
+            PythonSpec.classify("if_statement"),
+            NodeRole::Branch
+        ));
+        assert!(matches!(
+            PythonSpec.classify("conditional_expression"),
+            NodeRole::Conditional
+        ));
     }
 }

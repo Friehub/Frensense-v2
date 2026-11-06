@@ -96,6 +96,14 @@ artifact compatibility.
   from exactly the IR the engine scans.
 
 - **Regenerated embedded default-pack asset** (`assets/frensense-default.frc`):
+  the guard denylist now carries `'` and `"` beside `..`. An early return on a
+  quote (`if "'" in bar: return`) is the string-literal counterpart of the
+  traversal rejection the denylist already modelled, so XPath/SQL/shell
+  guards built that way now suppress the value instead of leaving it to reach
+  the sink. Default pack 92,701 -> 92,727 bytes. OWASP BenchmarkPython FP
+  40 -> 32, TP unchanged at 172, score 32.9% -> 33.9%. The generator half is
+  in `frensense-packgen`.
+- **Regenerated embedded default-pack asset** (`assets/frensense-default.frc`):
   stripped cross-language sink contamination from the Python/Go/C/Rust vocab
   tables (foreign JS/Node/Express/Prisma/Cloudflare APIs that were false-positive
   factories for the host language) and de-duplicated the propagator tables.
