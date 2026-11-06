@@ -177,7 +177,86 @@ pub fn lower_source_detailed(
             stack.push(k);
         }
     }
+    // Top-level executable code. Taint and policy checks only ever saw
+    // function bodies, so the same two statements that were reported inside
+    // `def handler():` were silent at file scope - CLI tools, ETL/notebook
+    // scripts, Django `settings.py`, and an
+    // `if __name__ == "__main__": app.run(debug=True)` guard were invisible.
+    if let Some(ir) = lower_module_scope(tree.root_node(), source, spec, facts) {
+        insert_ir(&mut irs, ir, tree.root_node().start_byte());
+    }
     Ok((irs, tree.root_node().has_error()))
+}
+
+/// Lower the executable statements that sit directly in a file's module scope
+/// into one pseudo-function IR.
+///
+/// Only *root-level* named children are visited:
+///
+/// * a function is its own IR (the extraction walk owns it) - lowering it
+///   here would report every finding twice under two names;
+/// * an import contributes no code;
+/// * a JS/TS `const`/`let`/`var` statement is already lowered by the binding
+///   walk (function values) or as a static pseudo-IR (everything else), which
+///   is where policy checks read module-level config today.
+///
+/// The last point is also the known limit: when a module-level binding feeds a
+/// later module-level sink (`const input = process.argv[2]; execSync(input)`),
+/// the two statements live in different IRs, so the source is not linked to
+/// that sink. That shape stays a function-only finding.
+///
+/// `None` when the file has no module-level code that produces an instruction,
+/// so a function-only file (the common case, and every corpus file) gains no
+/// empty pseudo-function.
+fn lower_module_scope(
+    root: tree_sitter::Node,
+    source: &str,
+    spec: &'static dyn frensense_lang::spec::LanguageSpec,
+    facts: Option<&FactTable>,
+) -> Option<FunctionIR> {
+    let mut ctx = LoweringContext::new_with_facts(spec, source, "<module>".to_string(), facts);
+    let mut cursor = root.walk();
+    let children: Vec<_> = root.named_children(&mut cursor).collect();
+    for child in children {
+        if module_scope_skip(child, spec) {
+            continue;
+        }
+        ctx.visit_node(child);
+    }
+    if ctx.ir.blocks.values().all(|b| b.instructions.is_empty()) {
+        return None;
+    }
+    let mut ir = SSABuilder::new(ctx.ir).build();
+    ir.language = spec.fact_language().to_string();
+    // The pseudo-function is a module's top level, never a call target:
+    // there is no source name a call site could resolve to it.
+    ir.is_static_data = true;
+    Some(ir)
+}
+
+/// Should the module-scope IR leave this root-level node to another lowering?
+fn module_scope_skip(
+    node: tree_sitter::Node<'_>,
+    spec: &dyn frensense_lang::spec::LanguageSpec,
+) -> bool {
+    let kind = node.kind();
+    if spec.is_function_node(kind) || spec.import_node_kinds().contains(&kind) {
+        return true;
+    }
+    if matches!(kind, "lexical_declaration" | "variable_declaration") {
+        return true;
+    }
+    // `export const x = ...` / `export function f` wrap the same nodes; a
+    // default export of an expression (`export default runTool(cmd)`) does
+    // execute at import time and stays in the module IR.
+    if kind == "export_statement" {
+        let mut cursor = node.walk();
+        return node.named_children(&mut cursor).any(|child| {
+            spec.is_function_node(child.kind())
+                || matches!(child.kind(), "lexical_declaration" | "variable_declaration")
+        });
+    }
+    false
 }
 
 /// Insert an IR keyed by its name, disambiguating on collision with the

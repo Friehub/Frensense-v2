@@ -88,6 +88,7 @@ mod cve_reproductions_tests;
 mod extractor_source_tests;
 mod financial_enterprise_tests;
 mod framework_ioc_tests;
+mod module_scope_tests;
 mod multi_lang_tests;
 mod path_sensitivity_tests;
 mod receiver_qualification_tests;

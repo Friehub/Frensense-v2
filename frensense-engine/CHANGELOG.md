@@ -122,6 +122,28 @@ what this crate does.
 
 ### Fixed
 
+- **Module-scope statements are analyzed.** Dataflow and policy checks only
+  ever ran over `FunctionIR`s extracted from function bodies, so the same two
+  statements were one finding inside `def handler():` and silent at file
+  scope: `cmd = request.args.get('c'); os.system("echo " + cmd)` produced **0**
+  findings at the top level, under a top-level `if True:`, and as a bare JS
+  `execSync('ls ' + process.argv[2])` expression. That left CLI tools,
+  ETL/notebook scripts, Django `settings.py`, and
+  `if __name__ == "__main__": app.run(debug=True)` outside every analysis
+  except the static pseudo-IRs that only carry declaration initializers. The
+  harness now lowers the file's root-level executable statements into one
+  `<module>` pseudo-function (`is_static_data`, so it is never a call target).
+  Functions (their own IRs), imports, and JS/TS `const`/`let`/`var`
+  statements - already owned by the binding walk or a static pseudo-IR - are
+  skipped, so nothing is lowered twice; a file with no module-level
+  instruction gains no pseudo-function. Measured on OWASP BenchmarkPython:
+  unchanged at TP **172** / FP **40** / FN **280** / TN **738**, score
+  **32.9%** (the corpus is function-only), while the four shapes above went
+  from 0 to 1 finding each, and the function/declaration controls still report
+  exactly once. Known limit: a module-level binding that feeds a later
+  module-level sink (`const input = process.argv[2]; execSync(input)`) spans
+  two IRs, so the source is not linked to that sink; the sink is found, the
+  flow is not.
 - **A branch or `match` arm whose condition is fixed at compile time is no
   longer lowered.** Every arm used to be lowered and merged, so an assignment
   in an arm that can never execute reached the join and the backward walk
