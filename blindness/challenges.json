@@ -1,6 +1,6 @@
 {
   "schema": 3,
-  "commit": "c2e6adefb3a6d89c3c21d39aeb166c8cb46e985c",
+  "commit": "684fbfd9974b079928ddcce2ce44a99d37b2f410",
   "count": 772,
   "scanned": 772,
   "carried": 0,
@@ -145,14 +145,13 @@
         "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
       },
       "stop": {
-        "function": "__init__@8214",
-        "file": "django/contrib/auth/password_validation.py",
-        "line": 239
+        "function": "get_context",
+        "file": "django/contrib/gis/forms/widgets.py",
+        "line": 43
       },
-      "impact": 76,
+      "impact": 74,
       "title": "No caller feeds parameter: self",
       "sinks": [
-        "BL-37ffd576b5",
         "BL-041087fd28",
         "BL-b0e57645c0",
         "BL-ada818daa2",
@@ -163,7 +162,6 @@
         "BL-af2ae57aae",
         "BL-36313bf0de",
         "BL-bac80e345f",
-        "BL-b664d256f4",
         "BL-5289be63c8",
         "BL-9bf72e20a7",
         "BL-c0b794a7f4",
@@ -210,7 +208,7 @@
         "BL-4aec8f6b16",
         "BL-f2ff1c97b3",
         "BL-7fd11464ae",
-        "BL-2e9be8efd1",
+        "BL-7c0898fa82",
         "BL-94500d4c17",
         "BL-cdd88f9bda",
         "BL-247b16aa0c",
@@ -471,56 +469,6 @@
       ]
     },
     {
-      "id": "BG-81bb11e8e2",
-      "challenge_kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "kind": "false-alarm",
-      "detail": "XPath injection",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "stop": {
-        "function": "",
-        "file": "",
-        "line": 0
-      },
-      "impact": 25,
-      "title": "False alarm on XPath injection",
-      "sinks": [
-        "BL-c9732764c7",
-        "BL-5358252973",
-        "BL-ed78e17460",
-        "BL-f39051ea68",
-        "BL-e998334a73",
-        "BL-e1a92e31a3",
-        "BL-1c462b9761",
-        "BL-774580ec52",
-        "BL-6d8d465cd8",
-        "BL-a8faf49246",
-        "BL-0615ad8a38",
-        "BL-20efd6764e",
-        "BL-0b6215ba68",
-        "BL-976c848214",
-        "BL-a43a775d26",
-        "BL-a0524738f4",
-        "BL-bb8047a508",
-        "BL-4c2bc55353",
-        "BL-d7d17be1a5",
-        "BL-8d59ac6208",
-        "BL-55872ef4cc",
-        "BL-e4351f1baa",
-        "BL-52eceef1f3",
-        "BL-0e3fc00640",
-        "BL-21f8f13c13"
-      ]
-    },
-    {
       "id": "BG-4eb0b6f680",
       "challenge_kind": "missed",
       "repo": "recent-cves",
@@ -540,7 +488,7 @@
         "file": "",
         "line": 0
       },
-      "impact": 20,
+      "impact": 19,
       "title": "Missed argument injection",
       "sinks": [
         "BL-0c3a8062e4",
@@ -560,7 +508,6 @@
         "BL-cb964a338e",
         "BL-d559470bee",
         "BL-32ca8fada6",
-        "BL-75845a2009",
         "BL-55ee690481",
         "BL-50b1e9d8b9"
       ]
@@ -685,45 +632,6 @@
       ]
     },
     {
-      "id": "BG-af83190da0",
-      "challenge_kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "kind": "false-alarm",
-      "detail": "code injection",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "stop": {
-        "function": "",
-        "file": "",
-        "line": 0
-      },
-      "impact": 14,
-      "title": "False alarm on code injection",
-      "sinks": [
-        "BL-f8c667147b",
-        "BL-6ff9f72d5f",
-        "BL-054ae02ed4",
-        "BL-0f16109617",
-        "BL-b034758fd6",
-        "BL-b00e193b61",
-        "BL-66b2e24c53",
-        "BL-8a50bf645b",
-        "BL-ca849f955a",
-        "BL-040d414259",
-        "BL-2b4a04e2d0",
-        "BL-b5c4ad9905",
-        "BL-e47c5714fd",
-        "BL-6b35e5afe8"
-      ]
-    },
-    {
       "id": "BG-3c136247c7",
       "challenge_kind": "unknown",
       "repo": "flask",
@@ -743,7 +651,7 @@
         "file": "src/flask/app.py",
         "line": 413
       },
-      "impact": 13,
+      "impact": 14,
       "title": "No caller feeds parameter: self",
       "sinks": [
         "BL-5626ca9f7e",
@@ -751,14 +659,54 @@
         "BL-370321bce4",
         "BL-f1f314032a",
         "BL-da63ef87da",
-        "BL-84740ce389",
-        "BL-ac485508ca",
+        "BL-0bc5803504",
+        "BL-f4ef194eb4",
         "BL-f0c4c078dd",
+        "BL-0f474487a5",
         "BL-9c56af76a2",
         "BL-6823f8ec91",
         "BL-f812b91e19",
         "BL-24f8c7ffe2",
         "BL-91fbe29442"
+      ]
+    },
+    {
+      "id": "BG-81bb11e8e2",
+      "challenge_kind": "false-alarm",
+      "repo": "owasp-python",
+      "lang": "python",
+      "kind": "false-alarm",
+      "detail": "XPath injection",
+      "track": "False alarm",
+      "difficulty": "medium",
+      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
+      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
+      "pin": {
+        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
+        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
+      },
+      "stop": {
+        "function": "",
+        "file": "",
+        "line": 0
+      },
+      "impact": 14,
+      "title": "False alarm on XPath injection",
+      "sinks": [
+        "BL-ed78e17460",
+        "BL-f39051ea68",
+        "BL-e1a92e31a3",
+        "BL-1c462b9761",
+        "BL-774580ec52",
+        "BL-6d8d465cd8",
+        "BL-a8faf49246",
+        "BL-20efd6764e",
+        "BL-0b6215ba68",
+        "BL-bb8047a508",
+        "BL-8d59ac6208",
+        "BL-e4351f1baa",
+        "BL-52eceef1f3",
+        "BL-21f8f13c13"
       ]
     },
     {
@@ -867,6 +815,41 @@
         "BL-67caf2ab77",
         "BL-c371fd6ca6",
         "BL-c0adc20ae3"
+      ]
+    },
+    {
+      "id": "BG-af83190da0",
+      "challenge_kind": "false-alarm",
+      "repo": "owasp-python",
+      "lang": "python",
+      "kind": "false-alarm",
+      "detail": "code injection",
+      "track": "False alarm",
+      "difficulty": "medium",
+      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
+      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
+      "pin": {
+        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
+        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
+      },
+      "stop": {
+        "function": "",
+        "file": "",
+        "line": 0
+      },
+      "impact": 10,
+      "title": "False alarm on code injection",
+      "sinks": [
+        "BL-f8c667147b",
+        "BL-6ff9f72d5f",
+        "BL-0f16109617",
+        "BL-b00e193b61",
+        "BL-8a50bf645b",
+        "BL-040d414259",
+        "BL-2b4a04e2d0",
+        "BL-b5c4ad9905",
+        "BL-e47c5714fd",
+        "BL-6b35e5afe8"
       ]
     },
     {
@@ -1135,38 +1118,6 @@
       ]
     },
     {
-      "id": "BG-7ccc671aa6",
-      "challenge_kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "kind": "false-alarm",
-      "detail": "open redirect",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "stop": {
-        "function": "",
-        "file": "",
-        "line": 0
-      },
-      "impact": 7,
-      "title": "False alarm on open redirect",
-      "sinks": [
-        "BL-45f3e6fe30",
-        "BL-18ae95baab",
-        "BL-f443270522",
-        "BL-42012542c1",
-        "BL-2416dbef8f",
-        "BL-2164b17e95",
-        "BL-4caf9331db"
-      ]
-    },
-    {
       "id": "BG-122600671d",
       "challenge_kind": "missed",
       "repo": "owasp-python",
@@ -1261,6 +1212,37 @@
       ]
     },
     {
+      "id": "BG-3515f1a2d4",
+      "challenge_kind": "unknown",
+      "repo": "django",
+      "lang": "python",
+      "kind": "param-no-caller",
+      "detail": "options",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      },
+      "stop": {
+        "function": "<fn@3056>",
+        "file": "django/contrib/admin/static/admin/js/actions.js",
+        "line": 91
+      },
+      "impact": 6,
+      "title": "No caller feeds parameter: options",
+      "sinks": [
+        "BL-97a1778e91",
+        "BL-b94f2688b7",
+        "BL-78cad3fbcb",
+        "BL-841b30adff",
+        "BL-22b25717ad",
+        "BL-a60649cc7e"
+      ]
+    },
+    {
       "id": "BG-ea22f2a227",
       "challenge_kind": "unknown",
       "repo": "django",
@@ -1292,12 +1274,12 @@
       ]
     },
     {
-      "id": "BG-a65c6a6d70",
+      "id": "BG-7ccc671aa6",
       "challenge_kind": "false-alarm",
       "repo": "owasp-python",
       "lang": "python",
       "kind": "false-alarm",
-      "detail": "path traversal",
+      "detail": "open redirect",
       "track": "False alarm",
       "difficulty": "medium",
       "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
@@ -1312,14 +1294,14 @@
         "line": 0
       },
       "impact": 6,
-      "title": "False alarm on path traversal",
+      "title": "False alarm on open redirect",
       "sinks": [
-        "BL-5434e00119",
-        "BL-71de1c14ce",
-        "BL-e6fabed90a",
-        "BL-2bf5328cd0",
-        "BL-7eb5e12c54",
-        "BL-8dff58815f"
+        "BL-45f3e6fe30",
+        "BL-18ae95baab",
+        "BL-f443270522",
+        "BL-42012542c1",
+        "BL-2164b17e95",
+        "BL-4caf9331db"
       ]
     },
     {
@@ -1708,6 +1690,34 @@
       ]
     },
     {
+      "id": "BG-f16a89d939",
+      "challenge_kind": "unknown",
+      "repo": "flask",
+      "lang": "python",
+      "kind": "external-call",
+      "detail": "super",
+      "track": "Library call",
+      "difficulty": "easy",
+      "hint": "The engine has no model for this call's result. Teach it whether the result carries its arguments (passthrough), is fresh, or is attacker-neutral.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: the result of a call with no analysed callee is a dead end. Model the callee (does its result carry its arguments?) so the walk can continue or stop clean.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      },
+      "stop": {
+        "function": "invoke",
+        "file": "src/flask/testing.py",
+        "line": 298
+      },
+      "impact": 3,
+      "title": "Unmodelled call: super",
+      "sinks": [
+        "BL-601d1883dd",
+        "BL-01f9bcb492",
+        "BL-95ddef4054"
+      ]
+    },
+    {
       "id": "BG-dd8e19ecc1",
       "challenge_kind": "missed",
       "repo": "owasp-python",
@@ -1848,31 +1858,31 @@
       ]
     },
     {
-      "id": "BG-a3ba8bf3ad",
-      "challenge_kind": "false-alarm",
-      "repo": "owasp-python",
+      "id": "BG-800afc20a1",
+      "challenge_kind": "unknown",
+      "repo": "flask",
       "lang": "python",
-      "kind": "false-alarm",
-      "detail": "unsafe deserialization",
-      "track": "False alarm",
+      "kind": "param-no-caller",
+      "detail": "resource",
+      "track": "Unseen caller",
       "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
       "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
       },
       "stop": {
-        "function": "",
-        "file": "",
-        "line": 0
+        "function": "open_resource",
+        "file": "src/flask/app.py",
+        "line": 413
       },
       "impact": 3,
-      "title": "False alarm on unsafe deserialization",
+      "title": "No caller feeds parameter: resource",
       "sinks": [
-        "BL-1781fce5cc",
-        "BL-9500b6a722",
-        "BL-5ed5a3c798"
+        "BL-b2d3d57b8d",
+        "BL-152c6b3b3e",
+        "BL-16dc903291"
       ]
     },
     {
@@ -2099,6 +2109,33 @@
       ]
     },
     {
+      "id": "BG-98161eb9ca",
+      "challenge_kind": "unknown",
+      "repo": "django",
+      "lang": "python",
+      "kind": "external-call",
+      "detail": "list",
+      "track": "Library call",
+      "difficulty": "easy",
+      "hint": "The engine has no model for this call's result. Teach it whether the result carries its arguments (passthrough), is fresh, or is attacker-neutral.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: the result of a call with no analysed callee is a dead end. Model the callee (does its result carry its arguments?) so the walk can continue or stop clean.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      },
+      "stop": {
+        "function": "execute",
+        "file": "django/db/backends/sqlite3/base.py",
+        "line": 358
+      },
+      "impact": 2,
+      "title": "Unmodelled call: list",
+      "sinks": [
+        "BL-8d2db1a992",
+        "BL-3c6100f440"
+      ]
+    },
+    {
       "id": "BG-1799bfed78",
       "challenge_kind": "unknown",
       "repo": "django",
@@ -2150,33 +2187,6 @@
       "sinks": [
         "BL-54e0c77e3f",
         "BL-2317427ad9"
-      ]
-    },
-    {
-      "id": "BG-f16a89d939",
-      "challenge_kind": "unknown",
-      "repo": "flask",
-      "lang": "python",
-      "kind": "external-call",
-      "detail": "super",
-      "track": "Library call",
-      "difficulty": "easy",
-      "hint": "The engine has no model for this call's result. Teach it whether the result carries its arguments (passthrough), is fresh, or is attacker-neutral.",
-      "engine_pointer": "walk.rs `node_is_unresolvable`: the result of a call with no analysed callee is a dead end. Model the callee (does its result carry its arguments?) so the walk can continue or stop clean.",
-      "pin": {
-        "url": "https://github.com/pallets/flask.git",
-        "commit": "d086db856be187255b8ec61ef409357393020f32"
-      },
-      "stop": {
-        "function": "open",
-        "file": "src/flask/testing.py",
-        "line": 235
-      },
-      "impact": 2,
-      "title": "Unmodelled call: super",
-      "sinks": [
-        "BL-01f9bcb492",
-        "BL-fb554f8ed5"
       ]
     },
     {
@@ -2396,12 +2406,12 @@
       ]
     },
     {
-      "id": "BG-2f7abfb0d9",
+      "id": "BG-0deded495a",
       "challenge_kind": "unknown",
       "repo": "django",
       "lang": "python",
       "kind": "param-no-caller",
-      "detail": "query",
+      "detail": "params",
       "track": "Unseen caller",
       "difficulty": "medium",
       "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
@@ -2412,14 +2422,14 @@
       },
       "stop": {
         "function": "execute",
-        "file": "django/db/backends/sqlite3/base.py",
-        "line": 354
+        "file": "django/db/backends/base/schema.py",
+        "line": 175
       },
       "impact": 2,
-      "title": "No caller feeds parameter: query",
+      "title": "No caller feeds parameter: params",
       "sinks": [
-        "BL-259768fa90",
-        "BL-83d9c3418f"
+        "BL-dda1d94596",
+        "BL-56bc3e02af"
       ]
     },
     {
@@ -2504,6 +2514,60 @@
       ]
     },
     {
+      "id": "BG-294435fccf",
+      "challenge_kind": "unknown",
+      "repo": "flask",
+      "lang": "python",
+      "kind": "param-no-caller",
+      "detail": "source",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      },
+      "stop": {
+        "function": "render_template_string",
+        "file": "src/flask/templating.py",
+        "line": 151
+      },
+      "impact": 2,
+      "title": "No caller feeds parameter: source",
+      "sinks": [
+        "BL-1ae7418098",
+        "BL-200f9be01c"
+      ]
+    },
+    {
+      "id": "BG-dbbfc74888",
+      "challenge_kind": "unknown",
+      "repo": "flask",
+      "lang": "python",
+      "kind": "param-no-caller",
+      "detail": "variable_name",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      },
+      "stop": {
+        "function": "from_envvar",
+        "file": "src/flask/config.py",
+        "line": 102
+      },
+      "impact": 2,
+      "title": "No caller feeds parameter: variable_name",
+      "sinks": [
+        "BL-cc0f629977",
+        "BL-daf2b50a27"
+      ]
+    },
+    {
       "id": "BG-912c45bb1e",
       "challenge_kind": "unknown",
       "repo": "libpng",
@@ -2528,6 +2592,33 @@
       "sinks": [
         "BL-233ecaddb7",
         "BL-bafa121cd0"
+      ]
+    },
+    {
+      "id": "BG-260de5985e",
+      "challenge_kind": "missed",
+      "repo": "recent-cves",
+      "lang": "go",
+      "kind": "missed",
+      "detail": "argument injection",
+      "track": "Missed: silent sink",
+      "difficulty": "medium",
+      "hint": "The code is labelled vulnerable, yet nothing was reported. Find where the walk to this sink stops (run with --explain) and teach the engine the missing step.",
+      "engine_pointer": "`frensense <file> --explain` lists every sink the engine explored here. No sink listed: the call is not recognised. Listed as unknown or clean: follow its stop site (walk.rs `node_is_unresolvable`).",
+      "pin": {
+        "url": "https://github.com/gogs/gogs/commit/76831d0d06c44c5cf46dc22b380440b7507c2f07",
+        "commit": "76831d0d06c44c5cf46dc22b380440b7507c2f07"
+      },
+      "stop": {
+        "function": "",
+        "file": "",
+        "line": 0
+      },
+      "impact": 2,
+      "title": "Missed argument injection",
+      "sinks": [
+        "BL-dda4f1b8a3",
+        "BL-75845a2009"
       ]
     },
     {
@@ -2740,32 +2831,6 @@
       "title": "Unmodelled call: deserialize",
       "sinks": [
         "BL-8a3089678b"
-      ]
-    },
-    {
-      "id": "BG-98161eb9ca",
-      "challenge_kind": "unknown",
-      "repo": "django",
-      "lang": "python",
-      "kind": "external-call",
-      "detail": "list",
-      "track": "Library call",
-      "difficulty": "easy",
-      "hint": "The engine has no model for this call's result. Teach it whether the result carries its arguments (passthrough), is fresh, or is attacker-neutral.",
-      "engine_pointer": "walk.rs `node_is_unresolvable`: the result of a call with no analysed callee is a dead end. Model the callee (does its result carry its arguments?) so the walk can continue or stop clean.",
-      "pin": {
-        "url": "https://github.com/django/django.git",
-        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
-      },
-      "stop": {
-        "function": "_update_watches",
-        "file": "django/utils/autoreload.py",
-        "line": 544
-      },
-      "impact": 1,
-      "title": "Unmodelled call: list",
-      "sinks": [
-        "BL-3c6100f440"
       ]
     },
     {
@@ -3051,7 +3116,7 @@
       "impact": 1,
       "title": "Unmodelled call: and_then",
       "sinks": [
-        "BL-1e4c14c76b"
+        "BL-90f45d8c6c"
       ]
     },
     {
@@ -3393,6 +3458,32 @@
       ]
     },
     {
+      "id": "BG-cd76b42e44",
+      "challenge_kind": "unknown",
+      "repo": "django",
+      "lang": "python",
+      "kind": "param-no-caller",
+      "detail": "file_path",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      },
+      "stop": {
+        "function": "__init__",
+        "file": "django/core/mail/backends/filebased.py",
+        "line": 12
+      },
+      "impact": 1,
+      "title": "No caller feeds parameter: file_path",
+      "sinks": [
+        "BL-edf3c7d4ab"
+      ]
+    },
+    {
       "id": "BG-ef24c90ec1",
       "challenge_kind": "unknown",
       "repo": "django",
@@ -3416,6 +3507,32 @@
       "title": "No caller feeds parameter: filename",
       "sinks": [
         "BL-9bd14d6cbe"
+      ]
+    },
+    {
+      "id": "BG-ffc7f32f2a",
+      "challenge_kind": "unknown",
+      "repo": "django",
+      "lang": "python",
+      "kind": "param-no-caller",
+      "detail": "flags",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      },
+      "stop": {
+        "function": "__init__",
+        "file": "django/core/validators.py",
+        "line": 28
+      },
+      "impact": 1,
+      "title": "No caller feeds parameter: flags",
+      "sinks": [
+        "BL-95150936a4"
       ]
     },
     {
@@ -3471,12 +3588,12 @@
       ]
     },
     {
-      "id": "BG-3515f1a2d4",
+      "id": "BG-55e3b8b9c6",
       "challenge_kind": "unknown",
       "repo": "django",
       "lang": "python",
       "kind": "param-no-caller",
-      "detail": "options",
+      "detail": "param_list",
       "track": "Unseen caller",
       "difficulty": "medium",
       "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
@@ -3486,23 +3603,23 @@
         "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
       },
       "stop": {
-        "function": "<fn@3056>",
-        "file": "django/contrib/admin/static/admin/js/actions.js",
-        "line": 91
+        "function": "executemany@4734",
+        "file": "django/db/backends/utils.py",
+        "line": 124
       },
       "impact": 1,
-      "title": "No caller feeds parameter: options",
+      "title": "No caller feeds parameter: param_list",
       "sinks": [
-        "BL-97a1778e91"
+        "BL-f3cda507a2"
       ]
     },
     {
-      "id": "BG-0deded495a",
+      "id": "BG-afee16b3ec",
       "challenge_kind": "unknown",
       "repo": "django",
       "lang": "python",
       "kind": "param-no-caller",
-      "detail": "params",
+      "detail": "password_list_path",
       "track": "Unseen caller",
       "difficulty": "medium",
       "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
@@ -3512,14 +3629,40 @@
         "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
       },
       "stop": {
-        "function": "last_executed_query",
-        "file": "django/db/backends/postgresql/operations.py",
-        "line": 307
+        "function": "__init__@8214",
+        "file": "django/contrib/auth/password_validation.py",
+        "line": 239
       },
       "impact": 1,
-      "title": "No caller feeds parameter: params",
+      "title": "No caller feeds parameter: password_list_path",
       "sinks": [
-        "BL-56bc3e02af"
+        "BL-0adbca57ef"
+      ]
+    },
+    {
+      "id": "BG-2f7abfb0d9",
+      "challenge_kind": "unknown",
+      "repo": "django",
+      "lang": "python",
+      "kind": "param-no-caller",
+      "detail": "query",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      },
+      "stop": {
+        "function": "execute",
+        "file": "django/db/backends/sqlite3/base.py",
+        "line": 354
+      },
+      "impact": 1,
+      "title": "No caller feeds parameter: query",
+      "sinks": [
+        "BL-259768fa90"
       ]
     },
     {
@@ -3783,6 +3926,162 @@
       ]
     },
     {
+      "id": "BG-3dd4c0dd99",
+      "challenge_kind": "unknown",
+      "repo": "flask",
+      "lang": "python",
+      "kind": "param-no-caller",
+      "detail": "encoding",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      },
+      "stop": {
+        "function": "open_instance_resource",
+        "file": "src/flask/app.py",
+        "line": 446
+      },
+      "impact": 1,
+      "title": "No caller feeds parameter: encoding",
+      "sinks": [
+        "BL-d7487154ab"
+      ]
+    },
+    {
+      "id": "BG-985f91ce2d",
+      "challenge_kind": "unknown",
+      "repo": "flask",
+      "lang": "python",
+      "kind": "param-no-caller",
+      "detail": "environ",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      },
+      "stop": {
+        "function": "__call__",
+        "file": "src/flask/app.py",
+        "line": 1619
+      },
+      "impact": 1,
+      "title": "No caller feeds parameter: environ",
+      "sinks": [
+        "BL-76fe30ac12"
+      ]
+    },
+    {
+      "id": "BG-6fef25e9b5",
+      "challenge_kind": "unknown",
+      "repo": "flask",
+      "lang": "python",
+      "kind": "param-no-caller",
+      "detail": "filename",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      },
+      "stop": {
+        "function": "from_file",
+        "file": "src/flask/config.py",
+        "line": 258
+      },
+      "impact": 1,
+      "title": "No caller feeds parameter: filename",
+      "sinks": [
+        "BL-4c81fc5df6"
+      ]
+    },
+    {
+      "id": "BG-f29c7383b4",
+      "challenge_kind": "unknown",
+      "repo": "flask",
+      "lang": "python",
+      "kind": "param-no-caller",
+      "detail": "mode",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      },
+      "stop": {
+        "function": "open_instance_resource",
+        "file": "src/flask/app.py",
+        "line": 446
+      },
+      "impact": 1,
+      "title": "No caller feeds parameter: mode",
+      "sinks": [
+        "BL-9a907671c1"
+      ]
+    },
+    {
+      "id": "BG-3192314d51",
+      "challenge_kind": "unknown",
+      "repo": "flask",
+      "lang": "python",
+      "kind": "param-no-caller",
+      "detail": "other",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      },
+      "stop": {
+        "function": "_path_is_ancestor",
+        "file": "src/flask/cli.py",
+        "line": 691
+      },
+      "impact": 1,
+      "title": "No caller feeds parameter: other",
+      "sinks": [
+        "BL-1e0ff8f4e6"
+      ]
+    },
+    {
+      "id": "BG-9fa41850d4",
+      "challenge_kind": "unknown",
+      "repo": "flask",
+      "lang": "python",
+      "kind": "param-no-caller",
+      "detail": "path",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      },
+      "stop": {
+        "function": "_path_is_ancestor",
+        "file": "src/flask/cli.py",
+        "line": 691
+      },
+      "impact": 1,
+      "title": "No caller feeds parameter: path",
+      "sinks": [
+        "BL-e4df294a3e"
+      ]
+    },
+    {
       "id": "BG-d96d11e8cc",
       "challenge_kind": "unknown",
       "repo": "libpng",
@@ -3913,19 +4212,19 @@
       ]
     },
     {
-      "id": "BG-260de5985e",
-      "challenge_kind": "missed",
-      "repo": "recent-cves",
-      "lang": "go",
-      "kind": "missed",
-      "detail": "argument injection",
-      "track": "Missed: silent sink",
+      "id": "BG-a65c6a6d70",
+      "challenge_kind": "false-alarm",
+      "repo": "owasp-python",
+      "lang": "python",
+      "kind": "false-alarm",
+      "detail": "path traversal",
+      "track": "False alarm",
       "difficulty": "medium",
-      "hint": "The code is labelled vulnerable, yet nothing was reported. Find where the walk to this sink stops (run with --explain) and teach the engine the missing step.",
-      "engine_pointer": "`frensense <file> --explain` lists every sink the engine explored here. No sink listed: the call is not recognised. Listed as unknown or clean: follow its stop site (walk.rs `node_is_unresolvable`).",
+      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
+      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
       "pin": {
-        "url": "https://github.com/gogs/gogs/commit/76831d0d06c44c5cf46dc22b380440b7507c2f07",
-        "commit": "76831d0d06c44c5cf46dc22b380440b7507c2f07"
+        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
+        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
       },
       "stop": {
         "function": "",
@@ -3933,9 +4232,35 @@
         "line": 0
       },
       "impact": 1,
-      "title": "Missed argument injection",
+      "title": "False alarm on path traversal",
       "sinks": [
-        "BL-dda4f1b8a3"
+        "BL-e6fabed90a"
+      ]
+    },
+    {
+      "id": "BG-a3ba8bf3ad",
+      "challenge_kind": "false-alarm",
+      "repo": "owasp-python",
+      "lang": "python",
+      "kind": "false-alarm",
+      "detail": "unsafe deserialization",
+      "track": "False alarm",
+      "difficulty": "medium",
+      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
+      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
+      "pin": {
+        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
+        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
+      },
+      "stop": {
+        "function": "",
+        "file": "",
+        "line": 0
+      },
+      "impact": 1,
+      "title": "False alarm on unsafe deserialization",
+      "sinks": [
+        "BL-5ed5a3c798"
       ]
     },
     {
@@ -5485,42 +5810,6 @@
       "group_key": "recent-cves|missed|SQL injection|Missed: unrecognised call",
       "group_repo": "recent-cves",
       "group_detail": "SQL injection"
-    },
-    {
-      "id": "BL-75845a2009",
-      "kind": "missed",
-      "repo": "cve-CVE-2026-16796",
-      "lang": "python",
-      "file": "pre/src__bedrock_agentcore__tools__code_interpreter_client.py",
-      "line": 23,
-      "function": "",
-      "sink": "",
-      "slot": "",
-      "track": "Missed: unrecognised call",
-      "difficulty": "easy",
-      "hint": "The code is labelled vulnerable, yet nothing was reported. Find where the walk to this sink stops (run with --explain) and teach the engine the missing step.",
-      "reason": "it recognised none of the calls here as a sink: `re.compile`",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --explain` lists every sink the engine explored here. No sink listed: the call is not recognised. Listed as unknown or clean: follow its stop site (walk.rs `node_is_unresolvable`).",
-      "repro": "frensense pre/src__bedrock_agentcore__tools__code_interpreter_client.py --explain",
-      "pin": {
-        "url": "https://github.com/aws/bedrock-agentcore-sdk-python/commit/3c4b4ee6b8730e6313a82c743ac37dbcc1c21cdb",
-        "commit": "3c4b4ee6b8730e6313a82c743ac37dbcc1c21cdb"
-      },
-      "fix_added": [
-        "import shlex",
-        "r\"^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?(\\[[a-zA-Z0-9._,\\-]*\\])?(==|>=|<=|!=|~=|>|<)?[a-zA-Z0-9.*]*$\"",
-        "packages_str = \" \".join(shlex.quote(pkg) for pkg in packages)"
-      ],
-      "label": {
-        "cwe": "88",
-        "case": "CVE-2026-16796:src__bedrock_agentcore__tools__code_interpreter_client.py",
-        "category": "argument injection",
-        "file_level": false
-      },
-      "group_key": "recent-cves|missed|argument injection|Missed: unrecognised call",
-      "group_repo": "recent-cves",
-      "group_detail": "argument injection"
     },
     {
       "id": "BL-9da32a0966",
@@ -9337,6 +9626,93 @@
       }
     },
     {
+      "id": "BL-8d2db1a992",
+      "repo": "django",
+      "lang": "python",
+      "file": "django/db/backends/sqlite3/base.py",
+      "line": 371,
+      "function": "executemany",
+      "sink": "executemany",
+      "slot": "arg 0",
+      "track": "Library call",
+      "difficulty": "easy",
+      "hint": "The engine has no model for this call's result. Teach it whether the result carries its arguments (passthrough), is fresh, or is attacker-neutral.",
+      "reason": "the flow hit a value the engine cannot resolve; the value folded to an attacker-independent constant",
+      "stop_sites": [
+        {
+          "kind": "external-call",
+          "function": "execute",
+          "detail": "list",
+          "file": "django/db/backends/sqlite3/base.py",
+          "line": 358
+        },
+        {
+          "kind": "external-call",
+          "function": "executemany",
+          "detail": "list",
+          "file": "django/db/backends/sqlite3/base.py",
+          "line": 367
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "execute",
+          "detail": "query",
+          "file": "django/db/backends/sqlite3/base.py",
+          "line": 354
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "executemany",
+          "detail": "query",
+          "file": "django/db/backends/sqlite3/base.py",
+          "line": 362
+        }
+      ],
+      "code": [
+        {
+          "n": 368,
+          "text": "        else:",
+          "hit": false
+        },
+        {
+          "n": 369,
+          "text": "            param_names = None",
+          "hit": false
+        },
+        {
+          "n": 370,
+          "text": "        query = self.convert_query(query, param_names=param_names)",
+          "hit": false
+        },
+        {
+          "n": 371,
+          "text": "        return super().executemany(query, param_list)",
+          "hit": true
+        },
+        {
+          "n": 372,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 373,
+          "text": "    def convert_query(self, query, *, param_names=None):",
+          "hit": false
+        },
+        {
+          "n": 374,
+          "text": "        if param_names is None:",
+          "hit": false
+        }
+      ],
+      "repro": "frensense django/db/backends/sqlite3/base.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: the result of a call with no analysed callee is a dead end. Model the callee (does its result carry its arguments?) so the walk can continue or stop clean.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      }
+    },
+    {
       "id": "BL-7c67156fdc",
       "repo": "django",
       "lang": "python",
@@ -10195,6 +10571,93 @@
       }
     },
     {
+      "id": "BL-601d1883dd",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/cli.py",
+      "line": 220,
+      "function": "prepare_import",
+      "sink": "join",
+      "slot": "arg 0",
+      "track": "Library call",
+      "difficulty": "easy",
+      "hint": "The engine has no model for this call's result. Teach it whether the result carries its arguments (passthrough), is fresh, or is attacker-neutral.",
+      "reason": "the flow hit a value the engine cannot resolve; a validating guard dominated the use",
+      "stop_sites": [
+        {
+          "kind": "external-call",
+          "function": "invoke",
+          "detail": "super",
+          "file": "src/flask/testing.py",
+          "line": 298
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "decorator",
+          "detail": "args",
+          "file": "src/flask/cli.py",
+          "line": 395
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "decorator@13507",
+          "detail": "f",
+          "file": "src/flask/cli.py",
+          "line": 422
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "run_command",
+          "detail": "info",
+          "file": "src/flask/cli.py",
+          "line": 935
+        }
+      ],
+      "code": [
+        {
+          "n": 217,
+          "text": "        path, name = os.path.split(path)",
+          "hit": false
+        },
+        {
+          "n": 218,
+          "text": "        module_name.append(name)",
+          "hit": false
+        },
+        {
+          "n": 219,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 220,
+          "text": "        if not os.path.exists(os.path.join(path, \"__init__.py\")):",
+          "hit": true
+        },
+        {
+          "n": 221,
+          "text": "            break",
+          "hit": false
+        },
+        {
+          "n": 222,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 223,
+          "text": "    if sys.path[0] != path:",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/cli.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: the result of a call with no analysed callee is a dead end. Model the callee (does its result carry its arguments?) so the walk can continue or stop clean.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
       "id": "BL-54e0c77e3f",
       "repo": "flask",
       "lang": "python",
@@ -10383,7 +10846,7 @@
       }
     },
     {
-      "id": "BL-fb554f8ed5",
+      "id": "BL-95ddef4054",
       "repo": "flask",
       "lang": "python",
       "file": "src/flask/testing.py",
@@ -10402,6 +10865,27 @@
           "detail": "super",
           "file": "src/flask/testing.py",
           "line": 235
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "from_file",
+          "detail": "filename",
+          "file": "src/flask/config.py",
+          "line": 258
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "open",
+          "detail": "kwargs",
+          "file": "src/flask/testing.py",
+          "line": 209
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "open_resource",
+          "detail": "resource",
+          "file": "src/flask/blueprints.py",
+          "line": 105
         }
       ],
       "code": [
@@ -17592,7 +18076,7 @@
       }
     },
     {
-      "id": "BL-1e4c14c76b",
+      "id": "BL-90f45d8c6c",
       "repo": "ripgrep",
       "lang": "rust",
       "file": "crates/ignore/src/walk.rs",
@@ -17618,13 +18102,6 @@
           "detail": "depth",
           "file": "crates/ignore/src/walk.rs",
           "line": 1542
-        },
-        {
-          "kind": "external-call",
-          "function": "generate_work",
-          "detail": "path",
-          "file": "crates/ignore/src/walk.rs",
-          "line": 1611
         }
       ],
       "code": [
@@ -19065,6 +19542,42 @@
       "group_detail": "command injection"
     },
     {
+      "id": "BL-75845a2009",
+      "kind": "missed",
+      "repo": "cve-CVE-2026-16796",
+      "lang": "python",
+      "file": "pre/src__bedrock_agentcore__tools__code_interpreter_client.py",
+      "line": 23,
+      "function": "",
+      "sink": "compile",
+      "slot": "",
+      "track": "Missed: silent sink",
+      "difficulty": "medium",
+      "hint": "The code is labelled vulnerable, yet nothing was reported. Find where the walk to this sink stops (run with --explain) and teach the engine the missing step.",
+      "reason": "it explored `compile` near here and stayed silent: no attacker source reached the sink; the backward walk exhausted its predecessors (flow died or was never tainted)",
+      "stop_sites": [],
+      "engine_pointer": "`frensense <file> --explain` lists every sink the engine explored here. No sink listed: the call is not recognised. Listed as unknown or clean: follow its stop site (walk.rs `node_is_unresolvable`).",
+      "repro": "frensense pre/src__bedrock_agentcore__tools__code_interpreter_client.py --explain",
+      "pin": {
+        "url": "https://github.com/aws/bedrock-agentcore-sdk-python/commit/3c4b4ee6b8730e6313a82c743ac37dbcc1c21cdb",
+        "commit": "3c4b4ee6b8730e6313a82c743ac37dbcc1c21cdb"
+      },
+      "fix_added": [
+        "import shlex",
+        "r\"^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?(\\[[a-zA-Z0-9._,\\-]*\\])?(==|>=|<=|!=|~=|>|<)?[a-zA-Z0-9.*]*$\"",
+        "packages_str = \" \".join(shlex.quote(pkg) for pkg in packages)"
+      ],
+      "label": {
+        "cwe": "88",
+        "case": "CVE-2026-16796:src__bedrock_agentcore__tools__code_interpreter_client.py",
+        "category": "argument injection",
+        "file_level": false
+      },
+      "group_key": "recent-cves|missed|argument injection|Missed: silent sink",
+      "group_repo": "recent-cves",
+      "group_detail": "argument injection"
+    },
+    {
       "id": "BL-ca854ce9a8",
       "kind": "missed",
       "repo": "cve-CVE-2026-21440",
@@ -19770,7 +20283,7 @@
       }
     },
     {
-      "id": "BL-37ffd576b5",
+      "id": "BL-0adbca57ef",
       "repo": "django",
       "lang": "python",
       "file": "django/contrib/auth/password_validation.py",
@@ -19783,6 +20296,13 @@
       "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
       "reason": "the flow hit a value the engine cannot resolve",
       "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "__init__@8214",
+          "detail": "password_list_path",
+          "file": "django/contrib/auth/password_validation.py",
+          "line": 239
+        },
         {
           "kind": "param-no-caller",
           "function": "__init__@8214",
@@ -21299,7 +21819,7 @@
       }
     },
     {
-      "id": "BL-b664d256f4",
+      "id": "BL-edf3c7d4ab",
       "repo": "django",
       "lang": "python",
       "file": "django/core/mail/backends/filebased.py",
@@ -21312,6 +21832,13 @@
       "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
       "reason": "the flow hit a value the engine cannot resolve",
       "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "__init__",
+          "detail": "file_path",
+          "file": "django/core/mail/backends/filebased.py",
+          "line": 12
+        },
         {
           "kind": "param-no-caller",
           "function": "__init__",
@@ -21556,6 +22083,72 @@
         }
       ],
       "repro": "frensense django/core/management/base.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      }
+    },
+    {
+      "id": "BL-b94f2688b7",
+      "repo": "django",
+      "lang": "python",
+      "file": "django/core/management/commands/compilemessages.py",
+      "line": 126,
+      "function": "handle",
+      "sink": "join",
+      "slot": "arg 1",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "handle",
+          "detail": "options",
+          "file": "django/core/management/commands/compilemessages.py",
+          "line": 71
+        }
+      ],
+      "code": [
+        {
+          "n": 123,
+          "text": "        for basedir in basedirs:",
+          "hit": false
+        },
+        {
+          "n": 124,
+          "text": "            if locales:",
+          "hit": false
+        },
+        {
+          "n": 125,
+          "text": "                dirs = [",
+          "hit": false
+        },
+        {
+          "n": 126,
+          "text": "                    os.path.join(basedir, locale, \"LC_MESSAGES\") for locale in locales",
+          "hit": true
+        },
+        {
+          "n": 127,
+          "text": "                ]",
+          "hit": false
+        },
+        {
+          "n": 128,
+          "text": "            else:",
+          "hit": false
+        },
+        {
+          "n": 129,
+          "text": "                dirs = [basedir]",
+          "hit": false
+        }
+      ],
+      "repro": "frensense django/core/management/commands/compilemessages.py --explain",
       "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
       "pin": {
         "url": "https://github.com/django/django.git",
@@ -22157,6 +22750,72 @@
       }
     },
     {
+      "id": "BL-78cad3fbcb",
+      "repo": "django",
+      "lang": "python",
+      "file": "django/core/management/commands/makemessages.py",
+      "line": 700,
+      "function": "write_po_file",
+      "sink": "join",
+      "slot": "arg 1",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "handle",
+          "detail": "options",
+          "file": "django/core/management/commands/makemessages.py",
+          "line": 317
+        }
+      ],
+      "code": [
+        {
+          "n": 697,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 698,
+          "text": "        Use msgmerge and msgattrib GNU gettext utilities.",
+          "hit": false
+        },
+        {
+          "n": 699,
+          "text": "        \"\"\"",
+          "hit": false
+        },
+        {
+          "n": 700,
+          "text": "        basedir = os.path.join(os.path.dirname(potfile), locale, \"LC_MESSAGES\")",
+          "hit": true
+        },
+        {
+          "n": 701,
+          "text": "        os.makedirs(basedir, exist_ok=True)",
+          "hit": false
+        },
+        {
+          "n": 702,
+          "text": "        pofile = os.path.join(basedir, \"%s.po\" % self.domain)",
+          "hit": false
+        },
+        {
+          "n": 703,
+          "text": "",
+          "hit": false
+        }
+      ],
+      "repro": "frensense django/core/management/commands/makemessages.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      }
+    },
+    {
       "id": "BL-6075e55426",
       "repo": "django",
       "lang": "python",
@@ -22212,6 +22871,72 @@
         {
           "n": 705,
           "text": "            args = [\"msgmerge\"] + self.msgmerge_options + [pofile, potfile]",
+          "hit": false
+        }
+      ],
+      "repro": "frensense django/core/management/commands/makemessages.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      }
+    },
+    {
+      "id": "BL-841b30adff",
+      "repo": "django",
+      "lang": "python",
+      "file": "django/core/management/commands/makemessages.py",
+      "line": 750,
+      "function": "copy_plural_forms",
+      "sink": "join",
+      "slot": "arg 3",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "handle",
+          "detail": "options",
+          "file": "django/core/management/commands/makemessages.py",
+          "line": 317
+        }
+      ],
+      "code": [
+        {
+          "n": 747,
+          "text": "        else:",
+          "hit": false
+        },
+        {
+          "n": 748,
+          "text": "            domains = (\"django\",)",
+          "hit": false
+        },
+        {
+          "n": 749,
+          "text": "        for domain in domains:",
+          "hit": false
+        },
+        {
+          "n": 750,
+          "text": "            django_po = os.path.join(",
+          "hit": true
+        },
+        {
+          "n": 751,
+          "text": "                django_dir, \"conf\", \"locale\", locale, \"LC_MESSAGES\", \"%s.po\" % domain",
+          "hit": false
+        },
+        {
+          "n": 752,
+          "text": "            )",
+          "hit": false
+        },
+        {
+          "n": 753,
+          "text": "            if os.path.exists(django_po):",
           "hit": false
         }
       ],
@@ -22793,6 +23518,72 @@
       }
     },
     {
+      "id": "BL-22b25717ad",
+      "repo": "django",
+      "lang": "python",
+      "file": "django/core/management/commands/shell.py",
+      "line": 247,
+      "function": "handle",
+      "sink": "exec",
+      "slot": "arg 0",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "handle",
+          "detail": "options",
+          "file": "django/core/management/commands/shell.py",
+          "line": 244
+        }
+      ],
+      "code": [
+        {
+          "n": 244,
+          "text": "    def handle(self, **options):",
+          "hit": false
+        },
+        {
+          "n": 245,
+          "text": "        # Execute the command and exit.",
+          "hit": false
+        },
+        {
+          "n": 246,
+          "text": "        if options[\"command\"]:",
+          "hit": false
+        },
+        {
+          "n": 247,
+          "text": "            exec(options[\"command\"], {**globals(), **self.get_namespace(**options)})",
+          "hit": true
+        },
+        {
+          "n": 248,
+          "text": "            return",
+          "hit": false
+        },
+        {
+          "n": 249,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 250,
+          "text": "        # Execute stdin if it has anything to read and exit.",
+          "hit": false
+        }
+      ],
+      "repro": "frensense django/core/management/commands/shell.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      }
+    },
+    {
       "id": "BL-8c736c2505",
       "repo": "django",
       "lang": "python",
@@ -22987,6 +23778,72 @@
         {
           "n": 244,
           "text": "            expanded_template = os.path.expanduser(template)",
+          "hit": false
+        }
+      ],
+      "repro": "frensense django/core/management/templates.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      }
+    },
+    {
+      "id": "BL-a60649cc7e",
+      "repo": "django",
+      "lang": "python",
+      "file": "django/core/management/templates.py",
+      "line": 313,
+      "function": "download",
+      "sink": "join",
+      "slot": "arg 1",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "handle",
+          "detail": "options",
+          "file": "django/core/management/templates.py",
+          "line": 86
+        }
+      ],
+      "code": [
+        {
+          "n": 310,
+          "text": "        if self.verbosity >= 2:",
+          "hit": false
+        },
+        {
+          "n": 311,
+          "text": "            self.stdout.write(\"Downloading %s\" % display_url)",
+          "hit": false
+        },
+        {
+          "n": 312,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 313,
+          "text": "        the_path = os.path.join(tempdir, filename)",
+          "hit": true
+        },
+        {
+          "n": 314,
+          "text": "        opener = build_opener()",
+          "hit": false
+        },
+        {
+          "n": 315,
+          "text": "        opener.addheaders = [(\"User-Agent\", f\"Django/{django.__version__}\")]",
+          "hit": false
+        },
+        {
+          "n": 316,
+          "text": "        try:",
           "hit": false
         }
       ],
@@ -23394,6 +24251,72 @@
       }
     },
     {
+      "id": "BL-dda1d94596",
+      "repo": "django",
+      "lang": "python",
+      "file": "django/db/backends/base/schema.py",
+      "line": 191,
+      "function": "execute",
+      "sink": "debug",
+      "slot": "arg 2",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "execute",
+          "detail": "params",
+          "file": "django/db/backends/base/schema.py",
+          "line": 175
+        }
+      ],
+      "code": [
+        {
+          "n": 188,
+          "text": "        # Account for non-string statement objects.",
+          "hit": false
+        },
+        {
+          "n": 189,
+          "text": "        sql = str(sql)",
+          "hit": false
+        },
+        {
+          "n": 190,
+          "text": "        # Log the command we're running, then run it",
+          "hit": false
+        },
+        {
+          "n": 191,
+          "text": "        logger.debug(",
+          "hit": true
+        },
+        {
+          "n": 192,
+          "text": "            \"%s; (params %r)\", sql, params, extra={\"params\": params, \"sql\": sql}",
+          "hit": false
+        },
+        {
+          "n": 193,
+          "text": "        )",
+          "hit": false
+        },
+        {
+          "n": 194,
+          "text": "        if self.collect_sql:",
+          "hit": false
+        }
+      ],
+      "repro": "frensense django/db/backends/base/schema.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      }
+    },
+    {
       "id": "BL-fbf91dd962",
       "repo": "django",
       "lang": "python",
@@ -23537,7 +24460,7 @@
       "track": "Unseen caller",
       "difficulty": "medium",
       "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
-      "reason": "the flow hit a value the engine cannot resolve",
+      "reason": "the flow hit a value the engine cannot resolve; the value folded to an attacker-independent constant",
       "stop_sites": [
         {
           "kind": "param-no-caller",
@@ -25431,79 +26354,6 @@
       }
     },
     {
-      "id": "BL-83d9c3418f",
-      "repo": "django",
-      "lang": "python",
-      "file": "django/db/backends/sqlite3/base.py",
-      "line": 371,
-      "function": "executemany",
-      "sink": "executemany",
-      "slot": "arg 0",
-      "track": "Unseen caller",
-      "difficulty": "medium",
-      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
-      "reason": "the flow hit a value the engine cannot resolve",
-      "stop_sites": [
-        {
-          "kind": "param-no-caller",
-          "function": "execute",
-          "detail": "query",
-          "file": "django/db/backends/sqlite3/base.py",
-          "line": 354
-        },
-        {
-          "kind": "param-no-caller",
-          "function": "executemany",
-          "detail": "query",
-          "file": "django/db/backends/sqlite3/base.py",
-          "line": 362
-        }
-      ],
-      "code": [
-        {
-          "n": 368,
-          "text": "        else:",
-          "hit": false
-        },
-        {
-          "n": 369,
-          "text": "            param_names = None",
-          "hit": false
-        },
-        {
-          "n": 370,
-          "text": "        query = self.convert_query(query, param_names=param_names)",
-          "hit": false
-        },
-        {
-          "n": 371,
-          "text": "        return super().executemany(query, param_list)",
-          "hit": true
-        },
-        {
-          "n": 372,
-          "text": "",
-          "hit": false
-        },
-        {
-          "n": 373,
-          "text": "    def convert_query(self, query, *, param_names=None):",
-          "hit": false
-        },
-        {
-          "n": 374,
-          "text": "        if param_names is None:",
-          "hit": false
-        }
-      ],
-      "repro": "frensense django/db/backends/sqlite3/base.py --explain",
-      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
-      "pin": {
-        "url": "https://github.com/django/django.git",
-        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
-      }
-    },
-    {
       "id": "BL-4aec8f6b16",
       "repo": "django",
       "lang": "python",
@@ -25848,7 +26698,7 @@
       }
     },
     {
-      "id": "BL-2e9be8efd1",
+      "id": "BL-7c0898fa82",
       "repo": "django",
       "lang": "python",
       "file": "django/db/backends/utils.py",
@@ -25867,6 +26717,27 @@
           "detail": "self",
           "file": "django/contrib/gis/gdal/envelope.py",
           "line": 186
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "execute@4572",
+          "detail": "sql",
+          "file": "django/db/backends/utils.py",
+          "line": 120
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "executemany@4734",
+          "detail": "sql",
+          "file": "django/db/backends/utils.py",
+          "line": 124
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "copy",
+          "detail": "statement",
+          "file": "django/db/backends/postgresql/base.py",
+          "line": 597
         }
       ],
       "code": [
@@ -26027,6 +26898,79 @@
           "detail": "self",
           "file": "django/db/backends/utils.py",
           "line": 124
+        }
+      ],
+      "code": [
+        {
+          "n": 148,
+          "text": "                    \"time\": \"%.3f\" % duration,",
+          "hit": false
+        },
+        {
+          "n": 149,
+          "text": "                }",
+          "hit": false
+        },
+        {
+          "n": 150,
+          "text": "            )",
+          "hit": false
+        },
+        {
+          "n": 151,
+          "text": "            logger.debug(",
+          "hit": true
+        },
+        {
+          "n": 152,
+          "text": "                \"(%.3f) %s; args=%s; alias=%s\",",
+          "hit": false
+        },
+        {
+          "n": 153,
+          "text": "                duration,",
+          "hit": false
+        },
+        {
+          "n": 154,
+          "text": "                sql,",
+          "hit": false
+        }
+      ],
+      "repro": "frensense django/db/backends/utils.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      }
+    },
+    {
+      "id": "BL-f3cda507a2",
+      "repo": "django",
+      "lang": "python",
+      "file": "django/db/backends/utils.py",
+      "line": 151,
+      "function": "debug_sql",
+      "sink": "debug",
+      "slot": "arg 3",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "executemany@4734",
+          "detail": "param_list",
+          "file": "django/db/backends/utils.py",
+          "line": 124
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "execute@4572",
+          "detail": "params",
+          "file": "django/db/backends/utils.py",
+          "line": 120
         }
       ],
       "code": [
@@ -28771,6 +29715,79 @@
       }
     },
     {
+      "id": "BL-95150936a4",
+      "repo": "django",
+      "lang": "python",
+      "file": "django/utils/regex_helper.py",
+      "line": 349,
+      "function": "_compile",
+      "sink": "compile",
+      "slot": "arg 1",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "__init__",
+          "detail": "flags",
+          "file": "django/core/validators.py",
+          "line": 28
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "__init__",
+          "detail": "self",
+          "file": "django/core/validators.py",
+          "line": 28
+        }
+      ],
+      "code": [
+        {
+          "n": 346,
+          "text": "    def _compile():",
+          "hit": false
+        },
+        {
+          "n": 347,
+          "text": "        # Compile the regex if it was not passed pre-compiled.",
+          "hit": false
+        },
+        {
+          "n": 348,
+          "text": "        if isinstance(regex, (str, bytes)):",
+          "hit": false
+        },
+        {
+          "n": 349,
+          "text": "            return re.compile(regex, flags)",
+          "hit": true
+        },
+        {
+          "n": 350,
+          "text": "        else:",
+          "hit": false
+        },
+        {
+          "n": 351,
+          "text": "            assert not flags, \"flags must be empty if regex is passed pre-compiled\"",
+          "hit": false
+        },
+        {
+          "n": 352,
+          "text": "            return regex",
+          "hit": false
+        }
+      ],
+      "repro": "frensense django/utils/regex_helper.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/django/django.git",
+        "commit": "c14b756185c88f7f2eb745ff061f3c221fea9de7"
+      }
+    },
+    {
       "id": "BL-b0d9c966cf",
       "repo": "django",
       "lang": "python",
@@ -29994,6 +31011,138 @@
       }
     },
     {
+      "id": "BL-b2d3d57b8d",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/app.py",
+      "line": 438,
+      "function": "open_resource",
+      "sink": "join",
+      "slot": "arg 1",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "open_resource",
+          "detail": "resource",
+          "file": "src/flask/app.py",
+          "line": 413
+        }
+      ],
+      "code": [
+        {
+          "n": 435,
+          "text": "        if mode not in {\"r\", \"rt\", \"rb\"}:",
+          "hit": false
+        },
+        {
+          "n": 436,
+          "text": "            raise ValueError(\"Resources can only be opened for reading.\")",
+          "hit": false
+        },
+        {
+          "n": 437,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 438,
+          "text": "        path = os.path.join(self.root_path, resource)",
+          "hit": true
+        },
+        {
+          "n": 439,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 440,
+          "text": "        if mode == \"rb\":",
+          "hit": false
+        },
+        {
+          "n": 441,
+          "text": "            return open(path, mode)  # pyright: ignore",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/app.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
+      "id": "BL-152c6b3b3e",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/app.py",
+      "line": 460,
+      "function": "open_instance_resource",
+      "sink": "join",
+      "slot": "arg 1",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "open_instance_resource",
+          "detail": "resource",
+          "file": "src/flask/app.py",
+          "line": 446
+        }
+      ],
+      "code": [
+        {
+          "n": 457,
+          "text": "        .. versionchanged:: 3.1",
+          "hit": false
+        },
+        {
+          "n": 458,
+          "text": "            Added the ``encoding`` parameter.",
+          "hit": false
+        },
+        {
+          "n": 459,
+          "text": "        \"\"\"",
+          "hit": false
+        },
+        {
+          "n": 460,
+          "text": "        path = os.path.join(self.instance_path, resource)",
+          "hit": true
+        },
+        {
+          "n": 461,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 462,
+          "text": "        if \"b\" in mode:",
+          "hit": false
+        },
+        {
+          "n": 463,
+          "text": "            return open(path, mode)",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/app.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
       "id": "BL-83b9bb0594",
       "repo": "flask",
       "lang": "python",
@@ -30126,6 +31275,138 @@
       }
     },
     {
+      "id": "BL-76fe30ac12",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/app.py",
+      "line": 962,
+      "function": "log_exception",
+      "sink": "error",
+      "slot": "arg 0",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "__call__",
+          "detail": "environ",
+          "file": "src/flask/app.py",
+          "line": 1619
+        }
+      ],
+      "code": [
+        {
+          "n": 959,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 960,
+          "text": "        .. versionadded:: 0.8",
+          "hit": false
+        },
+        {
+          "n": 961,
+          "text": "        \"\"\"",
+          "hit": false
+        },
+        {
+          "n": 962,
+          "text": "        self.logger.error(",
+          "hit": true
+        },
+        {
+          "n": 963,
+          "text": "            f\"Exception on {ctx.request.path} [{ctx.request.method}]\", exc_info=exc_info",
+          "hit": false
+        },
+        {
+          "n": 964,
+          "text": "        )",
+          "hit": false
+        },
+        {
+          "n": 965,
+          "text": "",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/app.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
+      "id": "BL-16dc903291",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/blueprints.py",
+      "line": 123,
+      "function": "open_resource",
+      "sink": "join",
+      "slot": "arg 1",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "open_resource",
+          "detail": "resource",
+          "file": "src/flask/blueprints.py",
+          "line": 105
+        }
+      ],
+      "code": [
+        {
+          "n": 120,
+          "text": "        if mode not in {\"r\", \"rt\", \"rb\"}:",
+          "hit": false
+        },
+        {
+          "n": 121,
+          "text": "            raise ValueError(\"Resources can only be opened for reading.\")",
+          "hit": false
+        },
+        {
+          "n": 122,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 123,
+          "text": "        path = os.path.join(self.root_path, resource)",
+          "hit": true
+        },
+        {
+          "n": 124,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 125,
+          "text": "        if mode == \"rb\":",
+          "hit": false
+        },
+        {
+          "n": 126,
+          "text": "            return open(path, mode)  # pyright: ignore",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/blueprints.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
       "id": "BL-f1f314032a",
       "repo": "flask",
       "lang": "python",
@@ -30185,6 +31466,211 @@
         }
       ],
       "repro": "frensense src/flask/blueprints.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
+      "id": "BL-1e0ff8f4e6",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/cli.py",
+      "line": 695,
+      "function": "_path_is_ancestor",
+      "sink": "join",
+      "slot": "arg 1",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "_path_is_ancestor",
+          "detail": "other",
+          "file": "src/flask/cli.py",
+          "line": 691
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "_path_is_ancestor",
+          "detail": "path",
+          "file": "src/flask/cli.py",
+          "line": 691
+        }
+      ],
+      "code": [
+        {
+          "n": 692,
+          "text": "    \"\"\"Take ``other`` and remove the length of ``path`` from it. Then join it",
+          "hit": false
+        },
+        {
+          "n": 693,
+          "text": "    to ``path``. If it is the original value, ``path`` is an ancestor of",
+          "hit": false
+        },
+        {
+          "n": 694,
+          "text": "    ``other``.\"\"\"",
+          "hit": false
+        },
+        {
+          "n": 695,
+          "text": "    return os.path.join(path, other[len(path) :].lstrip(os.sep)) == other",
+          "hit": true
+        },
+        {
+          "n": 696,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 697,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 698,
+          "text": "def load_dotenv(",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/cli.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
+      "id": "BL-e4df294a3e",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/cli.py",
+      "line": 695,
+      "function": "_path_is_ancestor",
+      "sink": "join",
+      "slot": "arg 0",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "_path_is_ancestor",
+          "detail": "path",
+          "file": "src/flask/cli.py",
+          "line": 691
+        }
+      ],
+      "code": [
+        {
+          "n": 692,
+          "text": "    \"\"\"Take ``other`` and remove the length of ``path`` from it. Then join it",
+          "hit": false
+        },
+        {
+          "n": 693,
+          "text": "    to ``path``. If it is the original value, ``path`` is an ancestor of",
+          "hit": false
+        },
+        {
+          "n": 694,
+          "text": "    ``other``.\"\"\"",
+          "hit": false
+        },
+        {
+          "n": 695,
+          "text": "    return os.path.join(path, other[len(path) :].lstrip(os.sep)) == other",
+          "hit": true
+        },
+        {
+          "n": 696,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 697,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 698,
+          "text": "def load_dotenv(",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/cli.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
+      "id": "BL-cc0f629977",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/config.py",
+      "line": 114,
+      "function": "from_envvar",
+      "sink": "get",
+      "slot": "arg 0",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "from_envvar",
+          "detail": "variable_name",
+          "file": "src/flask/config.py",
+          "line": 102
+        }
+      ],
+      "code": [
+        {
+          "n": 111,
+          "text": "                       files.",
+          "hit": false
+        },
+        {
+          "n": 112,
+          "text": "        :return: ``True`` if the file was loaded successfully.",
+          "hit": false
+        },
+        {
+          "n": 113,
+          "text": "        \"\"\"",
+          "hit": false
+        },
+        {
+          "n": 114,
+          "text": "        rv = os.environ.get(variable_name)",
+          "hit": true
+        },
+        {
+          "n": 115,
+          "text": "        if not rv:",
+          "hit": false
+        },
+        {
+          "n": 116,
+          "text": "            if silent:",
+          "hit": false
+        },
+        {
+          "n": 117,
+          "text": "                return False",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/config.py --explain",
       "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
       "pin": {
         "url": "https://github.com/pallets/flask.git",
@@ -30258,7 +31744,73 @@
       }
     },
     {
-      "id": "BL-84740ce389",
+      "id": "BL-daf2b50a27",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/config.py",
+      "line": 204,
+      "function": "from_pyfile",
+      "sink": "join",
+      "slot": "arg 1",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "from_envvar",
+          "detail": "variable_name",
+          "file": "src/flask/config.py",
+          "line": 102
+        }
+      ],
+      "code": [
+        {
+          "n": 201,
+          "text": "        .. versionadded:: 0.7",
+          "hit": false
+        },
+        {
+          "n": 202,
+          "text": "           `silent` parameter.",
+          "hit": false
+        },
+        {
+          "n": 203,
+          "text": "        \"\"\"",
+          "hit": false
+        },
+        {
+          "n": 204,
+          "text": "        filename = os.path.join(self.root_path, filename)",
+          "hit": true
+        },
+        {
+          "n": 205,
+          "text": "        d = types.ModuleType(\"config\")",
+          "hit": false
+        },
+        {
+          "n": 206,
+          "text": "        d.__file__ = filename",
+          "hit": false
+        },
+        {
+          "n": 207,
+          "text": "        try:",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/config.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
+      "id": "BL-0bc5803504",
       "repo": "flask",
       "lang": "python",
       "file": "src/flask/config.py",
@@ -30275,6 +31827,13 @@
           "kind": "param-no-caller",
           "function": "from_envvar",
           "detail": "self",
+          "file": "src/flask/config.py",
+          "line": 102
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "from_envvar",
+          "detail": "variable_name",
           "file": "src/flask/config.py",
           "line": 102
         }
@@ -30324,7 +31883,7 @@
       }
     },
     {
-      "id": "BL-ac485508ca",
+      "id": "BL-f4ef194eb4",
       "repo": "flask",
       "lang": "python",
       "file": "src/flask/config.py",
@@ -30341,6 +31900,13 @@
           "kind": "param-no-caller",
           "function": "from_envvar",
           "detail": "self",
+          "file": "src/flask/config.py",
+          "line": 102
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "from_envvar",
+          "detail": "variable_name",
           "file": "src/flask/config.py",
           "line": 102
         }
@@ -30379,6 +31945,72 @@
         {
           "n": 212,
           "text": "                return False",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/config.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
+      "id": "BL-4c81fc5df6",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/config.py",
+      "line": 290,
+      "function": "from_file",
+      "sink": "join",
+      "slot": "arg 1",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "from_file",
+          "detail": "filename",
+          "file": "src/flask/config.py",
+          "line": 258
+        }
+      ],
+      "code": [
+        {
+          "n": 287,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 288,
+          "text": "        .. versionadded:: 2.0",
+          "hit": false
+        },
+        {
+          "n": 289,
+          "text": "        \"\"\"",
+          "hit": false
+        },
+        {
+          "n": 290,
+          "text": "        filename = os.path.join(self.root_path, filename)",
+          "hit": true
+        },
+        {
+          "n": 291,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 292,
+          "text": "        try:",
+          "hit": false
+        },
+        {
+          "n": 293,
+          "text": "            with open(filename, \"r\" if text else \"rb\") as f:",
           "hit": false
         }
       ],
@@ -30449,6 +32081,72 @@
         }
       ],
       "repro": "frensense src/flask/config.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
+      "id": "BL-0f474487a5",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/sansio/app.py",
+      "line": 518,
+      "function": "auto_find_instance_path",
+      "sink": "join",
+      "slot": "arg 0",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "__init__",
+          "detail": "self",
+          "file": "src/flask/sansio/app.py",
+          "line": 281
+        }
+      ],
+      "code": [
+        {
+          "n": 515,
+          "text": "        \"\"\"",
+          "hit": false
+        },
+        {
+          "n": 516,
+          "text": "        prefix, package_path = find_package(self.import_name)",
+          "hit": false
+        },
+        {
+          "n": 517,
+          "text": "        if prefix is None:",
+          "hit": false
+        },
+        {
+          "n": 518,
+          "text": "            return os.path.join(package_path, \"instance\")",
+          "hit": true
+        },
+        {
+          "n": 519,
+          "text": "        return os.path.join(prefix, \"var\", f\"{self.name}-instance\")",
+          "hit": false
+        },
+        {
+          "n": 520,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 521,
+          "text": "    def create_global_jinja_loader(self) -> DispatchingJinjaLoader:",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/sansio/app.py --explain",
       "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
       "pin": {
         "url": "https://github.com/pallets/flask.git",
@@ -30779,6 +32477,281 @@
         }
       ],
       "repro": "frensense src/flask/sansio/scaffold.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
+      "id": "BL-1ae7418098",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/templating.py",
+      "line": 159,
+      "function": "render_template_string",
+      "sink": "from_string",
+      "slot": "arg 0",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "render_template_string",
+          "detail": "source",
+          "file": "src/flask/templating.py",
+          "line": 151
+        }
+      ],
+      "code": [
+        {
+          "n": 156,
+          "text": "    :param context: The variables to make available in the template.",
+          "hit": false
+        },
+        {
+          "n": 157,
+          "text": "    \"\"\"",
+          "hit": false
+        },
+        {
+          "n": 158,
+          "text": "    ctx = app_ctx._get_current_object()",
+          "hit": false
+        },
+        {
+          "n": 159,
+          "text": "    template = ctx.app.jinja_env.from_string(source)",
+          "hit": true
+        },
+        {
+          "n": 160,
+          "text": "    return _render(ctx, template, context)",
+          "hit": false
+        },
+        {
+          "n": 161,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 162,
+          "text": "",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/templating.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
+      "id": "BL-200f9be01c",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/templating.py",
+      "line": 211,
+      "function": "stream_template_string",
+      "sink": "from_string",
+      "slot": "arg 0",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "stream_template_string",
+          "detail": "source",
+          "file": "src/flask/templating.py",
+          "line": 200
+        }
+      ],
+      "code": [
+        {
+          "n": 208,
+          "text": "    .. versionadded:: 2.2",
+          "hit": false
+        },
+        {
+          "n": 209,
+          "text": "    \"\"\"",
+          "hit": false
+        },
+        {
+          "n": 210,
+          "text": "    ctx = app_ctx._get_current_object()",
+          "hit": false
+        },
+        {
+          "n": 211,
+          "text": "    template = ctx.app.jinja_env.from_string(source)",
+          "hit": true
+        },
+        {
+          "n": 212,
+          "text": "    return _stream(ctx, template, context)",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/templating.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
+      "id": "BL-9a907671c1",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/testing.py",
+      "line": 235,
+      "function": "open",
+      "sink": "open",
+      "slot": "arg 1",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "a validating guard dominated the use; the flow hit a value the engine cannot resolve; the value folded to an attacker-independent constant",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "open_instance_resource",
+          "detail": "mode",
+          "file": "src/flask/app.py",
+          "line": 446
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "open_resource",
+          "detail": "mode",
+          "file": "src/flask/app.py",
+          "line": 413
+        }
+      ],
+      "code": [
+        {
+          "n": 232,
+          "text": "        # within a single block.",
+          "hit": false
+        },
+        {
+          "n": 233,
+          "text": "        self._context_stack.close()",
+          "hit": false
+        },
+        {
+          "n": 234,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 235,
+          "text": "        response = super().open(",
+          "hit": true
+        },
+        {
+          "n": 236,
+          "text": "            request,",
+          "hit": false
+        },
+        {
+          "n": 237,
+          "text": "            buffered=buffered,",
+          "hit": false
+        },
+        {
+          "n": 238,
+          "text": "            follow_redirects=follow_redirects,",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/testing.py --explain",
+      "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
+      "pin": {
+        "url": "https://github.com/pallets/flask.git",
+        "commit": "d086db856be187255b8ec61ef409357393020f32"
+      }
+    },
+    {
+      "id": "BL-d7487154ab",
+      "repo": "flask",
+      "lang": "python",
+      "file": "src/flask/testing.py",
+      "line": 235,
+      "function": "open",
+      "sink": "open",
+      "slot": "arg 2",
+      "track": "Unseen caller",
+      "difficulty": "medium",
+      "hint": "A parameter with no analysed caller (often a method's `self`/receiver, a callback or an entry point). Resolve how values reach it, or classify the receiver so field reads on it stop being unknown.",
+      "reason": "the flow hit a value the engine cannot resolve",
+      "stop_sites": [
+        {
+          "kind": "param-no-caller",
+          "function": "open_instance_resource",
+          "detail": "encoding",
+          "file": "src/flask/app.py",
+          "line": 446
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "open_resource",
+          "detail": "encoding",
+          "file": "src/flask/app.py",
+          "line": 413
+        },
+        {
+          "kind": "param-no-caller",
+          "function": "open_resource",
+          "detail": "encoding",
+          "file": "src/flask/blueprints.py",
+          "line": 105
+        }
+      ],
+      "code": [
+        {
+          "n": 232,
+          "text": "        # within a single block.",
+          "hit": false
+        },
+        {
+          "n": 233,
+          "text": "        self._context_stack.close()",
+          "hit": false
+        },
+        {
+          "n": 234,
+          "text": "",
+          "hit": false
+        },
+        {
+          "n": 235,
+          "text": "        response = super().open(",
+          "hit": true
+        },
+        {
+          "n": 236,
+          "text": "            request,",
+          "hit": false
+        },
+        {
+          "n": 237,
+          "text": "            buffered=buffered,",
+          "hit": false
+        },
+        {
+          "n": 238,
+          "text": "            follow_redirects=follow_redirects,",
+          "hit": false
+        }
+      ],
+      "repro": "frensense src/flask/testing.py --explain",
       "engine_pointer": "walk.rs `node_is_unresolvable`: a FormalParam no cross edge feeds is a dead end. Link the call sites that reach it (method receivers, callbacks) or classify the receiver.",
       "pin": {
         "url": "https://github.com/pallets/flask.git",
@@ -31290,70 +33263,6 @@
       }
     },
     {
-      "id": "BL-c9732764c7",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00021.py",
-      "line": 39,
-      "function": "",
-      "sink": "taint.xpath-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.xpath-injection: `request.get` flows to `xpath` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00021.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "643",
-        "case": "xpathi:BenchmarkTest00021",
-        "category": "XPath injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|XPath injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "XPath injection"
-    },
-    {
-      "id": "BL-5358252973",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00022.py",
-      "line": 39,
-      "function": "",
-      "sink": "taint.xpath-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.xpath-injection: `request.get` flows to `xpath` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00022.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "643",
-        "case": "xpathi:BenchmarkTest00022",
-        "category": "XPath injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|XPath injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "XPath injection"
-    },
-    {
       "id": "BL-ed78e17460",
       "kind": "false-alarm",
       "repo": "owasp-python",
@@ -31706,38 +33615,6 @@
       "group_detail": "XPath injection"
     },
     {
-      "id": "BL-e998334a73",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00110.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.xpath-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.xpath-injection: `request.get` flows to `xpath` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00110.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "643",
-        "case": "xpathi:BenchmarkTest00110",
-        "category": "XPath injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|XPath injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "XPath injection"
-    },
-    {
       "id": "BL-e1a92e31a3",
       "kind": "false-alarm",
       "repo": "owasp-python",
@@ -31930,38 +33807,6 @@
       "group_detail": "open redirect"
     },
     {
-      "id": "BL-054ae02ed4",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00157.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.code-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.code-injection: `request.get` flows to `eval` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00157.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "94",
-        "case": "codeinj:BenchmarkTest00157",
-        "category": "code injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|code injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "code injection"
-    },
-    {
       "id": "BL-0f16109617",
       "kind": "false-alarm",
       "repo": "owasp-python",
@@ -31986,38 +33831,6 @@
       "label": {
         "cwe": "94",
         "case": "codeinj:BenchmarkTest00158",
-        "category": "code injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|code injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "code injection"
-    },
-    {
-      "id": "BL-b034758fd6",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00162.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.code-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.code-injection: `request.get` flows to `exec` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00162.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "94",
-        "case": "codeinj:BenchmarkTest00162",
         "category": "code injection",
         "file_level": true
       },
@@ -32056,70 +33869,6 @@
       "group_key": "owasp-python|false-alarm|code injection|False alarm",
       "group_repo": "owasp-python",
       "group_detail": "code injection"
-    },
-    {
-      "id": "BL-5434e00119",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00176.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.path-traversal",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.path-traversal: `request.getlist` flows to `open` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00176.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "22",
-        "case": "pathtraver:BenchmarkTest00176",
-        "category": "path traversal",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|path traversal|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "path traversal"
-    },
-    {
-      "id": "BL-71de1c14ce",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00184.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.path-traversal",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.path-traversal: `request.getlist` flows to `open` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00184.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "22",
-        "case": "pathtraver:BenchmarkTest00184",
-        "category": "path traversal",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|path traversal|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "path traversal"
     },
     {
       "id": "BL-1c462b9761",
@@ -32538,38 +34287,6 @@
       "group_detail": "weak randomness"
     },
     {
-      "id": "BL-66b2e24c53",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00263.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.code-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.code-injection: `request.getlist` flows to `eval` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00263.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "94",
-        "case": "codeinj:BenchmarkTest00263",
-        "category": "code injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|code injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "code injection"
-    },
-    {
       "id": "BL-cbe52719a4",
       "kind": "missed",
       "repo": "owasp-python",
@@ -32922,38 +34639,6 @@
       "group_detail": "XPath injection"
     },
     {
-      "id": "BL-0615ad8a38",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00470.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.xpath-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.xpath-injection: `request.get` flows to `xpath` (argument 1).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00470.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "643",
-        "case": "xpathi:BenchmarkTest00470",
-        "category": "XPath injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|XPath injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "XPath injection"
-    },
-    {
       "id": "BL-486c234388",
       "kind": "missed",
       "repo": "owasp-python",
@@ -33114,38 +34799,6 @@
       "group_detail": "code injection"
     },
     {
-      "id": "BL-1781fce5cc",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00508.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.unsafe-deserialization",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.unsafe-deserialization: `request.get` flows to `loads` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00508.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "502",
-        "case": "deserialization:BenchmarkTest00508",
-        "category": "unsafe deserialization",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|unsafe deserialization|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "unsafe deserialization"
-    },
-    {
       "id": "BL-e6fabed90a",
       "kind": "false-alarm",
       "repo": "owasp-python",
@@ -33170,38 +34823,6 @@
       "label": {
         "cwe": "22",
         "case": "pathtraver:BenchmarkTest00521",
-        "category": "path traversal",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|path traversal|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "path traversal"
-    },
-    {
-      "id": "BL-2bf5328cd0",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00530.py",
-      "line": 32,
-      "function": "",
-      "sink": "taint.path-traversal",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.path-traversal: `request.getlist` flows to `open` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00530.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "22",
-        "case": "pathtraver:BenchmarkTest00530",
         "category": "path traversal",
         "file_level": true
       },
@@ -33266,102 +34887,6 @@
       "label": {
         "cwe": "643",
         "case": "xpathi:BenchmarkTest00548",
-        "category": "XPath injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|XPath injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "XPath injection"
-    },
-    {
-      "id": "BL-976c848214",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00549.py",
-      "line": 32,
-      "function": "",
-      "sink": "taint.xpath-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.xpath-injection: `request.getlist` flows to `xpath` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00549.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "643",
-        "case": "xpathi:BenchmarkTest00549",
-        "category": "XPath injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|XPath injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "XPath injection"
-    },
-    {
-      "id": "BL-a43a775d26",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00550.py",
-      "line": 32,
-      "function": "",
-      "sink": "taint.xpath-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.xpath-injection: `request.getlist` flows to `xpath` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00550.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "643",
-        "case": "xpathi:BenchmarkTest00550",
-        "category": "XPath injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|XPath injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "XPath injection"
-    },
-    {
-      "id": "BL-a0524738f4",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00552.py",
-      "line": 32,
-      "function": "",
-      "sink": "taint.xpath-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.xpath-injection: `request.getlist` flows to `xpath` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00552.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "643",
-        "case": "xpathi:BenchmarkTest00552",
         "category": "XPath injection",
         "file_level": true
       },
@@ -33754,38 +35279,6 @@
       "group_detail": "open redirect"
     },
     {
-      "id": "BL-ca849f955a",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00600.py",
-      "line": 32,
-      "function": "",
-      "sink": "taint.code-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.code-injection: `request.getlist` flows to `eval` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00600.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "94",
-        "case": "codeinj:BenchmarkTest00600",
-        "category": "code injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|code injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "code injection"
-    },
-    {
       "id": "BL-040d414259",
       "kind": "false-alarm",
       "repo": "owasp-python",
@@ -33816,38 +35309,6 @@
       "group_key": "owasp-python|false-alarm|code injection|False alarm",
       "group_repo": "owasp-python",
       "group_detail": "code injection"
-    },
-    {
-      "id": "BL-9500b6a722",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00608.py",
-      "line": 32,
-      "function": "",
-      "sink": "taint.unsafe-deserialization",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.unsafe-deserialization: `request.getlist` flows to `load` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00608.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "502",
-        "case": "deserialization:BenchmarkTest00608",
-        "category": "unsafe deserialization",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|unsafe deserialization|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "unsafe deserialization"
     },
     {
       "id": "BL-ebe0ce1923",
@@ -34106,102 +35567,6 @@
       "group_detail": "weak randomness"
     },
     {
-      "id": "BL-7eb5e12c54",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00666.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.path-traversal",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.path-traversal: `request.get` flows to `open` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00666.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "22",
-        "case": "pathtraver:BenchmarkTest00666",
-        "category": "path traversal",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|path traversal|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "path traversal"
-    },
-    {
-      "id": "BL-4c2bc55353",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00684.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.xpath-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.xpath-injection: `request.get` flows to `xpath` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00684.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "643",
-        "case": "xpathi:BenchmarkTest00684",
-        "category": "XPath injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|XPath injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "XPath injection"
-    },
-    {
-      "id": "BL-d7d17be1a5",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00685.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.xpath-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.xpath-injection: `request.get` flows to `xpath` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00685.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "643",
-        "case": "xpathi:BenchmarkTest00685",
-        "category": "XPath injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|XPath injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "XPath injection"
-    },
-    {
       "id": "BL-8d59ac6208",
       "kind": "false-alarm",
       "repo": "owasp-python",
@@ -34362,38 +35727,6 @@
       "group_detail": "open redirect"
     },
     {
-      "id": "BL-2416dbef8f",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00724.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.open-redirect",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.open-redirect: `request.get` flows to `redirect` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00724.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "601",
-        "case": "redirect:BenchmarkTest00724",
-        "category": "open redirect",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|open redirect|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "open redirect"
-    },
-    {
       "id": "BL-2b4a04e2d0",
       "kind": "false-alarm",
       "repo": "owasp-python",
@@ -34424,70 +35757,6 @@
       "group_key": "owasp-python|false-alarm|code injection|False alarm",
       "group_repo": "owasp-python",
       "group_detail": "code injection"
-    },
-    {
-      "id": "BL-8dff58815f",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00738.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.path-traversal",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.path-traversal: `request.getlist` flows to `open` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00738.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "22",
-        "case": "pathtraver:BenchmarkTest00738",
-        "category": "path traversal",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|path traversal|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "path traversal"
-    },
-    {
-      "id": "BL-55872ef4cc",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest00763.py",
-      "line": 31,
-      "function": "",
-      "sink": "taint.xpath-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.xpath-injection: `request.getlist` flows to `xpath` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest00763.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "643",
-        "case": "xpathi:BenchmarkTest00763",
-        "category": "XPath injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|XPath injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "XPath injection"
     },
     {
       "id": "BL-c1ebaeeb19",
@@ -36088,38 +37357,6 @@
       "group_key": "owasp-python|missed|weak randomness|Missed pattern check",
       "group_repo": "owasp-python",
       "group_detail": "weak randomness"
-    },
-    {
-      "id": "BL-0e3fc00640",
-      "kind": "false-alarm",
-      "repo": "owasp-python",
-      "lang": "python",
-      "file": "testcode/BenchmarkTest01198.py",
-      "line": 32,
-      "function": "",
-      "sink": "taint.xpath-injection",
-      "slot": "",
-      "track": "False alarm",
-      "difficulty": "medium",
-      "hint": "The code is labelled safe, yet the engine reports it. Find the guard, constant or sanitiser on the reported path (run with --show-flows) that the walk did not credit.",
-      "reason": "it reports taint.xpath-injection: `request.getlist` flows to `xpath` (argument 0).",
-      "stop_sites": [],
-      "engine_pointer": "`frensense <file> --show-flows` prints the reported path. The false positive is a step on that path the engine should have cut (guard dominance, constant folding, sanitiser roles in walk.rs).",
-      "repro": "frensense testcode/BenchmarkTest01198.py --show-flows",
-      "pin": {
-        "url": "https://github.com/OWASP-Benchmark/BenchmarkPython.git",
-        "commit": "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-      },
-      "fix_added": [],
-      "label": {
-        "cwe": "643",
-        "case": "xpathi:BenchmarkTest01198",
-        "category": "XPath injection",
-        "file_level": true
-      },
-      "group_key": "owasp-python|false-alarm|XPath injection|False alarm",
-      "group_repo": "owasp-python",
-      "group_detail": "XPath injection"
     },
     {
       "id": "BL-9ad05a822e",
@@ -40927,19 +42164,71 @@
   ],
   "delta": {
     "solved": [
-      "BL-2074f26a44",
-      "BL-307e320171",
-      "BL-3b4f2e7e3e",
-      "BL-5e018006da",
-      "BL-68fad6f471",
-      "BL-6fa4f206ba",
-      "BL-8cded9d3aa",
-      "BL-a1ade22c9a",
-      "BL-a9c99f7642",
-      "BL-be27d0f471",
-      "BL-e85b61e550"
+      "BL-054ae02ed4",
+      "BL-0615ad8a38",
+      "BL-0e3fc00640",
+      "BL-1781fce5cc",
+      "BL-1e4c14c76b",
+      "BL-2416dbef8f",
+      "BL-2bf5328cd0",
+      "BL-2e9be8efd1",
+      "BL-37ffd576b5",
+      "BL-4c2bc55353",
+      "BL-5358252973",
+      "BL-5434e00119",
+      "BL-55872ef4cc",
+      "BL-66b2e24c53",
+      "BL-71de1c14ce",
+      "BL-7eb5e12c54",
+      "BL-83d9c3418f",
+      "BL-84740ce389",
+      "BL-8dff58815f",
+      "BL-9500b6a722",
+      "BL-976c848214",
+      "BL-a0524738f4",
+      "BL-a43a775d26",
+      "BL-ac485508ca",
+      "BL-b034758fd6",
+      "BL-b664d256f4",
+      "BL-c9732764c7",
+      "BL-ca849f955a",
+      "BL-d7d17be1a5",
+      "BL-e998334a73",
+      "BL-fb554f8ed5"
     ],
-    "new": []
+    "new": [
+      "BL-0adbca57ef",
+      "BL-0bc5803504",
+      "BL-0f474487a5",
+      "BL-152c6b3b3e",
+      "BL-16dc903291",
+      "BL-1ae7418098",
+      "BL-1e0ff8f4e6",
+      "BL-200f9be01c",
+      "BL-22b25717ad",
+      "BL-4c81fc5df6",
+      "BL-601d1883dd",
+      "BL-76fe30ac12",
+      "BL-78cad3fbcb",
+      "BL-7c0898fa82",
+      "BL-841b30adff",
+      "BL-8d2db1a992",
+      "BL-90f45d8c6c",
+      "BL-95150936a4",
+      "BL-95ddef4054",
+      "BL-9a907671c1",
+      "BL-a60649cc7e",
+      "BL-b2d3d57b8d",
+      "BL-b94f2688b7",
+      "BL-cc0f629977",
+      "BL-d7487154ab",
+      "BL-daf2b50a27",
+      "BL-dda1d94596",
+      "BL-e4df294a3e",
+      "BL-edf3c7d4ab",
+      "BL-f3cda507a2",
+      "BL-f4ef194eb4"
+    ]
   },
   "scores": [
     {
@@ -41023,11 +42312,11 @@
       "lang": "python",
       "tp": 172,
       "fn": 280,
-      "fp": 55,
-      "tn": 723,
+      "fp": 32,
+      "tn": 746,
       "recall": 0.3805,
-      "fpr": 0.0707,
-      "score": 0.3098,
+      "fpr": 0.0411,
+      "score": 0.3394,
       "categories": [
         {
           "name": "weak randomness",
@@ -41043,21 +42332,21 @@
           "name": "XPath injection",
           "tp": 14,
           "fn": 37,
-          "fp": 25,
-          "tn": 110,
+          "fp": 14,
+          "tn": 121,
           "recall": 0.2745,
-          "fpr": 0.1852,
-          "score": 0.0893
+          "fpr": 0.1037,
+          "score": 0.1708
         },
         {
           "name": "path traversal",
           "tp": 26,
           "fn": 39,
-          "fp": 6,
-          "tn": 97,
+          "fp": 1,
+          "tn": 102,
           "recall": 0.4,
-          "fpr": 0.0583,
-          "score": 0.3417
+          "fpr": 0.0097,
+          "score": 0.3903
         },
         {
           "name": "cross-site scripting",
@@ -41073,11 +42362,11 @@
           "name": "code injection",
           "tp": 11,
           "fn": 9,
-          "fp": 14,
-          "tn": 19,
+          "fp": 10,
+          "tn": 23,
           "recall": 0.55,
-          "fpr": 0.4242,
-          "score": 0.1258
+          "fpr": 0.303,
+          "score": 0.247
         },
         {
           "name": "trust boundary violation",
@@ -41103,21 +42392,11 @@
           "name": "open redirect",
           "tp": 8,
           "fn": 5,
-          "fp": 7,
-          "tn": 14,
+          "fp": 6,
+          "tn": 15,
           "recall": 0.6154,
-          "fpr": 0.3333,
-          "score": 0.2821
-        },
-        {
-          "name": "unsafe deserialization",
-          "tp": 11,
-          "fn": 7,
-          "fp": 3,
-          "tn": 33,
-          "recall": 0.6111,
-          "fpr": 0.0833,
-          "score": 0.5278
+          "fpr": 0.2857,
+          "score": 0.3297
         },
         {
           "name": "XML external entity",
@@ -41138,6 +42417,16 @@
           "recall": 0.3846,
           "fpr": 0.0,
           "score": 0.3846
+        },
+        {
+          "name": "unsafe deserialization",
+          "tp": 11,
+          "fn": 7,
+          "fp": 1,
+          "tn": 35,
+          "recall": 0.6111,
+          "fpr": 0.0278,
+          "score": 0.5833
         },
         {
           "name": "SQL injection",
