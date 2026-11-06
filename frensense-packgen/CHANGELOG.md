@@ -19,6 +19,17 @@ There is no semver contract here (nothing is published, and
 ## [0.8.0]
 
 ### Changed
+- **The guard denylist now carries the string-literal break-out characters.**
+  `BOOTSTRAP_GUARD_DENYLIST` had one entry, `..`, so the engine could only
+  recognize a path-traversal rejection. An early return on a quote
+  (`if "'" in bar: return`, `if value.includes('"') throw ...`) is the same
+  author validation for XPath, SQL, shell and HTML string contexts: the
+  surviving branch has no delimiter left to break out of the literal, but the
+  guard map saw an ordinary comparison and the value still reached the sink.
+  Adding `'` and `"` turns those into recognized guards. Measured on OWASP
+  BenchmarkPython: FP **40 -> 32** (the eight XPath/command-injection safe
+  tests built on `if "'" in bar: return`), TP unchanged at **172**, score
+  **32.9% -> 33.9%**. The regenerated asset is in `frensense-bundler`.
 - **Cross-language sink contamination removed from the vocabulary tables**: the
   Python, Go, C, and Rust tables carried large copy-pasted blocks of foreign
   APIs (JS DOM sinks like `innerHTML`/`dangerouslySetInnerHTML`, Express

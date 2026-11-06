@@ -122,6 +122,14 @@ what this crate does.
 
 ### Fixed
 
+- **Guard denylist matching strips literal quotes before testing patterns.**
+  `FactTable::is_guard_denylist` tested raw literal text (`"\"\""`, `"'admin'"`)
+  against patterns. When the quote delimiters (`'`, `"`) were added to the
+  guard denylist, any quoted literal matched against its own enclosing quotes,
+  inverting comparisons like `if v != ""` into false guards that marked the true
+  branch sanitized. Unquoting the literal before testing against denylist
+  patterns preserves normal string comparisons while recognizing break-out
+  delimiter rejections (`if "'" in bar: return`).
 - **Module-scope statements are analyzed.** Dataflow and policy checks only
   ever ran over `FunctionIR`s extracted from function bodies, so the same two
   statements were one finding inside `def handler():` and silent at file

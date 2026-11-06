@@ -392,9 +392,15 @@ pub static BOOTSTRAP_BUFFER_BUILTINS: std::sync::LazyLock<Vec<BufferBuiltinSpec>
 
 /// Guard-denylist markers: comparing user input against a literal that
 /// contains one of these rejects the input (`path.contains("..")` →
-/// traversal blocked). A lexical fact of path handling in every language;
-/// bundles may extend it via `GuardDenylistPattern` facts.
-pub static BOOTSTRAP_GUARD_DENYLIST: &[&str] = &[".."];
+/// traversal blocked). A lexical fact of injection handling in every
+/// language; bundles may extend it via `GuardDenylistPattern` facts.
+///
+/// The quote characters are the string-literal break-out markers: an early
+/// return on `"'" in value` / `value.includes('"')` is how XPath, SQL, shell
+/// and HTML string contexts reject an injection attempt, and the surviving
+/// branch has no delimiter left to break out of. Without them the guard is
+/// invisible and the value is reported as reaching the sink unchecked.
+pub static BOOTSTRAP_GUARD_DENYLIST: &[&str] = &["..", "'", "\""];
 
 /// Calls whose results live on the current stack frame, not the heap:
 /// leak-style checkers must never treat them as leakable allocations
