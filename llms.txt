@@ -43,36 +43,200 @@ npm install -g @friehub/frensense    # prebuilt binary, no Rust needed
 
 ## Documentation
 
-### Getting started
+### Start here
 
-- [Frensense v2](https://frensense.friehub.cloud/guide.md)
-- [Installation](https://frensense.friehub.cloud/guide/installation.md)
-- [Your first scan](https://frensense.friehub.cloud/guide/first-scan.md)
+- [Overview](https://frensense.friehub.cloud/guide.md): What Frensense is, what it scans, and where to go next.
+- [Install](https://frensense.friehub.cloud/guide/installation.md): Install the frensense binary with Cargo, npm, or a release download.
+- [Your first scan](https://frensense.friehub.cloud/guide/first-scan.md): Scan a small vulnerable app, read the finding, and learn what the exit code means.
+- [CLI reference](https://frensense.friehub.cloud/guide/cli.md): Every frensense command, flag, output format and exit code.
+
+### Use it
+
+- [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions.md): Fail pull requests on new findings, annotate them, and gate AI agents.
+- [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp.md): Run Frensense as an MCP server so AI coding agents can check their own changes.
+- [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp.md): Run Frensense as a language server so findings appear as editor diagnostics.
+
+### Teach the engine
+
+- [Bundles (.frc)](https://frensense.friehub.cloud/bundles.md): What a Frensense bundle is, how to download and use one, and how to judge whether it helps on your code.
 - [Teachable Static Analysis Guide](https://frensense.friehub.cloud/guide/teachability.md): A practical, user-readable guide to understanding and using Frensense's teachable static analysis system.
-- [CLI reference](https://frensense.friehub.cloud/guide/cli.md)
+- [Corpus & .frc bundles](https://frensense.friehub.cloud/corpus.md)
+- [Corpus authoring guide](https://frensense.friehub.cloud/corpus/authoring.md): Write labelled examples that teach the engine, lint them and compile a bundle.
 
-### Integrations
+### How it works
 
-- [GitHub Actions](https://frensense.friehub.cloud/guide/github-actions.md)
-- [MCP server (AI agents)](https://frensense.friehub.cloud/guide/mcp.md)
-- [LSP server (editors)](https://frensense.friehub.cloud/guide/lsp.md)
-
-### Architecture
-
-- [Architecture overview](https://frensense.friehub.cloud/architecture.md)
+- [Architecture](https://frensense.friehub.cloud/architecture.md): How Frensense turns source files into findings, from parsing to the program graph and the checkers.
 - [The program graph](https://frensense.friehub.cloud/architecture/program-graph.md)
 - [Checkers](https://frensense.friehub.cloud/architecture/checkers.md)
-- [Knowledge bundles (.frc)](https://frensense.friehub.cloud/architecture/bundles.md)
 - [Engine Blindness & Capability Profile](https://frensense.friehub.cloud/architecture/blindness.md): Real-world static analysis limits, safety valve truncations, and commit-by-commit dataflow tracking across open-source codebases.
+- [Benchmarks](https://frensense.friehub.cloud/architecture/benchmarks.md): How Frensense is scored, the current OWASP Benchmark for Python record, and how to reproduce it.
+
+### Contribute
+
 - [Engine Blindness Challenges](https://frensense.friehub.cloud/challenges.md): Every place the Frensense engine is silent or wrong on real code, as a challenge anyone can fix and earn credit for.
 
-### Corpus
+### Start here
 
+- [Overview](https://frensense.friehub.cloud/guide.md): What Frensense is, what it scans, and where to go next.
+- [Install](https://frensense.friehub.cloud/guide/installation.md): Install the frensense binary with Cargo, npm, or a release download.
+- [Your first scan](https://frensense.friehub.cloud/guide/first-scan.md): Scan a small vulnerable app, read the finding, and learn what the exit code means.
+- [CLI reference](https://frensense.friehub.cloud/guide/cli.md): Every frensense command, flag, output format and exit code.
+
+### Use it
+
+- [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions.md): Fail pull requests on new findings, annotate them, and gate AI agents.
+- [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp.md): Run Frensense as an MCP server so AI coding agents can check their own changes.
+- [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp.md): Run Frensense as a language server so findings appear as editor diagnostics.
+
+### Teach the engine
+
+- [Bundles (.frc)](https://frensense.friehub.cloud/bundles.md): What a Frensense bundle is, how to download and use one, and how to judge whether it helps on your code.
+- [Teachable Static Analysis Guide](https://frensense.friehub.cloud/guide/teachability.md): A practical, user-readable guide to understanding and using Frensense's teachable static analysis system.
 - [Corpus & .frc bundles](https://frensense.friehub.cloud/corpus.md)
-- [Corpus authoring guide](https://frensense.friehub.cloud/corpus/authoring.md)
+- [Corpus authoring guide](https://frensense.friehub.cloud/corpus/authoring.md): Write labelled examples that teach the engine, lint them and compile a bundle.
+
+### How it works
+
+- [Architecture](https://frensense.friehub.cloud/architecture.md): How Frensense turns source files into findings, from parsing to the program graph and the checkers.
+- [The program graph](https://frensense.friehub.cloud/architecture/program-graph.md)
+- [Checkers](https://frensense.friehub.cloud/architecture/checkers.md)
+- [Engine Blindness & Capability Profile](https://frensense.friehub.cloud/architecture/blindness.md): Real-world static analysis limits, safety valve truncations, and commit-by-commit dataflow tracking across open-source codebases.
+- [Benchmarks](https://frensense.friehub.cloud/architecture/benchmarks.md): How Frensense is scored, the current OWASP Benchmark for Python record, and how to reproduce it.
+
+### Contribute
+
+- [Engine Blindness Challenges](https://frensense.friehub.cloud/challenges.md): Every place the Frensense engine is silent or wrong on real code, as a challenge anyone can fix and earn credit for.
+
+### Start here
+
+- [Overview](https://frensense.friehub.cloud/guide.md): What Frensense is, what it scans, and where to go next.
+- [Install](https://frensense.friehub.cloud/guide/installation.md): Install the frensense binary with Cargo, npm, or a release download.
+- [Your first scan](https://frensense.friehub.cloud/guide/first-scan.md): Scan a small vulnerable app, read the finding, and learn what the exit code means.
+- [CLI reference](https://frensense.friehub.cloud/guide/cli.md): Every frensense command, flag, output format and exit code.
+
+### Use it
+
+- [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions.md): Fail pull requests on new findings, annotate them, and gate AI agents.
+- [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp.md): Run Frensense as an MCP server so AI coding agents can check their own changes.
+- [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp.md): Run Frensense as a language server so findings appear as editor diagnostics.
+
+### Teach the engine
+
+- [Bundles (.frc)](https://frensense.friehub.cloud/bundles.md): What a Frensense bundle is, how to download and use one, and how to judge whether it helps on your code.
+- [Teachable Static Analysis Guide](https://frensense.friehub.cloud/guide/teachability.md): A practical, user-readable guide to understanding and using Frensense's teachable static analysis system.
+- [Corpus & .frc bundles](https://frensense.friehub.cloud/corpus.md)
+- [Corpus authoring guide](https://frensense.friehub.cloud/corpus/authoring.md): Write labelled examples that teach the engine, lint them and compile a bundle.
+
+### How it works
+
+- [Architecture](https://frensense.friehub.cloud/architecture.md): How Frensense turns source files into findings, from parsing to the program graph and the checkers.
+- [The program graph](https://frensense.friehub.cloud/architecture/program-graph.md)
+- [Checkers](https://frensense.friehub.cloud/architecture/checkers.md)
+- [Engine Blindness & Capability Profile](https://frensense.friehub.cloud/architecture/blindness.md): Real-world static analysis limits, safety valve truncations, and commit-by-commit dataflow tracking across open-source codebases.
+- [Benchmarks](https://frensense.friehub.cloud/architecture/benchmarks.md): How Frensense is scored, the current OWASP Benchmark for Python record, and how to reproduce it.
+
+### Contribute
+
+- [Engine Blindness Challenges](https://frensense.friehub.cloud/challenges.md): Every place the Frensense engine is silent or wrong on real code, as a challenge anyone can fix and earn credit for.
+
+### Start here
+
+- [Overview](https://frensense.friehub.cloud/guide.md): What Frensense is, what it scans, and where to go next.
+- [Install](https://frensense.friehub.cloud/guide/installation.md): Install the frensense binary with Cargo, npm, or a release download.
+- [Your first scan](https://frensense.friehub.cloud/guide/first-scan.md): Scan a small vulnerable app, read the finding, and learn what the exit code means.
+- [CLI reference](https://frensense.friehub.cloud/guide/cli.md): Every frensense command, flag, output format and exit code.
+
+### Use it
+
+- [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions.md): Fail pull requests on new findings, annotate them, and gate AI agents.
+- [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp.md): Run Frensense as an MCP server so AI coding agents can check their own changes.
+- [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp.md): Run Frensense as a language server so findings appear as editor diagnostics.
+
+### Teach the engine
+
+- [Bundles (.frc)](https://frensense.friehub.cloud/bundles.md): What a Frensense bundle is, how to download and use one, and how to judge whether it helps on your code.
+- [Teachable Static Analysis Guide](https://frensense.friehub.cloud/guide/teachability.md): A practical, user-readable guide to understanding and using Frensense's teachable static analysis system.
+- [Corpus & .frc bundles](https://frensense.friehub.cloud/corpus.md)
+- [Corpus authoring guide](https://frensense.friehub.cloud/corpus/authoring.md): Write labelled examples that teach the engine, lint them and compile a bundle.
+
+### How it works
+
+- [Architecture](https://frensense.friehub.cloud/architecture.md): How Frensense turns source files into findings, from parsing to the program graph and the checkers.
+- [The program graph](https://frensense.friehub.cloud/architecture/program-graph.md)
+- [Checkers](https://frensense.friehub.cloud/architecture/checkers.md)
+- [Engine Blindness & Capability Profile](https://frensense.friehub.cloud/architecture/blindness.md): Real-world static analysis limits, safety valve truncations, and commit-by-commit dataflow tracking across open-source codebases.
+- [Benchmarks](https://frensense.friehub.cloud/architecture/benchmarks.md): How Frensense is scored, the current OWASP Benchmark for Python record, and how to reproduce it.
+
+### Contribute
+
+- [Engine Blindness Challenges](https://frensense.friehub.cloud/challenges.md): Every place the Frensense engine is silent or wrong on real code, as a challenge anyone can fix and earn credit for.
+
+### Start here
+
+- [Overview](https://frensense.friehub.cloud/guide.md): What Frensense is, what it scans, and where to go next.
+- [Install](https://frensense.friehub.cloud/guide/installation.md): Install the frensense binary with Cargo, npm, or a release download.
+- [Your first scan](https://frensense.friehub.cloud/guide/first-scan.md): Scan a small vulnerable app, read the finding, and learn what the exit code means.
+- [CLI reference](https://frensense.friehub.cloud/guide/cli.md): Every frensense command, flag, output format and exit code.
+
+### Use it
+
+- [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions.md): Fail pull requests on new findings, annotate them, and gate AI agents.
+- [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp.md): Run Frensense as an MCP server so AI coding agents can check their own changes.
+- [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp.md): Run Frensense as a language server so findings appear as editor diagnostics.
+
+### Teach the engine
+
+- [Bundles (.frc)](https://frensense.friehub.cloud/bundles.md): What a Frensense bundle is, how to download and use one, and how to judge whether it helps on your code.
+- [Teachable Static Analysis Guide](https://frensense.friehub.cloud/guide/teachability.md): A practical, user-readable guide to understanding and using Frensense's teachable static analysis system.
+- [Corpus & .frc bundles](https://frensense.friehub.cloud/corpus.md)
+- [Corpus authoring guide](https://frensense.friehub.cloud/corpus/authoring.md): Write labelled examples that teach the engine, lint them and compile a bundle.
+
+### How it works
+
+- [Architecture](https://frensense.friehub.cloud/architecture.md): How Frensense turns source files into findings, from parsing to the program graph and the checkers.
+- [The program graph](https://frensense.friehub.cloud/architecture/program-graph.md)
+- [Checkers](https://frensense.friehub.cloud/architecture/checkers.md)
+- [Engine Blindness & Capability Profile](https://frensense.friehub.cloud/architecture/blindness.md): Real-world static analysis limits, safety valve truncations, and commit-by-commit dataflow tracking across open-source codebases.
+- [Benchmarks](https://frensense.friehub.cloud/architecture/benchmarks.md): How Frensense is scored, the current OWASP Benchmark for Python record, and how to reproduce it.
+
+### Contribute
+
+- [Engine Blindness Challenges](https://frensense.friehub.cloud/challenges.md): Every place the Frensense engine is silent or wrong on real code, as a challenge anyone can fix and earn credit for.
+
+### Start here
+
+- [Overview](https://frensense.friehub.cloud/guide.md): What Frensense is, what it scans, and where to go next.
+- [Install](https://frensense.friehub.cloud/guide/installation.md): Install the frensense binary with Cargo, npm, or a release download.
+- [Your first scan](https://frensense.friehub.cloud/guide/first-scan.md): Scan a small vulnerable app, read the finding, and learn what the exit code means.
+- [CLI reference](https://frensense.friehub.cloud/guide/cli.md): Every frensense command, flag, output format and exit code.
+
+### Use it
+
+- [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions.md): Fail pull requests on new findings, annotate them, and gate AI agents.
+- [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp.md): Run Frensense as an MCP server so AI coding agents can check their own changes.
+- [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp.md): Run Frensense as a language server so findings appear as editor diagnostics.
+
+### Teach the engine
+
+- [Bundles (.frc)](https://frensense.friehub.cloud/bundles.md): What a Frensense bundle is, how to download and use one, and how to judge whether it helps on your code.
+- [Teachable Static Analysis Guide](https://frensense.friehub.cloud/guide/teachability.md): A practical, user-readable guide to understanding and using Frensense's teachable static analysis system.
+- [Corpus & .frc bundles](https://frensense.friehub.cloud/corpus.md)
+- [Corpus authoring guide](https://frensense.friehub.cloud/corpus/authoring.md): Write labelled examples that teach the engine, lint them and compile a bundle.
+
+### How it works
+
+- [Architecture](https://frensense.friehub.cloud/architecture.md): How Frensense turns source files into findings, from parsing to the program graph and the checkers.
+- [The program graph](https://frensense.friehub.cloud/architecture/program-graph.md)
+- [Checkers](https://frensense.friehub.cloud/architecture/checkers.md)
+- [Engine Blindness & Capability Profile](https://frensense.friehub.cloud/architecture/blindness.md): Real-world static analysis limits, safety valve truncations, and commit-by-commit dataflow tracking across open-source codebases.
+- [Benchmarks](https://frensense.friehub.cloud/architecture/benchmarks.md): How Frensense is scored, the current OWASP Benchmark for Python record, and how to reproduce it.
+
+### Contribute
+
+- [Engine Blindness Challenges](https://frensense.friehub.cloud/challenges.md): Every place the Frensense engine is silent or wrong on real code, as a challenge anyone can fix and earn credit for.
 
 ### Other
 
-- [Changelog](https://frensense.friehub.cloud/changelog.md): Complete release history and preview releases for Frensense
-- [Security Rule Bundles (.frc)](https://frensense.friehub.cloud/bundles.md): Download verified security rule bundles (.frc) for Frensense
+- [Bundles (moved)](https://frensense.friehub.cloud/architecture/bundles.md)
+- [Changelog](https://frensense.friehub.cloud/changelog.md): Release history for Frensense.
 

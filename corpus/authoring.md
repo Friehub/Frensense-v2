@@ -1,15 +1,16 @@
 ---
 url: https://frensense.friehub.cloud/corpus/authoring.md
+description: Write labelled examples that teach the engine, lint them and compile a bundle.
 ---
 
-# Corpus authoring guide
+# Frensense Corpus Authoring Guide
 
 > How to teach Frensense new vulnerabilities. Frensense is **corpus-based, not
 > rule-based**: there is no rule language to learn and no YAML to write. You
 > provide a vulnerable example and its remediated counterpart, and the
 > bundler verifies and distills the difference into a portable `.frc` bundle.
 
-Everything on this page is what the shipped `frensense lint` and
+Everything in this guide is what the shipped `frensense lint` and
 `frensense bundle` actually enforce, and the example is a complete family you
 can paste into a directory and build.
 

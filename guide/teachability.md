@@ -22,7 +22,7 @@ flowchart LR
     B["Remediated Example\n(*_negative)"] --> C
     C --> D["Replay Verification\n(Gate: 0 False Positives)"]
     D --> E["Compiled Knowledge Bundle\n(*.frc)"]
-    E --> F["Frensense Scanner\n(--corpus-bundle)"]
+    E --> F["Frensense Scanner\n(--bundle)"]
     G["Target Codebase"] --> F
     F --> H["Accurate Findings\n(Exact Source-to-Sink Path)"]
 ```
@@ -196,7 +196,7 @@ family can teach, held-out pairs and every lint code - is the
 Provide the bundle to the scanner:
 
 ```bash
-frensense src/ --corpus-bundle my_company.frc
+frensense src/ --bundle my_company.frc
 ```
 
 Or drop `frensense-corpus.frc` directly into the root directory of your project; Frensense will discover and load it automatically.

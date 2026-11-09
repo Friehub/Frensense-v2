@@ -1,6 +1,6 @@
 ---
 url: https://frensense.friehub.cloud/changelog.md
-description: Complete release history and preview releases for Frensense
+description: Release history for Frensense.
 ---
 
 # Changelog
@@ -16,10 +16,10 @@ identity. It is what a release tag (`vX.Y.Z`) points at. Changes inside the
 workspace crates are recorded in their own changelogs, which version and ship
 independently:
 
-* [`frensense-engine/CHANGELOG.md`](frensense-engine/CHANGELOG.md) — IR, graphs, taint analysis, checks, harness, `scan` API
-* [`frensense-lang/CHANGELOG.md`](frensense-lang/CHANGELOG.md) — language specs, rule cards, severities, CWE tables
-* [`frensense-bundler/CHANGELOG.md`](frensense-bundler/CHANGELOG.md) — `.frc` format, corpus bundling, `lint`, embedded default pack
-* [`frensense-packgen/CHANGELOG.md`](frensense-packgen/CHANGELOG.md) — the generated built-in vocabulary behind the default pack
+* [`frensense-engine/CHANGELOG.md`](https://github.com/Friehub/frensense-v2/blob/main/frensense-engine/CHANGELOG.md) — IR, graphs, taint analysis, checks, harness, `scan` API
+* [`frensense-lang/CHANGELOG.md`](https://github.com/Friehub/frensense-v2/blob/main/frensense-lang/CHANGELOG.md) — language specs, rule cards, severities, CWE tables
+* [`frensense-bundler/CHANGELOG.md`](https://github.com/Friehub/frensense-v2/blob/main/frensense-bundler/CHANGELOG.md) — `.frc` format, corpus bundling, `lint`, embedded default pack
+* [`frensense-packgen/CHANGELOG.md`](https://github.com/Friehub/frensense-v2/blob/main/frensense-packgen/CHANGELOG.md) — the generated built-in vocabulary behind the default pack
 
 Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
@@ -74,24 +74,75 @@ harness and keeps no changelog.
   the same way they teach a `.ts` one. The language list in the CLI help,
   MCP and LSP now includes `vue`, and module resolution understands
   `import './Comp.vue'` imports.
+* **Scanning a polyglot tree now names the source files it could not read.**
+  A directory walk kept only files the language specs support and silently
+  dropped everything else, so a repository with 30 Ruby files next to 10
+  Python files reported a complete scan of the Python quarter. Files whose
+  extension is a source language with no spec (Ruby, PHP, Java, C#, Kotlin,
+  Swift, Shell, SQL, and the rest of the built-in table) are now collected
+  separately: the CLI prints `Warning: N source file(s) in unsupported
+  languages were not scanned: Ruby (7), PHP (5)` with a path sample and the
+  supported-language list; `--format json` carries
+  `analysis.coverage.unsupported_source_files` (`count`, per-language
+  `languages`, and a 25-path `files` sample); `--profile <file>` includes the
+  same object; and `frensense_audit` returns it beside `advisories`. Data and
+  asset extensions (`.json`, `.md`, images, lockfiles) stay ignored,
+  `--language <name>` scopes the scan and suppresses the report, and the
+  count intentionally does not change `analysis.status`: the supported files
+  are analyzed exactly as completely as before.
 
 #### Repository & Release Tooling
 
-* **docs: the docs site summarizes releases instead of mirroring the changelog.**
+* **release: a manual dispatch creates the tag it announces, and the automatic
+  path can tag at all again.** `prepare` computed `tag_name=v<manifest
+  version>`, but the "Create annotated tag" step was gated on
+  `github.event_name == 'workflow_run'`, so a `workflow_dispatch` release
+  advertised a tag that was never created; all four `build-native` jobs then
+  checked out that ref and died fetching `+refs/tags/<tag>*` (exit 1), which is
+  the failure in the release log. The step also read its inputs from
+  `needs.check`, where `check` is a step id and the value is empty, so the
+  `workflow_run` path ran `git tag -a ""` and could never tag either; both now
+  read `steps.check`. The tag lookup is namespaced to `refs/tags/` so a branch
+  sharing the name is not mistaken for the release, and the identity assertion
+  compares the binary against the version the tag will carry (including a
+  dispatch-supplied tag) instead of the manifest version, so a tag that
+  disagrees with `Cargo.toml` fails before four crates are published.
+
+* **release: a re-run can finish a release whose tag already exists.**
+  `prepare` used to read any existing tag as "nothing new", so a failure
+  after the tag was pushed — a broken native build, a flaky SLSA job — left
+  the tag permanently without binaries: every re-run skipped `build-native`,
+  `publish-npm` and `github-release`. It now compares the tag's commit with
+  the release commit and asks GitHub whether the release already carries all
+  four shipped binaries; when the tag is at the release commit and one is
+  missing, the run rebuilds and re-uploads them with `create_tag=false`, so
+  the tag is never moved or re-created. `publish-npm` still skips a version
+  already on npm, and `publish-cargo` still publishes only crates missing
+  from crates.io, so the retry is additive.
+
+* **docs: the site renders the canonical docs instead of keeping copies.**
   `docs-site/changelog.md` was a byte-identical copy of the root file behind a
-  five-line front matter, so every entry had to be written twice and the page
-  grew to 858 lines of release narrative a visitor cannot skim. Mirroring now
-  ends at `0.7.0` (frozen history, untouched); from `0.8.0` onward the site
-  gets a short "what this version is" section that links to the full changelog,
-  and the root `CHANGELOG.md` stays the single source of truth. `AGENTS.md`
-  §7.1 states the new rule and drops the regeneration one-liner, along with the
-  `## [Unreleased]` heading convention: `0.8.0` was never tagged or published
-  (`git tag` stops at `v0.7.0`) yet every changelog carried an `[Unreleased]`
-  section plus a dated `## [0.8.0] - 2026-10-30` one, splitting a single version
-  across two headings and putting a version that does not exist on the site.
-  The five changelogs now carry one undated `## [0.8.0]` heading, with each
-  section's entries preserved verbatim (checked by comparing the non-heading
-  line sets before and after the fold).
+  five-line front matter, and the guide pages had drifted into parallel copies
+  of `docs/*.md`, so every correction had to be made twice and the site grew to
+  858 lines of release narrative a visitor cannot skim. The site is now a
+  rendering layer: `changelog.md`, `architecture/benchmarks.md`,
+  `corpus/authoring.md`, `guide/github-actions.md`, `guide/lsp.md` and
+  `guide/mcp.md` are front-matter stubs whose body is a single relative
+  `<!--@include: ...-->` directive pointing at the canonical file (or the root
+  `CHANGELOG.md`), resolved at VitePress build time. The rewrite removes 2,721
+  duplicated lines across 31 files, rewrites `README.md` and `npm/README.md` to
+  link to the same canonical pages instead of restating them, and makes
+  `prebuild` run `check_announcements.py`, which rejects HTML in announcement
+  titles and messages because the banner renders them as plain text.
+  `AGENTS.md` §7.1 records the include rule in place of the earlier "summarize,
+  do not mirror" rule, and the `## [Unreleased]` convention is retired: `0.8.0`
+  was never tagged or published (`git tag` stops at `v0.7.0`) yet every
+  changelog carried an `[Unreleased]` section plus a dated
+  `## [0.8.0] - 2026-10-30` one, splitting a single version across two headings
+  and putting a version that does not exist on the site. The five changelogs
+  now carry one undated `## [0.8.0]` heading, with each section's entries
+  preserved verbatim (checked by comparing the non-heading line sets before and
+  after the fold).
 
 * **docs: engine-blindness pop-up announcement on the docs site, embeddable on any Friehub site.**
   The announcement feed gains a `display` type (`bar` or `popup`) with a popup

@@ -22,7 +22,7 @@ mycorpus/
 The `<family>_positive.<ext>` / `<family>_negative.<ext>` infix is what makes a
 family; a directory with `positive.ts` and `negative.ts` groups **zero**
 families. Supported extensions: `ts`, `tsx`, `js`, `jsx`, `py`, `go`, `rs`,
-`c`, `cpp`, `h`, `hpp`.
+`c`, `h`. (C++ files are not analysed by the engine, so C++ examples teach it nothing.)
 
 ## Lint, build, inspect
 
@@ -45,10 +45,7 @@ invocation that took a corpus and an output path.
 
 ## Use the bundle
 
-Place the output at the root of the scanned project as
-`frensense-corpus.frc` (auto-discovered), pass it with
-`-b` / `--bundle` / `--corpus-bundle`, or set `FRENSENSE_CORPUS_BUNDLE` for
-MCP and LSP.
+See [Bundles](/bundles#use-a-bundle) for the ways to load one and how to check it helps.
 
 ## Next
 
