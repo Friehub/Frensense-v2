@@ -70,6 +70,33 @@ harness and keeps no changelog.
   `import './Comp.vue'` imports.
 
 #### Repository & Release Tooling
+- **release: a manual dispatch creates the tag it announces, and the automatic
+  path can tag at all again.** `prepare` computed `tag_name=v<manifest
+  version>`, but the "Create annotated tag" step was gated on
+  `github.event_name == 'workflow_run'`, so a `workflow_dispatch` release
+  advertised a tag that was never created; all four `build-native` jobs then
+  checked out that ref and died fetching `+refs/tags/<tag>*` (exit 1), which is
+  the failure in the release log. The step also read its inputs from
+  `needs.check`, where `check` is a step id and the value is empty, so the
+  `workflow_run` path ran `git tag -a ""` and could never tag either; both now
+  read `steps.check`. The tag lookup is namespaced to `refs/tags/` so a branch
+  sharing the name is not mistaken for the release, and the identity assertion
+  compares the binary against the version the tag will carry (including a
+  dispatch-supplied tag) instead of the manifest version, so a tag that
+  disagrees with `Cargo.toml` fails before four crates are published.
+
+- **release: a re-run can finish a release whose tag already exists.**
+  `prepare` used to read any existing tag as "nothing new", so a failure
+  after the tag was pushed — a broken native build, a flaky SLSA job — left
+  the tag permanently without binaries: every re-run skipped `build-native`,
+  `publish-npm` and `github-release`. It now compares the tag's commit with
+  the release commit and asks GitHub whether the release already carries all
+  four shipped binaries; when the tag is at the release commit and one is
+  missing, the run rebuilds and re-uploads them with `create_tag=false`, so
+  the tag is never moved or re-created. `publish-npm` still skips a version
+  already on npm, and `publish-cargo` still publishes only crates missing
+  from crates.io, so the retry is additive.
+
 - **docs: the docs site summarizes releases instead of mirroring the changelog.**
   `docs-site/changelog.md` was a byte-identical copy of the root file behind a
   five-line front matter, so every entry had to be written twice and the page

@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. v0.2.1)'
+        description: 'Tag to create and release (e.g. v0.8.0); empty uses v<Cargo.toml version>'
         required: false
 
 concurrency:
@@ -61,6 +61,7 @@ jobs:
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
       tag_name: ${{ steps.check.outputs.tag_name }}
+      create_tag: ${{ steps.check.outputs.create_tag }}
       version: ${{ steps.check.outputs.version }}
       identity: ${{ steps.identity.outputs.identity }}
       pending: ${{ steps.matrix.outputs.pending }}
@@ -101,12 +102,14 @@ jobs:
 
       - name: Check version and tags
         id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           PENDING_COUNT="${{ steps.matrix.outputs.pending_count }}"
           PENDING_COUNT="${PENDING_COUNT:-0}"
           VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
           TAG="v$VERSION"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Pending crate publications: $PENDING_COUNT (${{ steps.matrix.outputs.pending }})"
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
@@ -117,17 +120,56 @@ jobs:
             fi
           fi
 
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            TAG_SHA=$(git rev-list -n1 "$TAG")
+          # The identity assertion below must compare the binary against the
+          # version the tag will actually carry - not the manifest version a
+          # dispatch input can override.
+          echo "version=${TAG#v}" >> $GITHUB_OUTPUT
+
+          # Match only the tag namespace: a branch that happens to share the
+          # name must not be mistaken for an existing release tag.
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
+            TAG_SHA=$(git rev-list -n1 "refs/tags/$TAG")
+            COMMIT_SHA="${{ needs.gate.outputs.sha }}"
             echo "Tag $TAG already exists at $TAG_SHA."
-            if [[ "$PENDING_COUNT" -gt 0 ]]; then
+            # A run that failed *after* it pushed the tag (a native build, an
+            # npm publish, SLSA provenance) must be able to finish on a
+            # re-run. Decide whether this tag still needs its release assets,
+            # and rebuild only when it points at the commit being released
+            # and its GitHub release is missing one of the shipped binaries.
+            echo "create_tag=false" >> $GITHUB_OUTPUT
+            NEEDS_ASSETS=false
+            if [[ "$TAG_SHA" == "$COMMIT_SHA" ]]; then
+              ASSET_NAMES=$(gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null || true)
+              MISSING_ASSET=false
+              for asset in \
+                frensense-x86_64-unknown-linux-gnu \
+                frensense-x86_64-apple-darwin \
+                frensense-aarch64-apple-darwin \
+                frensense-x86_64-pc-windows-msvc.exe; do
+                if ! grep -qx "$asset" <<<"$ASSET_NAMES"; then
+                  MISSING_ASSET=true
+                fi
+              done
+              NEEDS_ASSETS="$MISSING_ASSET"
+            else
+              echo "Tag points at $TAG_SHA, not the release commit $COMMIT_SHA; leaving its assets alone."
+            fi
+            if [[ "$NEEDS_ASSETS" == "true" ]]; then
+              # Tag exists but the release is incomplete: rebuild the
+              # binaries and let the publish jobs fill in what is missing.
+              # The tag step is skipped (`create_tag=false`), so this never
+              # moves or re-creates a tag.
+              echo "Tag is at the release commit but its GitHub release is incomplete; rebuilding assets."
+              echo "should_release=true" >> $GITHUB_OUTPUT
+              echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+            elif [[ "$PENDING_COUNT" -gt 0 ]]; then
               # Crates moved after the binary was tagged: publish them without
               # creating or moving a tag.
               echo "Releasing publishable crates without a new tag."
               echo "should_release=true" >> $GITHUB_OUTPUT
               echo "tag_name=" >> $GITHUB_OUTPUT
             else
-              echo "Nothing new to publish or tag."
+              echo "Nothing new to publish or tag, and the release assets are complete."
               echo "should_release=false" >> $GITHUB_OUTPUT
               echo "tag_name=" >> $GITHUB_OUTPUT
             fi
@@ -135,6 +177,7 @@ jobs:
             echo "New version $VERSION detected. Tag $TAG will be created."
             echo "should_release=true" >> $GITHUB_OUTPUT
             echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+            echo "create_tag=true" >> $GITHUB_OUTPUT
           fi
 
       # Pre-publish assertion: build the binary and require `--version --json`
@@ -156,15 +199,21 @@ jobs:
           echo "identity=$(echo "$IDENTITY_JSON" | base64 -w0)" >> $GITHUB_OUTPUT
 
       - name: Create annotated tag with artifact identity
+        # Runs for both triggers. `prepare` is the only job that creates the
+        # release tag, and every downstream job checks it out by name, so a
+        # manual dispatch that announces `tag_name` but skips this step leaves
+        # them fetching a ref that does not exist. A re-run that only needs to
+        # fill in missing assets sets `create_tag=false` and must not touch
+        # the tag again.
         if: >-
           steps.check.outputs.should_release == 'true' &&
-          github.event_name == 'workflow_run' &&
+          steps.check.outputs.create_tag == 'true' &&
           steps.check.outputs.tag_name != ''
         env:
           IDENTITY_B64: ${{ steps.identity.outputs.identity }}
         run: |
-          TAG="${{ needs.check.outputs.tag_name }}"
-          VERSION="${{ needs.check.outputs.version }}"
+          TAG="${{ steps.check.outputs.tag_name }}"
+          VERSION="${{ steps.check.outputs.version }}"
           IDENTITY=$(echo "$IDENTITY_B64" | base64 -d)
           VOCAB=$(echo "$IDENTITY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["fact_vocabulary_fingerprint"])')
           BUNDLE_FMT=$(echo "$IDENTITY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["bundle_format"])')
