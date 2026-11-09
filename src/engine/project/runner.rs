@@ -11,7 +11,7 @@
 //! severity, impact, and tags (plus observation on the checker path).
 
 use super::Engine;
-use crate::engine::files::collect_files;
+use crate::engine::files::{UnsupportedSourceFile, collect_files_detailed};
 use crate::{Advisory, Result};
 use std::path::Path;
 
@@ -36,8 +36,11 @@ impl Engine {
         self.analysis_incomplete.clear();
         self.hidden_by_tier.clear();
         self.explain_records.clear();
+        self.skipped_unsupported.clear();
 
-        let paths = collect_files(root, self.language_filter.as_ref());
+        let collected = collect_files_detailed(root, self.language_filter.as_ref());
+        let paths = collected.supported;
+        let mut skipped_unsupported: Vec<UnsupportedSourceFile> = collected.unsupported;
 
         // Track unsupported explicit inputs and read failures instead of
         // letting either surface as a successful empty scan. Directory walks
@@ -237,6 +240,13 @@ impl Engine {
                 "{unsupported} unsupported or absent source input(s)"
             ));
         }
+        // Source files whose language has no spec are not findings and do not
+        // degrade the analysis of the files that *were* scanned, but they are
+        // a coverage gap the report must name: a 1-of-5-file scan that prints
+        // "Clean" without this list is unfalsifiable.
+        skipped_unsupported.sort();
+        skipped_unsupported.dedup();
+        self.skipped_unsupported = skipped_unsupported;
         if result.telemetry.input.submitted == 0 && result.telemetry.input.unsupported == 0 {
             result.telemetry.errors.push(
                 "no supported source files were selected (inputs may be ignored or filtered)"
@@ -1150,5 +1160,37 @@ mod bundle_pattern_tests {
             "{:?}",
             finding.tags
         );
+    }
+}
+
+#[cfg(test)]
+mod skipped_language_tests {
+    use crate::engine::Engine;
+
+    /// A mixed tree scans what it supports and names what it skipped. This is
+    /// the user-facing half of the fix: the advisory list is unchanged, but
+    /// the caller can now say "1 Ruby file was not analyzed".
+    #[test]
+    fn run_surfaces_source_files_in_unsupported_languages() {
+        let dir =
+            std::env::temp_dir().join(format!("frensense-skipped-langs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::fs::write(dir.join("app.py"), "def run():\n    pass\n").expect("write python");
+        std::fs::write(dir.join("app.rb"), "puts 1\n").expect("write ruby");
+        std::fs::write(dir.join("notes.md"), "# not source\n").expect("write markdown");
+
+        let mut engine = Engine::new();
+        let advisories = engine.run(&dir).expect("scan mixed tree");
+        assert!(advisories.is_empty(), "{advisories:?}");
+
+        let skipped = engine.take_skipped_unsupported();
+        assert_eq!(skipped.len(), 1, "{skipped:?}");
+        assert_eq!(skipped[0].language, "Ruby");
+        assert!(skipped[0].path.ends_with("app.rb"), "{skipped:?}");
+        // Taken once, then empty.
+        assert!(engine.take_skipped_unsupported().is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

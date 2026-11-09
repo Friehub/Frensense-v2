@@ -68,6 +68,22 @@ harness and keeps no changelog.
   the same way they teach a `.ts` one. The language list in the CLI help,
   MCP and LSP now includes `vue`, and module resolution understands
   `import './Comp.vue'` imports.
+- **Scanning a polyglot tree now names the source files it could not read.**
+  A directory walk kept only files the language specs support and silently
+  dropped everything else, so a repository with 30 Ruby files next to 10
+  Python files reported a complete scan of the Python quarter. Files whose
+  extension is a source language with no spec (Ruby, PHP, Java, C#, Kotlin,
+  Swift, Shell, SQL, and the rest of the built-in table) are now collected
+  separately: the CLI prints `Warning: N source file(s) in unsupported
+  languages were not scanned: Ruby (7), PHP (5)` with a path sample and the
+  supported-language list; `--format json` carries
+  `analysis.coverage.unsupported_source_files` (`count`, per-language
+  `languages`, and a 25-path `files` sample); `--profile <file>` includes the
+  same object; and `frensense_audit` returns it beside `advisories`. Data and
+  asset extensions (`.json`, `.md`, images, lockfiles) stay ignored,
+  `--language <name>` scopes the scan and suppresses the report, and the
+  count intentionally does not change `analysis.status`: the supported files
+  are analyzed exactly as completely as before.
 
 #### Repository & Release Tooling
 - **release: a manual dispatch creates the tag it announces, and the automatic
