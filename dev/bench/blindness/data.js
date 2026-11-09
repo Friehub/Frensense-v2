@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1793990847961,
+  "lastUpdate": 1794227874751,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -391,6 +391,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "Scan Duration",
             "value": 69.6,
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8fbda9365fbecdde85d8d65dc595daf8ae3e0022",
+          "message": "Merge pull request #75 from Friehub/fix/release-0.8.0-finish\n\nfix(release): unblock 0.8.0 tagging and report skipped source languages",
+          "timestamp": "2026-11-09T13:31:55+01:00",
+          "tree_id": "a75162f0bb19134894cef4c83aa392fb98c2cdc3",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/8fbda9365fbecdde85d8d65dc595daf8ae3e0022"
+        },
+        "date": 1794227874232,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Engine Blindness Rate (Unknown %)",
+            "value": 42.4,
+            "unit": "%"
+          },
+          {
+            "name": "Explored Sinks",
+            "value": 1578,
+            "unit": "sinks"
+          },
+          {
+            "name": "Safety Valve Caps Fired",
+            "value": 335784,
+            "unit": "caps"
+          },
+          {
+            "name": "Peak RSS Memory",
+            "value": 839.8,
+            "unit": "MB"
+          },
+          {
+            "name": "Scan Duration",
+            "value": 134.68,
             "unit": "s"
           }
         ]
