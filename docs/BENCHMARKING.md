@@ -1,72 +1,80 @@
-# Benchmarking Frensense
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
 
-Frensense is scored against third-party ground truth, not our own test
-corpus. The current independent benchmark is the **OWASP Benchmark for
-Python (v0.1)**: 1,230 test cases authored by the OWASP project with an
-authoritative expected-results CSV. There is zero overlap between those
-cases and any Frensense knowledge bundle, which makes the number
-competitor-comparable.
+# Benchmarks
+
+Frensense is scored against third-party ground truth, not only its own test
+corpus. The independent benchmark used today is the **OWASP Benchmark for
+Python (v0.1)**: 1,230 test cases written by the OWASP project, each labelled
+vulnerable or safe in an expected-results file. None of those cases appear in
+any Frensense knowledge bundle.
+
+One benchmark is a narrow view. It covers a handful of vulnerability classes in
+one language, in small single-file programs. Read the numbers as a progress
+measure for the engine, not as a statement about how it performs on your code.
 
 ## Published record
 
-Scored on 2026-10-02 with frensense v0.7.0, no `.frc` bundle
-(built-in language specs only), single-file scans, 8 parallel workers:
+Scored on 2026-11-06 with Frensense 0.8.0 built from the `main` branch at
+commit `c2e6ade`. No `.frc` bundle (built-in knowledge only), single-file
+scans, conservative matching (see "Scoring model").
 
 | metric | value |
 |---|---|
-| **Score (TPR - FPR)** | **26.2%** |
-| TPR | 28.5% |
-| **FPR** | **2.3%** |
-| TP / FP / FN / TN | 129 / 18 / 323 / 760 |
-| scan time | 6s (1,230 cases) |
+| **Score (TPR - FPR)** | **31.0%** |
+| TPR (vulnerable cases found) | 38.1% |
+| FPR (safe cases flagged) | 7.1% |
+| TP / FP / FN / TN | 172 / 55 / 280 / 723 |
+| scan time | about 4 s for 1,230 cases (2 workers) |
 
-For context, published results on the OWASP Benchmark (Java, v1.2,
-2017-2019), from the OWASP project's own scorecards:
+Compared with the previous record (v0.7.0, 2026-10-02):
 
-| tool | score | note |
+| | v0.7.0 | 0.8.0 (`c2e6ade`) |
 |---|---|---|
-| Veracode | ~50% | commercial, best published SAST |
-| **Frensense** | **26.2%** | **FPR 2.3%, lowest of any published tool** |
-| Fortify SCA | ~11-17% | commercial |
-| Checkmarx | ~0% | commercial |
-| SonarQube | ~0% | commercial |
+| Score | 26.2% | 31.0% |
+| TPR | 28.5% | 38.1% |
+| FPR | 2.3% | 7.1% |
+| TP / FP | 129 / 18 | 172 / 55 |
 
-Caveats: different language (they benchmark Java, we Python), different
-benchmark version (v1.2 vs v0.1), different years. Directionally
-meaningful, not peer-reviewed.
+The engine finds more vulnerable cases, and it also raises more false alarms:
+the false-positive rate roughly tripled. Reducing it is an open engine
+priority, and many of the [challenges](/challenges) target it.
 
-## Where the score comes from
+We do not publish a ranking against other tools on this benchmark. The OWASP
+project's published scorecards are for the Java benchmark, a different language
+and test suite, so their numbers cannot be compared with these.
 
-The engine's FPR is the lowest in the published comparison set. The TPR
-gaps concentrate in a few CWE classes where Python API coverage in the
-fact tables is thin, not in engine logic. Per-CWE breakdown (lowest
-score first, classes with at least 5 vulnerable cases):
+## Per-category results
 
-| CWE | cases | TPR | FPR | score | what's missing |
-|---|---|---|---|---|---|
-| CWE-330 weak randomness | 326 | 0.0% | 0.0% | 0.0% | random-source to sink flows unmodeled (`random.randint` not a source) |
-| CWE-501 trust boundary | 37 | 0.0% | 0.0% | 0.0% | cookie-attribute checker needed (Secure flag), value-agnostic |
-| CWE-611 XXE | 28 | 0.0% | 0.0% | 0.0% | Python XML parsers unknown (`xml.etree`, `lxml`) |
-| CWE-614 cookie flags | 39 | 0.0% | 0.0% | 0.0% | same checker as CWE-501: set_cookie attribute inspection |
-| CWE-79 XSS | 89 | 0.0% | 0.0% | 0.0% | Flask `render_template`/escape flows unmodeled |
-| CWE-90 LDAP | 29 | 0.0% | 0.0% | 0.0% | LDAP filter sinks unknown |
-| CWE-78 cmd injection | 20 | 23.1% | 14.3% | 8.8% | partial: most benchmark subprocess shapes still unmodeled |
-| CWE-643 XPath | 186 | 9.8% | 0.7% | 9.1% | partial: direct sink shapes fire, the majority of lxml builder shapes miss |
-| CWE-94 code injection | 53 | 35.0% | 21.2% | 13.8% | `eval`/`exec` partial coverage; tainted-vs-constant discrimination still thin (7 safe cases flag) |
-| CWE-22 path traversal | 168 | 36.9% | 3.9% | 33.0% | partial: direct open-family joins fire; `codecs.open` and indirect joins unmodeled |
-| CWE-89 SQLi | 16 | 40.0% | 0.0% | 40.0% | solid: parameterized-query gate working |
-| CWE-502 deserialization | 54 | 44.4% | 2.8% | 41.7% | partial: direct `pickle.loads` calls fire, chained payload shapes miss |
-| CWE-601 redirect | 34 | 69.2% | 19.0% | 50.2% | solid on direct flows; some safe-case redirects still flag |
-| CWE-328 hash | 151 | 100.0% | 0.0% | 100.0% | perfect: declared weak-hash selector rules with per-rule credential qualification |
+Lowest score first. A "case" is one test file. A finding counts for a
+vulnerable case only if it is attributed to that case's CWE.
 
-The pattern: **FPR is best-in-class; TPR is limited by named-sink and
-named-source coverage in the Python fact tables.** The biggest single
-lever is CWE-330 weak randomness (99 vulnerable cases, none reachable
-yet): modeling Python's `random` module as a source, then the
-cookie-attribute checker (CWE-501/614, 42 vulnerable cases) and the
-XSS/XPath sink shapes (CWE-79/643, 77 vulnerable cases). Every gap row
-is a table entry or a checker away, which is what the roadmap
-prioritizes.
+| CWE | class | cases | TP | FP | FN | TN | TPR | FPR | score |
+|---|---|---|---|---|---|---|---|---|---|
+| CWE-330 | weak randomness | 326 | 0 | 0 | 99 | 227 | 0.0% | 0.0% | 0.0% |
+| CWE-79 | cross-site scripting | 89 | 0 | 0 | 31 | 58 | 0.0% | 0.0% | 0.0% |
+| CWE-501 | trust boundary | 37 | 0 | 0 | 18 | 19 | 0.0% | 0.0% | 0.0% |
+| CWE-90 | LDAP injection | 29 | 0 | 0 | 16 | 13 | 0.0% | 0.0% | 0.0% |
+| CWE-611 | XML external entities | 28 | 0 | 0 | 8 | 20 | 0.0% | 0.0% | 0.0% |
+| CWE-643 | XPath injection | 186 | 14 | 25 | 37 | 110 | 27.5% | 18.5% | 8.9% |
+| CWE-94 | code injection | 53 | 11 | 14 | 9 | 19 | 55.0% | 42.4% | 12.6% |
+| CWE-601 | open redirect | 34 | 8 | 7 | 5 | 14 | 61.5% | 33.3% | 28.2% |
+| CWE-22 | path traversal | 168 | 26 | 6 | 39 | 97 | 40.0% | 5.8% | 34.2% |
+| CWE-78 | command injection | 20 | 5 | 0 | 8 | 7 | 38.5% | 0.0% | 38.5% |
+| CWE-89 | SQL injection | 16 | 2 | 0 | 3 | 11 | 40.0% | 0.0% | 40.0% |
+| CWE-502 | deserialization | 54 | 11 | 3 | 7 | 33 | 61.1% | 8.3% | 52.8% |
+| CWE-328 | weak hash | 151 | 71 | 0 | 0 | 80 | 100.0% | 0.0% | 100.0% |
+| CWE-614 | cookie flags | 39 | 24 | 0 | 0 | 15 | 100.0% | 0.0% | 100.0% |
+
+What this shows:
+
+- **Five classes score zero.** The built-in knowledge does not recognise the
+  sources or sinks those cases use. Weak randomness alone is 99 vulnerable
+  cases.
+- **Three classes have a high false-alarm rate**: XPath injection, code
+  injection and open redirect flag 18%, 42% and 33% of their safe cases. These
+  are the classes where the safe variant looks most like the vulnerable one.
+- **Weak hashes and cookie flags are solved** on this benchmark, because they
+  need no data-flow reasoning.
 
 ## Reproduce it yourself
 
@@ -116,10 +124,16 @@ The OWASP Benchmark accuracy metric, applied per case:
 
 | expected | finding emitted | class |
 |---|---|---|
-| vulnerable | yes | TP |
+| vulnerable | yes, attributed to the case's CWE | TP |
 | vulnerable | no | FN |
 | safe | yes | FP |
 | safe | no | TN |
+
+The default matching mode is `conservative`: a finding counts as a true
+positive only when it is attributed to the CWE the case is about. A finding
+with no CWE attribution can never earn a true positive. `--match any` counts
+any finding on a vulnerable case and gives a more generous number, which is not
+comparable with the record above.
 
 - `TPR = TP / (TP + FN)` (recall on vulnerable cases)
 - `FPR = FP / (FP + TN)` (false alarms on safe cases)
@@ -134,8 +148,8 @@ real scanners.
 - Each case is scanned as a single file in its own process, so there is
   no cross-case state and no bundle influence: this measures the engine
   plus its built-in language specs.
-- Run with a `.frc` bundle via the CLI's `--corpus-bundle` flag to
-  measure bundle uplift separately.
+- Pass `--bundle <file.frc>` to the runner to measure what a bundle adds.
+  A bundle can raise false alarms as well as detections, so compare both.
 - The per-CWE table is the tuning roadmap: the lowest-scoring classes
   with the most cases are where sink/source coverage work pays off
   most.

@@ -1,277 +1,169 @@
 <div align="left">
   <h1>Frensense</h1>
-  <p><strong>A deterministic, dataflow-driven security scanner for TypeScript, JavaScript, Python, Go, and Rust.</strong></p>
+  <p><strong>A deterministic security scanner that follows untrusted input through your code and shows every path from source to dangerous call.</strong></p>
   <p>
     <a href="https://crates.io/crates/frensense"><img src="https://img.shields.io/crates/v/frensense.svg" alt="crates.io" /></a>
     <a href="https://www.npmjs.com/package/@friehub/frensense"><img src="https://img.shields.io/npm/v/@friehub/frensense.svg" alt="npm" /></a>
     <a href="https://frensense.friehub.cloud"><img src="https://img.shields.io/badge/docs-frensense.friehub.cloud-blue.svg" alt="Documentation" /></a>
-    <a href="https://github.com/Friehub/Frensense-v2/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License" /></a>
-  </p>
-  <p>
-    <a href="https://frensense.friehub.cloud">Documentation</a> &bull;
-    <a href="https://frensense.friehub.cloud/bundles">Security Bundles (.frc)</a> &bull;
-    <a href="https://crates.io/crates/frensense">crates.io</a> &bull;
-    <a href="https://www.npmjs.com/package/@friehub/frensense">npm</a> &bull;
-    <a href="https://github.com/Friehub/Frensense-v2/releases">Releases</a>
+    <a href="https://github.com/Friehub/frensense-v2/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-green.svg" alt="License" /></a>
+    <a href="https://github.com/sponsors/0xademola"><img src="https://img.shields.io/badge/sponsor-♥-ea4aaa.svg" alt="Sponsor" /></a>
   </p>
 </div>
 
-<br />
+Frensense is an open-source static application security testing (SAST) tool for
+TypeScript, JavaScript, Python, Go, Rust and C (Vue files have early support). It
+builds a graph of how values move through your whole project and reports a
+finding when data from an untrusted source can reach a dangerous call without
+being sanitized. Each finding shows that path with file and line positions.
 
-Frensense detects security vulnerabilities by combining compiler-grade dataflow
-analysis with a learned knowledge base. No brittle YAML rule packs, no regex
-heuristics, the engine builds an AST, def-use chains, and a program dependence
-graph for your code, then verifies whether untrusted data can actually reach a
-dangerous sink.
+It is one binary. Scanning, watch mode, an MCP server for AI agents and a
+language server for editors are all subcommands of `frensense`. There is no
+model and no network call in a scan: the same input always gives the same
+output.
 
-## How It Works
+> **Status: young, and honest about it.** Frensense reports what it can show
+> and stays quiet about what it cannot, so it **misses real vulnerabilities**.
+> On the OWASP Benchmark for Python it finds 38% of the vulnerable cases with a
+> 7% false-alarm rate, and finds none of the cross-site scripting, weak
+> randomness, XML external entity, LDAP injection or trust-boundary cases. Treat
+> a clean scan as "nothing found", not "nothing there". Full numbers are in
+> [Benchmarks](https://frensense.friehub.cloud/architecture/benchmarks).
 
-1. **IR & Graphs**: Every file is lowered to a lightweight IR; the engine builds
-   def-use chains, a call graph, heap/points-to summaries, and an SVFG.
-2. **Taint Analysis**: Taint paths are tracked from sources (`req.body`,
-   query params) to sinks (`exec`, `db.query`, `fetch`) with path-sensitive
-   pruning through the taint engine.
-3. **Knowledge Merge**: A `.frc` bundle's learned facts (framework-aware
-   sources, sinks, sanitizers, and modelled APIs) are merged into the config,
-   teaching the engine framework-specific semantics.
-4. **Composition**: A finding is emitted only when the dataflow result and the
-   structural evidence agree, keeping the false-positive rate low.
-
-## Quick Start
+## Install
 
 ```bash
-# Install (Cargo or npm)
-cargo install frensense
-npm install -g @friehub/frensense
-
-# Or run instantly without installing
-npx @friehub/frensense .
-
-# Scan a project
-frensense .
-
-# Teach the engine with a .frc knowledge bundle
-frensense . --corpus-bundle frensense-corpus.frc
-
-# JSON / SARIF output
-frensense . --json
-frensense . --sarif
-
-# Diff-only (changed files since last commit)
-frensense . --diff-only --strict
-
-# Baseline workflow: save current findings, then fail on new ones
-# (findings are identified by stable IDs: a finding that moves lines
-# after an unrelated edit is NOT a regression)
-frensense . --emit-baseline baseline.json
-frensense . --compare-baseline baseline.json --strict
-
-# Watch mode: re-scan on file changes, print only NEW findings
-frensense watch .
-
-# GitHub Actions annotations: findings render on the PR's Files Changed tab
-frensense . --github
+npm install -g @friehub/frensense     # prebuilt binary, needs Node.js 18+
+# or
+cargo install frensense               # builds from source, needs Rust 1.95+
 ```
 
-The engine auto-discovers a `frensense-corpus.frc` in the project root, or you
-can point `--corpus-bundle` at any bundle file.
+Release binaries for Linux x64, macOS and Windows are on the
+[releases page](https://github.com/Friehub/frensense-v2/releases). Details:
+[Install](https://frensense.friehub.cloud/guide/installation).
 
-### One binary, every surface
-
-The `frensense` crate ships a single binary with everything built in. The
-CLI, the MCP server for AI agents, and the LSP server for editors are
-subcommands of the same binary:
-
-| command | consumer | transport |
-|---|---|---|
-| `frensense [path]` | humans, CI | files/exit code |
-| `frensense mcp` | AI agents (Claude, Cursor, Zed, …) | JSON-RPC over stdio |
-| `frensense lsp` | editors (VS Code, Neovim, …) | LSP over stdio |
-
-`cargo install frensense`, `npm install -g @friehub/frensense`, or a release binary
-gives you all of them. They share one analysis engine, one
-knowledge-bundle format, and one finding-identity scheme, so a finding in
-your editor, in an agent's scan, and in CI is the same finding with the
-same stable ID.
-
-## What It Catches
-
-- **Injection**: SQL/NoSQL injection, command injection, XPath/XXE.
-- **Broken Access Control**: IDOR, missing auth guards, mass assignment.
-- **Cryptographic Weaknesses**: weak hashes, ECB mode, hardcoded keys.
-- **Server-Side Issues**: SSRF, path traversal, XXE, unsafe deserialization.
-- **Client-Side**: Reflected/DOM XSS, prototype pollution, open redirects.
-- **Misconfiguration**: Missing security headers, session mismanagement,
-  insecure cookies, TLS verification disabled.
-
-## Languages
-
-| Language | Parser | Compiler Mode |
-|----------|--------|---------------|
-| TypeScript / JavaScript / TSX | Tree-sitter | Oxc (`--use-compiler`) |
-| Python | Tree-sitter |, |
-| Go | Tree-sitter |, |
-| Rust | Tree-sitter | rust-analyzer HIR (`--use-compiler`) |
-
-## MCP Integration (AI Agents)
-
-Frensense ships an MCP server built into the same binary, so AI coding agents
-can scan their own output before committing:
+## Scan
 
 ```bash
-frensense mcp
+frensense .                          # scan the current folder
+frensense . --show-flows             # include every step from source to sink
+frensense . --json                   # machine-readable report
+frensense . --sarif -o results.sarif # SARIF 2.1.0 for code-scanning tools
+frensense explain taint.sql-injection  # what a rule means and how to fix it
 ```
 
-The server speaks newline-delimited JSON-RPC over stdio.
+A finding looks like this:
 
-### Tools
+```text
+[CRITICAL] OS command injection: `request.get` reaches `popen`
+  --> app.py:10:12 (in `ping`)
 
-| tool | what it does |
+     |
+   9 |     host = request.args.get("host")
+  10 |     return os.popen("ping -c 1 " + host).read()
+     |            ^^^^^^^^
+     |
+  = rule: taint.command-injection  (CWE-78)
+  = why:  Attacker-supplied text reaches a shell or process launcher and can run other commands.
+  = fix:  Pass arguments as a list without a shell, and validate the value against an allowlist.
+```
+
+A normal scan exits `0` even when it finds something. Add `--strict` to exit
+`1` on any finding. [First scan walkthrough](https://frensense.friehub.cloud/guide/first-scan).
+
+## Use it in CI
+
+Record today's findings once, commit the file, and fail pull requests only on
+findings that are new:
+
+```bash
+frensense . --emit-baseline .frensense/baseline.json
+```
+
+```bash
+frensense . --compare-baseline .frensense/baseline.json --github
+```
+
+The second command exits `1` only on new findings and prints GitHub
+annotations for the rest. Do not add `--strict` to it: `--strict` fails on every
+finding, including ones already in the baseline. A finding that only moves
+lines after an unrelated edit still counts as the same finding. A full workflow
+file is in
+[CI and agent gating](https://frensense.friehub.cloud/guide/github-actions).
+
+## Use it from an AI agent or an editor
+
+```json
+{ "mcpServers": { "frensense": { "command": "frensense", "args": ["mcp"] } } }
+```
+
+`frensense mcp` gives an agent three tools (`frensense_audit`,
+`frensense_scan_file`, `frensense_diff`) so it can check its own changes with
+the same engine CI uses. `frensense lsp` shows findings as diagnostics in any
+editor with a generic LSP client. Setup for each:
+[AI agents](https://frensense.friehub.cloud/guide/mcp) and
+[Editors](https://frensense.friehub.cloud/guide/lsp).
+
+## What it reports
+
+57 built-in rules, listed by `frensense explain`:
+
+- **30 taint rules** for injection (SQL, NoSQL, command, code, template, LDAP,
+  XPath), path traversal, SSRF, open redirect, XSS, unsafe deserialization, XXE,
+  prototype pollution and regular-expression denial of service.
+- **27 checks** for weak hashes and ciphers, cookie flags, insecure transport,
+  and memory safety (use after free, double free, out-of-bounds, leaks).
+
+A rule existing does not mean it fires on every framework. The engine only
+detects what it knows about, and what it knows about frameworks comes from
+bundles.
+
+## Bundles: teaching the engine your framework
+
+A `.frc` bundle adds sources, sinks and sanitizers for libraries the built-in
+pack does not know. Load one with `frensense . --bundle my.frc`, or build your
+own from pairs of vulnerable and fixed examples. A bundle can add detections and
+it can add false alarms, so compare a scan with and without it on your own code
+before you rely on it. See
+[Bundles](https://frensense.friehub.cloud/bundles).
+
+## Benchmarks
+
+Scored on the OWASP Benchmark for Python (1,230 cases), Frensense 0.8.0, no
+bundle, conservative matching (a finding must carry the case's CWE):
+
+| Score (TPR - FPR) | TPR | FPR | TP / FP / FN / TN |
+|---|---|---|---|
+| 31.0% | 38.1% | 7.1% | 172 / 55 / 280 / 723 |
+
+That is better than the previous record on detections (the false-alarm rate
+rose from 2.3% to 7.1%, which is a known priority). We do not publish a
+comparison with other tools: the OWASP project's scorecards are for the Java
+benchmark and cannot be compared with these. Per-category results and how to
+reproduce the run:
+[Benchmarks](https://frensense.friehub.cloud/architecture/benchmarks).
+
+## Documentation
+
+| | |
 |---|---|
-| `frensense_audit` | directory audit; returns `clean` + advisories |
-| `frensense_scan_file` | single-file scan for edit loops ("is THIS file clean?") |
-| `frensense_diff` | scan a git diff / patch and report only findings on added lines |
-
-Every tool supports `.frc` corpus bundles (`corpus_bundle` argument, or set
-`FRENSENSE_CORPUS_BUNDLE` in the server's environment for the whole session),
-and results carry stable finding IDs (`FRN-…`) so an agent can track "did I
-fix THIS finding yet" across edit cycles.
-
-### Registering the server with your MCP client
-
-The server is a subcommand of the binary you already installed: no runtime,
-no package manager step, and no plugin. MCP clients (Claude Desktop,
-Claude Code, Cursor, Zed, ...) launch it themselves as a subprocess over
-stdio, so you only tell them the command. In Claude Desktop's
-`claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "frensense": {
-      "command": "frensense",
-      "args": ["mcp"],
-      "env": {
-        "FRENSENSE_CORPUS_BUNDLE": "/path/to/frensense-corpus.frc"
-      }
-    }
-  }
-}
-```
-
-Or run zero-install via `npx` (no manual download or PATH setup required):
-
-```json
-{
-  "mcpServers": {
-    "frensense": {
-      "command": "npx",
-      "args": ["-y", "@friehub/frensense", "mcp"]
-    }
-  }
-}
-```
-
-If using a local binary not on PATH, use the absolute path as `"command"`; clients
-accept both. In Claude Code, the equivalent one-liner is:
-
-```bash
-claude mcp add frensense -- frensense mcp
-```
-
-That's it: no daemon, no port, no Python/Node runtime. The client spawns the
-command per session, speaks JSON-RPC over stdin/stdout, and kills it when the
-session ends. The same story applies to the LSP server (see below).
-
-## LSP (Editors)
-
-The LSP server is a subcommand of the same binary. It publishes diagnostics
-as you open and save files: same findings, same stable IDs, same severity
-mapping as the CLI.
-
-```json
-// e.g. VS Code settings.json / Neovim LSP config: point the client at the subcommand
-{ "command": "frensense", "args": ["lsp"] }
-```
-
-Diagnostics appear on `didOpen` and `didSave`; the server scans the saved
-file on disk, so what the editor shows is exactly what CI scans. Like the
-MCP server it is a single self-contained binary launched by the editor over
-stdio.
-
-## Benchmark Results
-
-Scored against the OWASP Benchmark for Python: 1,230 third-party test
-cases with an authoritative expected-results CSV. Zero overlap with any
-Frensense knowledge bundle. This run uses the engine alone, no `.frc`
-bundle (`v0.7.0`):
-
-| metric | value |
-|---|---|
-| **Score (TPR - FPR)** | **26.2%** |
-| TPR | 28.5% |
-| **FPR** | **2.3%** |
-| TP / FP / FN / TN | 129 / 18 / 323 / 760 |
-| scan time | 6s |
-
-For comparison, the OWASP project's published Benchmark scorecards
-(Java, v1.2): Veracode ~50%, Fortify SCA ~11-17%, Checkmarx ~0%,
-SonarQube ~0%. The standout number is the false-positive rate: 3.0% is
-commercially competitive, and the recall gaps are concentrated in a few
-CWE classes where Python API coverage is still thin, not in engine
-logic. See the caveats and the full per-CWE table in
-[docs/BENCHMARKING.md](docs/BENCHMARKING.md).
-
-Run it yourself:
-
-```bash
-cargo build --release
-git clone --depth 1 https://github.com/OWASP-Benchmark/BenchmarkPython /tmp/BenchmarkPython
-python3 frensense-bench/run.py --suite owasp \
-  --owasp-csv /tmp/BenchmarkPython/expectedresults-0.1.csv \
-  --owasp-testcode /tmp/BenchmarkPython/testcode
-```
-
-## Detailed Guides
-
-- [docs/MCP_USAGE.md](docs/MCP_USAGE.md): MCP setup, tool reference, and a
-  worked end-to-end agent session (edit → diff-gate → fix → verify by
-  stable ID).
-- [docs/LSP_USAGE.md](docs/LSP_USAGE.md): editor setup (Neovim, Helix,
-  VS Code) and the protocol walkthrough.
-- [docs/AGENT_INTEGRATION.md](docs/AGENT_INTEGRATION.md): CI wiring,
-  baseline gating, `--github` annotations, and the agent-fixes/CI-judges
-  workflow.
-- [docs/BENCHMARKING.md](docs/BENCHMARKING.md): benchmark methodology and
-  per-CWE results.
-
-## Knowledge Bundles (.frc)
-
-Detection knowledge ships as `.frc` bundles, compiled, checksummed archives
-produced by `frensense-bundler`. A bundle carries two kinds of content:
-
-- **Patterns**: fingerprinted positive/negative code pairs the engine matches
-  against your functions.
-- **Learned facts**: replay-verified sources, sinks, sanitizers, and modelled
-  framework APIs.
-
-At scan time the engine loads a bundle in this priority order:
-
-1. `--corpus-bundle <file>` CLI flag
-2. Auto-discovered `frensense-corpus.frc` in the project root
-3. Embedded bytes via the library API (`set_corpus_bundle`)
-
-The envelope is validated (`FRC1` magic, version, checksum) and the learned
-facts are merged into the engine's fact table on top of the built-in language
-specs, the bundle teaches the engine at runtime, without touching engine code.
+| Start | [Overview](https://frensense.friehub.cloud/guide/) · [Install](https://frensense.friehub.cloud/guide/installation) · [First scan](https://frensense.friehub.cloud/guide/first-scan) · [CLI reference](https://frensense.friehub.cloud/guide/cli) |
+| Use | [CI](https://frensense.friehub.cloud/guide/github-actions) · [AI agents](https://frensense.friehub.cloud/guide/mcp) · [Editors](https://frensense.friehub.cloud/guide/lsp) |
+| Teach | [Bundles](https://frensense.friehub.cloud/bundles) · [How teaching works](https://frensense.friehub.cloud/guide/teachability) · [Authoring](https://frensense.friehub.cloud/corpus/authoring) |
+| Understand | [Architecture](https://frensense.friehub.cloud/architecture/) · [Engine blindness](https://frensense.friehub.cloud/architecture/blindness) |
+| Help | [Engine Blindness Challenges](https://frensense.friehub.cloud/challenges) · [Changelog](https://frensense.friehub.cloud/changelog) |
 
 ## Contributing
 
-Contributions are welcome under GPL-3.0. Read [CONTRIBUTING.md](CONTRIBUTING.md)
-and sign the lightweight [CLA](CLA.md), one click via the CLA bot on your first
-pull request.
+The most useful contribution is a
+[blindness challenge](https://frensense.friehub.cloud/challenges): a vulnerable
+case the engine cannot see yet, with a pinned repository and a command to
+check your fix. Code contributions are welcome under GPL-3.0. Read
+[CONTRIBUTING.md](https://github.com/Friehub/frensense-v2/blob/main/CONTRIBUTING.md)
+and sign the lightweight
+[CLA](https://github.com/Friehub/frensense-v2/blob/main/CLA.md) (one click via
+the CLA bot on your first pull request).
 
 ## License
 
-GPL-3.0, see [LICENSE](LICENSE). Commercial licensing available at
-https://friehub.com/licensing.
+GPL-3.0, see [LICENSE](https://github.com/Friehub/frensense-v2/blob/main/LICENSE).
+Commercial licensing is available at https://www.friehub.cloud/contact.

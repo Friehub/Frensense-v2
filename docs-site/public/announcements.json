@@ -14,7 +14,7 @@
       "id": "release-v0.8.0",
       "display": "bar",
       "title": "Frensense v0.8.0 is out",
-      "message": "The v0.8.0 release ships the engine purity refactor, scoped package-level facts, and a rebuilt corpus pipeline. See the <a href=\"/changelog\">changelog</a> for the full list of changes.</p>",
+      "message": "The v0.8.0 release ships the engine purity refactor, scoped package-level facts, and a rebuilt corpus pipeline.",
       "level": "info",
       "link": { "text": "Read the changelog", "href": "/changelog" },
       "iconColor": "#3b82f6"

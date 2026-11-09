@@ -32,6 +32,12 @@ class CheckAnnouncementsTest(unittest.TestCase):
     def test_valid_bar_announcement_passes(self):
         self.assertEqual(check(dict(BASE_ANN)), [])
 
+    def test_markup_in_message_is_rejected(self):
+        bad = dict(BASE_ANN, message='See the <a href="/changelog">changelog</a>.</p>')
+        errs = check(bad)
+        self.assertEqual(len(errs), 1)
+        self.assertIn("plain text", errs[0])
+
     def test_invalid_display(self):
         base = {"id": "a", "message": "m"}
         errors = check(dict(base, display="modal"))

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 <!-- Copyright (c) 2024-2026 Friehub. All rights reserved. -->
 
-# Agent + CI Integration Guide
+# CI and agent gating
 
 Frensense is designed for a split workflow: **AI agents fix code, CI judges
 it.** This guide wires the two halves together with the CLI surface
@@ -13,7 +13,7 @@ sides.
 ## The model
 
 ```
-┌──────────┐  frensense-mcp        ┌──────────────┐
+┌──────────┐  frensense mcp        ┌──────────────┐
 │ AI agent │──────────────────────▶│ per-change   │
 │          │   frensense_diff      │ gate (fast)  │
 └────┬─────┘                       └──────────────┘
@@ -28,7 +28,7 @@ sides.
 - **The agent gates its own change** before committing with
   `frensense_diff`: only findings on the change's added lines are
   reported, so pre-existing debt never blocks it.
-- **CI enforces the invariant** with baselines and `--strict`: a merged
+- **CI enforces the invariant** with a baseline (`--compare-baseline`): a merged
   change can never *increase* the number of findings, even as the
   codebase churns.
 - Both sides speak the same finding identity (stable fingerprints), so
@@ -130,7 +130,7 @@ shift-stable.
 ## 2. Agent-side gating (pre-commit)
 
 The MCP server is the agent's primary surface (see
-[docs/MCP_USAGE.md](MCP_USAGE.md) for the full walkthrough). The pattern
+[docs/MCP_USAGE.md](https://frensense.friehub.cloud/guide/mcp) for the full walkthrough). The pattern
 that keeps PRs green:
 
 1. **Edit.**
@@ -145,7 +145,7 @@ that keeps PRs green:
    the agent's change introduced nothing new, the baseline gate passes.
 
 For agents working through an editor instead of the MCP, the LSP surface
-([docs/LSP_USAGE.md](LSP_USAGE.md)) shows the same findings with the same
+([docs/LSP_USAGE.md](https://frensense.friehub.cloud/guide/lsp)) shows the same findings with the same
 IDs as diagnostics on save.
 
 ### Without MCP: plain shell
@@ -242,6 +242,6 @@ change what the engine can see, and both sides must agree on reality.
 
 ## See also
 
-- [MCP_USAGE.md](MCP_USAGE.md): agent tool surface + end-to-end session
-- [LSP_USAGE.md](LSP_USAGE.md): editor surface
-- README: install, one-crate-three-binaries
+- [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp): agent tool surface and an end-to-end session
+- [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp): editor surface
+- [CLI reference](https://frensense.friehub.cloud/guide/cli): every flag and exit code

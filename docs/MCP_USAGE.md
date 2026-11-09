@@ -1,46 +1,20 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 <!-- Copyright (c) 2024-2026 Friehub. All rights reserved. -->
 
-# frensense-mcp: Usage Guide
+# AI agents (MCP)
 
-`frensense-mcp` exposes the Frensense engine to AI coding agents over the
+`frensense mcp` exposes the Frensense engine to AI coding agents over the
 [Model Context Protocol](https://modelcontextprotocol.io) (JSON-RPC on
 stdio). Every tool calls the same analysis engine as the CLI: same
 lowering, same fact tables, same stable finding IDs.
 
 ## Installation
 
-`frensense-mcp` is a self-contained binary — no runtime, no daemon, no
-plugin step. Get it and put it on `PATH`:
-
-**Via npm (Node.js users, prebuilt binaries):**
-
-```bash
-npm install -g @friehub/frensense
-```
-
-**Or zero-install with npx (no install needed):**
-
-```bash
-npx @friehub/frensense mcp
-```
-
-**Download a release binary:**
-
-```bash
-# Linux x86_64 — replace with latest release
-curl -L https://github.com/Friehub/frensense-v2/releases/latest/download/frensense-linux-x64 \
-  -o /usr/local/bin/frensense && chmod +x /usr/local/bin/frensense
-```
-
-**Or install from source via Cargo:**
-
-```bash
-cargo install frensense   # installs the unified frensense binary
-```
-
-The MCP server is built into the same binary as the CLI and the LSP server — one
-unified binary (`frensense mcp`).
+The MCP server is a subcommand of the `frensense` binary. There is no separate
+package and no daemon. [Install `frensense`](https://frensense.friehub.cloud/guide/installation), then
+check that `frensense mcp` starts (it waits for a client on stdin; press
+Ctrl+C to stop). With npm you can also run it without installing:
+`npx @friehub/frensense mcp`.
 
 ## Registering with your MCP client
 
@@ -111,7 +85,7 @@ Arguments:
 |---|---|---|---|
 | `path` | string | **required** | File or directory to audit |
 | `severity_threshold` | `critical` \| `warning` \| `info` | `warning` | Minimum severity to include |
-| `language` | string | — | Filter by language (`rust`, `typescript`, `javascript`, `python`) |
+| `language` | string | — | Filter by language (`c`, `go`, `javascript`, `python`, `rust`, `typescript`, `vue`) |
 | `corpus_bundle` | string | — | Path to a `.frc` bundle; overrides `FRENSENSE_CORPUS_BUNDLE` |
 | `stream` | bool | `false` | Emit per-finding `notification` messages as they arrive, then the final result |
 
@@ -287,6 +261,6 @@ diff when the agent is only touching one buffer):
 
 ## Related
 
-- `docs/LSP_USAGE.md`: the same engine inside your editor
-- `docs/AGENT_INTEGRATION.md`: CI wiring, baseline gating, GitHub annotations
-- README: install and quick-start reference
+- [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp): the same engine inside your editor
+- [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions): CI wiring, baseline gating, GitHub annotations
+- [CLI reference](https://frensense.friehub.cloud/guide/cli): every flag and exit code
