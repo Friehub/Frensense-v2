@@ -123,6 +123,7 @@ pub fn run_audit_streamed(
     };
 
     let filtered = filter_advisories(advisories, severity_threshold, language);
+    let skipped = engine.take_skipped_unsupported();
 
     let total = filtered.len();
     write_notification(&json!({
@@ -143,6 +144,7 @@ pub fn run_audit_streamed(
     let result = json!({
         "clean": filtered.is_empty(),
         "advisories": serde_json::to_value(&filtered).unwrap_or_default(),
+        "unsupported_source_files": crate::cli::skipped_unsupported_json(&skipped),
     });
     write_response(&rpc_result(id, result));
 }
@@ -175,9 +177,11 @@ pub fn run_audit(path: &str, severity_threshold: &str, language: Option<&str>) -
     };
 
     let filtered = filter_advisories(advisories, severity_threshold, language);
+    let skipped = engine.take_skipped_unsupported();
 
     json!({
         "clean": filtered.is_empty(),
         "advisories": serde_json::to_value(&filtered).unwrap_or_default(),
+        "unsupported_source_files": crate::cli::skipped_unsupported_json(&skipped),
     })
 }

@@ -68,8 +68,51 @@ harness and keeps no changelog.
   the same way they teach a `.ts` one. The language list in the CLI help,
   MCP and LSP now includes `vue`, and module resolution understands
   `import './Comp.vue'` imports.
+- **Scanning a polyglot tree now names the source files it could not read.**
+  A directory walk kept only files the language specs support and silently
+  dropped everything else, so a repository with 30 Ruby files next to 10
+  Python files reported a complete scan of the Python quarter. Files whose
+  extension is a source language with no spec (Ruby, PHP, Java, C#, Kotlin,
+  Swift, Shell, SQL, and the rest of the built-in table) are now collected
+  separately: the CLI prints `Warning: N source file(s) in unsupported
+  languages were not scanned: Ruby (7), PHP (5)` with a path sample and the
+  supported-language list; `--format json` carries
+  `analysis.coverage.unsupported_source_files` (`count`, per-language
+  `languages`, and a 25-path `files` sample); `--profile <file>` includes the
+  same object; and `frensense_audit` returns it beside `advisories`. Data and
+  asset extensions (`.json`, `.md`, images, lockfiles) stay ignored,
+  `--language <name>` scopes the scan and suppresses the report, and the
+  count intentionally does not change `analysis.status`: the supported files
+  are analyzed exactly as completely as before.
 
 #### Repository & Release Tooling
+- **release: a manual dispatch creates the tag it announces, and the automatic
+  path can tag at all again.** `prepare` computed `tag_name=v<manifest
+  version>`, but the "Create annotated tag" step was gated on
+  `github.event_name == 'workflow_run'`, so a `workflow_dispatch` release
+  advertised a tag that was never created; all four `build-native` jobs then
+  checked out that ref and died fetching `+refs/tags/<tag>*` (exit 1), which is
+  the failure in the release log. The step also read its inputs from
+  `needs.check`, where `check` is a step id and the value is empty, so the
+  `workflow_run` path ran `git tag -a ""` and could never tag either; both now
+  read `steps.check`. The tag lookup is namespaced to `refs/tags/` so a branch
+  sharing the name is not mistaken for the release, and the identity assertion
+  compares the binary against the version the tag will carry (including a
+  dispatch-supplied tag) instead of the manifest version, so a tag that
+  disagrees with `Cargo.toml` fails before four crates are published.
+
+- **release: a re-run can finish a release whose tag already exists.**
+  `prepare` used to read any existing tag as "nothing new", so a failure
+  after the tag was pushed — a broken native build, a flaky SLSA job — left
+  the tag permanently without binaries: every re-run skipped `build-native`,
+  `publish-npm` and `github-release`. It now compares the tag's commit with
+  the release commit and asks GitHub whether the release already carries all
+  four shipped binaries; when the tag is at the release commit and one is
+  missing, the run rebuilds and re-uploads them with `create_tag=false`, so
+  the tag is never moved or re-created. `publish-npm` still skips a version
+  already on npm, and `publish-cargo` still publishes only crates missing
+  from crates.io, so the retry is additive.
+
 - **docs: the docs site summarizes releases instead of mirroring the changelog.**
   `docs-site/changelog.md` was a byte-identical copy of the root file behind a
   five-line front matter, so every entry had to be written twice and the page

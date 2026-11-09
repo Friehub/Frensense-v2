@@ -44,6 +44,12 @@ pub struct Engine {
     /// via [`Engine::take_incomplete`] so the report can list them under
     /// `analysis_incomplete` instead of silently weakening those results.
     pub(crate) analysis_incomplete: Vec<frensense_engine::scan::IncompleteFunction>,
+    /// Source files skipped by the most recent `run` because the engine has
+    /// no language spec for them. Surfaced via
+    /// [`Engine::take_skipped_unsupported`] so the report can say which
+    /// languages it did not analyze instead of describing a partial scan as
+    /// complete.
+    pub(crate) skipped_unsupported: Vec<crate::engine::files::UnsupportedSourceFile>,
     /// Hidden finding counts grouped by tier.
     pub(crate) hidden_by_tier: std::collections::BTreeMap<crate::RuleTier, usize>,
     /// Accumulated telemetry across scanned language groups.
@@ -66,6 +72,7 @@ impl Engine {
             max_complexity: None,
             explain_records: Vec::new(),
             analysis_incomplete: Vec::new(),
+            skipped_unsupported: Vec::new(),
             hidden_by_tier: std::collections::BTreeMap::new(),
             telemetry: frensense_engine::telemetry::ScanTelemetry::default(),
         }
@@ -122,6 +129,15 @@ impl Engine {
     #[must_use]
     pub fn take_incomplete(&mut self) -> Vec<frensense_engine::scan::IncompleteFunction> {
         std::mem::take(&mut self.analysis_incomplete)
+    }
+
+    /// Take the source files the most recent `run` skipped because their
+    /// language has no engine spec. A scan that reports findings while
+    /// silently ignoring the Python half of a repo is not complete, and the
+    /// caller is expected to say so.
+    #[must_use]
+    pub fn take_skipped_unsupported(&mut self) -> Vec<crate::engine::files::UnsupportedSourceFile> {
+        std::mem::take(&mut self.skipped_unsupported)
     }
 
     /// Set the scan profile governing which rule tiers are reported.

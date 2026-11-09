@@ -3,10 +3,70 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use super::options::CliOptions;
+use crate::engine::files::UnsupportedSourceFile;
 use crate::explain::ExplainRecord;
 use crate::reporter::Reporter;
 use crate::{Advisory, FrensenseError, Result};
 use std::collections::HashSet;
+
+/// How many skipped-file paths a report embeds. The counts are complete; the
+/// path list is a sample so a generated-source tree cannot bloat the JSON.
+pub const UNSUPPORTED_SAMPLE: usize = 25;
+
+/// One language for which the engine skipped source files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedLanguage {
+    /// Language name shown to the user (`Ruby`, `PHP`, ...).
+    pub language: String,
+    /// How many files of that language were skipped.
+    pub files: usize,
+}
+
+/// Per-language counts for skipped source files, ordered by count (largest
+/// first, then name) so the report is deterministic regardless of walk order.
+#[must_use]
+pub fn skipped_language_counts(skipped: &[UnsupportedSourceFile]) -> Vec<SkippedLanguage> {
+    let mut counts: std::collections::BTreeMap<&'static str, usize> =
+        std::collections::BTreeMap::new();
+    for file in skipped {
+        *counts.entry(file.language).or_default() += 1;
+    }
+    let mut languages: Vec<SkippedLanguage> = counts
+        .into_iter()
+        .map(|(language, files)| SkippedLanguage {
+            language: language.to_string(),
+            files,
+        })
+        .collect();
+    languages.sort_by(|a, b| {
+        b.files
+            .cmp(&a.files)
+            .then_with(|| a.language.cmp(&b.language))
+    });
+    languages
+}
+
+/// The `unsupported_source_files` object shared by the CLI JSON report and
+/// the MCP audit result: a full count, a full per-language breakdown, and a
+/// bounded path sample.
+#[must_use]
+pub fn skipped_unsupported_json(skipped: &[UnsupportedSourceFile]) -> serde_json::Value {
+    serde_json::json!({
+        "count": skipped.len(),
+        "languages": skipped_language_counts(skipped)
+            .into_iter()
+            .map(|entry| serde_json::json!({
+                "language": entry.language,
+                "files": entry.files,
+            }))
+            .collect::<Vec<_>>(),
+        "files": skipped
+            .iter()
+            .take(UNSUPPORTED_SAMPLE)
+            .map(|file| file.path.as_str())
+            .collect::<Vec<_>>(),
+    })
+}
 
 /// Print a banner at the start of a scan when running in interactive human mode.
 pub fn print_scan_banner(
@@ -145,7 +205,7 @@ pub fn json_report(
     advisories: &[Advisory],
     incomplete: &[frensense_engine::scan::IncompleteFunction],
 ) -> serde_json::Value {
-    json_report_with_telemetry(advisories, incomplete, None)
+    json_report_with_skips(advisories, incomplete, None, &[])
 }
 
 /// The JSON report envelope with full `analysis` telemetry object.
@@ -154,6 +214,20 @@ pub fn json_report_with_telemetry(
     advisories: &[Advisory],
     incomplete: &[frensense_engine::scan::IncompleteFunction],
     telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+) -> serde_json::Value {
+    json_report_with_skips(advisories, incomplete, telemetry, &[])
+}
+
+/// The JSON report envelope including the source files the scan skipped
+/// because the engine has no spec for their language. The extra object is
+/// additive (`analysis.coverage.unsupported_source_files`), so the schema
+/// version does not move; consumers that ignore it keep working.
+#[must_use]
+pub fn json_report_with_skips(
+    advisories: &[Advisory],
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
+    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+    skipped: &[UnsupportedSourceFile],
 ) -> serde_json::Value {
     let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
     let telem = telemetry.unwrap_or(&empty_telem);
@@ -168,6 +242,7 @@ pub fn json_report_with_telemetry(
             "files_failed": telem.input.failed,
             "failed_files": telem.input.failed_files,
             "unsupported_inputs": telem.input.unsupported,
+            "unsupported_source_files": skipped_unsupported_json(skipped),
             "files_partial": telem.input.parse_partial,
             "partial_files": telem.input.parse_partial_files,
             "functions": telem.input.functions,
@@ -253,10 +328,11 @@ pub fn print_results(
     duration: Option<std::time::Duration>,
     output_path: Option<&std::path::Path>,
 ) -> Result<()> {
-    print_results_detailed(
+    print_results_with_skips(
         advisories,
         incomplete,
         None,
+        &[],
         format,
         input_path,
         duration,
@@ -274,6 +350,57 @@ pub fn print_results_detailed(
     duration: Option<std::time::Duration>,
     output_path: Option<&std::path::Path>,
 ) -> Result<()> {
+    print_results_with_skips(
+        advisories,
+        incomplete,
+        telemetry,
+        &[],
+        format,
+        input_path,
+        duration,
+        output_path,
+    )
+}
+
+/// Print results and say which source files the scan could not analyze
+/// because the engine has no language spec for them.
+///
+/// The warning goes to stderr so it never contaminates stdout reports, and it
+/// prints even when the scan of the supported files was otherwise complete: a
+/// polyglot repository where 30 of 40 files are Ruby must not present itself
+/// as a clean JavaScript scan.
+#[allow(clippy::too_many_arguments)]
+pub fn print_results_with_skips(
+    advisories: &[Advisory],
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
+    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+    skipped: &[UnsupportedSourceFile],
+    format: &str,
+    input_path: &std::path::Path,
+    duration: Option<std::time::Duration>,
+    output_path: Option<&std::path::Path>,
+) -> Result<()> {
+    if !skipped.is_empty() {
+        let languages = skipped_language_counts(skipped)
+            .iter()
+            .map(|entry| format!("{} ({})", entry.language, entry.files))
+            .collect::<Vec<_>>()
+            .join(", ");
+        eprintln!(
+            "Warning: {} source file(s) in unsupported languages were not scanned: {languages}.",
+            skipped.len(),
+        );
+        eprintln!(
+            "  Supported languages: {}.",
+            crate::parser::language_names_help()
+        );
+        for file in skipped.iter().take(10) {
+            eprintln!("  {} ({})", file.path, file.language);
+        }
+        if skipped.len() > 10 {
+            eprintln!("  ... and {} more", skipped.len() - 10);
+        }
+    }
     if !incomplete.is_empty() {
         eprintln!(
             "Warning: {} function(s) exceeded the per-function analysis budget and were \
@@ -305,8 +432,8 @@ pub fn print_results_detailed(
     }
     match format {
         "json" => {
-            let rendered = serde_json::to_string_pretty(&json_report_with_telemetry(
-                advisories, incomplete, telemetry,
+            let rendered = serde_json::to_string_pretty(&json_report_with_skips(
+                advisories, incomplete, telemetry, skipped,
             ))
             .map_err(|e| FrensenseError::Config(format!("JSON error: {e}")))?;
             if let Some(out) = output_path {
@@ -1123,8 +1250,9 @@ mod explain_rule_tests {
 /// `REPORT_SCHEMA_VERSION` and this test move together.
 #[cfg(test)]
 mod json_report_schema_tests {
-    use super::{json_report, json_report_with_telemetry};
+    use super::{json_report, json_report_with_skips, json_report_with_telemetry};
     use crate::Advisory;
+    use crate::engine::files::UnsupportedSourceFile;
     use frensense_engine::telemetry::ScanTelemetry;
     use std::path::Path;
 
@@ -1208,6 +1336,39 @@ mod json_report_schema_tests {
         telem.input.parse_partial_files.push("bad.py".into());
         let report = json_report_with_telemetry(&[], &[], Some(&telem));
         assert_eq!(report["analysis"]["status"], "partial");
+    }
+
+    #[test]
+    fn coverage_names_unsupported_source_languages() {
+        let skipped = vec![
+            UnsupportedSourceFile {
+                path: "src/a.rb".into(),
+                language: "Ruby",
+            },
+            UnsupportedSourceFile {
+                path: "src/b.rb".into(),
+                language: "Ruby",
+            },
+            UnsupportedSourceFile {
+                path: "web/App.java".into(),
+                language: "Java",
+            },
+        ];
+        let report = json_report_with_skips(&[], &[], None, &skipped);
+        let coverage = &report["analysis"]["coverage"]["unsupported_source_files"];
+        assert_eq!(coverage["count"], 3);
+        assert_eq!(coverage["languages"][0]["language"], "Ruby");
+        assert_eq!(coverage["languages"][0]["files"], 2);
+        assert_eq!(coverage["languages"][1]["language"], "Java");
+        assert_eq!(coverage["files"][0], "src/a.rb");
+    }
+
+    #[test]
+    fn reports_without_skips_keep_an_empty_unsupported_object() {
+        let report = json_report_with_telemetry(&[], &[], None);
+        let coverage = &report["analysis"]["coverage"]["unsupported_source_files"];
+        assert_eq!(coverage["count"], 0);
+        assert_eq!(coverage["languages"].as_array().map(Vec::len), Some(0));
     }
 }
 

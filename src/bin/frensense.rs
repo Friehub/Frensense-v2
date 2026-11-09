@@ -6,7 +6,7 @@
 //! The frensense CLI: collect files → compiler scan → report.
 
 use frensense::cli::{
-    compare_baseline, parse_options, print_explain, print_results_detailed, print_scan_banner,
+    compare_baseline, parse_options, print_explain, print_results_with_skips, print_scan_banner,
     save_baseline,
 };
 use frensense::engine::Engine;
@@ -871,6 +871,7 @@ fn main() -> Result<()> {
     let mut explain_records = Vec::new();
     let mut hidden_by_tier = std::collections::BTreeMap::new();
     let mut incomplete: Vec<frensense_engine::scan::IncompleteFunction> = Vec::new();
+    let mut skipped_unsupported: Vec<frensense::engine::files::UnsupportedSourceFile> = Vec::new();
     let mut telemetry = frensense_engine::telemetry::ScanTelemetry::default();
     let advisories = if options.diff_only {
         let repo_dir = if input_path.is_dir() {
@@ -904,6 +905,7 @@ fn main() -> Result<()> {
                 e2.set_show_flows(options.show_flows);
                 all.extend(e2.run(f)?);
                 incomplete.extend(e2.take_incomplete());
+                skipped_unsupported.extend(e2.take_skipped_unsupported());
                 telemetry.merge(e2.take_telemetry());
                 if options.explain {
                     explain_records.extend(e2.take_explain());
@@ -932,6 +934,7 @@ fn main() -> Result<()> {
         for p in &input_paths {
             all.extend(engine.run(p)?);
             incomplete.extend(engine.take_incomplete());
+            skipped_unsupported.extend(engine.take_skipped_unsupported());
             telemetry.merge(engine.take_telemetry());
             if options.explain {
                 explain_records.extend(engine.take_explain());
@@ -958,12 +961,15 @@ fn main() -> Result<()> {
         }
     }
 
+    skipped_unsupported.sort();
+    skipped_unsupported.dedup();
     let status = frensense::cli::ScanStatus::compute(&telemetry, &incomplete);
 
-    print_results_detailed(
+    print_results_with_skips(
         &advisories,
         &incomplete,
         Some(&telemetry),
+        &skipped_unsupported,
         &options.format,
         &input_path,
         Some(start_time.elapsed()),
@@ -990,6 +996,7 @@ fn main() -> Result<()> {
                 "parse_partial_files": telemetry.input.parse_partial_files,
                 "functions": telemetry.input.functions,
             },
+            "unsupported_source_files": frensense::cli::skipped_unsupported_json(&skipped_unsupported),
             "taint": {
                 "nodes_visited": telemetry.taint.nodes_visited,
                 "functions_visited": telemetry.taint.functions_visited,
