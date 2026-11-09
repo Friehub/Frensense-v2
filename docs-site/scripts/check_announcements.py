@@ -320,6 +320,10 @@ def check(a: dict) -> list[str]:
     Returns a list of error strings (empty when the item is well-formed).
     """
     errors: list[str] = []
+    for field in ("title", "message"):
+        # The banner and popup render text only, so markup would show up literally.
+        if isinstance(a.get(field), str) and ("<" in a[field] or ">" in a[field]):
+            errors.append(f"{field} must be plain text: HTML is shown as typed, use the link field for a link")
     if "display" in a and a["display"] not in DISPLAYS:
         errors.append(f"display must be one of {sorted(DISPLAYS)}")
     img = a.get("image")

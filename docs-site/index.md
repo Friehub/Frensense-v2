@@ -3,14 +3,14 @@ layout: home
 
 hero:
   name: "Frensense"
-  text: "Deterministic security engine"
-  tagline: "Static analysis without the rules. Frensense lowers every file to a program graph and reports exact source-to-sink taint paths. Findings are reachability queries, not guesses."
+  text: "Code scanning that shows its work"
+  tagline: "A deterministic static analyser that follows untrusted input through your code and reports each path from source to dangerous call. Open source, one binary, no network."
   actions:
     - theme: brand
       text: Get started
       link: /guide/
     - theme: alt
-      text: Download
+      text: Install
       link: /guide/installation
     - theme: alt
       text: GitHub
@@ -18,18 +18,18 @@ hero:
 
 features:
   - title: Exact taint paths
-    details: Every finding comes with the concrete source-to-sink path through the program graph, with file positions. Not a confidence score.
+    details: Every finding comes with the path the data took, with file positions, so you can check it yourself. The same input always gives the same result.
   - title: Teachable engine
-    details: Label a vulnerable example and its fixed twin in the corpus, and the bundler learns source, sink, sanitizer facts and policies into a checksummed .frc bundle.
+    details: Label a vulnerable example and its fixed twin, and the bundler learns the missing sources, sinks and sanitizers into a .frc bundle you can load.
   - title: Multi-language
-    details: TypeScript, JavaScript/TSX, Python, Go, and Rust, with per-language providers (Oxc for JS/TS, rust-analyzer HIR for Rust).
+    details: TypeScript, JavaScript, Python, Go, Rust and C, with early Vue support. Each language is a small tree-sitter provider on a shared engine.
   - title: Memory safety
-    details: Use-after-free, double-free, and out-of-bounds checkers built on interprocedural allocation summaries and an abstract value lattice.
+    details: Use-after-free, double-free, out-of-bounds and leak checks, built on allocation summaries and value tracking.
   - title: Built for agents
-    details: MCP and LSP servers built into the frensense CLI. Read why frontier AI needs deterministic oracles in our research essay.
+    details: MCP and LSP servers are built into the same binary, so an AI agent or an editor can check code with the same engine. Read why in our essay.
     link: /blog/2026-10-09-static-analysis-in-the-age-of-frontier-ai
   - title: Open core
-    details: The engine is GPL-3.0 free software; .frc knowledge bundles carry the detection knowledge. Commercial licences available.
+    details: The engine is GPL-3.0 free software. Knowledge bundles extend what it can detect, and commercial licences are available.
 ---
 
 <DownloadStrip />

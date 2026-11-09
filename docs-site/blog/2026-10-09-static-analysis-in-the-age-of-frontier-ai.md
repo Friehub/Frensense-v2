@@ -248,4 +248,4 @@ npm install -g @friehub/frensense
 npx @friehub/frensense .
 ```
 
-To explore verified rule bundles and inspect our differential capability matrices, visit the [Frensense Bundles Portal](/bundles) or consult our [Getting Started Guide](/guide/getting-started).
+To explore verified rule bundles and inspect our differential capability matrices, visit the [Frensense Bundles Portal](/bundles) or consult our [Getting Started Guide](/guide/).
