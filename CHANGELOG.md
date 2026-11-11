@@ -113,15 +113,47 @@ harness and keeps no changelog.
   already on npm, and `publish-cargo` still publishes only crates missing
   from crates.io, so the retry is additive.
 
-- **release: the native build no longer asks setup-node for an npm cache.**
-  `build-native` passed `cache: 'npm'` to `actions/setup-node`, whose cache
+- **release: the native build keys its npm cache off the package lockfile.**
+  `build-native` passes `cache: 'npm'` to `actions/setup-node`, whose cache
   resolver requires a lockfile in the repository root. This repo has no root
-  `package.json` or lockfile — `npm/package.json` declares the published
-  package and the docs site keeps `docs-site/package-lock.json` — so all four
+  `package.json` — the published package's metadata is `npm/package.json` and
+  the docs site keeps `docs-site/package-lock.json` — so all four
   `Build Native` jobs failed in setup with "Dependencies lock file is not
-  found" before `cargo build` ran, leaving a release tag without binaries. The
-  Rust build installs nothing from npm, so the cache request is removed
-  instead of pointed at an unrelated lockfile.
+  found" before `cargo build` ran, leaving a release tag without binaries.
+  Removing the cache fixed the failure but gave up the cache; the fix is to
+  commit `npm/package-lock.json` (the package has no runtime dependencies, so
+  it is a versioned record of its metadata) and point
+  `cache-dependency-path` at it, which restores the caching every job had
+  before the lockfile went missing.
+
+- **release: the arm64 macOS binary builds on a runner this organization
+  actually has.** The `aarch64-apple-darwin` leg asked for `macos-14`, which
+  the GitHub backend resolves to the `macos-14-arm64-us-default` scale set;
+  this organization has no such runner, so the job was cancelled one second
+  after it started, before its first step. `build-native` sets
+  `fail-fast: false`, but a cancelled matrix leg still makes the job result
+  unsuccessful, which skipped `generate-hashes`, `provenance`, `publish-npm`
+  and `github-release`: a release that built three of four binaries and
+  published no asset. The leg now runs on `macos-latest` with an explicit
+  `aarch64-apple-darwin` target, the same supported image the x86_64 leg
+  uses, so the arm64 binary is cross-compiled instead of waiting for a runner
+  that does not exist.
+
+- **release: cargo-smart-release and cargo-semver-checks are cached.**
+  Both were installed with `cargo install --locked` on every release,
+  compiling their dependency trees from scratch — around five minutes each in
+  `publish-cargo`. The job now restores `~/.cargo/bin/cargo-smart-release`
+  and `~/.cargo/bin/cargo-semver-checks` from an `actions/cache` entry keyed
+  on the runner OS and installs only on a miss, so a re-run of a release (and
+  the next release on the same tool generation) goes straight to publishing.
+
+- **release: publishing configures a git identity before smart-release
+  commits.** `cargo smart-release --execute` rewrites the dependent
+  manifests' version requirements and commits them locally before publishing;
+  `publish-cargo` is a fresh clone with no `user.name`/`user.email`, so the
+  run ended at `Error: Failed to commit changed manifests` with no crate on
+  crates.io. The job now sets `github-actions[bot]`, as `prepare` already does
+  for the release tag.
 
 - **docs: the site renders the canonical docs instead of keeping copies.**
   `docs-site/changelog.md` was a byte-identical copy of the root file behind a
