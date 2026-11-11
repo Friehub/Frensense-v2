@@ -252,7 +252,12 @@ jobs:
             target: x86_64-apple-darwin
             bin_name: frensense
             ext: ''
-          - host: macos-14
+          # `macos-14` resolves to a runner scale set this organization does
+          # not have (`macos-14-arm64-us-default`), so the job was cancelled
+          # before its first step. `macos-latest` is supported and the Rust
+          # target is explicit, so the arm64 binary is cross-compiled from the
+          # same runner image the x86_64 leg uses.
+          - host: macos-latest
             target: aarch64-apple-darwin
             bin_name: frensense
             ext: ''
@@ -275,13 +280,13 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v4.4.0
         with:
           node-version: 22
-          # Deliberately no `cache: 'npm'`. The cache resolver looks for a
-          # lockfile in the repository root, and this repo has none: the only
-          # package metadata is `npm/package.json` and the docs site keeps its
-          # own `docs-site/package-lock.json`. The native build installs
-          # nothing from npm, so asking for an npm cache only made every
-          # `build-native` job fail in setup with "Dependencies lock file is
-          # not found" before `cargo build` ever ran.
+          cache: 'npm'
+          # Setup-node's cache resolver looks for a lockfile at the repository
+          # root unless told otherwise, and this repo's npm metadata lives in
+          # `npm/`. The committed lockfile there lets the action key the cache
+          # instead of failing the job with "Dependencies lock file is not
+          # found" before `cargo build` runs.
+          cache-dependency-path: npm/package-lock.json
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
@@ -431,14 +436,41 @@ jobs:
           # SHA keeps crate-only releases working with no tag at all.
           ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
+      - name: Configure git identity
+        # `cargo smart-release --execute` rewrites the dependents' manifest
+        # requirements and then runs `git commit -am`. `prepare` configures an
+        # identity in its own checkout, but this job is a fresh clone with no
+        # author set, so the commit failed with "Failed to commit changed
+        # manifests" before a single crate was published.
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: stable
+      - name: Cache the release tooling
+        # `cargo install` builds cargo-smart-release and cargo-semver-checks
+        # from source, which costs five-plus minutes on every release. Both
+        # binaries are released as standalone executables here so a repeat run
+        # (and the next release on the same tool generation) skips the build.
+        # Bump the `v1` segment to force a refresh after a tool release or a
+        # runner-image change.
+        id: release-tools-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-smart-release
+            ~/.cargo/bin/cargo-semver-checks
+          key: cargo-release-tools-${{ runner.os }}-v1
       - name: Install cargo-smart-release
-        run: cargo install cargo-smart-release --locked
+        run: >-
+          command -v cargo-smart-release >/dev/null ||
+          cargo install cargo-smart-release --locked
       - name: Install cargo-semver-checks
-        run: cargo install cargo-semver-checks --locked
+        run: >-
+          command -v cargo-semver-checks >/dev/null ||
+          cargo install cargo-semver-checks --locked
       - name: Per-crate SemVer assertion against the published baseline
         # Every crate about to ship must already carry a version that covers
         # its public-API change. `check-release` compares each publishable
