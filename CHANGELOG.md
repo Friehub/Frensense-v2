@@ -113,6 +113,16 @@ harness and keeps no changelog.
   already on npm, and `publish-cargo` still publishes only crates missing
   from crates.io, so the retry is additive.
 
+- **release: the native build no longer asks setup-node for an npm cache.**
+  `build-native` passed `cache: 'npm'` to `actions/setup-node`, whose cache
+  resolver requires a lockfile in the repository root. This repo has no root
+  `package.json` or lockfile — `npm/package.json` declares the published
+  package and the docs site keeps `docs-site/package-lock.json` — so all four
+  `Build Native` jobs failed in setup with "Dependencies lock file is not
+  found" before `cargo build` ran, leaving a release tag without binaries. The
+  Rust build installs nothing from npm, so the cache request is removed
+  instead of pointed at an unrelated lockfile.
+
 - **docs: the site renders the canonical docs instead of keeping copies.**
   `docs-site/changelog.md` was a byte-identical copy of the root file behind a
   five-line front matter, and the guide pages had drifted into parallel copies
