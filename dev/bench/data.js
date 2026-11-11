@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794393038591,
+  "lastUpdate": 1794434968262,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -2133,6 +2133,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/e58ff1c4986a42b742685ef2d83668979ea66d80"
         },
         "date": 1794393037238,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 33.9,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 38.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 4.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 172,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 32,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "distinct": true,
+          "id": "18f3589a58dca4abdec37f1885e7d2730a207f62",
+          "message": "feat(cli): real-time scan progress bar and peak RSS tracking\n\n- Implement live scan progress reporting to stderr with interactive TTY and non-interactive log modes\n- Add safe peak RSS tracking reading VmHWM from /proc/self/status\n- Wire engine and runner scan progress callbacks\n- Expose --no-progress CLI flag and report peak memory in scan summary\n- Add What's New page to documentation site and update CHANGELOG\n- Bump frensense and frensense-engine to v0.8.1\n\nSigned-off-by: 0xademola <76975899+0xademola@users.noreply.github.com>",
+          "timestamp": "2026-11-11T22:52:53+01:00",
+          "tree_id": "4a4b3195367b04654d1e1950044cdfdbceae2880",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/18f3589a58dca4abdec37f1885e7d2730a207f62"
+        },
+        "date": 1794434967179,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
