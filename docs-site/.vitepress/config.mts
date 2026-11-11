@@ -374,6 +374,7 @@ export default defineConfig({
       {
         text: `v${currentVersion}`,
         items: [
+          { text: "What's New", link: '/whats-new' },
           { text: 'Changelog', link: '/changelog' },
           { text: 'All releases', link: 'https://github.com/Friehub/frensense-v2/releases' },
           { text: 'v1 documentation (archive)', link: '/v1/' }
@@ -385,7 +386,7 @@ export default defineConfig({
     // guide, the bundle pages and the architecture notes never changes the
     // menu under the reader.
     sidebar: Object.fromEntries(
-      ['/guide/', '/architecture/', '/corpus/', '/bundles', '/challenges', '/changelog'].map((k) => [k, DOCS_SIDEBAR])
+      ['/guide/', '/architecture/', '/corpus/', '/bundles', '/challenges', '/changelog', '/whats-new'].map((k) => [k, DOCS_SIDEBAR])
     ),
 
     socialLinks: [

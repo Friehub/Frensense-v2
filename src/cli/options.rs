@@ -55,6 +55,8 @@ pub struct CliOptions {
     pub profile_output: Option<PathBuf>,
     /// Initialize tracing subscriber for spans and logs.
     pub trace: bool,
+    /// Disable real-time progress bar and updates.
+    pub no_progress: bool,
 }
 
 /// Parse CLI arguments into structured scan options.
@@ -79,6 +81,7 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
         fail_on_incomplete: false,
         profile_output: None,
         trace: false,
+        no_progress: false,
     };
 
     let mut i = 1;
@@ -139,6 +142,7 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
             }
             "--fail-on-incomplete" => options.fail_on_incomplete = true,
             "--trace" => options.trace = true,
+            "--no-progress" => options.no_progress = true,
             "--profile-out" | "--profile-output" => {
                 let val = args
                     .get(i + 1)
