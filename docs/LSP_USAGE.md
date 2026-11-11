@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 <!-- Copyright (c) 2024-2026 Friehub. All rights reserved. -->
 
-# frensense lsp: Usage Guide
+# Editors (LSP)
 
 `frensense lsp` puts the Frensense engine inside your editor: findings
 appear as diagnostics when you open or save a file, with the same severity
@@ -11,22 +11,10 @@ standard Language Server Protocol over stdio and ships in the same
 
 ## Installation
 
-`frensense lsp` is a self-contained binary — no Node.js runtime, no VS
-Code extension marketplace step. Get it and put it on `PATH`:
-
-**Download a release binary** (recommended):
-
-```bash
-# Linux x86_64 — replace the tag with the latest release
-curl -L https://github.com/Friehub/frensense-v2/releases/latest/download/frensense-x86_64-unknown-linux-gnu \
-  -o /usr/local/bin/frensense && chmod +x /usr/local/bin/frensense
-```
-
-**Or install from source** (requires a Rust toolchain):
-
-```bash
-cargo install frensense   # installs the unified frensense binary
-```
+`frensense lsp` is a subcommand of the `frensense` binary. There is no editor
+extension to install. [Install `frensense`](https://frensense.friehub.cloud/guide/installation) and make
+sure it is on the `PATH` your editor sees, then point your editor's generic
+LSP client at it (see "Client configuration").
 
 ## What it does (and deliberately doesn't)
 
@@ -216,6 +204,6 @@ seeing a regression.
 
 ## Related
 
-- `docs/MCP_USAGE.md`: the same engine for AI agents
-- `docs/AGENT_INTEGRATION.md`: CI wiring and baseline gating
-- README: install, quick start, single-binary notes
+- [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp): the same engine for AI agents
+- [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions): CI wiring and baseline gating
+- [CLI reference](https://frensense.friehub.cloud/guide/cli): every flag and exit code

@@ -10,10 +10,10 @@ identity. It is what a release tag (`vX.Y.Z`) points at. Changes inside the
 workspace crates are recorded in their own changelogs, which version and ship
 independently:
 
-- [`frensense-engine/CHANGELOG.md`](frensense-engine/CHANGELOG.md) — IR, graphs, taint analysis, checks, harness, `scan` API
-- [`frensense-lang/CHANGELOG.md`](frensense-lang/CHANGELOG.md) — language specs, rule cards, severities, CWE tables
-- [`frensense-bundler/CHANGELOG.md`](frensense-bundler/CHANGELOG.md) — `.frc` format, corpus bundling, `lint`, embedded default pack
-- [`frensense-packgen/CHANGELOG.md`](frensense-packgen/CHANGELOG.md) — the generated built-in vocabulary behind the default pack
+- [`frensense-engine/CHANGELOG.md`](https://github.com/Friehub/frensense-v2/blob/main/frensense-engine/CHANGELOG.md) — IR, graphs, taint analysis, checks, harness, `scan` API
+- [`frensense-lang/CHANGELOG.md`](https://github.com/Friehub/frensense-v2/blob/main/frensense-lang/CHANGELOG.md) — language specs, rule cards, severities, CWE tables
+- [`frensense-bundler/CHANGELOG.md`](https://github.com/Friehub/frensense-v2/blob/main/frensense-bundler/CHANGELOG.md) — `.frc` format, corpus bundling, `lint`, embedded default pack
+- [`frensense-packgen/CHANGELOG.md`](https://github.com/Friehub/frensense-v2/blob/main/frensense-packgen/CHANGELOG.md) — the generated built-in vocabulary behind the default pack
 
 Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
@@ -123,21 +123,29 @@ harness and keeps no changelog.
   Rust build installs nothing from npm, so the cache request is removed
   instead of pointed at an unrelated lockfile.
 
-- **docs: the docs site summarizes releases instead of mirroring the changelog.**
+- **docs: the site renders the canonical docs instead of keeping copies.**
   `docs-site/changelog.md` was a byte-identical copy of the root file behind a
-  five-line front matter, so every entry had to be written twice and the page
-  grew to 858 lines of release narrative a visitor cannot skim. Mirroring now
-  ends at `0.7.0` (frozen history, untouched); from `0.8.0` onward the site
-  gets a short "what this version is" section that links to the full changelog,
-  and the root `CHANGELOG.md` stays the single source of truth. `AGENTS.md`
-  §7.1 states the new rule and drops the regeneration one-liner, along with the
-  `## [Unreleased]` heading convention: `0.8.0` was never tagged or published
-  (`git tag` stops at `v0.7.0`) yet every changelog carried an `[Unreleased]`
-  section plus a dated `## [0.8.0] - 2026-10-30` one, splitting a single version
-  across two headings and putting a version that does not exist on the site.
-  The five changelogs now carry one undated `## [0.8.0]` heading, with each
-  section's entries preserved verbatim (checked by comparing the non-heading
-  line sets before and after the fold).
+  five-line front matter, and the guide pages had drifted into parallel copies
+  of `docs/*.md`, so every correction had to be made twice and the site grew to
+  858 lines of release narrative a visitor cannot skim. The site is now a
+  rendering layer: `changelog.md`, `architecture/benchmarks.md`,
+  `corpus/authoring.md`, `guide/github-actions.md`, `guide/lsp.md` and
+  `guide/mcp.md` are front-matter stubs whose body is a single relative
+  `<!--@include: ...-->` directive pointing at the canonical file (or the root
+  `CHANGELOG.md`), resolved at VitePress build time. The rewrite removes 2,721
+  duplicated lines across 31 files, rewrites `README.md` and `npm/README.md` to
+  link to the same canonical pages instead of restating them, and makes
+  `prebuild` run `check_announcements.py`, which rejects HTML in announcement
+  titles and messages because the banner renders them as plain text.
+  `AGENTS.md` §7.1 records the include rule in place of the earlier "summarize,
+  do not mirror" rule, and the `## [Unreleased]` convention is retired: `0.8.0`
+  was never tagged or published (`git tag` stops at `v0.7.0`) yet every
+  changelog carried an `[Unreleased]` section plus a dated
+  `## [0.8.0] - 2026-10-30` one, splitting a single version across two headings
+  and putting a version that does not exist on the site. The five changelogs
+  now carry one undated `## [0.8.0]` heading, with each section's entries
+  preserved verbatim (checked by comparing the non-heading line sets before and
+  after the fold).
 
 - **docs: engine-blindness pop-up announcement on the docs site, embeddable on any Friehub site.**
   The announcement feed gains a `display` type (`bar` or `popup`) with a popup

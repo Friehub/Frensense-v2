@@ -1,62 +1,83 @@
-# Installation
+---
+title: Install
+description: Install the frensense binary with Cargo, npm, or a release download.
+---
 
-Frensense ships as **one binary** that does everything: scanning, watch mode,
-the MCP server (`frensense mcp`), and the LSP server (`frensense lsp`). Pick
-whichever install path matches your setup.
+# Install
 
-## Install from crates.io
+Frensense is one binary named `frensense`. Pick the route that fits your
+machine, then run `frensense --version` to check it worked.
 
-The quickest path if you have Rust installed:
+| Route | Needs | Command |
+| --- | --- | --- |
+| npm | Node.js 18 or newer | `npm install -g @friehub/frensense` |
+| No install | Node.js 18 or newer | `npx @friehub/frensense .` |
+| Cargo | Rust 1.95 or newer | `cargo install frensense` |
+| Release download | nothing | see below |
+
+## npm
+
+The npm package carries prebuilt binaries, so you do not need a Rust
+compiler. It supports Linux x64, macOS (Intel and Apple Silicon) and Windows
+x64.
+
+```bash
+npm install -g @friehub/frensense
+frensense --version
+```
+
+The `frensense` command from npm is a small launcher around the native
+binary. Every subcommand (`watch`, `mcp`, `lsp`, ...) works the same way.
+
+## Cargo
 
 ```bash
 cargo install frensense
 ```
 
-This compiles and installs the `frensense` binary into `~/.cargo/bin`.
+This compiles the binary and puts it in `~/.cargo/bin`. It needs Rust 1.95 or
+newer, and takes a few minutes.
 
-## Install from npm
+## Release download
 
-If you are a Node.js user, the npm package packages prebuilt binaries for
-your platform (no Rust compiler needed):
+Each [GitHub release](https://github.com/Friehub/frensense-v2/releases)
+attaches one binary per platform, named after its Rust target:
 
-```bash
-# Global install
-npm install -g @friehub/frensense
+| Platform | File |
+| --- | --- |
+| Linux x64 | `frensense-x86_64-unknown-linux-gnu` |
+| macOS Intel | `frensense-x86_64-apple-darwin` |
+| macOS Apple Silicon | `frensense-aarch64-apple-darwin` |
+| Windows x64 | `frensense-x86_64-pc-windows-msvc.exe` |
 
-# Or run instantly without installing
-npx @friehub/frensense .
-```
-
-The npm launcher (`frensense`) wraps the native binary, so all commands and
-subcommands (`mcp`, `lsp`, `watch`) work identically to the direct binary.
-
-## Prebuilt binaries
-
-Release binaries for Linux x64, macOS (x64/arm64), and Windows x64 are
-published on the
-[GitHub releases](https://github.com/Friehub/frensense-v2/releases) page,
-each with SLSA L3 provenance:
+There is no Linux arm64 build yet. On Linux x64:
 
 ```bash
-# example: linux x64
-curl -LO https://github.com/Friehub/frensense-v2/releases/latest/download/frensense-linux-x64
-chmod +x frensense-linux-x64
-sudo mv frensense-linux-x64 /usr/local/bin/frensense
+curl -L -o frensense \
+  https://github.com/Friehub/frensense-v2/releases/latest/download/frensense-x86_64-unknown-linux-gnu
+chmod +x frensense
+sudo mv frensense /usr/local/bin/
 ```
 
-## Verify
+Releases are built by a GitHub Actions workflow that also produces a SLSA
+provenance file (`*.intoto.jsonl`) for the binaries. You can check a download
+against it with [slsa-verifier](https://github.com/slsa-framework/slsa-verifier).
+
+## Check the install
 
 ```bash
-frensense --version
-frensense --help
+frensense --version     # prints: frensense 0.8.0
+frensense --help        # lists every flag and subcommand
 ```
 
-`--help` lists every subcommand, including `watch`, `mcp`, and `lsp`.
+If a scan ends with `Status: Failed analysis` and a warning about
+"unsupported or absent source input", the folder holds no
+[supported files](/guide/#what-it-scans). Try it inside a project that has a
+`.py`, `.ts`, `.js`, `.go`, `.rs` or `.c` file.
 
-## Build from source (contributors)
+## Build from source
 
-You only need this if you want to hack on the engine. A recent Rust
-toolchain (1.95+) is required:
+Only needed if you want to change the engine:
 
 ```bash
 git clone https://github.com/Friehub/frensense-v2.git
@@ -64,4 +85,10 @@ cd frensense-v2
 cargo build --release
 ```
 
-The binary lands in `target/release/frensense`.
+The binary is `target/release/frensense`. See
+[CONTRIBUTING.md](https://github.com/Friehub/frensense-v2/blob/main/CONTRIBUTING.md)
+before opening a pull request.
+
+## Next
+
+[Run your first scan](/guide/first-scan).

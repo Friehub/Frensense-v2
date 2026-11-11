@@ -202,12 +202,58 @@ const LLMS_TEMPLATE = [
 
 // frensense v2 documentation site.
 // Deployed at the domain root; the legacy v1 site is served under /v1/.
+// The documentation menu. Grouped by what the reader is trying to do.
+const DOCS_SIDEBAR = [
+  {
+    text: 'Start here',
+    items: [
+      { text: 'Overview', link: '/guide/' },
+      { text: 'Install', link: '/guide/installation' },
+      { text: 'Your first scan', link: '/guide/first-scan' },
+      { text: 'CLI reference', link: '/guide/cli' }
+    ]
+  },
+  {
+    text: 'Use it',
+    items: [
+      { text: 'CI and agent gating', link: '/guide/github-actions' },
+      { text: 'AI agents (MCP)', link: '/guide/mcp' },
+      { text: 'Editors (LSP)', link: '/guide/lsp' }
+    ]
+  },
+  {
+    text: 'Teach the engine',
+    items: [
+      { text: 'Bundles (.frc)', link: '/bundles' },
+      { text: 'How teaching works', link: '/guide/teachability' },
+      { text: 'Corpus overview', link: '/corpus/' },
+      { text: 'Authoring guide', link: '/corpus/authoring' }
+    ]
+  },
+  {
+    text: 'How it works',
+    items: [
+      { text: 'Architecture', link: '/architecture/' },
+      { text: 'The program graph', link: '/architecture/program-graph' },
+      { text: 'Checkers', link: '/architecture/checkers' },
+      { text: 'Engine blindness', link: '/architecture/blindness' },
+      { text: 'Benchmarks', link: '/architecture/benchmarks' }
+    ]
+  },
+  {
+    text: 'Contribute',
+    items: [{ text: 'Engine Blindness Challenges', link: '/challenges' }]
+  }
+]
+
 export default defineConfig({
   lang: 'en-US',
   title: 'Frensense',
   description:
     'Frensense v2, a compiler-mode static analysis engine that lowers every file to a program graph and reports exact source-to-sink taint paths.',
-  ignoreDeadLinks: true, // v1 archive pages are copied in after the build, not known to VitePress.
+  // The v1 archive is copied in after the build, so VitePress cannot see it. Every other
+  // dead link now fails the build instead of shipping.
+  ignoreDeadLinks: [/^\/v1(\/|$)/],
   sitemap: {
     hostname: SITE_ORIGIN
   },
@@ -321,72 +367,26 @@ export default defineConfig({
     downloadStats,
 
     nav: [
-      { text: 'Docs', link: '/guide/', activeMatch: '/guide/' },
-      { text: 'Architecture', link: '/architecture/', activeMatch: '/architecture/' },
-      { text: 'Corpus', link: '/corpus/', activeMatch: '/corpus/' },
-      { text: 'Bundles', link: '/bundles', activeMatch: '/bundles' },
-      { text: 'Challenges', link: '/challenges', activeMatch: '/challenges' },
-      { text: 'Blog', link: '/blog/', activeMatch: '/blog/' },
-      { text: 'Changelog', link: '/changelog', activeMatch: '/changelog' },
+      { text: 'Docs', link: '/guide/', activeMatch: '^/(guide|architecture|corpus)/' },
+      { text: 'Bundles', link: '/bundles', activeMatch: '^/bundles' },
+      { text: 'Challenges', link: '/challenges', activeMatch: '^/challenges' },
+      { text: 'Blog', link: '/blog/', activeMatch: '^/blog/' },
       {
         text: `v${currentVersion}`,
         items: [
           { text: 'Changelog', link: '/changelog' },
-          { text: 'v0.7.0 Previews (GitHub)', link: 'https://github.com/Friehub/frensense-v2/releases' },
-          { text: 'v0.6.0 (Previous Stable)', link: 'https://github.com/Friehub/frensense-v2/releases/tag/v0.6.0' },
-          { text: 'v1.x (Legacy Archive)', link: '/v1/' },
-          { text: 'crates.io', link: 'https://crates.io/crates/frensense' },
-          { text: 'npm (@friehub/frensense)', link: 'https://www.npmjs.com/package/@friehub/frensense' },
-          { text: 'GitHub Repository', link: 'https://github.com/Friehub/frensense-v2' }
+          { text: 'All releases', link: 'https://github.com/Friehub/frensense-v2/releases' },
+          { text: 'v1 documentation (archive)', link: '/v1/' }
         ]
       }
     ],
 
-    sidebar: {
-      '/guide/': [
-        {
-          text: 'Getting started',
-          items: [
-            { text: 'Introduction', link: '/guide/' },
-            { text: 'Installation', link: '/guide/installation' },
-            { text: 'Your first scan', link: '/guide/first-scan' },
-            { text: 'Teachable engine', link: '/guide/teachability' },
-            { text: 'CLI reference', link: '/guide/cli' }
-          ]
-        },
-        {
-          text: 'Integrations',
-          items: [
-            { text: 'GitHub Actions', link: '/guide/github-actions' },
-            { text: 'MCP server (AI agents)', link: '/guide/mcp' },
-            { text: 'LSP server (editors)', link: '/guide/lsp' }
-          ]
-        }
-      ],
-      '/architecture/': [
-        {
-          text: 'Architecture',
-          items: [
-            { text: 'Overview', link: '/architecture/' },
-            { text: 'The program graph', link: '/architecture/program-graph' },
-            { text: 'Checkers', link: '/architecture/checkers' },
-            { text: 'Knowledge bundles (.frc)', link: '/architecture/bundles' },
-            { text: 'Engine blindness & capabilities', link: '/architecture/blindness' },
-            { text: 'Blindness challenges', link: '/challenges' }
-          ]
-        }
-      ],
-      '/corpus/': [
-        {
-          text: 'Corpus',
-          items: [
-            { text: 'Corpus & .frc bundles', link: '/corpus/' },
-            { text: 'Authoring guide', link: '/corpus/authoring' }
-          ]
-        }
-      ],
-      '/blog/': []
-    },
+    // One sidebar for every documentation section, so moving between the
+    // guide, the bundle pages and the architecture notes never changes the
+    // menu under the reader.
+    sidebar: Object.fromEntries(
+      ['/guide/', '/architecture/', '/corpus/', '/bundles', '/challenges', '/changelog'].map((k) => [k, DOCS_SIDEBAR])
+    ),
 
     socialLinks: [
       { icon: 'github', link: 'https://github.com/Friehub/frensense-v2' }
@@ -399,7 +399,7 @@ export default defineConfig({
     outline: { level: [2, 3] },
 
     footer: {
-      message: 'Released under the GPL-3.0 license.',
+      message: 'Released under the GPL-3.0 license. <a href="/changelog">Changelog</a> · <a href="https://crates.io/crates/frensense">crates.io</a> · <a href="https://www.npmjs.com/package/@friehub/frensense">npm</a> · <a href="https://github.com/Friehub/frensense-v2">GitHub</a>',
       copyright: 'Copyright © 2026 Friehub'
     }
   },

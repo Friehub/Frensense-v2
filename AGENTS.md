@@ -236,19 +236,23 @@ is not done.
   number appearing in that file, because `.frc` compatibility is what the
   number governs. Ctrl that entry there, not in the root.
 
-**The docs site summarizes releases; it does not mirror the root file.**
-[`docs-site/changelog.md`](docs-site/changelog.md) is a "what each version
-is" page: one short section per release — a few bullets on the capability that
-landed and a link to the full changelog — not a copy. The root `CHANGELOG.md`
-is the full, per-crate-accurate history for `frensense` and stays the source
-of truth. Do not regenerate the site page from the root file, and never add a
-release entry only there: the site may summarize, it may not claim something
-the changelog does not say.
+**The docs site renders the canonical files; it does not keep copies.**
+[`docs-site/changelog.md`](docs-site/changelog.md) and several guide pages are
+front-matter stubs whose body is a single relative `<!--@include: ...-->`
+directive pointing at the canonical file: the root `CHANGELOG.md` for releases
+and `docs/BENCHMARKING.md`, `docs/FRENSENSE_CORPUS_GUIDE.md`,
+`docs/AGENT_INTEGRATION.md`, `docs/LSP_USAGE.md`, `docs/MCP_USAGE.md` for the
+guides. The directive resolves at VitePress build time, so the site cannot
+drift from the source. Edit the canonical file, never the rendered page, and
+never paste a second copy of its content into `docs-site/`.
 
-- **Mirroring ended with `0.7.0`.** Everything from `## [0.7.0]` down in the
-  site file is frozen copied history and is not rewritten, reformatted or
-  deleted. From `0.8.0` onward, a release gets a summary section written for a
-  reader deciding whether to upgrade, with the detail a click away.
+- **Releases are written once.** The root `CHANGELOG.md` is the full,
+  per-crate-accurate history for `frensense`; the site renders it directly.
+  Never add a release entry only to the site, and never let the site claim
+  something the changelog does not say.
+  `docs-site/scripts/check_announcements.py` runs in `prebuild` and rejects
+  HTML in announcement titles/messages, since the banner renders them as plain
+  text and markup would appear literally.
 - **One open version heading, named for the version it will ship as.** The
   heading above a run of entries is the number that run will be released
   under, with no date (`## [0.8.0]`); a release adds the date when the tag is
@@ -258,9 +262,9 @@ the changelog does not say.
 
 When updating agent instructions, keep this rule explicit: the crate changelogs
 are the source of truth for their crate, the root file is the source of truth
-for `frensense`, the docs site summarizes releases from `0.8.0` onward instead
-of mirroring them, and no other documentation is changed for routine code
-changes.
+for `frensense`, the docs site includes those files rather than keeping
+parallel copies or summaries, and no other documentation is changed for
+routine code changes.
 
 ### 7.2 Versioning and the bump strategy
 
