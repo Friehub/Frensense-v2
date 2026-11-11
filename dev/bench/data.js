@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794228096359,
+  "lastUpdate": 1794389505236,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -2035,6 +2035,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/7a862f92057c0350ac74b869f3882d26dedcaf53"
         },
         "date": 1794228094949,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 33.9,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 38.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 4.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 172,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 32,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "fe7b3678eac5dac3dee8d952df373297486cb367",
+          "message": "Merge pull request #77 from Friehub/fix/release-npm-cache\n\nfix(release): drop the npm cache from the native build",
+          "timestamp": "2026-11-11T10:30:39+01:00",
+          "tree_id": "e7f1dbd47322d56045b53c6dbcc2c0f6c1b42865",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/fe7b3678eac5dac3dee8d952df373297486cb367"
+        },
+        "date": 1794389504300,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
