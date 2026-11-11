@@ -10,16 +10,55 @@ identity. It is what a release tag (`vX.Y.Z`) points at. Changes inside the
 workspace crates are recorded in their own changelogs, which version and ship
 independently:
 
-- [`frensense-engine/CHANGELOG.md`](frensense-engine/CHANGELOG.md) — IR, graphs, taint analysis, checks, harness, `scan` API
-- [`frensense-lang/CHANGELOG.md`](frensense-lang/CHANGELOG.md) — language specs, rule cards, severities, CWE tables
-- [`frensense-bundler/CHANGELOG.md`](frensense-bundler/CHANGELOG.md) — `.frc` format, corpus bundling, `lint`, embedded default pack
-- [`frensense-packgen/CHANGELOG.md`](frensense-packgen/CHANGELOG.md) — the generated built-in vocabulary behind the default pack
+- [`frensense-engine/CHANGELOG.md`](https://github.com/Friehub/frensense-v2/blob/main/frensense-engine/CHANGELOG.md) — IR, graphs, taint analysis, checks, harness, `scan` API
+- [`frensense-lang/CHANGELOG.md`](https://github.com/Friehub/frensense-v2/blob/main/frensense-lang/CHANGELOG.md) — language specs, rule cards, severities, CWE tables
+- [`frensense-bundler/CHANGELOG.md`](https://github.com/Friehub/frensense-v2/blob/main/frensense-bundler/CHANGELOG.md) — `.frc` format, corpus bundling, `lint`, embedded default pack
+- [`frensense-packgen/CHANGELOG.md`](https://github.com/Friehub/frensense-v2/blob/main/frensense-packgen/CHANGELOG.md) — the generated built-in vocabulary behind the default pack
 
 Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
 
+## [0.8.1] - 2026-11-11
+
+### Added
+
+- **Real-time scan progress bar.** Frensense now streams scan progress to
+  `stderr` while the analysis runs, so CLI users and AI agents no longer see
+  a silent terminal after the header. Output adapts automatically:
+  - **Interactive TTY** (terminal attached): an animated single-line bar
+    showing current phase, files completed (`completed/total (%)`) and the
+    file currently being processed, live error count, and peak RSS memory —
+    all rendered in-place with ANSI line-clearing so stdout stays clean.
+  - **Non-interactive / pipe / CI / agent** (`2>&1 | cat`, GitHub Actions,
+    agent subprocesses): throttled milestone lines on `stderr` in the form
+    `[frensense] Phase: completed/total (%) | N errors | X MB peak RSS`,
+    emitted on every phase transition, every 10% progress increment, or at
+    least once every two seconds. No ANSI control characters.
+  - `--no-progress` suppresses all progress output for scripted callers that
+    do not want it.
+  - Machine-format outputs (`--json`, `--sarif`, `--github`) are unaffected:
+    progress goes to `stderr`; `stdout` carries only the structured payload.
+- **Peak RSS in scan summary.** The `Scan Summary` block now reports
+  `Peak Memory (RSS)` (Linux `VmHWM`, high-water mark) and `Files Scanned`
+  as a `completed/total` ratio.
+- **`Engine::set_progress_callback`.** Library consumers embedding the
+  `frensense` crate can register a progress callback
+  (`Fn(&ScanProgress<'_>) + Send + Sync + UnwindSafe + 'static`) to receive
+  the same real-time updates programmatically.
+
+### Changed
+
+- `frensense-engine` bumped to `0.8.1`: `scan.rs` exposes the new
+  `ScanProgress<'_>` struct, `ScanProgressCallback` type alias, and
+  `scan_with_progress` / `prepare_with_facts_with_progress` /
+  `scan_prepared_with_progress` entry points. `debug_flags` gains the
+  safe `peak_rss_kb() -> u64` helper (reads `/proc/self/status` with no
+  `unsafe`). `cargo semver-checks` reports 202/202 checks pass against
+  the `0.8.0` baseline.
+
 ## [0.8.0]
+
 
 ### Breaking
 

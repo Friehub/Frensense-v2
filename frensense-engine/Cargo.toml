@@ -1,6 +1,6 @@
 [package]
 name = "frensense-engine"
-version = "0.8.0"
+version = "0.8.1"
 authors = ["Friehub Developers"]
 edition = "2024"
 description = "Frensense engine core - IR lowering, value-flow analysis, interprocedural taint, and policy checks"

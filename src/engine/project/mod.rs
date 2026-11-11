@@ -54,6 +54,16 @@ pub struct Engine {
     pub(crate) hidden_by_tier: std::collections::BTreeMap<crate::RuleTier, usize>,
     /// Accumulated telemetry across scanned language groups.
     pub(crate) telemetry: frensense_engine::telemetry::ScanTelemetry,
+    /// Optional progress callback for real-time progress updates.
+    pub(crate) progress_callback: Option<
+        std::sync::Arc<
+            dyn Fn(&frensense_engine::scan::ScanProgress<'_>)
+                + Send
+                + Sync
+                + std::panic::UnwindSafe
+                + std::panic::RefUnwindSafe,
+        >,
+    >,
 }
 
 impl Engine {
@@ -75,7 +85,21 @@ impl Engine {
             skipped_unsupported: Vec::new(),
             hidden_by_tier: std::collections::BTreeMap::new(),
             telemetry: frensense_engine::telemetry::ScanTelemetry::default(),
+            progress_callback: None,
         }
+    }
+
+    /// Set an optional callback to receive scan progress updates.
+    pub fn set_progress_callback(
+        &mut self,
+        callback: impl Fn(&frensense_engine::scan::ScanProgress<'_>)
+            + Send
+            + Sync
+            + std::panic::UnwindSafe
+            + std::panic::RefUnwindSafe
+            + 'static,
+    ) {
+        self.progress_callback = Some(std::sync::Arc::new(callback));
     }
 
     /// Provide a `.frc` bundle (static bytes) whose learned facts teach the

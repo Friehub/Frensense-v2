@@ -246,6 +246,7 @@ fn print_help() {
     println!(
         "  --explain-json <file>      Write every silent sink argument, with the value the engine could not resolve, as JSON (implies --explain)"
     );
+    println!("  --no-progress              Disable real-time scan progress bar and updates");
     println!("  -h, --help                 Print this help");
     println!(
         "  -v, --version              Print version (add --json for machine-readable identity)"
@@ -868,6 +869,26 @@ fn main() -> Result<()> {
     engine.set_explain(options.explain);
     engine.set_show_flows(options.show_flows);
 
+    let show_progress = !options.no_progress;
+    let progress = std::sync::Arc::new(std::sync::Mutex::new(
+        frensense::cli::ProgressReporter::new(show_progress),
+    ));
+    {
+        let progress_clone = std::sync::Arc::clone(&progress);
+        engine.set_progress_callback(move |p| {
+            if let Ok(mut r) = progress_clone.lock() {
+                r.update(
+                    p.phase,
+                    p.completed_files,
+                    p.total_files,
+                    p.current_file,
+                    p.error_count,
+                    p.peak_rss_kb,
+                );
+            }
+        });
+    }
+
     let mut explain_records = Vec::new();
     let mut hidden_by_tier = std::collections::BTreeMap::new();
     let mut incomplete: Vec<frensense_engine::scan::IncompleteFunction> = Vec::new();
@@ -903,6 +924,19 @@ fn main() -> Result<()> {
                 e2.set_max_complexity(options.max_complexity);
                 e2.set_explain(options.explain);
                 e2.set_show_flows(options.show_flows);
+                let progress_clone = std::sync::Arc::clone(&progress);
+                e2.set_progress_callback(move |p| {
+                    if let Ok(mut r) = progress_clone.lock() {
+                        r.update(
+                            p.phase,
+                            p.completed_files,
+                            p.total_files,
+                            p.current_file,
+                            p.error_count,
+                            p.peak_rss_kb,
+                        );
+                    }
+                });
                 all.extend(e2.run(f)?);
                 incomplete.extend(e2.take_incomplete());
                 skipped_unsupported.extend(e2.take_skipped_unsupported());
@@ -946,6 +980,10 @@ fn main() -> Result<()> {
         telemetry.finalize();
         all
     };
+
+    if let Ok(r) = progress.lock() {
+        r.finish();
+    }
 
     if options.explain {
         print_explain(&explain_records, &hidden_by_tier);

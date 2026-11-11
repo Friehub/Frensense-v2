@@ -139,6 +139,19 @@ impl Engine {
                 }
             }
         }
+        let total_files = files.len();
+        let read_failures_count = read_failures.len();
+        let mut global_completed = 0usize;
+        if let Some(ref cb) = self.progress_callback {
+            cb(&frensense_engine::scan::ScanProgress {
+                phase: "Collecting",
+                completed_files: 0,
+                total_files: total_files.max(paths.len()),
+                current_file: None,
+                error_count: read_failures_count,
+                peak_rss_kb: frensense_engine::debug_flags::peak_rss_kb(),
+            });
+        }
         let mut result = scan::ScanResult::default();
         for group in groups.values() {
             // Built-in config + fact table from the language spec present.
@@ -166,6 +179,9 @@ impl Engine {
                 config.sources.insert(pattern.to_string());
             }
             facts.max_complexity = self.max_complexity;
+            let progress_cb = self.progress_callback.clone();
+            let group_offset = global_completed;
+            let group_total = total_files.max(paths.len());
             let mut part = std::thread::scope(|scope| {
                 let failed_files: Vec<String> = group.iter().map(|f| f.0.clone()).collect();
                 let failed_result = |message: String| {
@@ -183,7 +199,26 @@ impl Engine {
                 match std::thread::Builder::new()
                     .name("frensense-scanner-group".into())
                     .stack_size(32 * 1024 * 1024)
-                    .spawn_scoped(scope, || scan::scan(group, &config, &facts))
+                    .spawn_scoped(scope, move || {
+                        let mut cb_closure = progress_cb.as_ref().map(|cb| {
+                            let cb = std::sync::Arc::clone(cb);
+                            move |p: &frensense_engine::scan::ScanProgress<'_>| {
+                                let combined = frensense_engine::scan::ScanProgress {
+                                    phase: p.phase,
+                                    completed_files: group_offset + p.completed_files,
+                                    total_files: group_total,
+                                    current_file: p.current_file,
+                                    error_count: read_failures_count + p.error_count,
+                                    peak_rss_kb: p.peak_rss_kb,
+                                };
+                                cb(&combined);
+                            }
+                        });
+                        let progress_ref = cb_closure.as_mut().map(|f| {
+                            f as &mut (dyn FnMut(&frensense_engine::scan::ScanProgress<'_>) + Send)
+                        });
+                        scan::scan_with_progress(group, &config, &facts, progress_ref)
+                    })
                 {
                     Ok(handle) => match handle.join() {
                         Ok(result) => result,
@@ -192,6 +227,7 @@ impl Engine {
                     Err(error) => failed_result(format!("failed to spawn scanner worker: {error}")),
                 }
             });
+            global_completed += group.len();
             // Classify bundle-learned sinks from the advisory pattern that
             // names them. A `.frc` ships a CWE per pattern and nothing else
             // about the class, so this is the class a consumer can honour
