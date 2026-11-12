@@ -17,7 +17,7 @@ Before this release, running a scan showed the header and then went quiet until 
 
 Starting with 0.8.1:
 
-* **In your terminal**, a live progress bar updates as each file is processed. It shows which phase is running (Lowering, Taint Analysis, etc.), how many files have been scanned out of the total, any errors encountered, and how much memory is in use.
+* **In your terminal**, a live progress bar updates as each file is processed. It shows the current phase (lowering files, then analyzing the program), how many files have been scanned out of the total, any errors encountered, and how much memory is in use.
 * **In CI or when piping output**, clean log lines appear at regular milestones so your pipeline logs stay readable without any special terminal codes.
 * **In machine-output modes** (`--json`, `--sarif`), nothing changes — structured output goes to stdout untouched; progress goes to stderr.
 * Use `--no-progress` to suppress all progress output if you prefer silence.
