@@ -127,6 +127,28 @@ harness and keeps no changelog.
   are analyzed exactly as completely as before.
 
 #### Repository & Release Tooling
+- **release: an existing tag at another commit no longer strands its binaries.**
+  `prepare` compared the tag's commit with the release commit and, when they
+  differed, read the tag as "already released": it left `tag_name` empty, so
+  `build-native`, `generate-hashes`, `provenance`, `publish-npm` and
+  `github-release` all skipped and the run went straight to `publish-cargo`.
+  That is what happened to `v0.8.1`: the tag was cut on the merged PR head
+  (`0368c00`) while the release dispatch ran from its merge commit
+  (`3653979`, Release #86), so the run skipped every binary job and went
+  straight to `publish-cargo`. `v0.8.1` ended up with no GitHub release and
+  no binaries (its tag page lists only the source archives), npm stayed on
+  `0.8.0`, and the only thing the run was about to do was publish the bumped
+  crates. A tag is authoritative for what its release ships, whichever commit
+  it names, so completeness is now decided against the tag's own GitHub
+  release assets rather than the tag/release commit comparison, and any
+  missing binary rebuilds the release from the tag. `prepare` also checks
+  that tag out before the identity assertion, and `publish-cargo` publishes
+  from a new `checkout_ref` output (the tag when there is one, the release
+  commit for a crate-only run) instead of always from the branch tip, so a
+  release never mixes artifacts and crate sources from different commits. A
+  tag that is not an ancestor of the release commit still builds from the
+  tag, but logs a warning.
+
 - **release: a manual dispatch creates the tag it announces, and the automatic
   path can tag at all again.** `prepare` computed `tag_name=v<manifest
   version>`, but the "Create annotated tag" step was gated on
