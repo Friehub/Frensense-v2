@@ -77,6 +77,30 @@ pub fn rss_kb() -> u64 {
         .unwrap_or(0)
 }
 
+/// Peak resident set size (High Water Mark) of the current process, in KiB (0 when unreadable).
+#[must_use]
+pub fn peak_rss_kb() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            let mut hwm = None;
+            let mut rss = None;
+            for line in s.lines() {
+                if line.starts_with("VmHWM:") {
+                    hwm = line.split_whitespace().nth(1).and_then(|p| p.parse::<u64>().ok());
+                } else if line.starts_with("VmRSS:") {
+                    rss = line.split_whitespace().nth(1).and_then(|p| p.parse::<u64>().ok());
+                }
+                if hwm.is_some() && rss.is_some() {
+                    break;
+                }
+            }
+            hwm.or(rss)
+        })
+        .unwrap_or(0)
+}
+
+
 /// Trace helper: `dbg_trace!(flags.walk, "fmt args...")`.
 ///
 /// The format arguments are only evaluated when the flag is on, so building
@@ -100,4 +124,14 @@ mod tests {
         let b = DebugFlags::get();
         assert_eq!(a, b);
     }
+
+    #[test]
+    fn peak_rss_kb_returns_value() {
+        let peak = peak_rss_kb();
+        // On Linux /proc/self/status is available so peak > 0.
+        #[cfg(target_os = "linux")]
+        assert!(peak > 0, "peak RSS should be positive on linux");
+        let _ = peak;
+    }
 }
+

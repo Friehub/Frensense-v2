@@ -23,6 +23,19 @@ use crate::telemetry::{
 };
 use frensense_lang::spec::{Export, Import, ModuleItem};
 
+/// Real-time progress update emitted during scanning.
+#[derive(Debug, Clone)]
+pub struct ScanProgress<'a> {
+    pub phase: &'a str,
+    pub completed_files: usize,
+    pub total_files: usize,
+    pub current_file: Option<&'a str>,
+    pub error_count: usize,
+    pub peak_rss_kb: u64,
+}
+
+pub type ScanProgressCallback<'a> = &'a mut (dyn FnMut(&ScanProgress<'_>) + Send);
+
 /// Scan a set of source files under a config and fact table.
 ///
 /// `sources` maps file path → extension (used to pick the language spec).
@@ -31,20 +44,26 @@ pub fn scan(
     config: &TaintConfig,
     facts: &FactTable,
 ) -> ScanResult {
+    scan_with_progress(files, config, facts, None)
+}
+
+/// Scan a set of source files under a config and fact table with an optional progress callback.
+pub fn scan_with_progress(
+    files: &[(String, String, String)], // (path, source, ext)
+    config: &TaintConfig,
+    facts: &FactTable,
+    mut progress_cb: Option<&mut (dyn FnMut(&ScanProgress<'_>) + Send)>,
+) -> ScanResult {
     let started = Instant::now();
-    match prepare_with_facts(files, Some(facts)) {
-        Ok(p) => {
-            let mut result = scan_prepared(&p, config, facts);
-            result.telemetry.phases.push(PhaseTiming {
-                phase: "total".into(),
-                ms: millis_since(started),
-            });
-            result
-        }
+    let prepare_cb = progress_cb
+        .as_mut()
+        .map(|cb| &mut **cb as &mut (dyn FnMut(&ScanProgress<'_>) + Send));
+    let p = match prepare_with_facts_with_progress(files, Some(facts), prepare_cb) {
+        Ok(p) => p,
         Err(e) => {
             let mut telemetry = ScanTelemetry::default();
             telemetry.errors.push(e.clone());
-            ScanResult {
+            return ScanResult {
                 findings: Vec::new(),
                 located: Vec::new(),
                 located_checker: Vec::new(),
@@ -52,10 +71,18 @@ pub fn scan(
                 errors: vec![e],
                 analysis_incomplete: Vec::new(),
                 telemetry,
-            }
+            };
         }
-    }
+    };
+    let mut result = scan_prepared_with_progress(&p, config, facts, progress_cb);
+    result.telemetry.phases.push(PhaseTiming {
+        phase: "total".into(),
+        ms: millis_since(started),
+    });
+    result
 }
+
+
 
 /// A program lowered once, ready for repeated scans under different fact
 /// tables. The replay gate lowers each family exactly once and re-scans it
@@ -143,6 +170,15 @@ pub fn prepare_with_facts(
     files: &[(String, String, String)],
     facts: Option<&FactTable>,
 ) -> Result<PreparedProgram, String> {
+    prepare_with_facts_with_progress(files, facts, None)
+}
+
+/// Lower every file once with dynamic bundle facts and an optional progress callback.
+pub fn prepare_with_facts_with_progress(
+    files: &[(String, String, String)],
+    facts: Option<&FactTable>,
+    mut progress_cb: Option<ScanProgressCallback<'_>>,
+) -> Result<PreparedProgram, String> {
     let mut irs: FxHashMap<String, FunctionIR> = FxHashMap::default();
     let mut fn_file: FxHashMap<String, String> = FxHashMap::default();
     let mut file_source: FxHashMap<String, String> = FxHashMap::default();
@@ -156,7 +192,17 @@ pub fn prepare_with_facts(
     let mut parse_partial: Vec<String> = Vec::new();
     let submitted = ordered.len();
     let mut file_timings: Vec<FileTiming> = Vec::new();
-    for (path, source, ext) in ordered {
+    for (idx, (path, source, ext)) in ordered.into_iter().enumerate() {
+        if let Some(ref mut cb) = progress_cb {
+            cb(&ScanProgress {
+                phase: "Lowering",
+                completed_files: idx,
+                total_files: submitted,
+                current_file: Some(path.as_str()),
+                error_count: lower_errors.len(),
+                peak_rss_kb: crate::debug_flags::peak_rss_kb(),
+            });
+        }
         let started = Instant::now();
         let lowered = lower_isolated(path, source, ext, facts);
         let (fns, parse_broken, caps) = match lowered {
@@ -164,6 +210,16 @@ pub fn prepare_with_facts(
             Err(reason) => {
                 lower_failed_files.push(path.clone());
                 lower_errors.push(reason);
+                if let Some(ref mut cb) = progress_cb {
+                    cb(&ScanProgress {
+                        phase: "Lowering",
+                        completed_files: idx + 1,
+                        total_files: submitted,
+                        current_file: Some(path.as_str()),
+                        error_count: lower_errors.len(),
+                        peak_rss_kb: crate::debug_flags::peak_rss_kb(),
+                    });
+                }
                 continue;
             }
         };
@@ -196,7 +252,18 @@ pub fn prepare_with_facts(
             fn_file.entry(key.clone()).or_insert_with(|| path.clone());
             irs.insert(key, ir);
         }
+        if let Some(ref mut cb) = progress_cb {
+            cb(&ScanProgress {
+                phase: "Lowering",
+                completed_files: idx + 1,
+                total_files: submitted,
+                current_file: Some(path.as_str()),
+                error_count: lower_errors.len(),
+                peak_rss_kb: crate::debug_flags::peak_rss_kb(),
+            });
+        }
     }
+
 
     let ir_names: rustc_hash::FxHashSet<String> = irs.keys().cloned().collect();
     let res = crate::graph::module::ModuleAliasResolver::build(files, &ir_names, &fn_file);
@@ -271,6 +338,16 @@ pub fn scan_prepared(
     config: &TaintConfig,
     facts: &FactTable,
 ) -> ScanResult {
+    scan_prepared_with_progress(prepared, config, facts, None)
+}
+
+/// Scan a [`PreparedProgram`] with an optional progress callback.
+pub fn scan_prepared_with_progress(
+    prepared: &PreparedProgram,
+    config: &TaintConfig,
+    facts: &FactTable,
+    mut progress_cb: Option<ScanProgressCallback<'_>>,
+) -> ScanResult {
     // Bundle-learned source patterns widen the config: a `.frc` bundle
     // teaches new framework sources without touching the built-in tables.
     // Local mutable copy; the caller's config stays shared and unchanged.
@@ -299,6 +376,17 @@ pub fn scan_prepared(
             prepared.irs.len(),
             crate::debug_flags::rss_kb()
         );
+    }
+
+    if let Some(ref mut cb) = progress_cb {
+        cb(&ScanProgress {
+            phase: "Building SVFG",
+            completed_files: prepared.files().len(),
+            total_files: prepared.submitted,
+            current_file: None,
+            error_count: prepared.lower_errors.len(),
+            peak_rss_kb: crate::debug_flags::peak_rss_kb(),
+        });
     }
 
     // The program graph is built first: non-dataflow checks that walk
@@ -335,6 +423,18 @@ pub fn scan_prepared(
         fn_file: &prepared.fn_file,
         file_package_imports: &prepared.file_package_imports,
     };
+
+    if let Some(ref mut cb) = progress_cb {
+        cb(&ScanProgress {
+            phase: "Policy Checks",
+            completed_files: prepared.files().len(),
+            total_files: prepared.submitted,
+            current_file: None,
+            error_count: prepared.lower_errors.len(),
+            peak_rss_kb: crate::debug_flags::peak_rss_kb(),
+        });
+    }
+
     let (checker_findings, check_telemetry) = {
         let t = Instant::now();
         let (found, check_telemetry) = checks::check_all_with_telemetry(
@@ -357,6 +457,17 @@ pub fn scan_prepared(
         (found, check_telemetry)
     };
 
+    if let Some(ref mut cb) = progress_cb {
+        cb(&ScanProgress {
+            phase: "Taint Analysis",
+            completed_files: prepared.files().len(),
+            total_files: prepared.submitted,
+            current_file: None,
+            error_count: prepared.lower_errors.len(),
+            peak_rss_kb: crate::debug_flags::peak_rss_kb(),
+        });
+    }
+
     let fn_file = &prepared.fn_file;
     let file_source = &prepared.file_source;
     let mut engine = BackwardTaintEngine::new(&prog, config)
@@ -371,6 +482,7 @@ pub fn scan_prepared(
         engine.run();
         millis_since(t)
     };
+
     if mem_probe {
         eprintln!(
             "[mem] after_taint findings={} rss_kb={}",

@@ -7,12 +7,14 @@
 mod baseline_tests;
 pub mod git;
 pub mod options;
+pub mod progress;
 pub mod reporting;
 pub mod watch;
 #[cfg(test)]
 mod watch_tests;
 
 pub use options::*;
+pub use progress::*;
 pub use reporting::*;
 pub use watch::{
     FileWatcher, POLL_INTERVAL, format_watch_finding, new_advisories, run_watch_loop,

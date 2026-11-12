@@ -30,7 +30,7 @@ needless_pass_by_value = "warn"
 
 [package]
 name = "frensense"
-version = "0.8.0"
+version = "0.8.1"
 authors = ["Friehub Developers"]
 edition = "2024"
 description = "Frensense: deterministic dataflow security scanner."
@@ -52,7 +52,7 @@ name = "frensense"
 path = "src/bin/frensense.rs"
 
 [dependencies]
-frensense-engine = { path = "frensense-engine", version = "0.8.0", features = ["serialize"] }
+frensense-engine = { path = "frensense-engine", version = "0.8.1", features = ["serialize"] }
 frensense-lang = { path = "frensense-lang", version = "0.8.0" }
 thiserror = "1.0"
 tracing = { version = "0.1", features = ["attributes"] }
