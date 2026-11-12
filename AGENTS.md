@@ -347,11 +347,17 @@ number reaches the dependents' manifests. Two things still need care:
   dependent's requirement keeps the same suffix. Drop the suffix from every
   dependent in the commit that cuts the final release (as the 0.8.0 cut did).
 
-**Mechanics.** Versions are set by hand in the manifests; the release workflow
-publishes **every publishable crate by name**, in dependency order
-(`frensense-lang frensense-engine frensense-bundler frensense`), with
-`cargo smart-release --bump keep --bump-dependencies keep`, which publishes
-exactly those manifest versions and skips `publish = false` crates.
+**Mechanics.** Versions are set by hand in the manifests; nothing bumps or
+rewrites them at publish time. The release workflow asks
+`release-matrix.py` which publishable crates are missing from crates.io and
+passes **only those names** to `cargo publish -p …`, which uploads them in
+dependency order and waits for each version to index before packaging its
+dependents. Naming the whole workspace is not an option: `cargo publish`
+treats an already-published version among the selected packages as a fatal
+error before uploading anything, so a partial release (one crate bumped, its
+siblings still at their published versions) would never publish. A crate-only
+run therefore names the moved crates and leaves the rest alone; a re-run after
+a half-finished publish names only what is still missing.
 
 A release is decided per crate, not by the root version alone:
 

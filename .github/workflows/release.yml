@@ -439,9 +439,10 @@ jobs:
     # new binary to build, and a skipped dependency would silently skip this
     # job - which is exactly the skip we are guarding against.
     needs: [prepare]
-    # Publish exactly when a crate's manifest version is not on crates.io yet;
-    # `prepare` decided that set, and the post-publish assertion below fails if
-    # any of it did not actually land.
+    # Publish exactly when a crate's manifest version is not on crates.io yet.
+    # `prepare` decides whether that is the case; the job recomputes the actual
+    # pending set on its own checkout, and the post-publish assertion below
+    # fails if any of it did not actually land.
     if: >-
       needs.prepare.outputs.should_release == 'true' &&
       needs.prepare.outputs.pending_count != '0'
@@ -460,37 +461,21 @@ jobs:
           # tag at all.
           ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
-      - name: Configure git identity
-        # `cargo smart-release --execute` rewrites the dependents' manifest
-        # requirements and then runs `git commit -am`. `prepare` configures an
-        # identity in its own checkout, but this job is a fresh clone with no
-        # author set, so the commit failed with "Failed to commit changed
-        # manifests" before a single crate was published.
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: stable
-      - name: Cache the release tooling
-        # `cargo install` builds cargo-smart-release and cargo-semver-checks
-        # from source, which costs five-plus minutes on every release. Both
-        # binaries are released as standalone executables here so a repeat run
-        # (and the next release on the same tool generation) skips the build.
-        # Bump the `v1` segment to force a refresh after a tool release or a
-        # runner-image change.
-        id: release-tools-cache
+      - name: Cache cargo-semver-checks
+        # `cargo install` builds cargo-semver-checks from source, which costs
+        # five-plus minutes on every release. The binary is released as a
+        # standalone executable here so a repeat run (and the next release on
+        # the same tool generation) skips the build. Bump the `v1` segment to
+        # force a refresh after a tool release or a runner-image change.
+        id: semver-checks-cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: |
-            ~/.cargo/bin/cargo-smart-release
-            ~/.cargo/bin/cargo-semver-checks
-          key: cargo-release-tools-${{ runner.os }}-v1
-      - name: Install cargo-smart-release
-        run: >-
-          command -v cargo-smart-release >/dev/null ||
-          cargo install cargo-smart-release --locked
+          path: ~/.cargo/bin/cargo-semver-checks
+          key: cargo-semver-checks-${{ runner.os }}-v1
       - name: Install cargo-semver-checks
         run: >-
           command -v cargo-semver-checks >/dev/null ||
@@ -501,37 +486,48 @@ jobs:
         # crate against its latest crates.io release and skips a crate that
         # moved its middle number (the bump absorbs the break).
         run: python3 .github/scripts/semver-gate.py --published
-      - name: Publish workspace crates in dependency order
-        # cargo-smart-release replaces the old hand-rolled publish loop
-        # (curl + `sleep 35` + `cargo publish --allow-dirty`). It resolves
-        # the dependency graph, publishes lang -> engine -> bundler -> frensense
-        # in topological order, and waits on the crates.io index properly.
+      - name: Compute the pending crate set
+        # Recomputed on the checked-out release ref instead of trusting the
+        # `prepare` matrix: that ran on the dispatch commit, while this job may
+        # check out the tag, and a crate can land on crates.io in between.
+        id: pending
+        run: python3 .github/scripts/release-matrix.py --github-output "$GITHUB_OUTPUT"
+      - name: Publish the pending crates in dependency order
+        # `cargo publish` is the release driver because the registry, not a git
+        # tag, decides what is left to do. Given several `-p` packages it
+        # uploads them in dependency order and waits for each version to appear
+        # in the index before it packages the crates that depend on it, which
+        # is the crates.io behaviour this job needs.
+        #
+        # Naming only the pending set is mandatory, not a cosmetic choice: for
+        # every selected package `cargo publish` runs `verify_unpublished`
+        # before uploading anything, and an already-published version is a hard
+        # error there. `cargo smart-release --bump keep` had the same limit in a
+        # different place ("'frensense-lang' is unchanged"), so naming all four
+        # crates made a partial release (engine and frensense bumped, lang and
+        # bundler still at their published versions) impossible to publish.
         #
         # Strictness:
-        #   - No `--allow-dirty`: a clean tag checkout is required; smart-release
-        #     refuses to publish from a dirty tree.
-        #   - `--bump keep --bump-dependencies keep`: versions are set by hand in
-        #     the manifests (the `chore(release)` commit); we publish exactly those.
-        #   - `--no-changelog`: the curated per-crate CHANGELOG.md files are
-        #     preserved verbatim, not regenerated from commits.
-        #   - `--no-tag --no-push`: the `prepare` job already created the release
-        #     tag; this job only publishes.
+        #   - No `--allow-dirty`: a clean release checkout is required.
+        #   - Versions come from the manifests; nothing is bumped or rewritten
+        #     here, and no release commit is created.
         #   - `frensense-packgen` / `frensense-devtools` are `publish = false`
-        #     and are skipped automatically.
-        #
-        # Every publishable crate is named explicitly, in dependency order. Naming
-        # only `frensense` let smart-release decide whether its path dependencies
-        # needed publishing; naming them all makes the set this run may publish
-        # visible in the log, and `--bump keep` still publishes exactly the
-        # manifest versions (an already-published version is a no-op).
+        #     and are never in the pending set.
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          cargo smart-release --execute \
-            --bump keep --bump-dependencies keep \
-            --no-changelog --no-changelog-preview --no-changelog-github-release \
-            --no-tag --no-push \
-            frensense-lang frensense-engine frensense-bundler frensense
+          set -euo pipefail
+          PENDING="${{ steps.pending.outputs.pending }}"
+          if [[ -z "${PENDING// /}" ]]; then
+            echo "Every publishable crate at its manifest version is on crates.io; nothing to publish."
+            exit 0
+          fi
+          args=()
+          for entry in $PENDING; do
+            echo "pending: $entry"
+            args+=(-p "${entry%@*}")
+          done
+          cargo publish "${args[@]}"
 
       - name: Assert every publishable crate is on crates.io
         # A release is not done when the named crate publishes: each crate

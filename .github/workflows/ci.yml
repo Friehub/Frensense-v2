@@ -193,7 +193,7 @@ jobs:
 
   # --- Release Graph Validation ---
   release-graph:
-    name: Release Graph (smart-release)
+    name: Release Graph (cargo publish)
     runs-on: ubuntu-latest
     needs: [qa]
     permissions:
@@ -210,22 +210,16 @@ jobs:
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: stable
-      - name: Setup Rust Cache
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
-      - name: Install cargo-smart-release
-        run: cargo install cargo-smart-release --locked
       - name: Validate release graph (dry-run)
-        # Fails if the workspace cannot be released coherently: inconsistent
-        # inter-crate version requirements, missing publishable deps, etc.
-        # Versions are hand-set, so `--bump keep` validates them as-is. Every
-        # publishable crate is named, exactly as the release workflow does, so
-        # this dry run exercises the set that will actually be published.
-        run: |
-          cargo smart-release \
-            --bump keep --bump-dependencies keep \
-            --no-changelog --no-changelog-preview --no-changelog-github-release \
-            --no-tag --no-push \
-            frensense-lang frensense-engine frensense-bundler frensense
+        # Runs the same publish checks the release job runs, without uploading:
+        # every publishable crate must package into a valid `.crate`, declare a
+        # version for each path dependency, and only depend on crates that can
+        # be on crates.io. `publish = false` members are skipped automatically,
+        # and a version already on the registry is only a warning in dry-run
+        # mode, so this validates the graph on every commit rather than only on
+        # a release commit. `--no-verify` skips the per-crate build; Rust Tests
+        # already built the workspace.
+        run: cargo publish --workspace --dry-run --no-verify
 
   # --- Correctness (Rust) ---
   test-rust:
