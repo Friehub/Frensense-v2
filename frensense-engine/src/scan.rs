@@ -23,58 +23,20 @@ use crate::telemetry::{
 };
 use frensense_lang::spec::{Export, Import, ModuleItem};
 
-/// Real-time progress update emitted during scanning.
-#[derive(Debug, Clone)]
-pub struct ScanProgress<'a> {
-    pub phase: &'a str,
-    pub completed_files: usize,
-    pub total_files: usize,
-    pub current_file: Option<&'a str>,
-    pub error_count: usize,
-    pub peak_rss_kb: u64,
-}
-
-pub type ScanProgressCallback<'a> = &'a mut (dyn FnMut(&ScanProgress<'_>) + Send);
-
 /// Scan a set of source files under a config and fact table.
 ///
-/// `sources` maps file path → extension (used to pick the language spec).
+/// `files` maps file path → extension (used to pick the language spec).
+/// Files are lowered one at a time through [`ProgramBuilder`] and then
+/// analyzed as one interprocedural program.
 pub fn scan(
     files: &[(String, String, String)], // (path, source, ext)
     config: &TaintConfig,
     facts: &FactTable,
 ) -> ScanResult {
-    scan_with_progress(files, config, facts, None)
-}
-
-/// Scan a set of source files under a config and fact table with an optional progress callback.
-pub fn scan_with_progress(
-    files: &[(String, String, String)], // (path, source, ext)
-    config: &TaintConfig,
-    facts: &FactTable,
-    mut progress_cb: Option<&mut (dyn FnMut(&ScanProgress<'_>) + Send)>,
-) -> ScanResult {
     let started = Instant::now();
-    let prepare_cb = progress_cb
-        .as_mut()
-        .map(|cb| &mut **cb as &mut (dyn FnMut(&ScanProgress<'_>) + Send));
-    let p = match prepare_with_facts_with_progress(files, Some(facts), prepare_cb) {
-        Ok(p) => p,
-        Err(e) => {
-            let mut telemetry = ScanTelemetry::default();
-            telemetry.errors.push(e.clone());
-            return ScanResult {
-                findings: Vec::new(),
-                located: Vec::new(),
-                located_checker: Vec::new(),
-                checker: Vec::new(),
-                errors: vec![e],
-                analysis_incomplete: Vec::new(),
-                telemetry,
-            };
-        }
-    };
-    let mut result = scan_prepared_with_progress(&p, config, facts, progress_cb);
+    let mut builder = ProgramBuilder::new();
+    add_sorted(&mut builder, files, Some(facts));
+    let mut result = scan_prepared(&builder.finish(), config, facts);
     result.telemetry.phases.push(PhaseTiming {
         phase: "total".into(),
         ms: millis_since(started),
@@ -82,7 +44,30 @@ pub fn scan_with_progress(
     result
 }
 
-
+/// Scan one source file: the single-file capability.
+///
+/// Only flows whose source and sink both live in `source` can be found. A
+/// flow that starts here and ends in another file is the program
+/// capability's job ([`scan`] / [`scan_prepared`]); a frontend picks the one
+/// that matches what it has in scope (an editor buffer, one path from
+/// `frensense_scan_file`, or a whole repository).
+pub fn scan_file(
+    path: &str,
+    source: &str,
+    ext: &str,
+    config: &TaintConfig,
+    facts: &FactTable,
+) -> ScanResult {
+    let started = Instant::now();
+    let mut builder = ProgramBuilder::new();
+    builder.add_file(path, source, ext, Some(facts));
+    let mut result = scan_prepared(&builder.finish(), config, facts);
+    result.telemetry.phases.push(PhaseTiming {
+        phase: "total".into(),
+        ms: millis_since(started),
+    });
+    result
+}
 
 /// A program lowered once, ready for repeated scans under different fact
 /// tables. The replay gate lowers each family exactly once and re-scans it
@@ -119,6 +104,16 @@ pub struct PreparedProgram {
     pub file_timings: Vec<FileTiming>,
 }
 
+impl std::fmt::Debug for PreparedProgram {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PreparedProgram")
+            .field("files", &self.file_timings.len())
+            .field("functions", &self.irs.len())
+            .field("lower_errors", &self.lower_errors.len())
+            .finish()
+    }
+}
+
 /// Stack size for the per-file lowering thread (the default 4 MiB overflows
 /// on deeply nested real-world functions; one such overflow used to abort the
 /// process and lose every file's findings).
@@ -130,6 +125,10 @@ const LOWER_STACK_BYTES: usize = 32 * 1024 * 1024;
 /// parsed. A panic is contained here and reported as that file's error.
 type IsolatedLowering = (FxHashMap<String, FunctionIR>, bool, Vec<CapHit>);
 
+#[allow(
+    clippy::disallowed_methods,
+    reason = "lowering runs on a dedicated 32 MiB thread because real-world deeply nested functions overflow the default 4 MiB stack; stacker cannot recover a stack overflow that happens inside the tree-sitter lowering call frames"
+)]
 fn lower_isolated(
     path: &str,
     source: &str,
@@ -156,134 +155,262 @@ fn lower_isolated(
     }
 }
 
+/// One file lowered by a [`ProgramBuilder`], before the program-wide merge.
+#[derive(Debug)]
+struct LoweredFile<'a> {
+    path: String,
+    source: &'a str,
+    ext: String,
+    functions: FxHashMap<String, FunctionIR>,
+    parse_partial: bool,
+    caps: Vec<CapHit>,
+    ms: u128,
+    error: Option<String>,
+}
+
+/// Lowering outcome for one file, returned by [`ProgramBuilder::add_file`].
+///
+/// This is the per-file feedback a frontend renders as progress: which file
+/// finished, how many functions it produced, whether the parse tree was
+/// broken, and why lowering failed when it did.
+#[derive(Debug, Clone)]
+pub struct FileReport {
+    /// Path exactly as submitted.
+    pub path: String,
+    /// Functions the file lowered to (`0` when lowering failed).
+    pub functions: usize,
+    /// Milliseconds spent lowering this file.
+    pub ms: u128,
+    /// The parse tree had errors; analysis used the recovered tree.
+    pub parse_partial: bool,
+    /// Why lowering failed. The file is left out of the program and the
+    /// reason is recorded in the scan's error accounting too.
+    pub error: Option<String>,
+}
+
+/// Builds a [`PreparedProgram`] one file at a time.
+///
+/// This is the per-file capability behind [`scan`]. A frontend submits files
+/// itself — so it owns the loop, the counter, any parallelism, and early
+/// cancellation — and acts on each [`FileReport`] immediately.
+/// [`finish`](Self::finish) then merges the submitted files deterministically
+/// and resolves modules. Lowering is local, so submission order does not
+/// affect the result.
+///
+/// The builder borrows each file's source text for the lifetime of the
+/// buffer: a scan never keeps a second copy of the corpus in memory.
+#[derive(Debug, Default)]
+pub struct ProgramBuilder<'a> {
+    files: Vec<LoweredFile<'a>>,
+}
+
+impl<'a> ProgramBuilder<'a> {
+    /// A builder with no files.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Lower one source file and remember it for [`finish`](Self::finish).
+    ///
+    /// A lowering failure is contained here: the file is retained as an
+    /// error in the accounting and reported through [`FileReport::error`],
+    /// exactly as [`scan`] reports a failed file.
+    pub fn add_file(
+        &mut self,
+        path: &str,
+        source: &'a str,
+        ext: &str,
+        facts: Option<&FactTable>,
+    ) -> FileReport {
+        let started = Instant::now();
+        let lowered = lower_isolated(path, source, ext, facts);
+        let ms = millis_since(started);
+        match lowered {
+            Ok((functions, parse_partial, caps)) => {
+                let count = functions.len();
+                self.files.push(LoweredFile {
+                    path: path.to_owned(),
+                    source,
+                    ext: ext.to_owned(),
+                    functions,
+                    parse_partial,
+                    caps,
+                    ms,
+                    error: None,
+                });
+                FileReport {
+                    path: path.to_owned(),
+                    functions: count,
+                    ms,
+                    parse_partial,
+                    error: None,
+                }
+            }
+            Err(error) => {
+                self.files.push(LoweredFile {
+                    path: path.to_owned(),
+                    source,
+                    ext: ext.to_owned(),
+                    functions: FxHashMap::default(),
+                    parse_partial: false,
+                    caps: Vec::new(),
+                    ms,
+                    error: Some(error.clone()),
+                });
+                FileReport {
+                    path: path.to_owned(),
+                    functions: 0,
+                    ms,
+                    parse_partial: false,
+                    error: Some(error),
+                }
+            }
+        }
+    }
+
+    /// Merge every submitted file into one program.
+    ///
+    /// Submission order does not matter: files are merged path-sorted, so a
+    /// colliding function name rekeys the same way on every run.
+    #[must_use]
+    pub fn finish(mut self) -> PreparedProgram {
+        // Deterministic merge order (path-sorted): which twin of a colliding
+        // name keeps the bare key must not depend on submission order.
+        self.files.sort_by(|a, b| a.path.cmp(&b.path));
+        let submitted = self.files.len();
+        // Module resolution consumes the whole input list, including files
+        // whose lowering failed: a failed twin still declares imports that
+        // another file's resolution may need to see. Paths and extensions are
+        // owned; sources stay borrowed from the caller's buffers.
+        let program: Vec<(String, &'a str, String)> = self
+            .files
+            .iter()
+            .map(|f| (f.path.clone(), f.source, f.ext.clone()))
+            .collect();
+
+        let mut irs: FxHashMap<String, FunctionIR> = FxHashMap::default();
+        let mut fn_file: FxHashMap<String, String> = FxHashMap::default();
+        let mut file_source: FxHashMap<String, String> = FxHashMap::default();
+        let mut lower_errors: Vec<String> = Vec::new();
+        let mut lower_failed_files: Vec<String> = Vec::new();
+        let mut lower_caps: Vec<CapHit> = Vec::new();
+        let mut parse_partial_files: Vec<String> = Vec::new();
+        let mut file_timings: Vec<FileTiming> = Vec::new();
+
+        for file in self.files {
+            if let Some(error) = file.error {
+                lower_failed_files.push(file.path);
+                lower_errors.push(error);
+                continue;
+            }
+            let LoweredFile {
+                path,
+                source,
+                functions,
+                parse_partial,
+                caps,
+                ms,
+                ..
+            } = file;
+            lower_caps.extend(caps);
+            if parse_partial {
+                parse_partial_files.push(path.clone());
+            }
+            file_timings.push(FileTiming {
+                file: path.clone(),
+                ms,
+                functions: functions.len(),
+            });
+            for (name, mut ir) in functions {
+                file_source
+                    .entry(path.clone())
+                    .or_insert_with(|| source.to_owned());
+                // Function keys are only unique per file: byte-offset names
+                // (`<fn@505>`) and common method names (`set`) collide across
+                // files. First-wins dropped the other file's whole function
+                // silently (the forgedReview/noSqlReviews miss); rekey the
+                // incoming twin under its file instead. `ir.name` tracks the
+                // key so findings, `fn_file`, and checker locations stay in
+                // lockstep.
+                let key = if irs.contains_key(&name) {
+                    format!("{path}::{name}")
+                } else {
+                    name
+                };
+                ir.name = key.clone();
+                fn_file.entry(key.clone()).or_insert_with(|| path.clone());
+                irs.insert(key, ir);
+            }
+        }
+
+        let ir_names: rustc_hash::FxHashSet<String> = irs.keys().cloned().collect();
+        let program_refs: Vec<(&str, &str, &str)> = program
+            .iter()
+            .map(|(path, source, ext)| (path.as_str(), *source, ext.as_str()))
+            .collect();
+        let res = crate::graph::module::ModuleAliasResolver::build_from_refs(
+            &program_refs,
+            &ir_names,
+            &fn_file,
+        );
+
+        PreparedProgram {
+            irs,
+            fn_file,
+            file_source,
+            file_aliases: res.file_aliases,
+            file_package_imports: res.file_package_imports,
+            file_imports: res.file_imports,
+            file_exports: res.file_exports,
+            file_module_items: res.file_module_items,
+            lower_errors,
+            parse_partial: parse_partial_files,
+            submitted,
+            lower_caps,
+            lower_failed_files,
+            file_timings,
+        }
+    }
+}
+
 /// Lower every file once, remembering which file each function came from
 /// (functions are keyed by name; first file wins on collision).
 ///
 /// # Errors
-/// Returns the first lowering error, if any.
+/// Lowering failures are recorded in the returned program's error accounting
+/// rather than returned: a scan continues without the file and says so.
 pub fn prepare(files: &[(String, String, String)]) -> Result<PreparedProgram, String> {
     prepare_with_facts(files, None)
 }
 
 /// Lower every file once with dynamic bundle facts.
+///
+/// # Errors
+/// Lowering failures are recorded in the returned program's error accounting
+/// rather than returned: a scan continues without the file and says so.
 pub fn prepare_with_facts(
     files: &[(String, String, String)],
     facts: Option<&FactTable>,
 ) -> Result<PreparedProgram, String> {
-    prepare_with_facts_with_progress(files, facts, None)
+    let mut builder = ProgramBuilder::new();
+    add_sorted(&mut builder, files, facts);
+    Ok(builder.finish())
 }
 
-/// Lower every file once with dynamic bundle facts and an optional progress callback.
-pub fn prepare_with_facts_with_progress(
-    files: &[(String, String, String)],
+/// Submit `files` in path-sorted order, the order the pre-builder lowering
+/// loop used. Determinism lives in [`ProgramBuilder::finish`]; this only
+/// keeps the convenience entry points byte-for-byte compatible.
+fn add_sorted<'a>(
+    builder: &mut ProgramBuilder<'a>,
+    files: &'a [(String, String, String)],
     facts: Option<&FactTable>,
-    mut progress_cb: Option<ScanProgressCallback<'_>>,
-) -> Result<PreparedProgram, String> {
-    let mut irs: FxHashMap<String, FunctionIR> = FxHashMap::default();
-    let mut fn_file: FxHashMap<String, String> = FxHashMap::default();
-    let mut file_source: FxHashMap<String, String> = FxHashMap::default();
-    // Deterministic merge order (path-sorted): which twin of a colliding
-    // name keeps the bare key must not depend on directory walk order.
-    let mut ordered: Vec<&(String, String, String)> = files.iter().collect();
+) {
+    let mut ordered: Vec<&'a (String, String, String)> = files.iter().collect();
     ordered.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut lower_errors: Vec<String> = Vec::new();
-    let mut lower_failed_files: Vec<String> = Vec::new();
-    let mut lower_caps: Vec<CapHit> = Vec::new();
-    let mut parse_partial: Vec<String> = Vec::new();
-    let submitted = ordered.len();
-    let mut file_timings: Vec<FileTiming> = Vec::new();
-    for (idx, (path, source, ext)) in ordered.into_iter().enumerate() {
-        if let Some(ref mut cb) = progress_cb {
-            cb(&ScanProgress {
-                phase: "Lowering",
-                completed_files: idx,
-                total_files: submitted,
-                current_file: Some(path.as_str()),
-                error_count: lower_errors.len(),
-                peak_rss_kb: crate::debug_flags::peak_rss_kb(),
-            });
-        }
-        let started = Instant::now();
-        let lowered = lower_isolated(path, source, ext, facts);
-        let (fns, parse_broken, caps) = match lowered {
-            Ok(ok) => ok,
-            Err(reason) => {
-                lower_failed_files.push(path.clone());
-                lower_errors.push(reason);
-                if let Some(ref mut cb) = progress_cb {
-                    cb(&ScanProgress {
-                        phase: "Lowering",
-                        completed_files: idx + 1,
-                        total_files: submitted,
-                        current_file: Some(path.as_str()),
-                        error_count: lower_errors.len(),
-                        peak_rss_kb: crate::debug_flags::peak_rss_kb(),
-                    });
-                }
-                continue;
-            }
-        };
-        lower_caps.extend(caps);
-        if parse_broken {
-            parse_partial.push(path.clone());
-        }
-        file_timings.push(FileTiming {
-            file: path.clone(),
-            ms: millis_since(started),
-            functions: fns.len(),
-        });
-        for (name, mut ir) in fns {
-            file_source
-                .entry(path.clone())
-                .or_insert_with(|| source.clone());
-            // Function keys are only unique per file: byte-offset names
-            // (`<fn@505>`) and common method names (`set`) collide across
-            // files. First-wins dropped the other file's whole function
-            // silently (the forgedReview/noSqlReviews miss); rekey the
-            // incoming twin under its file instead. `ir.name` tracks the
-            // key so findings, `fn_file`, and checker locations stay in
-            // lockstep.
-            let key = if irs.contains_key(&name) {
-                format!("{path}::{name}")
-            } else {
-                name
-            };
-            ir.name = key.clone();
-            fn_file.entry(key.clone()).or_insert_with(|| path.clone());
-            irs.insert(key, ir);
-        }
-        if let Some(ref mut cb) = progress_cb {
-            cb(&ScanProgress {
-                phase: "Lowering",
-                completed_files: idx + 1,
-                total_files: submitted,
-                current_file: Some(path.as_str()),
-                error_count: lower_errors.len(),
-                peak_rss_kb: crate::debug_flags::peak_rss_kb(),
-            });
-        }
+    for (path, source, ext) in ordered {
+        builder.add_file(path, source, ext, facts);
     }
-
-
-    let ir_names: rustc_hash::FxHashSet<String> = irs.keys().cloned().collect();
-    let res = crate::graph::module::ModuleAliasResolver::build(files, &ir_names, &fn_file);
-
-    Ok(PreparedProgram {
-        irs,
-        fn_file,
-        file_source,
-        file_aliases: res.file_aliases,
-        file_package_imports: res.file_package_imports,
-        file_imports: res.file_imports,
-        file_exports: res.file_exports,
-        file_module_items: res.file_module_items,
-        lower_errors,
-        parse_partial,
-        submitted,
-        lower_caps,
-        lower_failed_files,
-        file_timings,
-    })
 }
 
 impl PreparedProgram {
@@ -333,20 +460,14 @@ impl PreparedProgram {
 
 /// Scan a [`PreparedProgram`] under a config and fact table. Same semantics
 /// as [`scan`]; the lowering is reused across calls.
+#[allow(
+    clippy::disallowed_macros,
+    reason = "the FRENSdbg_MEM probes are process-level debug output, printed only when that debug flag is enabled"
+)]
 pub fn scan_prepared(
     prepared: &PreparedProgram,
     config: &TaintConfig,
     facts: &FactTable,
-) -> ScanResult {
-    scan_prepared_with_progress(prepared, config, facts, None)
-}
-
-/// Scan a [`PreparedProgram`] with an optional progress callback.
-pub fn scan_prepared_with_progress(
-    prepared: &PreparedProgram,
-    config: &TaintConfig,
-    facts: &FactTable,
-    mut progress_cb: Option<ScanProgressCallback<'_>>,
 ) -> ScanResult {
     // Bundle-learned source patterns widen the config: a `.frc` bundle
     // teaches new framework sources without touching the built-in tables.
@@ -376,17 +497,6 @@ pub fn scan_prepared_with_progress(
             prepared.irs.len(),
             crate::debug_flags::rss_kb()
         );
-    }
-
-    if let Some(ref mut cb) = progress_cb {
-        cb(&ScanProgress {
-            phase: "Building SVFG",
-            completed_files: prepared.files().len(),
-            total_files: prepared.submitted,
-            current_file: None,
-            error_count: prepared.lower_errors.len(),
-            peak_rss_kb: crate::debug_flags::peak_rss_kb(),
-        });
     }
 
     // The program graph is built first: non-dataflow checks that walk
@@ -424,17 +534,6 @@ pub fn scan_prepared_with_progress(
         file_package_imports: &prepared.file_package_imports,
     };
 
-    if let Some(ref mut cb) = progress_cb {
-        cb(&ScanProgress {
-            phase: "Policy Checks",
-            completed_files: prepared.files().len(),
-            total_files: prepared.submitted,
-            current_file: None,
-            error_count: prepared.lower_errors.len(),
-            peak_rss_kb: crate::debug_flags::peak_rss_kb(),
-        });
-    }
-
     let (checker_findings, check_telemetry) = {
         let t = Instant::now();
         let (found, check_telemetry) = checks::check_all_with_telemetry(
@@ -456,17 +555,6 @@ pub fn scan_prepared_with_progress(
         });
         (found, check_telemetry)
     };
-
-    if let Some(ref mut cb) = progress_cb {
-        cb(&ScanProgress {
-            phase: "Taint Analysis",
-            completed_files: prepared.files().len(),
-            total_files: prepared.submitted,
-            current_file: None,
-            error_count: prepared.lower_errors.len(),
-            peak_rss_kb: crate::debug_flags::peak_rss_kb(),
-        });
-    }
 
     let fn_file = &prepared.fn_file;
     let file_source = &prepared.file_source;
@@ -821,5 +909,84 @@ mod collision_tests {
                 .map(|c| (&c.finding.rule, &c.finding.function, c.line))
                 .collect::<Vec<_>>()
         );
+    }
+}
+
+#[cfg(test)]
+mod program_builder_tests {
+    use super::{ProgramBuilder, scan_file, scan_prepared};
+    use crate::analysis::taint::facts::seeded_tables;
+
+    fn ts_tables() -> (
+        crate::analysis::taint::config::TaintConfig,
+        crate::analysis::taint::facts::FactTable,
+    ) {
+        seeded_tables(["ts"])
+    }
+
+    /// Lowering is local and `finish` merges path-sorted, so the order a
+    /// frontend submits files in must not change what the scan finds.
+    #[test]
+    fn submission_order_does_not_change_findings() {
+        const PREFIX: &str = "export function wrap () {\n  return";
+        let a = format!("{PREFIX} (req) => {{\n    noop(1)\n  }}\n}}\n");
+        let b = format!("{PREFIX} (req) => {{\n    exec(req)\n  }}\n}}\n");
+        let (config, facts) = ts_tables();
+
+        let mut forward = ProgramBuilder::new();
+        forward.add_file("app/a.ts", &a, "ts", Some(&facts));
+        forward.add_file("app/b.ts", &b, "ts", Some(&facts));
+        let mut reverse = ProgramBuilder::new();
+        reverse.add_file("app/b.ts", &b, "ts", Some(&facts));
+        reverse.add_file("app/a.ts", &a, "ts", Some(&facts));
+
+        let first = scan_prepared(&forward.finish(), &config, &facts);
+        let second = scan_prepared(&reverse.finish(), &config, &facts);
+        let coords = |r: &super::ScanResult| {
+            r.located
+                .iter()
+                .map(|l| (l.file.clone(), l.line, l.finding.sink.clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(coords(&first), coords(&second));
+    }
+
+    /// The single-file capability lowers and scans exactly one file.
+    #[test]
+    fn scan_file_scans_one_file() {
+        let (config, facts) = ts_tables();
+        let src = "app.get(\"/x\", (req, res) => { eval(req.body.cmd); });\n";
+        let result = scan_file("app/handler.ts", src, "ts", &config, &facts);
+        assert!(result.errors.is_empty(), "scan errors: {:?}", result.errors);
+        assert!(
+            result.located.iter().any(|l| l.finding.sink == "eval"),
+            "single-file scan missed the flow: {:?}",
+            result
+                .located
+                .iter()
+                .map(|l| (&l.file, &l.finding.sink))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// A file that cannot be lowered reports its error on the add_file call
+    /// and leaves the rest of the program scannable; it never aborts.
+    #[test]
+    fn add_file_reports_failure_and_keeps_the_program() {
+        let (config, facts) = ts_tables();
+        let mut builder = ProgramBuilder::new();
+        let good = builder.add_file(
+            "app/good.ts",
+            "export function f() {}\n",
+            "ts",
+            Some(&facts),
+        );
+        assert!(good.error.is_none(), "good file: {good:?}");
+        let bad = builder.add_file("app/bad.zzz", "not source", "zzz", Some(&facts));
+        assert!(bad.error.is_some(), "unknown extension must fail lowering");
+
+        let result = scan_prepared(&builder.finish(), &config, &facts);
+        assert_eq!(result.telemetry.input.failed, 1);
+        assert_eq!(result.telemetry.input.scanned, 1);
     }
 }

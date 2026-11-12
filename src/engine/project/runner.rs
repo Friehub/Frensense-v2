@@ -30,6 +30,26 @@ impl Engine {
     /// Returns an error if the path does not exist or a bundle cannot be
     /// loaded.
     pub fn run(&mut self, root: &Path) -> Result<Vec<Advisory>> {
+        self.run_observed(root, &mut crate::cli::NoopObserver)
+    }
+
+    /// Scan a directory tree or a single file, reporting progress to
+    /// `observer`.
+    ///
+    /// The engine has no progress API: this runner drives
+    /// [`frensense_engine::scan::ProgramBuilder`] one file at a time and
+    /// forwards each [`frensense_engine::scan::FileReport`] as a progress
+    /// step. A frontend with no UI passes [`crate::cli::NoopObserver`] via
+    /// [`run`](Self::run).
+    ///
+    /// # Errors
+    /// Returns an error if the path does not exist or a bundle cannot be
+    /// loaded.
+    pub fn run_observed(
+        &mut self,
+        root: &Path,
+        observer: &mut dyn crate::cli::ScanObserver,
+    ) -> Result<Vec<Advisory>> {
         // A reusable Engine may serve multiple scans (MCP/LSP); each `run`
         // contributes fresh telemetry, so clear its previous totals first.
         self.telemetry = frensense_engine::telemetry::ScanTelemetry::default();
@@ -142,17 +162,15 @@ impl Engine {
         let total_files = files.len();
         let read_failures_count = read_failures.len();
         let mut global_completed = 0usize;
-        if let Some(ref cb) = self.progress_callback {
-            cb(&frensense_engine::scan::ScanProgress {
-                phase: "Collecting",
-                completed_files: 0,
-                total_files: total_files.max(paths.len()),
-                current_file: None,
-                error_count: read_failures_count,
-                peak_rss_kb: frensense_engine::debug_flags::peak_rss_kb(),
-            });
-        }
+        observer.progress(
+            "Collecting",
+            0,
+            total_files.max(paths.len()),
+            None,
+            read_failures_count,
+        );
         let mut result = scan::ScanResult::default();
+        let observer = std::sync::Mutex::new(observer);
         for group in groups.values() {
             // Built-in config + fact table from the language spec present.
             let (mut config, mut facts) = build_spec_tables(group);
@@ -179,9 +197,9 @@ impl Engine {
                 config.sources.insert(pattern.to_string());
             }
             facts.max_complexity = self.max_complexity;
-            let progress_cb = self.progress_callback.clone();
             let group_offset = global_completed;
             let group_total = total_files.max(paths.len());
+            let observer = &observer;
             let mut part = std::thread::scope(|scope| {
                 let failed_files: Vec<String> = group.iter().map(|f| f.0.clone()).collect();
                 let failed_result = |message: String| {
@@ -200,26 +218,54 @@ impl Engine {
                     .name("frensense-scanner-group".into())
                     .stack_size(32 * 1024 * 1024)
                     .spawn_scoped(scope, move || {
-                        let mut cb_closure = progress_cb.as_ref().map(|cb| {
-                            let cb = std::sync::Arc::clone(cb);
-                            move |p: &frensense_engine::scan::ScanProgress<'_>| {
-                                let combined = frensense_engine::scan::ScanProgress {
-                                    phase: p.phase,
-                                    completed_files: group_offset + p.completed_files,
-                                    total_files: group_total,
-                                    current_file: p.current_file,
-                                    error_count: read_failures_count + p.error_count,
-                                    peak_rss_kb: p.peak_rss_kb,
-                                };
-                                cb(&combined);
+                        // The runner owns the per-file loop, so progress is
+                        // just the loop counter it already has; the engine
+                        // exposes per-file lowering, not a progress hook.
+                        let started = std::time::Instant::now();
+                        let mut builder = scan::ProgramBuilder::new();
+                        let mut errors = read_failures_count;
+                        for (idx, (path, source, ext)) in group.iter().enumerate() {
+                            if let Ok(mut sink) = observer.lock() {
+                                sink.progress(
+                                    "Lowering",
+                                    group_offset + idx,
+                                    group_total,
+                                    Some(path.as_str()),
+                                    errors,
+                                );
                             }
-                        });
-                        let progress_ref = cb_closure.as_mut().map(|f| {
-                            f as &mut (dyn FnMut(&frensense_engine::scan::ScanProgress<'_>) + Send)
-                        });
-                        scan::scan_with_progress(group, &config, &facts, progress_ref)
-                    })
-                {
+                            let report = builder.add_file(path, source, ext, Some(&facts));
+                            if report.error.is_some() {
+                                errors += 1;
+                            }
+                        }
+                        if let Ok(mut sink) = observer.lock() {
+                            sink.progress(
+                                "Lowering",
+                                group_offset + group.len(),
+                                group_total,
+                                None,
+                                errors,
+                            );
+                            sink.progress(
+                                "Analyzing",
+                                group_offset + group.len(),
+                                group_total,
+                                None,
+                                errors,
+                            );
+                        }
+                        let mut part = scan::scan_prepared(&builder.finish(), &config, &facts);
+                        part.telemetry
+                            .phases
+                            .push(frensense_engine::telemetry::PhaseTiming {
+                                phase: "total".into(),
+                                ms: std::time::Instant::now()
+                                    .duration_since(started)
+                                    .as_millis(),
+                            });
+                        part
+                    }) {
                     Ok(handle) => match handle.join() {
                         Ok(result) => result,
                         Err(_) => failed_result("scanner worker thread panicked".into()),

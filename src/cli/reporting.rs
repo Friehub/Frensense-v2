@@ -160,16 +160,25 @@ pub fn print_scan_summary_detailed(
     println!("============================= Scan Summary =============================");
     println!("Target:             {}", input_path.display());
     println!("Scan Duration:      {:.2}s", duration.as_secs_f64());
-    let peak_rss = frensense_engine::debug_flags::peak_rss_kb();
+    let peak_rss = crate::cli::progress::peak_rss_kb();
     if peak_rss > 0 {
-        println!("Peak Memory (RSS):  {}", crate::cli::progress::format_rss(peak_rss));
+        println!(
+            "Peak Memory (RSS):  {}",
+            crate::cli::progress::format_rss(peak_rss)
+        );
     }
     if telem.input.submitted > 0 {
         let errs = telem.input.failed + telem.errors.len();
         if errs > 0 {
-            println!("Files Scanned:      {}/{} ({errs} failed/errors)", telem.input.scanned, telem.input.submitted);
+            println!(
+                "Files Scanned:      {}/{} ({errs} failed/errors)",
+                telem.input.scanned, telem.input.submitted
+            );
         } else {
-            println!("Files Scanned:      {}/{}", telem.input.scanned, telem.input.submitted);
+            println!(
+                "Files Scanned:      {}/{}",
+                telem.input.scanned, telem.input.submitted
+            );
         }
     }
     println!("Findings Breakdown:");

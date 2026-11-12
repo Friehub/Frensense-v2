@@ -42,20 +42,23 @@ harness and keeps no changelog.
 - **Peak RSS in scan summary.** The `Scan Summary` block now reports
   `Peak Memory (RSS)` (Linux `VmHWM`, high-water mark) and `Files Scanned`
   as a `completed/total` ratio.
-- **`Engine::set_progress_callback`.** Library consumers embedding the
-  `frensense` crate can register a progress callback
-  (`Fn(&ScanProgress<'_>) + Send + Sync + UnwindSafe + 'static`) to receive
-  the same real-time updates programmatically.
+- **`Engine::run_observed`.** Library consumers embedding the `frensense`
+  crate can pass a `cli::ScanObserver` to receive the same real-time
+  updates programmatically; `Engine::run` remains the no-UI entry point
+  used by MCP, LSP and tests.
 
 ### Changed
 
-- `frensense-engine` bumped to `0.8.1`: `scan.rs` exposes the new
-  `ScanProgress<'_>` struct, `ScanProgressCallback` type alias, and
-  `scan_with_progress` / `prepare_with_facts_with_progress` /
-  `scan_prepared_with_progress` entry points. `debug_flags` gains the
-  safe `peak_rss_kb() -> u64` helper (reads `/proc/self/status` with no
-  `unsafe`). `cargo semver-checks` reports 202/202 checks pass against
-  the `0.8.0` baseline.
+- **Progress is driven by the consumer, not the engine.** Per-file lowering is
+  now the engine's `scan::ProgramBuilder` capability (`add_file` returns a
+  `FileReport` for each file; `finish` merges them deterministically), and the
+  CLI runner owns the loop that renders progress. Peak RSS moved to
+  `cli::progress::peak_rss_kb`, where process state belongs. The engine no
+  longer exposes `ScanProgress`, `ScanProgressCallback`, the three
+  `*_with_progress` functions, or `debug_flags::peak_rss_kb`, so a UI feature
+  can no longer grow the engine's public API. `frensense-engine` ships
+  `0.8.1` with an API that is purely additive over the published `0.8.0`;
+  dependents keep their `^0.8.0` requirement instead of moving in lockstep.
 
 ## [0.8.0]
 
