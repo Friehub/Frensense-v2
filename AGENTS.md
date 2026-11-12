@@ -130,6 +130,16 @@ spec seed → default pack → consumer bundle
    BenchmarkPython corpus or any benchmark. Tests must reproduce
    *real-world* patterns; the benchmark is an independent measurement, not
    a target list.
+5. **Consumer-facing UI lives in `frensense`, not `frensense-engine`.**
+   Terminal rendering (progress bars, spinners, ANSI/TTY handling), process
+   metrics (peak RSS), exit-code policy and report formatting are the
+   `frensense` crate's job. The engine exposes analysis *capabilities* and
+   observability (`tracing`, telemetry) — never a UI hook, progress callback,
+   or per-process metric. When a frontend needs a new seam (per-file
+   lowering, cancellation, incremental work), add it to the `scan` capability
+   surface **once** and let every frontend consume it; do not thread a
+   feature-specific callback through the engine API. A progress bar must not
+   be able to grow `pub` items.
 
 ## 5. The gate (run before every PR)
 

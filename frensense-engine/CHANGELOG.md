@@ -10,6 +10,35 @@ Built-in vocabulary tables live in `frensense-packgen`; the `.frc` envelope
 lives in `frensense-bundler`. Their changes appear here only when they alter
 what this crate does.
 
+## [0.8.1]
+
+### Added
+
+- **`ProgramBuilder`: per-file lowering as a first-class capability.**
+  `add_file(path, source, ext, facts)` lowers exactly one file and returns a
+  `FileReport` (functions produced, wall time, partial parse, lowering
+  error); `finish()` merges the submitted files path-sorted and resolves
+  modules. Lowering is local, so a frontend owns the loop, can parallelize
+  or stop early, and gets progress from the call it made — no callback and
+  no engine-owned UI state. This is the seam `scan` and
+  `prepare_with_facts` are now built on.
+- **`scan_file`: the single-file scan capability.** One file in, findings
+  whose source and sink both live in that file out. `scan` /
+  `scan_prepared` remain the interprocedural capability; the distinction is
+  scope, not a second algorithm.
+
+### Changed
+
+- **The scan API is analysis-only again.** `ScanProgress`,
+  `ScanProgressCallback`, `scan_with_progress`,
+  `prepare_with_facts_with_progress`, `scan_prepared_with_progress` and
+  `debug_flags::peak_rss_kb` are gone. They were added after the published
+  `0.8.0` to let the CLI render a progress bar, which put terminal and
+  process-metric concerns inside the engine crate; the consumer now drives
+  `ProgramBuilder` and reads its own RSS. Relative to the published `0.8.0`,
+  `0.8.1` is purely additive (the builder and `scan_file`), so dependents
+  keep their `^0.8.0` requirement and no sibling manifest moves.
+
 ## [0.8.0]
 
 ### Breaking

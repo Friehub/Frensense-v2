@@ -180,12 +180,28 @@ impl ModuleAliasResolver {
         ir_names: &FxHashSet<String>,
         fn_file: &FxHashMap<String, String>,
     ) -> ModuleResolution {
-        let known_files: Vec<String> = files.iter().map(|(p, _, _)| p.clone()).collect();
+        // Borrow the caller's strings instead of copying the corpus; the
+        // ref-based form is also what `scan::ProgramBuilder` calls, so a
+        // per-file frontend never duplicates every source file's text.
+        let files: Vec<(&str, &str, &str)> = files
+            .iter()
+            .map(|(path, source, ext)| (path.as_str(), source.as_str(), ext.as_str()))
+            .collect();
+        Self::build_from_refs(&files, ir_names, fn_file)
+    }
+
+    /// [`build`](Self::build) without owning the `(path, source, ext)` rows.
+    pub(crate) fn build_from_refs(
+        files: &[(&str, &str, &str)], // (path, source, ext)
+        ir_names: &FxHashSet<String>,
+        fn_file: &FxHashMap<String, String>,
+    ) -> ModuleResolution {
+        let known_files: Vec<String> = files.iter().map(|(p, _, _)| (*p).to_owned()).collect();
         let mut file_imports: FxHashMap<String, Vec<Import>> = FxHashMap::default();
         let mut file_exports: FxHashMap<String, Vec<Export>> = FxHashMap::default();
         let mut file_module_items: FxHashMap<String, Vec<ModuleItem>> = FxHashMap::default();
 
-        for (path, source, ext) in files {
+        for &(path, source, ext) in files {
             let Some(spec) = frensense_lang::spec_for_ext(ext) else {
                 continue;
             };
@@ -200,9 +216,9 @@ impl ModuleAliasResolver {
             let imps = spec.extract_imports(tree.root_node(), source);
             let exps = spec.extract_exports(tree.root_node(), source);
             let items = spec.extract_module_items(tree.root_node(), source);
-            file_imports.insert(path.clone(), imps);
-            file_exports.insert(path.clone(), exps);
-            file_module_items.insert(path.clone(), items);
+            file_imports.insert(path.to_owned(), imps);
+            file_exports.insert(path.to_owned(), exps);
+            file_module_items.insert(path.to_owned(), items);
         }
 
         // Build per-file export map

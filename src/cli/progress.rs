@@ -29,6 +29,76 @@ impl std::fmt::Debug for ProgressReporter {
     }
 }
 
+/// Peak resident set size (high-water mark) of the current process, in KiB.
+///
+/// Reads Linux `/proc/self/status` (`VmHWM`, falling back to `VmRSS`). Zero
+/// when the file is unavailable. This is process state, so it belongs to the
+/// consumer crate — the engine never measures the process.
+#[must_use]
+pub fn peak_rss_kb() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            let mut hwm = None;
+            let mut rss = None;
+            for line in s.lines() {
+                if line.starts_with("VmHWM:") {
+                    hwm = line
+                        .split_whitespace()
+                        .nth(1)
+                        .and_then(|p| p.parse::<u64>().ok());
+                } else if line.starts_with("VmRSS:") {
+                    rss = line
+                        .split_whitespace()
+                        .nth(1)
+                        .and_then(|p| p.parse::<u64>().ok());
+                }
+                if hwm.is_some() && rss.is_some() {
+                    break;
+                }
+            }
+            hwm.or(rss)
+        })
+        .unwrap_or(0)
+}
+
+/// Receives scan progress from the scan runner.
+///
+/// This is a consumer-side type: the engine exposes the per-file capability
+/// ([`frensense_engine::scan::ProgramBuilder`]) and knows nothing about
+/// progress. Frontends with no UI use [`NoopObserver`].
+pub trait ScanObserver: Send {
+    /// One step of scan progress.
+    ///
+    /// `completed` counts files finished so far out of `total`; `current` is
+    /// the file being lowered, when there is one; `errors` is the running
+    /// count of files that could not be read or lowered.
+    fn progress(
+        &mut self,
+        phase: &str,
+        completed: usize,
+        total: usize,
+        current: Option<&str>,
+        errors: usize,
+    );
+}
+
+/// Observer used when nobody is watching (MCP, LSP, tests).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopObserver;
+
+impl ScanObserver for NoopObserver {
+    fn progress(
+        &mut self,
+        _phase: &str,
+        _completed: usize,
+        _total: usize,
+        _current: Option<&str>,
+        _errors: usize,
+    ) {
+    }
+}
+
 /// Format bytes into human-readable memory string (e.g. "42.5 MB").
 #[must_use]
 pub fn format_rss(rss_kb: u64) -> String {
@@ -84,25 +154,43 @@ impl ProgressReporter {
         total_files: usize,
         current_file: Option<&str>,
         error_count: usize,
-        peak_rss_kb: u64,
     ) {
         if !self.enabled {
             return;
         }
 
-        let percent = if total_files > 0 {
-            (completed_files * 100) / total_files
-        } else {
-            100
-        };
+        let percent = completed_files
+            .saturating_mul(100)
+            .checked_div(total_files)
+            .unwrap_or(100);
+        let peak_rss_kb = peak_rss_kb();
 
         if self.is_tty {
-            self.render_tty(phase, completed_files, total_files, percent, current_file, error_count, peak_rss_kb);
+            self.render_tty(
+                phase,
+                completed_files,
+                total_files,
+                percent,
+                current_file,
+                error_count,
+                peak_rss_kb,
+            );
         } else {
-            self.render_non_tty(phase, completed_files, total_files, percent, error_count, peak_rss_kb);
+            self.render_non_tty(
+                phase,
+                completed_files,
+                total_files,
+                percent,
+                error_count,
+                peak_rss_kb,
+            );
         }
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "one call renders one status line; grouping the fields into a struct would only move the same arguments behind a construction site"
+    )]
     fn render_tty(
         &self,
         phase: &str,
@@ -182,6 +270,19 @@ impl ProgressReporter {
     }
 }
 
+impl ScanObserver for ProgressReporter {
+    fn progress(
+        &mut self,
+        phase: &str,
+        completed: usize,
+        total: usize,
+        current: Option<&str>,
+        errors: usize,
+    ) {
+        self.update(phase, completed, total, current, errors);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,9 +299,18 @@ mod tests {
     #[test]
     fn truncate_path_respects_budget() {
         assert_eq!(truncate_path("short.rs", 20), "short.rs");
-        assert_eq!(truncate_path("path/to/very/long/file/name.rs", 15), "...file/name.rs");
-        assert_eq!(truncate_path("path/to/very/long/file/name.rs", 18), "...ng/file/name.rs");
-        assert_eq!(truncate_path("path/to/very/long/file/name.rs", 19), "...ong/file/name.rs");
+        assert_eq!(
+            truncate_path("path/to/very/long/file/name.rs", 15),
+            "...file/name.rs"
+        );
+        assert_eq!(
+            truncate_path("path/to/very/long/file/name.rs", 18),
+            "...ng/file/name.rs"
+        );
+        assert_eq!(
+            truncate_path("path/to/very/long/file/name.rs", 19),
+            "...ong/file/name.rs"
+        );
         assert_eq!(truncate_path("hello.rs", 3), "...");
         assert_eq!(truncate_path("hello.rs", 2), "..");
     }
@@ -208,9 +318,16 @@ mod tests {
     #[test]
     fn disabled_reporter_does_not_render() {
         let mut r = ProgressReporter::new(false);
-        r.update("Testing", 5, 10, Some("file.rs"), 0, 1024);
+        r.update("Testing", 5, 10, Some("file.rs"), 0);
         assert!(!r.has_active_line.load(Ordering::SeqCst));
         r.finish();
     }
-}
 
+    #[test]
+    fn peak_rss_returns_value_on_linux() {
+        let peak = peak_rss_kb();
+        #[cfg(target_os = "linux")]
+        assert!(peak > 0, "peak RSS should be positive on linux");
+        let _ = peak;
+    }
+}

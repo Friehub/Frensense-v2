@@ -66,8 +66,12 @@ jobs:
       identity: ${{ steps.identity.outputs.identity }}
       pending: ${{ steps.matrix.outputs.pending }}
       pending_count: ${{ steps.matrix.outputs.pending_count }}
-      # Only `prepare` depends on `gate`; downstream jobs read the SHA here.
-      sha: ${{ needs.gate.outputs.sha }}
+      # A tag that already exists is authoritative for what a release ships,
+      # even when it names a commit other than the branch tip this run was
+      # dispatched from (a tag on a merged PR head is the common case). Every
+      # job that builds or publishes release content checks out this ref, so a
+      # crate-only release (no tag) falls back to the release commit.
+      checkout_ref: ${{ steps.check.outputs.checkout_ref }}
     permissions:
       contents: write
     steps:
@@ -130,55 +134,74 @@ jobs:
           if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
             TAG_SHA=$(git rev-list -n1 "refs/tags/$TAG")
             COMMIT_SHA="${{ needs.gate.outputs.sha }}"
-            echo "Tag $TAG already exists at $TAG_SHA."
-            # A run that failed *after* it pushed the tag (a native build, an
-            # npm publish, SLSA provenance) must be able to finish on a
-            # re-run. Decide whether this tag still needs its release assets,
-            # and rebuild only when it points at the commit being released
-            # and its GitHub release is missing one of the shipped binaries.
+            echo "Tag $TAG already exists at $TAG_SHA (release commit: $COMMIT_SHA)."
+            # A run that failed *after* something reached the outside world
+            # (the tag, a native build, an npm publish, SLSA provenance) must
+            # be able to finish on a re-run. The tag is authoritative for what
+            # that release ships: it may name the merged PR head rather than
+            # the merge commit, and a release must never be re-cut from a
+            # commit the tag does not name. So completeness is decided against
+            # the tag's own GitHub release, whichever commit the tag points
+            # at, and every job that builds or publishes content checks the
+            # tag out by name.
             echo "create_tag=false" >> $GITHUB_OUTPUT
-            NEEDS_ASSETS=false
-            if [[ "$TAG_SHA" == "$COMMIT_SHA" ]]; then
-              ASSET_NAMES=$(gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null || true)
-              MISSING_ASSET=false
-              for asset in \
-                frensense-x86_64-unknown-linux-gnu \
-                frensense-x86_64-apple-darwin \
-                frensense-aarch64-apple-darwin \
-                frensense-x86_64-pc-windows-msvc.exe; do
-                if ! grep -qx "$asset" <<<"$ASSET_NAMES"; then
-                  MISSING_ASSET=true
-                fi
-              done
-              NEEDS_ASSETS="$MISSING_ASSET"
-            else
-              echo "Tag points at $TAG_SHA, not the release commit $COMMIT_SHA; leaving its assets alone."
+            if ! git merge-base --is-ancestor "$TAG_SHA" "$COMMIT_SHA"; then
+              echo "::warning::Tag $TAG points at $TAG_SHA, which is not an ancestor of the release commit $COMMIT_SHA; assets and crates will ship from the tag."
             fi
-            if [[ "$NEEDS_ASSETS" == "true" ]]; then
+            ASSET_NAMES=$(gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null || true)
+            MISSING_ASSET=false
+            for asset in \
+              frensense-x86_64-unknown-linux-gnu \
+              frensense-x86_64-apple-darwin \
+              frensense-aarch64-apple-darwin \
+              frensense-x86_64-pc-windows-msvc.exe; do
+              if ! grep -qx "$asset" <<<"$ASSET_NAMES"; then
+                MISSING_ASSET=true
+              fi
+            done
+            if [[ "$MISSING_ASSET" == "true" ]]; then
               # Tag exists but the release is incomplete: rebuild the
-              # binaries and let the publish jobs fill in what is missing.
-              # The tag step is skipped (`create_tag=false`), so this never
-              # moves or re-creates a tag.
-              echo "Tag is at the release commit but its GitHub release is incomplete; rebuilding assets."
+              # binaries from the tag and let the publish jobs fill in what is
+              # missing. The tag step is skipped (`create_tag=false`), so this
+              # never moves or re-creates a tag.
+              echo "GitHub release $TAG is missing shipped binaries; rebuilding them from the tag."
               echo "should_release=true" >> $GITHUB_OUTPUT
               echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+              echo "checkout_ref=$TAG" >> $GITHUB_OUTPUT
             elif [[ "$PENDING_COUNT" -gt 0 ]]; then
               # Crates moved after the binary was tagged: publish them without
               # creating or moving a tag.
               echo "Releasing publishable crates without a new tag."
               echo "should_release=true" >> $GITHUB_OUTPUT
               echo "tag_name=" >> $GITHUB_OUTPUT
+              echo "checkout_ref=$COMMIT_SHA" >> $GITHUB_OUTPUT
             else
               echo "Nothing new to publish or tag, and the release assets are complete."
               echo "should_release=false" >> $GITHUB_OUTPUT
               echo "tag_name=" >> $GITHUB_OUTPUT
+              echo "checkout_ref=$COMMIT_SHA" >> $GITHUB_OUTPUT
             fi
           else
             echo "New version $VERSION detected. Tag $TAG will be created."
             echo "should_release=true" >> $GITHUB_OUTPUT
             echo "tag_name=$TAG" >> $GITHUB_OUTPUT
             echo "create_tag=true" >> $GITHUB_OUTPUT
+            echo "checkout_ref=$TAG" >> $GITHUB_OUTPUT
           fi
+
+      - name: Check out the tag being completed
+        # An existing tag is authoritative, and `build-native`, `publish-npm`
+        # and `github-release` check it out by name. This job must build the
+        # same commit for the identity assertion instead of the branch tip the
+        # run was dispatched from.
+        if: >-
+          steps.check.outputs.should_release == 'true' &&
+          steps.check.outputs.tag_name != '' &&
+          steps.check.outputs.create_tag != 'true'
+        run: |
+          TAG="${{ steps.check.outputs.tag_name }}"
+          git checkout --detach "refs/tags/$TAG"
+          echo "Checked out $TAG at $(git rev-parse HEAD) for identity and release builds."
 
       # Pre-publish assertion: build the binary and require `--version --json`
       # to report exactly the version we are about to tag and publish. Catches
@@ -432,9 +455,10 @@ jobs:
           egress-policy: audit
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
         with:
-          # The tag (when there is one) points at this commit; checking out the
-          # SHA keeps crate-only releases working with no tag at all.
-          ref: ${{ needs.prepare.outputs.sha }}
+          # The tag (when there is one) defines what the release ships; the
+          # release commit is the fallback for a crate-only release with no
+          # tag at all.
+          ref: ${{ needs.prepare.outputs.checkout_ref }}
           fetch-depth: 0
       - name: Configure git identity
         # `cargo smart-release --execute` rewrites the dependents' manifest
