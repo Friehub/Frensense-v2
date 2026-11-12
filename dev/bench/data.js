@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794435638689,
+  "lastUpdate": 1794474453022,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -2231,6 +2231,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/0368c00d37eb66ff41b520397a6d419af38bfad6"
         },
         "date": 1794435637472,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 33.9,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 38.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 4.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 172,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 32,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "365397923ad76dffbee40f5b562efbcf1ea4fff9",
+          "message": "Merge pull request #79 from Friehub/feat/progress-bar-0.8.1\n\nfeat(cli): real-time scan progress bar and peak RSS tracking",
+          "timestamp": "2026-11-12T10:06:38+01:00",
+          "tree_id": "8b255a1e496a7aceb53def3fe66e13076b72fc99",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/365397923ad76dffbee40f5b562efbcf1ea4fff9"
+        },
+        "date": 1794474451359,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
