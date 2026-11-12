@@ -45,21 +45,15 @@ if ! cargo test --workspace --lib --bins; then
     FAILURES=$((FAILURES + 1))
 fi
 
-# 4. Release graph validation (dry-run; hard gate in CI, soft here so a
-#    missing toolchain never blocks a commit). Catches inconsistent
-#    inter-crate version requirements before they reach a release.
-echo "[CHECK 4/6] Validating release graph (cargo smart-release)..."
-if command -v cargo-smart-release >/dev/null 2>&1; then
-    if ! cargo smart-release \
-        --bump keep --bump-dependencies keep \
-        --no-changelog --no-changelog-preview --no-changelog-github-release \
-        --no-tag --no-push \
-        frensense >/dev/null 2>&1; then
-        echo "[FAIL] Release graph validation failed. Run 'cargo smart-release --bump keep' to see why."
-        FAILURES=$((FAILURES + 1))
-    fi
-else
-    echo "[SKIP] cargo-smart-release not installed (hard gate runs in CI)."
+# 4. Release graph validation: package every publishable crate exactly as the
+#    release job does, without uploading. Catches a path dependency without a
+#    version, a dependency on a `publish = false` crate, and any other reason a
+#    crate would not package. `--allow-dirty` is required because the commit has
+#    not happened yet; `--no-verify` keeps it to manifest/packaging checks.
+echo "[CHECK 4/6] Validating release graph (cargo publish --dry-run)..."
+if ! cargo publish --workspace --dry-run --no-verify --allow-dirty; then
+    echo "[FAIL] Release graph validation failed. Run 'cargo publish --workspace --dry-run --no-verify --allow-dirty' to see why."
+    FAILURES=$((FAILURES + 1))
 fi
 
 # 5. Corpus lint (hard gate, as in CI): a family that fails lint would teach

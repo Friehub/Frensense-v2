@@ -127,6 +127,30 @@ harness and keeps no changelog.
   are analyzed exactly as completely as before.
 
 #### Repository & Release Tooling
+- **release: crates.io publishes only the crates that are actually pending.**
+  `publish-cargo` named all four publishable crates to
+  `cargo smart-release --execute --bump keep`, which treats an explicitly named
+  crate whose manifest version is not greater than its published version as
+  fatal. `v0.8.1` bumped `frensense-engine` and `frensense` but left
+  `frensense-lang` and `frensense-bundler` at their published `0.8.0`, so the
+  job aborted with `'frensense-lang' is unchanged` / `'frensense-bundler' is
+  unchanged` and exited 1 before uploading a single crate. crates.io therefore
+  stayed without `frensense-engine 0.8.1` and `frensense 0.8.1` while npm and
+  the tag's binaries shipped `0.8.1`. The job now recomputes the pending set
+  with `scripts/release-matrix.py` on the checked-out release ref and passes
+  only those names to `cargo publish`, which uploads a multi-package selection
+  in dependency order and waits for each version to appear in the index before
+  packaging its dependents. Naming only the pending set is required rather
+  than cosmetic: `cargo publish` verifies unpublished-ness for every selected
+  package before uploading anything, so an already-published version is a hard
+  error there too. A release that fails halfway can now be re-run to completion
+  from the existing tag, a crate-only run publishes exactly what moved, and no
+  manifest is rewritten or release commit created in the process. The same
+  command replaced the smart-release dry run in CI's `Release Graph` job and in
+  the pre-commit fast path (`cargo publish --workspace --dry-run --no-verify`),
+  which validates packaging on every commit instead of failing on the first
+  unchanged crate.
+
 - **release: an existing tag at another commit no longer strands its binaries.**
   `prepare` compared the tag's commit with the release commit and, when they
   differed, read the tag as "already released": it left `tag_name` empty, so
