@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794227874751,
+  "lastUpdate": 1794474789067,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -440,6 +440,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "Scan Duration",
             "value": 134.68,
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "365397923ad76dffbee40f5b562efbcf1ea4fff9",
+          "message": "Merge pull request #79 from Friehub/feat/progress-bar-0.8.1\n\nfeat(cli): real-time scan progress bar and peak RSS tracking",
+          "timestamp": "2026-11-12T10:06:38+01:00",
+          "tree_id": "8b255a1e496a7aceb53def3fe66e13076b72fc99",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/365397923ad76dffbee40f5b562efbcf1ea4fff9"
+        },
+        "date": 1794474788586,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "Engine Blindness Rate (Unknown %)",
+            "value": 42.4,
+            "unit": "%"
+          },
+          {
+            "name": "Explored Sinks",
+            "value": 1578,
+            "unit": "sinks"
+          },
+          {
+            "name": "Safety Valve Caps Fired",
+            "value": 335784,
+            "unit": "caps"
+          },
+          {
+            "name": "Peak RSS Memory",
+            "value": 839.4,
+            "unit": "MB"
+          },
+          {
+            "name": "Scan Duration",
+            "value": 126.05,
             "unit": "s"
           }
         ]
