@@ -25,6 +25,79 @@ Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
 
+## \[0.8.2]
+
+### Added
+
+* **The report now says how much of the tree it actually covered.** A scan
+  that analyzed 3 of 40 files could print `Status: Clean` and
+  `Analysis Complete: No findings.` — the same words as a scan that read all
+  40 and found nothing. Three gaps were open at once: the status ignored the
+  taint engine's undecided sites, the text summary's `Files Scanned` ratio
+  used *submitted* (supported) files as its denominator, and a scan that
+  recognized no dangerous operation at all was indistinguishable from one
+  that inspected every operation and cleared it. Measured on the 1,230-file
+  OWASP Benchmark for Python, the old report said `status: complete` while
+  **622 files yielded no recognized sink site** and **19 sink sites ended
+  `Unknown`** — the scan had no basis to call that tree clean. The summary
+  now prints:
+  * `Files Scanned: N/M`, where `M` is every source file the walk found —
+    supported files plus source files in a language with no spec (the
+    denominator used to be `submitted`, so a polyglot tree reported `N/N`).
+  * `Not Analyzed: K (U unsupported language, F failed)`, so the gap has a
+    reason.
+  * `Sink Sites`, `Not Recognized` and `Undecided`, derived from verdicts the
+    engine already produced (`ScanResult.located` and
+    `located_checker`) — no engine change, no second analysis pass.
+    The one-line status is qualified: `Clean` now requires a completed scan,
+    every recognized sink site decided, and no source file left unanalyzed;
+    otherwise it prints `No findings (nothing recognized)`,
+    `No findings (K of M source files analyzed)` or
+    `No findings (N site(s) undecided)`.
+* **`--explain` lists the files the scan never saw.** Besides the existing
+  "why the engine stayed silent about a sink it saw" records, `--explain`
+  now prints a coverage section: `Coverage: N/M source file(s) analyzed`, the
+  unsupported languages with counts and a path sample, files that failed to
+  read/parse/lower, analyzed files that yielded no recognized sink, and the
+  sink sites the backward walk could not decide. The lists are capped at 25
+  entries, matching the engine's telemetry sample cap.
+* **MCP tools report the same denominator.** `frensense_scan_file`,
+  `frensense_audit` and `frensense_diff` now return an `analysis` object
+  (`status`, `coverage.files_found`/`files_analyzed`/`files_not_analyzed`/
+  `files_unsupported`/`files_failed`, `sink_sites`, `unresolved_sites`,
+  `no_sink_files`, `unresolved_sample`). `clean` is no longer only
+  `advisories.is_empty()`: it also requires a completed analysis, every
+  recognized sink site decided, and no source file left unanalyzed, so an
+  agent gating on `clean` is never told an unanalyzed tree is safe. The tool
+  descriptions and the `message` field explain what a clean answer rests on.
+* **SARIF carries coverage to CI.** `runs[].properties.frensense.coverage`
+  now includes `files_found`, `files_analyzed`, `files_not_analyzed`,
+  `files_unsupported` and `files_failed` next to the sink-site counts, and
+  `runs[].invocations[].toolExecutionNotifications` adds a warning when
+  source files were not analyzed and a note when analyzed files contained no
+  modeled sink. `runs[].results` is unchanged, so code-scanning consumers
+  that ignore notifications keep every finding.
+
+### Changed
+
+* **`analysis.clean` and the honest denominator in the JSON report.**
+  `--format json` now carries `analysis.clean` and, under
+  `analysis.coverage`, `files_found`, `files_not_analyzed` and
+  `files_unsupported` alongside the existing `files_submitted` /
+  `files_scanned` / `files_failed`. Additive fields only; `status` keeps its
+  meaning (`complete`/`partial`/`failed`) and no key was renamed, so
+  `REPORT_SCHEMA_VERSION` stays at 1.
+* **API additions are additive.** `Coverage` and `UnresolvedSite` live in
+  `frensense::policy`; `Engine::take_coverage()` exposes the per-run
+  accounting. The new rendering entry points
+  (`print_scan_summary_detailed_with_coverage`,
+  `print_results_with_coverage`, `print_explain_coverage`,
+  `json_report_with_coverage`, `Reporter::to_sarif_with_coverage`,
+  `Reporter::to_markdown_detailed`, `mcp::diff::run_diff_detailed`) are
+  siblings; `print_scan_summary_detailed`, `json_report_with_skips`,
+  `Reporter::to_sarif_detailed`, `DiffScanOutcome` and `run_diff` keep their
+  published signatures and delegate, so `0.8.1` consumers compile unchanged.
+
 ## \[0.8.1] - 2026-11-11
 
 ### Added
@@ -133,6 +206,30 @@ harness and keeps no changelog.
   are analyzed exactly as completely as before.
 
 #### Repository & Release Tooling
+
+* **release: crates.io publishes only the crates that are actually pending.**
+  `publish-cargo` named all four publishable crates to
+  `cargo smart-release --execute --bump keep`, which treats an explicitly named
+  crate whose manifest version is not greater than its published version as
+  fatal. `v0.8.1` bumped `frensense-engine` and `frensense` but left
+  `frensense-lang` and `frensense-bundler` at their published `0.8.0`, so the
+  job aborted with `'frensense-lang' is unchanged` / `'frensense-bundler' is
+  unchanged` and exited 1 before uploading a single crate. crates.io therefore
+  stayed without `frensense-engine 0.8.1` and `frensense 0.8.1` while npm and
+  the tag's binaries shipped `0.8.1`. The job now recomputes the pending set
+  with `scripts/release-matrix.py` on the checked-out release ref and passes
+  only those names to `cargo publish`, which uploads a multi-package selection
+  in dependency order and waits for each version to appear in the index before
+  packaging its dependents. Naming only the pending set is required rather
+  than cosmetic: `cargo publish` verifies unpublished-ness for every selected
+  package before uploading anything, so an already-published version is a hard
+  error there too. A release that fails halfway can now be re-run to completion
+  from the existing tag, a crate-only run publishes exactly what moved, and no
+  manifest is rewritten or release commit created in the process. The same
+  command replaced the smart-release dry run in CI's `Release Graph` job and in
+  the pre-commit fast path (`cargo publish --workspace --dry-run --no-verify`),
+  which validates packaging on every commit instead of failing on the first
+  unchanged crate.
 
 * **release: an existing tag at another commit no longer strands its binaries.**
   `prepare` compared the tag's commit with the release commit and, when they
