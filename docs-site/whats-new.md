@@ -11,7 +11,7 @@ A quick look at what changed in each release, written for everyone — no compil
 
 ## 0.8.2 — Honest Coverage
 
-**"No findings" now tells you what it actually looked at.**
+**"Clean" never means "not analyzed" — Frensense no longer reports clean when it couldn't scan a codebase.**
 
 Every scanner has two silent failures: it can find nothing because the code is safe, or because it never looked. Frensense used to print the same words — `Status: Clean`, `Analysis Complete: No findings.` — for both. On the OWASP Benchmark for Python, that meant calling a 1,230-file tree complete while 622 files contained nothing the engine models and 19 dangerous calls were left undecided.
 
