@@ -53,6 +53,7 @@ impl Engine {
         // A reusable Engine may serve multiple scans (MCP/LSP); each `run`
         // contributes fresh telemetry, so clear its previous totals first.
         self.telemetry = frensense_engine::telemetry::ScanTelemetry::default();
+        self.coverage = crate::policy::Coverage::default();
         self.analysis_incomplete.clear();
         self.hidden_by_tier.clear();
         self.explain_records.clear();
@@ -340,6 +341,24 @@ impl Engine {
             .extend(result.telemetry.errors.iter().cloned());
         result.telemetry.finalize();
         self.telemetry = result.telemetry.clone();
+        // What the scan actually covered, derived from the findings every
+        // verdict produced plus the input accounting. `id_by_path` names
+        // every file that was read and submitted for lowering, so the
+        // difference against the files that yielded a finding is the set
+        // where the engine had nothing to inspect - the coverage gap a
+        // "Clean" verdict used to hide. Source files in a language with no
+        // spec never reach the engine, so the runner adds them to the
+        // denominator itself.
+        let considered: Vec<String> = id_by_path.keys().cloned().collect();
+        // Files the walk found but cannot analyze: source files in a language
+        // with no spec, plus an explicit input that is not a supported source
+        // file at all (`.txt`, or a path that does not exist). The second has
+        // no entry in the skipped list, so it is counted from the input
+        // accounting; without it a 0-of-1 scan would claim 0 files found.
+        let absent_input =
+            usize::from(self.skipped_unsupported.is_empty() && unsupported > 0 && root.is_file());
+        let files_unsupported = self.skipped_unsupported.len() + absent_input;
+        self.coverage = crate::policy::Coverage::from_scan(&result, &considered, files_unsupported);
         for err in &result.errors {
             tracing::warn!("scan error: {err}");
         }

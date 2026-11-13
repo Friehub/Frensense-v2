@@ -5,6 +5,7 @@
 use super::options::CliOptions;
 use crate::engine::files::UnsupportedSourceFile;
 use crate::explain::ExplainRecord;
+use crate::policy::Coverage;
 use crate::reporter::Reporter;
 use crate::{Advisory, FrensenseError, Result};
 use std::collections::HashSet;
@@ -120,6 +121,52 @@ impl ScanStatus {
             ScanStatus::Partial
         }
     }
+
+    /// The report's answer to "is this clean?".
+    ///
+    /// `true` only when nothing was reported, the machinery completed, every
+    /// file the walk found was analyzed, and every sink site the scan
+    /// recognized was decided. An *undecided* site makes a scan unclean: "I
+    /// could not decide" is not "clean". So does a file the engine never
+    /// looked at - a clean verdict over an unanalyzed tree is the one thing a
+    /// clean verdict must never mean.
+    ///
+    /// A coverage gap (an analyzed file where no sink site was recognized)
+    /// does not by itself make the scan unclean, because [`Coverage`] reports
+    /// it separately - forcing every utility module to look like a failure
+    /// would train readers to ignore the status.
+    #[must_use]
+    pub fn clean(self, advisories_empty: bool, coverage: &Coverage) -> bool {
+        advisories_empty
+            && self == ScanStatus::Complete
+            && coverage.fully_resolved()
+            && coverage.files_not_analyzed() == 0
+    }
+}
+
+/// The one-line answer the summary prints.
+///
+/// `Clean` is reserved for a scan that ran completely, analyzed every file
+/// it found, recognized at least one sink site somewhere, and decided every
+/// site it recognized. Every other combination says what qualified it.
+fn status_label(status: ScanStatus, findings: usize, coverage: Option<&Coverage>) -> String {
+    match status {
+        ScanStatus::Failed => "Failed analysis".to_string(),
+        ScanStatus::Partial if findings == 0 => "No findings (partial analysis)".to_string(),
+        ScanStatus::Partial => format!("Findings reported ({findings}, partial analysis)"),
+        ScanStatus::Complete if findings > 0 => "Findings reported".to_string(),
+        ScanStatus::Complete => match coverage {
+            Some(c) if !c.recognized_anything() => "No findings (nothing recognized)".to_string(),
+            Some(c) if c.files_not_analyzed() > 0 => format!(
+                "No findings ({} of {} source files analyzed)",
+                c.files_analyzed, c.files_found
+            ),
+            Some(c) if !c.fully_resolved() => {
+                format!("No findings ({} site(s) undecided)", c.unresolved_sites)
+            }
+            _ => "Clean".to_string(),
+        },
+    }
 }
 
 /// Print a structured scan summary block.
@@ -140,6 +187,31 @@ pub fn print_scan_summary_detailed(
     output_path: Option<&std::path::Path>,
     telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
     incomplete: &[frensense_engine::scan::IncompleteFunction],
+) {
+    print_scan_summary_detailed_with_coverage(
+        advisories,
+        input_path,
+        duration,
+        output_path,
+        telemetry,
+        incomplete,
+        None,
+    );
+}
+
+/// [`print_scan_summary_detailed`] plus what the scan actually covered.
+///
+/// The coverage line is the denominator behind "no findings": without it a
+/// scan that analyzed 3 of 40 files is indistinguishable from one that
+/// analyzed all 40 and found nothing.
+pub fn print_scan_summary_detailed_with_coverage(
+    advisories: &[Advisory],
+    input_path: &std::path::Path,
+    duration: std::time::Duration,
+    output_path: Option<&std::path::Path>,
+    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
+    coverage: Option<&Coverage>,
 ) {
     let mut critical = 0;
     let mut warning = 0;
@@ -167,17 +239,55 @@ pub fn print_scan_summary_detailed(
             crate::cli::progress::format_rss(peak_rss)
         );
     }
-    if telem.input.submitted > 0 {
-        let errs = telem.input.failed + telem.errors.len();
-        if errs > 0 {
+    // The honest denominator: files found, not files the engine chose to
+    // submit. On a polyglot tree the two differ, and only the first tells a
+    // reader that 380 of 400 files were never analyzed.
+    match coverage {
+        Some(c) if c.files_found > 0 => {
+            println!("Files Scanned:      {}/{}", c.files_analyzed, c.files_found);
+            if c.files_not_analyzed() > 0 {
+                println!(
+                    "Not Analyzed:       {} ({} unsupported language, {} failed)",
+                    c.files_not_analyzed(),
+                    c.files_unsupported,
+                    c.files_failed
+                );
+            }
+        }
+        _ if telem.input.submitted > 0 => {
+            let errs = telem.input.failed + telem.errors.len();
+            if errs > 0 {
+                println!(
+                    "Files Scanned:      {}/{} ({errs} failed/errors)",
+                    telem.input.scanned, telem.input.submitted
+                );
+            } else {
+                println!(
+                    "Files Scanned:      {}/{}",
+                    telem.input.scanned, telem.input.submitted
+                );
+            }
+        }
+        _ => {}
+    }
+    // The denominator behind "no findings". Without it, a scan that
+    // recognized nothing is indistinguishable from a clean one; with it, a
+    // reader can falsify the verdict themselves.
+    if let Some(c) = coverage {
+        println!(
+            "Sink Sites:         {} recognized in {} file(s)",
+            c.sink_sites, c.files_with_sink_sites
+        );
+        if c.files_without_sink_sites > 0 {
             println!(
-                "Files Scanned:      {}/{} ({errs} failed/errors)",
-                telem.input.scanned, telem.input.submitted
+                "Not Recognized:     {} file(s) contained no sink site the engine models",
+                c.files_without_sink_sites
             );
-        } else {
+        }
+        if c.unresolved_sites > 0 {
             println!(
-                "Files Scanned:      {}/{}",
-                telem.input.scanned, telem.input.submitted
+                "Undecided:          {} sink site(s) the analysis could not resolve",
+                c.unresolved_sites
             );
         }
     }
@@ -186,18 +296,17 @@ pub fn print_scan_summary_detailed(
     println!("  - Warning:        {warning}");
     println!("  - Info:           {info}");
     println!("Total Findings:     {}", advisories.len());
-    let status_label = match (status, advisories.is_empty()) {
-        (ScanStatus::Complete, true) => "Clean".to_string(),
-        (ScanStatus::Complete, false) => "Findings reported".to_string(),
-        (ScanStatus::Partial, true) => "Clean (Partial/Degraded analysis)".to_string(),
-        (ScanStatus::Partial, false) => "Findings reported (Partial/Degraded analysis)".to_string(),
-        (ScanStatus::Failed, _) => "Failed analysis".to_string(),
-    };
-    println!("Status:             {status_label}");
+    println!(
+        "Status:             {}",
+        status_label(status, advisories.len(), coverage)
+    );
     if let Some(out) = output_path {
         println!("Report File:        {}", out.display());
     }
     println!("========================================================================");
+    let coverage_gap = coverage.is_some_and(|c| {
+        !c.fully_resolved() || !c.recognized_anything() || c.files_not_analyzed() > 0
+    });
     if status != ScanStatus::Complete {
         println!("Caveat: Analysis status is {status:?}; results may be partial.");
         let caps_count = telem.caps.iter().map(|c| c.hits).sum::<usize>();
@@ -207,6 +316,55 @@ pub fn print_scan_summary_detailed(
             telem.input.parse_partial,
             incomplete.len()
         );
+    }
+    if status != ScanStatus::Complete || coverage_gap {
+        if status == ScanStatus::Complete {
+            // The headline has to match the gap: a scan that read every file
+            // but recognized nothing has a coverage gap, not a file it never
+            // opened.
+            match coverage {
+                Some(c) if c.files_not_analyzed() > 0 => {
+                    println!("Caveat: the analysis did not analyze every file.");
+                }
+                Some(_) => println!("Caveat: the analysis is qualified."),
+                None => println!("Caveat: the analysis did not cover every file."),
+            }
+        }
+        if let Some(c) = coverage {
+            if c.files_not_analyzed() > 0 {
+                println!(
+                    "        {} of {} source file(s) were not analyzed ({} unsupported",
+                    c.files_not_analyzed(),
+                    c.files_found,
+                    c.files_unsupported
+                );
+                println!(
+                    "        language, {} failed); findings there cannot be ruled out.",
+                    c.files_failed
+                );
+            }
+            if !c.recognized_anything() {
+                println!("        No sink site was recognized in any scanned file: this scan says");
+                println!("        nothing about whether the code is safe.");
+            } else if c.files_without_sink_sites > 0 {
+                // Subsumed by the line above when nothing was recognized at
+                // all; here it names the files that were silent among the
+                // ones that were not.
+                println!(
+                    "        {} of {} analyzed file(s) yielded no recognized sink; a finding",
+                    c.files_without_sink_sites, c.files_analyzed
+                );
+                println!("        there cannot be ruled out. `analysis.coverage.no_sink_files`");
+                println!("        names a sample.");
+            }
+            if !c.fully_resolved() {
+                println!(
+                    "        {} sink site(s) reached no verdict. Run with --explain to see where",
+                    c.unresolved_sites
+                );
+                println!("        the backward walk stopped.");
+            }
+        }
         println!("        Run with --json to inspect the full `analysis` telemetry object.");
         println!("========================================================================");
     }
@@ -227,6 +385,33 @@ pub fn json_report(
     incomplete: &[frensense_engine::scan::IncompleteFunction],
 ) -> serde_json::Value {
     json_report_with_skips(advisories, incomplete, None, &[])
+}
+
+/// The one-line headline above the summary when the scan reported nothing.
+///
+/// "Analysis Complete: No findings." was printed for every empty result,
+/// including scans that recognized no sink at all. A reader has no way to
+/// tell those apart, so the headline now carries the qualification.
+fn no_findings_headline(status: ScanStatus, coverage: Option<&Coverage>) -> String {
+    match (status, coverage) {
+        (ScanStatus::Complete, Some(c)) if !c.recognized_anything() => {
+            "No findings - no sink site was recognized, so this scan does not show the code is safe."
+                .to_string()
+        }
+        (ScanStatus::Complete, Some(c)) if c.files_not_analyzed() > 0 => format!(
+            "No findings - only {} of {} source file(s) were analyzed; the rest were not scanned.",
+            c.files_analyzed, c.files_found
+        ),
+        (ScanStatus::Complete, Some(c)) if !c.fully_resolved() => {
+            format!(
+                "No findings - {} sink site(s) were left undecided.",
+                c.unresolved_sites
+            )
+        }
+        (ScanStatus::Complete, _) => "Analysis Complete: No findings.".to_string(),
+        (ScanStatus::Partial, _) => "No findings (analysis incomplete).".to_string(),
+        (ScanStatus::Failed, _) => "Analysis failed.".to_string(),
+    }
 }
 
 /// The JSON report envelope with full `analysis` telemetry object.
@@ -250,16 +435,52 @@ pub fn json_report_with_skips(
     telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
     skipped: &[UnsupportedSourceFile],
 ) -> serde_json::Value {
+    json_report_with_coverage(advisories, incomplete, telemetry, skipped, None)
+}
+
+/// [`json_report_with_skips`] plus what the scan actually covered.
+///
+/// Adds `analysis.clean` and the recognition/denominator fields under
+/// `analysis.coverage`, so a consumer that reads only `status` cannot mistake
+/// "we recognized nothing" for "we inspected and found nothing".
+#[must_use]
+pub fn json_report_with_coverage(
+    advisories: &[Advisory],
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
+    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+    skipped: &[UnsupportedSourceFile],
+    coverage: Option<&Coverage>,
+) -> serde_json::Value {
     let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
     let telem = telemetry.unwrap_or(&empty_telem);
     let status = ScanStatus::compute(telem, incomplete);
-    let clean = status == ScanStatus::Complete && advisories.is_empty();
+    let cov = coverage.cloned().unwrap_or_default();
+    let clean = status.clean(advisories.is_empty(), &cov);
+    // Without engine-derived coverage (the compatibility entry points),
+    // fall back to the input accounting so the denominator is still honest
+    // about unsupported inputs and read failures.
+    let (files_found, files_not_analyzed, files_unsupported) = match coverage {
+        Some(c) => (c.files_found, c.files_not_analyzed(), c.files_unsupported),
+        None => {
+            let unsupported = skipped.len().max(telem.input.unsupported);
+            let found = telem.input.submitted + unsupported;
+            (
+                found,
+                found.saturating_sub(telem.input.scanned),
+                unsupported,
+            )
+        }
+    };
 
     let analysis_obj = serde_json::json!({
         "status": status,
+        "clean": clean,
         "coverage": {
+            "files_found": files_found,
             "files_submitted": telem.input.submitted,
             "files_scanned": telem.input.scanned,
+            "files_not_analyzed": files_not_analyzed,
+            "files_unsupported": files_unsupported,
             "files_failed": telem.input.failed,
             "failed_files": telem.input.failed_files,
             "unsupported_inputs": telem.input.unsupported,
@@ -267,6 +488,20 @@ pub fn json_report_with_skips(
             "files_partial": telem.input.parse_partial,
             "partial_files": telem.input.parse_partial_files,
             "functions": telem.input.functions,
+            // What the scan recognized: the denominator behind "no
+            // findings". `files_without_sink_sites` names the files where
+            // the engine found nothing it models as dangerous, so a reader
+            // can tell "inspected and clean" from "nothing recognized".
+            "sink_sites": cov.sink_sites,
+            "files_with_sink_sites": cov.files_with_sink_sites,
+            "files_without_sink_sites": cov.files_without_sink_sites,
+            "no_sink_files": cov.no_sink_files,
+            "unresolved_sites": cov.unresolved_sites,
+            "unresolved_sample": cov.unresolved_sample.iter().map(|s| serde_json::json!({
+                "file": s.file,
+                "line": s.line,
+                "sink": s.sink,
+            })).collect::<Vec<serde_json::Value>>(),
         },
         "errors": telem.errors,
         "suppressed": telem.suppressed.iter().map(|s| serde_json::json!({
@@ -401,6 +636,36 @@ pub fn print_results_with_skips(
     duration: Option<std::time::Duration>,
     output_path: Option<&std::path::Path>,
 ) -> Result<()> {
+    print_results_with_coverage(
+        advisories,
+        incomplete,
+        telemetry,
+        skipped,
+        None,
+        format,
+        input_path,
+        duration,
+        output_path,
+    )
+}
+
+/// [`print_results_with_skips`] plus what the scan could recognize.
+///
+/// `coverage` is the denominator behind "no findings": a report that prints
+/// "Clean" without it cannot be falsified, because a scan that recognized no
+/// sink at all looks exactly like an inspected-clean one.
+#[allow(clippy::too_many_arguments)]
+pub fn print_results_with_coverage(
+    advisories: &[Advisory],
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
+    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+    skipped: &[UnsupportedSourceFile],
+    coverage: Option<&Coverage>,
+    format: &str,
+    input_path: &std::path::Path,
+    duration: Option<std::time::Duration>,
+    output_path: Option<&std::path::Path>,
+) -> Result<()> {
     if !skipped.is_empty() {
         let languages = skipped_language_counts(skipped)
             .iter()
@@ -451,10 +716,21 @@ pub fn print_results_with_skips(
             eprintln!("  {error}");
         }
     }
+    // The one coverage warning worth stderr: a scan that recognized no sink
+    // at all proves nothing, and a `--output` report reader may never see
+    // the summary block.
+    if let Some(c) = coverage
+        && !c.recognized_anything()
+    {
+        eprintln!(
+            "Warning: no sink site was recognized in any of the {} analyzed file(s): this scan does not show the code is safe.",
+            c.files_analyzed
+        );
+    }
     match format {
         "json" => {
-            let rendered = serde_json::to_string_pretty(&json_report_with_skips(
-                advisories, incomplete, telemetry, skipped,
+            let rendered = serde_json::to_string_pretty(&json_report_with_coverage(
+                advisories, incomplete, telemetry, skipped, coverage,
             ))
             .map_err(|e| FrensenseError::Config(format!("JSON error: {e}")))?;
             if let Some(out) = output_path {
@@ -465,13 +741,14 @@ pub fn print_results_with_skips(
                     ))
                 })?;
                 if let Some(d) = duration {
-                    print_scan_summary_detailed(
+                    print_scan_summary_detailed_with_coverage(
                         advisories,
                         input_path,
                         d,
                         Some(out),
                         telemetry,
                         incomplete,
+                        coverage,
                     );
                 }
                 println!("JSON report written to: {}", out.display());
@@ -480,7 +757,9 @@ pub fn print_results_with_skips(
             }
         }
         "sarif" => {
-            let sarif = Reporter::to_sarif_detailed(advisories, input_path, telemetry, incomplete);
+            let sarif = Reporter::to_sarif_with_coverage(
+                advisories, input_path, telemetry, incomplete, coverage,
+            );
             let rendered = serde_json::to_string_pretty(&sarif)
                 .map_err(|e| FrensenseError::Config(format!("JSON error: {e}")))?;
             if let Some(out) = output_path {
@@ -491,13 +770,14 @@ pub fn print_results_with_skips(
                     ))
                 })?;
                 if let Some(d) = duration {
-                    print_scan_summary_detailed(
+                    print_scan_summary_detailed_with_coverage(
                         advisories,
                         input_path,
                         d,
                         Some(out),
                         telemetry,
                         incomplete,
+                        coverage,
                     );
                 }
                 println!("SARIF report written to: {}", out.display());
@@ -515,13 +795,14 @@ pub fn print_results_with_skips(
                     ))
                 })?;
                 if let Some(d) = duration {
-                    print_scan_summary_detailed(
+                    print_scan_summary_detailed_with_coverage(
                         advisories,
                         input_path,
                         d,
                         Some(out),
                         telemetry,
                         incomplete,
+                        coverage,
                     );
                 }
                 println!("GitHub annotations written to: {}", out.display());
@@ -531,10 +812,13 @@ pub fn print_results_with_skips(
         }
         _ => {
             let cwd = std::env::current_dir().ok();
+            let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
+            let status = ScanStatus::compute(telemetry.unwrap_or(&empty_telem), incomplete);
+            let headline = no_findings_headline(status, coverage);
             if let Some(out) = output_path {
                 let mut buf = Vec::new();
                 if advisories.is_empty() {
-                    buf.extend_from_slice(b"Analysis Complete: No findings.\n");
+                    buf.extend_from_slice(format!("{headline}\n").as_bytes());
                 } else {
                     buf.extend_from_slice(
                         format!("Analysis: {}\n\n", input_path.display()).as_bytes(),
@@ -557,23 +841,24 @@ pub fn print_results_with_skips(
                 })?;
 
                 if let Some(d) = duration {
-                    print_scan_summary_detailed(
+                    print_scan_summary_detailed_with_coverage(
                         advisories,
                         input_path,
                         d,
                         Some(out),
                         telemetry,
                         incomplete,
+                        coverage,
                     );
                 }
                 println!("Text report written to: {}", out.display());
             } else {
                 if advisories.is_empty() {
-                    println!("Analysis Complete: No findings.");
+                    println!("{headline}");
                     if let Some(d) = duration {
                         println!();
-                        print_scan_summary_detailed(
-                            advisories, input_path, d, None, telemetry, incomplete,
+                        print_scan_summary_detailed_with_coverage(
+                            advisories, input_path, d, None, telemetry, incomplete, coverage,
                         );
                     }
                 } else {
@@ -585,8 +870,8 @@ pub fn print_results_with_skips(
                     println!("Total Findings: {}", advisories.len());
                     if let Some(d) = duration {
                         println!();
-                        print_scan_summary_detailed(
-                            advisories, input_path, d, None, telemetry, incomplete,
+                        print_scan_summary_detailed_with_coverage(
+                            advisories, input_path, d, None, telemetry, incomplete, coverage,
                         );
                     }
                 }
@@ -655,6 +940,85 @@ pub fn print_explain(
         }
         if let Some(src) = &r.source_desc {
             eprintln!("      source: {src}");
+        }
+    }
+}
+
+/// Print the `--explain` coverage lists: every source file the scan did not
+/// analyze (and why), the analyzed files where no sink site was recognized,
+/// and the sink sites that reached no verdict.
+///
+/// `--explain` already answers "why did the engine stay silent about a sink
+/// it saw"; this answers the prior question, "which files did it never see".
+/// Written to stderr, like the rest of `--explain`.
+pub fn print_explain_coverage(
+    coverage: &Coverage,
+    skipped: &[UnsupportedSourceFile],
+    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+) {
+    eprintln!();
+    eprintln!(
+        "Coverage: {}/{} source file(s) analyzed ({} not analyzed: {} unsupported language, {} failed)",
+        coverage.files_analyzed,
+        coverage.files_found,
+        coverage.files_not_analyzed(),
+        coverage.files_unsupported,
+        coverage.files_failed,
+    );
+    if !skipped.is_empty() {
+        eprintln!("  unsupported language (not scanned):");
+        for entry in skipped_language_counts(skipped) {
+            eprintln!("    {:<16} {}", entry.language, entry.files);
+        }
+        for file in skipped.iter().take(10) {
+            eprintln!("    - {} ({})", file.path, file.language);
+        }
+        if skipped.len() > 10 {
+            eprintln!("    ... and {} more", skipped.len() - 10);
+        }
+    }
+    if let Some(telem) = telemetry
+        && !telem.input.failed_files.is_empty()
+    {
+        eprintln!("  failed to read, parse, or lower (not analyzed):");
+        for file in &telem.input.failed_files {
+            eprintln!("    - {file}");
+        }
+        if telem.input.failed > telem.input.failed_files.len() {
+            eprintln!(
+                "    ... and {} more",
+                telem.input.failed - telem.input.failed_files.len()
+            );
+        }
+    }
+    if coverage.files_without_sink_sites > 0 {
+        eprintln!(
+            "  analyzed, no sink site the engine models ({} of {} analyzed file(s)):",
+            coverage.files_without_sink_sites, coverage.files_analyzed
+        );
+        for file in &coverage.no_sink_files {
+            eprintln!("    - {file}");
+        }
+        if coverage.files_without_sink_sites > coverage.no_sink_files.len() {
+            eprintln!(
+                "    ... and {} more",
+                coverage.files_without_sink_sites - coverage.no_sink_files.len()
+            );
+        }
+    }
+    if coverage.unresolved_sites > 0 {
+        eprintln!(
+            "  sink site(s) the backward walk could not decide ({}):",
+            coverage.unresolved_sites
+        );
+        for site in &coverage.unresolved_sample {
+            eprintln!("    - {}:{}  {}", site.file, site.line, site.sink);
+        }
+        if coverage.unresolved_sites > coverage.unresolved_sample.len() {
+            eprintln!(
+                "    ... and {} more",
+                coverage.unresolved_sites - coverage.unresolved_sample.len()
+            );
         }
     }
 }
@@ -1271,7 +1635,7 @@ mod explain_rule_tests {
 /// `REPORT_SCHEMA_VERSION` and this test move together.
 #[cfg(test)]
 mod json_report_schema_tests {
-    use super::{json_report, json_report_with_skips, json_report_with_telemetry};
+    use super::{json_report, json_report_with_coverage, json_report_with_telemetry};
     use crate::Advisory;
     use crate::engine::files::UnsupportedSourceFile;
     use frensense_engine::telemetry::ScanTelemetry;
@@ -1375,7 +1739,7 @@ mod json_report_schema_tests {
                 language: "Java",
             },
         ];
-        let report = json_report_with_skips(&[], &[], None, &skipped);
+        let report = json_report_with_coverage(&[], &[], None, &skipped, None);
         let coverage = &report["analysis"]["coverage"]["unsupported_source_files"];
         assert_eq!(coverage["count"], 3);
         assert_eq!(coverage["languages"][0]["language"], "Ruby");
@@ -1390,6 +1754,34 @@ mod json_report_schema_tests {
         let coverage = &report["analysis"]["coverage"]["unsupported_source_files"];
         assert_eq!(coverage["count"], 0);
         assert_eq!(coverage["languages"].as_array().map(Vec::len), Some(0));
+    }
+
+    #[test]
+    fn coverage_denominator_counts_unsupported_sources_and_blocks_clean() {
+        let mut telem = frensense_engine::telemetry::ScanTelemetry::default();
+        telem.input.submitted = 1;
+        telem.input.scanned = 1;
+        let skipped = vec![UnsupportedSourceFile {
+            path: "worker.rb".into(),
+            language: "Ruby",
+        }];
+        let coverage = crate::policy::Coverage {
+            files_found: 2,
+            files_analyzed: 1,
+            files_unsupported: 1,
+            files_with_sink_sites: 1,
+            sink_sites: 1,
+            ..crate::policy::Coverage::default()
+        };
+        let report = json_report_with_coverage(&[], &[], Some(&telem), &skipped, Some(&coverage));
+        let c = &report["analysis"]["coverage"];
+        assert_eq!(c["files_found"], 2, "{report}");
+        assert_eq!(c["files_not_analyzed"], 1, "{report}");
+        assert_eq!(c["files_unsupported"], 1, "{report}");
+        assert_eq!(
+            report["analysis"]["clean"], false,
+            "a source file left unanalyzed is not clean: {report}"
+        );
     }
 }
 
@@ -1409,6 +1801,45 @@ mod scan_status_tests {
     fn complete_on_clean_zero_files() {
         let telem = ScanTelemetry::default();
         assert_eq!(ScanStatus::compute(&telem, &[]), ScanStatus::Complete);
+    }
+
+    fn clean_coverage() -> crate::policy::Coverage {
+        crate::policy::Coverage {
+            files_found: 1,
+            files_analyzed: 1,
+            files_with_sink_sites: 1,
+            sink_sites: 1,
+            ..crate::policy::Coverage::default()
+        }
+    }
+
+    #[test]
+    fn clean_requires_every_recognized_site_decided() {
+        let mut coverage = clean_coverage();
+        assert!(ScanStatus::Complete.clean(true, &coverage));
+        coverage.unresolved_sites = 1;
+        assert!(
+            !ScanStatus::Complete.clean(true, &coverage),
+            "an undecided sink site is not clean"
+        );
+    }
+
+    #[test]
+    fn clean_requires_every_found_file_analyzed() {
+        let mut coverage = clean_coverage();
+        coverage.files_found = 2;
+        coverage.files_unsupported = 1;
+        assert!(
+            !ScanStatus::Complete.clean(true, &coverage),
+            "a file never analyzed is not clean"
+        );
+    }
+
+    #[test]
+    fn clean_still_requires_no_findings_and_a_complete_status() {
+        let coverage = clean_coverage();
+        assert!(!ScanStatus::Partial.clean(true, &coverage));
+        assert!(!ScanStatus::Complete.clean(false, &coverage));
     }
 
     #[test]

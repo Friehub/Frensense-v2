@@ -2,14 +2,16 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-//! Reporting policy: which engine findings become advisories, and which
-//! survive the severity/confidence floor (ENGINE_PURITY_REFACTOR 1.3).
+//! Reporting policy: which engine findings become advisories, which survive
+//! the severity/confidence floor (ENGINE_PURITY_REFACTOR 1.3), and what the
+//! report may claim the scan actually covered ([`Coverage`]).
 //!
 //! The engine emits verdicts; what becomes a *reported* advisory is
 //! consumer policy. This module is the only place that answers
 //!
-//! 1. which engine findings become advisories ([`reports_finding`]), and
-//! 2. which advisories survive the severity/confidence floor ([`apply`]).
+//! 1. which engine findings become advisories ([`reports_finding`]),
+//! 2. which advisories survive the severity/confidence floor ([`apply`]), and
+//! 3. how much of the input the scan really inspected ([`Coverage`]).
 //!
 //! [`crate::reporter`] renders what survives; nothing else filters.
 //! The `--explain` "why the engine stayed silent" map lives in
@@ -17,8 +19,9 @@
 
 use crate::{Advisory, Profile, RuleTier, Severity};
 use frensense_engine::analysis::taint::engine::{BackwardVerdict, FindingClass, SinkFinding};
+use frensense_engine::scan::ScanResult;
 use frensense_lang::rule_card;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Engine output that becomes an advisory: a vulnerable verdict on a
 /// dangerous sink slot (sink-signature aware), whose sink names a
@@ -132,6 +135,183 @@ pub fn apply_with_profile(
     profile: Profile,
 ) -> (Vec<Advisory>, BTreeMap<RuleTier, usize>) {
     apply_with_profile_and_hygiene(advisories, min_confidence, severity_floor, profile, false)
+}
+
+/// How many file names / unresolved sites a report keeps. Matches the
+/// engine's telemetry sample cap (`telemetry::PARTIAL_SAMPLE`) so a
+/// whole-tree scan cannot inflate the report envelope.
+pub const COVERAGE_SAMPLE: usize = 25;
+
+/// One sink argument the backward walk reached but could not decide.
+///
+/// A taint walk that meets a value it cannot resolve (dynamic dispatch,
+/// reflection, an unmodeled callee) ends `Unknown` rather than `Clean`. The
+/// engine has always counted those; this names them so "we could not decide"
+/// stops looking like "there was nothing to decide".
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UnresolvedSite {
+    /// Path exactly as the scan submitted it.
+    pub file: String,
+    /// 1-based line of the sink call (`0` when lowering recorded no span).
+    pub line: u32,
+    /// Sink name the engine recognized.
+    pub sink: String,
+}
+
+/// What a scan *covered*, as distinct from what it *concluded*.
+///
+/// "No findings" has two meanings the report used to collapse into one word:
+///
+/// 1. the engine inspected the dangerous operations in this code and no
+///    attacker source reached them, or
+/// 2. the engine never looked at the code at all - a file in a language with
+///    no spec, a file that failed to lower, or a file where nothing it models
+///    as dangerous appeared.
+///
+/// The second is a statement about the engine, not about the code, and
+/// printing "Clean" for it makes a clean scan unfalsifiable. Both are true at
+/// once on a large corpus: on the OWASP Benchmark for Python, 622 of 1,230
+/// files yield no recognized sink site.
+///
+/// Every count is derived from data the scan already produces (findings plus
+/// `ScanTelemetry`), so this costs one pass over values the consumer already
+/// receives and works on any language. No engine change.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Coverage {
+    /// Source files the walk found: every supported file submitted for
+    /// analysis plus every source file whose language has no engine spec.
+    /// The denominator of "N of M files scanned".
+    pub files_found: usize,
+    /// Files successfully read, parsed, and lowered.
+    pub files_analyzed: usize,
+    /// Supported files that could not be read, parsed, or lowered.
+    pub files_failed: usize,
+    /// Source files dropped without analysis because the engine has no spec
+    /// for their language.
+    pub files_unsupported: usize,
+    /// Distinct sink call sites the engine recognized (`file`, `line`, sink).
+    /// Every verdict counts: a recognized site is one the engine reasoned
+    /// about, whether or not it produced an advisory.
+    pub sink_sites: usize,
+    /// Analyzed files that yielded at least one recognized sink site.
+    pub files_with_sink_sites: usize,
+    /// Analyzed files that yielded none. For these, "no findings" describes
+    /// the engine's vocabulary, not the code.
+    pub files_without_sink_sites: usize,
+    /// First [`COVERAGE_SAMPLE`] such files, sorted.
+    pub no_sink_files: Vec<String>,
+    /// Distinct sink sites whose walk ended `Unknown`.
+    pub unresolved_sites: usize,
+    /// First [`COVERAGE_SAMPLE`] unresolved sites, sorted by file/line/sink.
+    pub unresolved_sample: Vec<UnresolvedSite>,
+}
+
+impl Coverage {
+    /// Derive coverage from one scan's findings and input accounting.
+    ///
+    /// `considered` is the set of paths the runner submitted for lowering;
+    /// it is only used to name files for the sample, never to count them
+    /// (the scan's own `scanned` count is authoritative).
+    /// `files_unsupported` is the number of source files the walk skipped
+    /// because their language has no spec - the runner knows it from its
+    /// collected-file list, the engine telemetry does not.
+    #[must_use]
+    pub fn from_scan(result: &ScanResult, considered: &[String], files_unsupported: usize) -> Self {
+        let mut sites: BTreeSet<(&str, u32, &str)> = BTreeSet::new();
+        let mut recognized: BTreeSet<&str> = BTreeSet::new();
+        let mut unresolved: BTreeSet<UnresolvedSite> = BTreeSet::new();
+        for located in &result.located {
+            sites.insert((
+                located.file.as_str(),
+                located.line,
+                located.finding.sink.as_str(),
+            ));
+            recognized.insert(located.file.as_str());
+            if located.finding.verdict == BackwardVerdict::Unknown {
+                unresolved.insert(UnresolvedSite {
+                    file: located.file.clone(),
+                    line: located.line,
+                    sink: located.finding.sink.clone(),
+                });
+            }
+        }
+        // A non-dataflow checker finding (weak hash, insecure cookie) is also
+        // recognition: the engine understood an operation in that file.
+        for located in &result.located_checker {
+            recognized.insert(located.file.as_str());
+        }
+
+        let input = &result.telemetry.input;
+        let files_analyzed = input.scanned;
+        let files_with_sink_sites = recognized.len();
+        // A file that failed to lower is not evidence about the engine's
+        // vocabulary, and it is already counted (and named) as a failure.
+        let failed: BTreeSet<&str> = input.failed_files.iter().map(String::as_str).collect();
+        let mut no_sink_files: Vec<String> = considered
+            .iter()
+            .filter(|path| !recognized.contains(path.as_str()))
+            .filter(|path| !failed.contains(path.as_str()))
+            .cloned()
+            .collect();
+        no_sink_files.sort();
+        no_sink_files.dedup();
+        no_sink_files.truncate(COVERAGE_SAMPLE);
+
+        Coverage {
+            files_found: input.submitted + files_unsupported,
+            files_analyzed,
+            files_failed: input.failed,
+            files_unsupported,
+            sink_sites: sites.len(),
+            files_with_sink_sites,
+            files_without_sink_sites: files_analyzed.saturating_sub(files_with_sink_sites),
+            no_sink_files,
+            unresolved_sites: unresolved.len(),
+            unresolved_sample: unresolved.into_iter().take(COVERAGE_SAMPLE).collect(),
+        }
+    }
+
+    /// Source files the scan found but did not analyze: unsupported languages
+    /// plus read/parse/lower failures. The "M - N" in "N of M files scanned".
+    #[must_use]
+    pub fn files_not_analyzed(&self) -> usize {
+        self.files_failed + self.files_unsupported
+    }
+
+    /// Fold one scan's coverage into a running total. Multi-path and
+    /// `--diff-only` runs scan one file at a time, so their report is the
+    /// union, not the last run's numbers.
+    pub fn merge(&mut self, other: Coverage) {
+        self.files_found += other.files_found;
+        self.files_analyzed += other.files_analyzed;
+        self.files_failed += other.files_failed;
+        self.files_unsupported += other.files_unsupported;
+        self.sink_sites += other.sink_sites;
+        self.files_with_sink_sites += other.files_with_sink_sites;
+        self.files_without_sink_sites += other.files_without_sink_sites;
+        self.unresolved_sites += other.unresolved_sites;
+        self.no_sink_files.extend(other.no_sink_files);
+        self.no_sink_files.sort();
+        self.no_sink_files.dedup();
+        self.no_sink_files.truncate(COVERAGE_SAMPLE);
+        self.unresolved_sample.extend(other.unresolved_sample);
+        self.unresolved_sample.sort();
+        self.unresolved_sample.dedup();
+        self.unresolved_sample.truncate(COVERAGE_SAMPLE);
+    }
+
+    /// True when the scan recognized at least one sink site somewhere. A
+    /// scan that recognized nothing has no basis to call anything clean.
+    #[must_use]
+    pub fn recognized_anything(&self) -> bool {
+        self.files_with_sink_sites > 0
+    }
+
+    /// True when every sink site the scan recognized was decided.
+    #[must_use]
+    pub fn fully_resolved(&self) -> bool {
+        self.unresolved_sites == 0
+    }
 }
 
 #[cfg(test)]
@@ -295,5 +475,116 @@ mod tests {
         assert_eq!(hidden.get(&RuleTier::Beta), Some(&1));
         assert_eq!(hidden.get(&RuleTier::Experimental), Some(&1));
         assert_eq!(hidden.get(&RuleTier::Hygiene), None);
+    }
+
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT_DIR: AtomicUsize = AtomicUsize::new(0);
+
+    /// Scan a throwaway directory through the real `Engine`, so the fixture
+    /// exercises the same fact tables the product does.
+    fn coverage_for(files: &[(&str, &str)]) -> Coverage {
+        let n = NEXT_DIR.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("frensense-coverage-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        for (name, source) in files {
+            std::fs::write(dir.join(name), source).expect("write fixture");
+        }
+        let mut engine = crate::Engine::new();
+        engine.run(&dir).expect("scan");
+        let coverage = engine.take_coverage();
+        let _ = std::fs::remove_dir_all(&dir);
+        coverage
+    }
+
+    const SINK: &str = "from flask import request\nimport os\n\n\ndef handler():\n    os.system(request.args.get(\"cmd\"))\n";
+
+    #[test]
+    fn a_file_with_a_sink_is_recognized() {
+        let coverage = coverage_for(&[("sink.py", SINK)]);
+        assert!(coverage.recognized_anything(), "{coverage:?}");
+        assert_eq!(coverage.files_found, 1);
+        assert_eq!(coverage.files_analyzed, 1);
+        assert_eq!(coverage.files_with_sink_sites, 1);
+        assert_eq!(coverage.files_without_sink_sites, 0);
+        assert!(coverage.no_sink_files.is_empty());
+        assert!(coverage.sink_sites >= 1);
+    }
+
+    #[test]
+    fn a_file_without_a_sink_is_named_as_unrecognized() {
+        let coverage = coverage_for(&[
+            ("sink.py", SINK),
+            ("models.py", "class User:\n    name: str = \"\"\n"),
+        ]);
+        assert_eq!(coverage.files_found, 2);
+        assert_eq!(coverage.files_analyzed, 2);
+        assert_eq!(coverage.files_with_sink_sites, 1);
+        assert_eq!(coverage.files_without_sink_sites, 1);
+        assert!(
+            coverage
+                .no_sink_files
+                .iter()
+                .all(|p| p.ends_with("models.py")),
+            "{coverage:?}"
+        );
+    }
+
+    #[test]
+    fn a_sanitized_sink_still_counts_as_recognized() {
+        // Recognition is not detection: the engine inspected this sink and
+        // decided no attacker source reaches it. That is a conclusion, and
+        // the file must not be reported as blind.
+        let coverage = coverage_for(&[(
+            "sanitized.py",
+            "import os\n\n\ndef handler():\n    os.system(\"echo hi\")\n",
+        )]);
+        assert!(coverage.recognized_anything(), "{coverage:?}");
+        assert_eq!(coverage.files_without_sink_sites, 0);
+    }
+
+    #[test]
+    fn an_unsupported_language_is_counted_but_not_scanned() {
+        // The denominator: a 1-of-2 scan must not report itself as 1/1.
+        let coverage = coverage_for(&[("sink.py", SINK), ("worker.rb", "puts 'hello'\n")]);
+        assert_eq!(coverage.files_found, 2, "{coverage:?}");
+        assert_eq!(coverage.files_analyzed, 1);
+        assert_eq!(coverage.files_unsupported, 1);
+        assert_eq!(coverage.files_not_analyzed(), 1);
+    }
+
+    #[test]
+    fn merge_unions_samples_and_sums_counts() {
+        let mut a = Coverage {
+            files_found: 1,
+            files_analyzed: 1,
+            files_with_sink_sites: 1,
+            sink_sites: 2,
+            ..Coverage::default()
+        };
+        let b = Coverage {
+            files_found: 2,
+            files_analyzed: 1,
+            files_failed: 1,
+            files_without_sink_sites: 1,
+            no_sink_files: vec!["b.py".into()],
+            unresolved_sites: 1,
+            unresolved_sample: vec![UnresolvedSite {
+                file: "b.py".into(),
+                line: 3,
+                sink: "eval".into(),
+            }],
+            ..Coverage::default()
+        };
+        a.merge(b);
+        assert_eq!(a.files_found, 3);
+        assert_eq!(a.files_analyzed, 2);
+        assert_eq!(a.files_not_analyzed(), 1);
+        assert_eq!(a.sink_sites, 2);
+        assert_eq!(a.files_without_sink_sites, 1);
+        assert_eq!(a.no_sink_files, vec!["b.py".to_string()]);
+        assert!(!a.fully_resolved());
     }
 }

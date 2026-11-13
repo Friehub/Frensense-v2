@@ -124,6 +124,11 @@ pub fn run_audit_streamed(
 
     let filtered = filter_advisories(advisories, severity_threshold, language);
     let skipped = engine.take_skipped_unsupported();
+    let coverage = engine.take_coverage();
+    let telemetry = engine.take_telemetry();
+    let incomplete = engine.take_incomplete();
+    let (clean, analysis) =
+        super::scan_file::mcp_analysis(&filtered, &coverage, &telemetry, &incomplete);
 
     let total = filtered.len();
     write_notification(&json!({
@@ -142,9 +147,10 @@ pub fn run_audit_streamed(
     }
 
     let result = json!({
-        "clean": filtered.is_empty(),
+        "clean": clean,
         "advisories": serde_json::to_value(&filtered).unwrap_or_default(),
         "unsupported_source_files": crate::cli::skipped_unsupported_json(&skipped),
+        "analysis": analysis,
     });
     write_response(&rpc_result(id, result));
 }
@@ -178,10 +184,16 @@ pub fn run_audit(path: &str, severity_threshold: &str, language: Option<&str>) -
 
     let filtered = filter_advisories(advisories, severity_threshold, language);
     let skipped = engine.take_skipped_unsupported();
+    let coverage = engine.take_coverage();
+    let telemetry = engine.take_telemetry();
+    let incomplete = engine.take_incomplete();
+    let (clean, analysis) =
+        super::scan_file::mcp_analysis(&filtered, &coverage, &telemetry, &incomplete);
 
     json!({
-        "clean": filtered.is_empty(),
+        "clean": clean,
         "advisories": serde_json::to_value(&filtered).unwrap_or_default(),
         "unsupported_source_files": crate::cli::skipped_unsupported_json(&skipped),
+        "analysis": analysis,
     })
 }

@@ -29,12 +29,27 @@ use std::path::Path;
 /// that landed on them, and how many diff files the engine actually ran.
 pub type DiffScanOutcome = (BTreeMap<String, Vec<AddedRange>>, Vec<Advisory>, usize);
 
+/// A diff scan plus how far the analysis behind it could see.
+///
+/// Coverage travels with the findings because a diff gate is the one place
+/// where "clean" is consumed as a decision: an agent that reads `clean:
+/// true` from a file the engine recognized nothing in has been told the
+/// wrong thing.
+pub struct DiffScan {
+    pub ranges: BTreeMap<String, Vec<AddedRange>>,
+    pub advisories: Vec<Advisory>,
+    pub scanned: usize,
+    pub coverage: crate::policy::Coverage,
+    pub telemetry: frensense_engine::telemetry::ScanTelemetry,
+    pub incomplete: Vec<frensense_engine::scan::IncompleteFunction>,
+}
+
 /// MCP tool definition for `frensense_diff`.
 #[must_use]
 pub fn tool_definition() -> Value {
     json!({
         "name": "frensense_diff",
-        "description": "Scan files touched by a unified diff (git diff/patch format) and report ONLY findings whose line falls inside the diff's added-line ranges. Use this to gate a change: pre-existing findings elsewhere in the touched files are filtered out, so the result answers 'does MY change introduce findings?'. Empty advisories with clean=true means the added lines are invariant-clean. Pass either a diff text (diff_text) or a repo path whose working tree is scanned (repo).",
+        "description": "Scan files touched by a unified diff (git diff/patch format) and report ONLY findings whose line falls inside the diff's added-line ranges. Use this to gate a change: pre-existing findings elsewhere in the touched files are filtered out, so the result answers 'does MY change introduce findings?'. Empty advisories with clean=true means the added lines introduce no findings, every touched file was analyzed, and every sink site the engine recognized was decided; read analysis.coverage to see the denominator (files_analyzed/files_found) and sink_sites (0 means the gate cannot vouch for the change). Pass either a diff text (diff_text) or a repo path whose working tree is scanned (repo).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -331,6 +346,27 @@ pub fn run_diff(
     min_confidence: f64,
     corpus_bundle: Option<&str>,
 ) -> crate::Result<DiffScanOutcome> {
+    let scan = run_diff_detailed(
+        repo,
+        diff_text,
+        severity_threshold,
+        min_confidence,
+        corpus_bundle,
+    )?;
+    Ok((scan.ranges, scan.advisories, scan.scanned))
+}
+
+/// [`run_diff`] plus the coverage and telemetry behind its answer.
+///
+/// # Errors
+/// Same as [`run_diff`].
+pub fn run_diff_detailed(
+    repo: &Path,
+    diff_text: Option<&str>,
+    severity_threshold: &str,
+    min_confidence: f64,
+    corpus_bundle: Option<&str>,
+) -> crate::Result<DiffScan> {
     let diff = match diff_text {
         Some(d) => d.to_string(),
         None => git_diff_head(repo).map_err(crate::FrensenseError::Config)?,
@@ -343,10 +379,18 @@ pub fn run_diff(
     // by collect_files' own rules.
     let mut all = Vec::new();
     let mut scanned = 0usize;
+    let mut unsupported_touched = 0usize;
+    let mut coverage = crate::policy::Coverage::default();
+    let mut telemetry = frensense_engine::telemetry::ScanTelemetry::default();
+    let mut incomplete = Vec::new();
     let mut engine = super::scan_file::build_engine(min_confidence, corpus_bundle);
     for path in ranges.keys() {
         let abs = repo.join(path);
         if !is_supported(&abs) {
+            // A touched source file in a language with no spec (or a deleted
+            // file) is part of the change; it belongs in the denominator
+            // even though the engine cannot scan it.
+            unsupported_touched += 1;
             continue;
         }
         // A file run emits advisories whose file_path is the path we
@@ -358,8 +402,14 @@ pub fn run_diff(
                 adv.file_path = path.clone();
                 all.push(adv);
             }
+            coverage.merge(engine.take_coverage());
+            telemetry.merge(engine.take_telemetry());
+            incomplete.extend(engine.take_incomplete());
         }
     }
+    telemetry.finalize();
+    coverage.files_found += unsupported_touched;
+    coverage.files_unsupported += unsupported_touched;
 
     let all = filter_advisories(all, severity_threshold, min_confidence);
     let on_added: Vec<Advisory> = all
@@ -368,7 +418,14 @@ pub fn run_diff(
             ranges.keys().any(|d| path_matches(&adv.file_path, d)) && in_added_lines(adv, &ranges)
         })
         .collect();
-    Ok((ranges, on_added, scanned))
+    Ok(DiffScan {
+        ranges,
+        advisories: on_added,
+        scanned,
+        coverage,
+        telemetry,
+        incomplete,
+    })
 }
 
 /// Build the JSON-RPC `tools/call` result value.
@@ -378,6 +435,23 @@ pub fn result_payload(
     advisories: &[Advisory],
     scanned: usize,
 ) -> Value {
+    result_payload_detailed(ranges, advisories, scanned, None, None, &[])
+}
+
+/// Build the JSON-RPC `tools/call` result value with coverage.
+#[must_use]
+pub(crate) fn result_payload_detailed(
+    ranges: &BTreeMap<String, Vec<AddedRange>>,
+    advisories: &[Advisory],
+    scanned: usize,
+    coverage: Option<&crate::policy::Coverage>,
+    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
+) -> Value {
+    let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
+    let telem = telemetry.unwrap_or(&empty_telem);
+    let cov = coverage.cloned().unwrap_or_default();
+    let (clean, analysis) = super::scan_file::mcp_analysis(advisories, &cov, telem, incomplete);
     let files: Vec<Value> = ranges
         .iter()
         .map(|(f, rs)| {
@@ -390,7 +464,7 @@ pub fn result_payload(
         })
         .collect();
     json!({
-        "clean": advisories.is_empty(),
+        "clean": clean,
         "files_touched": files.len(),
         "files_scanned": scanned,
         "added_ranges": files,
@@ -398,10 +472,17 @@ pub fn result_payload(
         // by comparing IDs across iterations of the same change.
         "stable_ids": advisories.iter().map(|a| a.stable_id()).collect::<Vec<_>>(),
         "advisories": advisories,
-        "message": if advisories.is_empty() {
-            "added lines introduce no findings"
-        } else {
+        "analysis": analysis,
+        "message": if !advisories.is_empty() {
             ""
+        } else if !cov.recognized_anything() {
+            "added lines introduce no findings; no sink site was recognized in the touched files, so the gate cannot vouch for them"
+        } else if !cov.fully_resolved() {
+            "added lines introduce no findings; some sink sites could not be decided"
+        } else if cov.files_not_analyzed() > 0 {
+            "added lines introduce no findings; some touched files were not analyzed, so they cannot be ruled out"
+        } else {
+            "added lines introduce no findings"
         },
     })
 }
@@ -467,14 +548,21 @@ pub fn run_diff_tool(args: &Value) -> Value {
         }
     }
 
-    match run_diff(
+    match run_diff_detailed(
         repo,
         diff_text,
         severity_threshold,
         min_confidence,
         corpus_bundle,
     ) {
-        Ok((ranges, advisories, scanned)) => result_payload(&ranges, &advisories, scanned),
+        Ok(outcome) => result_payload_detailed(
+            &outcome.ranges,
+            &outcome.advisories,
+            outcome.scanned,
+            Some(&outcome.coverage),
+            Some(&outcome.telemetry),
+            &outcome.incomplete,
+        ),
         Err(e) => json!({
             "clean": false,
             "advisories": [],
