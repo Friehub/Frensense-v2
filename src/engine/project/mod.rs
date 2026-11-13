@@ -54,6 +54,12 @@ pub struct Engine {
     pub(crate) hidden_by_tier: std::collections::BTreeMap<crate::RuleTier, usize>,
     /// Accumulated telemetry across scanned language groups.
     pub(crate) telemetry: frensense_engine::telemetry::ScanTelemetry,
+    /// What the most recent `run` covered: source files found versus
+    /// analyzed, sink sites inspected, files with none, and sites the walk
+    /// left undecided. Surfaced via [`Engine::take_coverage`] so a "no
+    /// findings" report can say whether it means "inspected and clean" or
+    /// "nothing recognized".
+    pub(crate) coverage: crate::policy::Coverage,
 }
 
 impl Engine {
@@ -75,6 +81,7 @@ impl Engine {
             skipped_unsupported: Vec::new(),
             hidden_by_tier: std::collections::BTreeMap::new(),
             telemetry: frensense_engine::telemetry::ScanTelemetry::default(),
+            coverage: crate::policy::Coverage::default(),
         }
     }
 
@@ -175,6 +182,16 @@ impl Engine {
     #[must_use]
     pub fn take_telemetry(&mut self) -> frensense_engine::telemetry::ScanTelemetry {
         std::mem::take(&mut self.telemetry)
+    }
+
+    /// Take what the most recent `run` covered: files found versus analyzed,
+    /// sink sites inspected, which files yielded none, and which sites it
+    /// left undecided. A consumer that reports "no findings" must consult
+    /// this, or it cannot tell "inspected and clean" from "nothing
+    /// recognized".
+    #[must_use]
+    pub fn take_coverage(&mut self) -> crate::policy::Coverage {
+        std::mem::take(&mut self.coverage)
     }
 
     /// Register a synthetic file id for a scanned path (used by the runner

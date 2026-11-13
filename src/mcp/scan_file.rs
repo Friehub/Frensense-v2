@@ -26,7 +26,7 @@ use std::path::Path;
 pub fn tool_definition() -> Value {
     json!({
         "name": "frensense_scan_file",
-        "description": "Scan ONE source file with deterministic dataflow analysis. Returns advisories found in that file only, each labeled with the file path, line, and column. An empty advisories array with clean=true means the file satisfies all invariants. Use this over frensense_audit when checking a single file you just wrote or edited; it is faster and scoped. Non-source files (or unsupported extensions) return unsupported_file instead of an error.",
+        "description": "Scan ONE source file with deterministic dataflow analysis. Returns advisories found in that file only, each labeled with the file path, line, and column. `clean=true` means no findings were reported, the analysis completed, and every sink site the engine recognized was decided; read `analysis.coverage` for the denominator and `analysis.coverage.sink_sites` to see whether it recognized anything at all (0 means a clean result is a statement about engine vocabulary, not about the code). Use this over frensense_audit when checking a single file you just wrote or edited; it is faster and scoped. Non-source files (or unsupported extensions) return unsupported_file instead of an error.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -83,6 +83,40 @@ pub fn filter_advisories(
     )
 }
 
+/// A single-file scan plus what it actually covered.
+///
+/// `advisories` answers "did anything fire?"; `coverage` answers "did the
+/// engine inspect anything at all, and was every file it found actually
+/// analyzed?". The second is what keeps a clean result falsifiable: a file
+/// with no recognized sink is silent for a reason that has nothing to do
+/// with the code being safe.
+#[derive(Debug)]
+pub(crate) struct FileScan {
+    pub advisories: Vec<Advisory>,
+    pub coverage: crate::policy::Coverage,
+    pub telemetry: frensense_engine::telemetry::ScanTelemetry,
+    pub incomplete: Vec<frensense_engine::scan::IncompleteFunction>,
+}
+
+/// Core single-file scan, retaining coverage and telemetry.
+///
+/// # Errors
+/// Propagates engine failures (unreadable file, internal analysis error).
+pub(crate) fn scan_file_detailed(
+    path: &Path,
+    min_confidence: f64,
+    corpus_bundle: Option<&str>,
+) -> crate::Result<FileScan> {
+    let mut engine = build_engine(min_confidence, corpus_bundle);
+    let advisories = engine.run(path)?;
+    Ok(FileScan {
+        advisories,
+        coverage: engine.take_coverage(),
+        telemetry: engine.take_telemetry(),
+        incomplete: engine.take_incomplete(),
+    })
+}
+
 /// Core single-file scan. All analysis goes through `Engine::run` -
 /// no parallel code path, no re-implemented lowering. Errors from the
 /// engine surface as `Err` and are rendered by the caller as a
@@ -95,8 +129,7 @@ pub fn scan_file(
     min_confidence: f64,
     corpus_bundle: Option<&str>,
 ) -> crate::Result<Vec<Advisory>> {
-    let mut engine = build_engine(min_confidence, corpus_bundle);
-    engine.run(path)
+    Ok(scan_file_detailed(path, min_confidence, corpus_bundle)?.advisories)
 }
 
 /// Engine construction shared by every MCP tool. The CLI wires the same
@@ -114,7 +147,67 @@ pub(crate) fn build_engine(min_confidence: f64, corpus_bundle: Option<&str>) -> 
 /// Build the JSON-RPC `tools/call` result payload.
 #[must_use]
 pub fn result_payload(path: &Path, advisories: &[Advisory]) -> Value {
-    let clean = advisories.is_empty();
+    result_payload_detailed(path, advisories, None, None, &[])
+}
+
+/// `clean` and the `analysis` object every MCP tool reports.
+///
+/// One implementation for `scan_file`, `audit` and `diff`: an agent that
+/// gates on `clean` must get the same answer from all three, and all three
+/// must expose the coverage behind it. `coverage` travels as an object with
+/// the same field names the CLI writes under `analysis.coverage`, so a
+/// prompt or a script can read one shape everywhere.
+pub(crate) fn mcp_analysis(
+    advisories: &[Advisory],
+    coverage: &crate::policy::Coverage,
+    telemetry: &frensense_engine::telemetry::ScanTelemetry,
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
+) -> (bool, Value) {
+    let status = crate::cli::ScanStatus::compute(telemetry, incomplete);
+    let clean = status.clean(advisories.is_empty(), coverage);
+    let block = json!({
+        "status": status,
+        "coverage": {
+            "files_found": coverage.files_found,
+            "files_analyzed": coverage.files_analyzed,
+            "files_not_analyzed": coverage.files_not_analyzed(),
+            "files_unsupported": coverage.files_unsupported,
+            "files_failed": coverage.files_failed,
+            "sink_sites": coverage.sink_sites,
+            "files_with_sink_sites": coverage.files_with_sink_sites,
+            "files_without_sink_sites": coverage.files_without_sink_sites,
+            "no_sink_files": coverage.no_sink_files,
+            "unresolved_sites": coverage.unresolved_sites,
+            "unresolved_sample": coverage.unresolved_sample.iter().map(|s| json!({
+                "file": s.file,
+                "line": s.line,
+                "sink": s.sink,
+            })).collect::<Vec<Value>>(),
+        },
+        "functions": telemetry.input.functions,
+        "parse_partial": telemetry.input.parse_partial,
+    });
+    (clean, block)
+}
+
+/// Build the JSON-RPC `tools/call` result payload with coverage.
+///
+/// `clean` is not "no advisories": it also requires a completed analysis,
+/// no undecided sink site, and no source file left unanalyzed. `analysis`
+/// carries the coverage numbers either way, so an agent can see that a clean
+/// answer came from a file where the engine recognized nothing.
+#[must_use]
+pub(crate) fn result_payload_detailed(
+    path: &Path,
+    advisories: &[Advisory],
+    coverage: Option<&crate::policy::Coverage>,
+    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
+) -> Value {
+    let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
+    let telem = telemetry.unwrap_or(&empty_telem);
+    let cov = coverage.cloned().unwrap_or_default();
+    let (clean, analysis) = mcp_analysis(advisories, &cov, telem, incomplete);
     let mut payload = json!({
         "clean": clean,
         "file": path.display().to_string(),
@@ -124,9 +217,28 @@ pub fn result_payload(path: &Path, advisories: &[Advisory]) -> Value {
         // field of each advisory carries the same value.
         "stable_ids": advisories.iter().map(|a| a.stable_id()).collect::<Vec<_>>(),
         "advisories": advisories,
+        // What the answer rests on. `coverage.sink_sites == 0` means the
+        // engine found nothing it models as dangerous in this file, so a
+        // clean result is a statement about engine vocabulary, not about the
+        // code.
+        "analysis": analysis,
     });
     if clean {
-        payload["message"] = json!("no findings");
+        payload["message"] = json!(if cov.recognized_anything() {
+            "no findings"
+        } else {
+            "no findings; no sink site was recognized in this file, so findings there cannot be ruled out"
+        });
+    } else if advisories.is_empty() && !cov.fully_resolved() {
+        payload["message"] = json!(format!(
+            "no findings; {} sink site(s) could not be decided",
+            cov.unresolved_sites
+        ));
+    } else if advisories.is_empty() && cov.files_not_analyzed() > 0 {
+        payload["message"] = json!(format!(
+            "no findings; only {}/{} source file(s) were analyzed, so the rest cannot be ruled out",
+            cov.files_analyzed, cov.files_found
+        ));
     }
     payload
 }
@@ -183,10 +295,16 @@ pub fn run_scan_file(args: &Value) -> Value {
         });
     }
 
-    match scan_file(path, min_confidence, corpus_bundle) {
-        Ok(advisories) => {
-            let filtered = filter_advisories(advisories, severity_threshold, min_confidence);
-            result_payload(path, &filtered)
+    match scan_file_detailed(path, min_confidence, corpus_bundle) {
+        Ok(scan) => {
+            let filtered = filter_advisories(scan.advisories, severity_threshold, min_confidence);
+            result_payload_detailed(
+                path,
+                &filtered,
+                Some(&scan.coverage),
+                Some(&scan.telemetry),
+                &scan.incomplete,
+            )
         }
         Err(e) => json!({
             "clean": false,

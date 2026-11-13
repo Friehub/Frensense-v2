@@ -6,8 +6,8 @@
 //! The frensense CLI: collect files → compiler scan → report.
 
 use frensense::cli::{
-    compare_baseline, parse_options, print_explain, print_results_with_skips, print_scan_banner,
-    save_baseline,
+    compare_baseline, parse_options, print_explain, print_explain_coverage,
+    print_results_with_coverage, print_scan_banner, save_baseline,
 };
 use frensense::engine::Engine;
 use frensense::{FRENSENSE_VERSION, Result};
@@ -877,6 +877,7 @@ fn main() -> Result<()> {
     let mut incomplete: Vec<frensense_engine::scan::IncompleteFunction> = Vec::new();
     let mut skipped_unsupported: Vec<frensense::engine::files::UnsupportedSourceFile> = Vec::new();
     let mut telemetry = frensense_engine::telemetry::ScanTelemetry::default();
+    let mut coverage = frensense::policy::Coverage::default();
     let advisories = if options.diff_only {
         let repo_dir = if input_path.is_dir() {
             input_path.clone()
@@ -911,6 +912,7 @@ fn main() -> Result<()> {
                 incomplete.extend(e2.take_incomplete());
                 skipped_unsupported.extend(e2.take_skipped_unsupported());
                 telemetry.merge(e2.take_telemetry());
+                coverage.merge(e2.take_coverage());
                 if options.explain {
                     explain_records.extend(e2.take_explain());
                     for (tier, count) in e2.take_hidden_by_tier() {
@@ -940,6 +942,7 @@ fn main() -> Result<()> {
             incomplete.extend(engine.take_incomplete());
             skipped_unsupported.extend(engine.take_skipped_unsupported());
             telemetry.merge(engine.take_telemetry());
+            coverage.merge(engine.take_coverage());
             if options.explain {
                 explain_records.extend(engine.take_explain());
                 for (tier, count) in engine.take_hidden_by_tier() {
@@ -953,8 +956,14 @@ fn main() -> Result<()> {
 
     progress.finish();
 
+    // Sort/dedup before `--explain` so the coverage lists it prints match
+    // the ones the summary will count.
+    skipped_unsupported.sort();
+    skipped_unsupported.dedup();
+
     if options.explain {
         print_explain(&explain_records, &hidden_by_tier);
+        print_explain_coverage(&coverage, &skipped_unsupported, Some(&telemetry));
     }
     if let Some(path) = &options.explain_json_path {
         let doc = serde_json::json!({
@@ -967,15 +976,14 @@ fn main() -> Result<()> {
         }
     }
 
-    skipped_unsupported.sort();
-    skipped_unsupported.dedup();
     let status = frensense::cli::ScanStatus::compute(&telemetry, &incomplete);
 
-    print_results_with_skips(
+    print_results_with_coverage(
         &advisories,
         &incomplete,
         Some(&telemetry),
         &skipped_unsupported,
+        Some(&coverage),
         &options.format,
         &input_path,
         Some(start_time.elapsed()),

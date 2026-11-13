@@ -3,6 +3,7 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use crate::Advisory;
+use crate::policy::Coverage;
 use frensense_engine::analysis::taint::path::{PathStep, TaintPath};
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -14,9 +15,64 @@ impl Reporter {
     /// Generates a Markdown report grouped by severity.
     #[must_use]
     pub fn to_markdown(advisories: &[Advisory], path: &str) -> String {
+        Self::to_markdown_detailed(advisories, path, None)
+    }
+
+    /// Generates a Markdown report that says what the scan could recognize.
+    ///
+    /// A "No findings" Markdown report is the easiest place to overclaim: it
+    /// leaves the reader with a clean bill of health and no denominator. The
+    /// coverage block supplies one.
+    #[must_use]
+    pub fn to_markdown_detailed(
+        advisories: &[Advisory],
+        path: &str,
+        coverage: Option<&Coverage>,
+    ) -> String {
         let mut md = format!("# Frensense Report for {path}\n\n");
         if advisories.is_empty() {
-            md.push_str("**Analysis Complete:** No findings.\n");
+            match coverage {
+                Some(c) if !c.recognized_anything() => md.push_str(
+                    "**No findings - no sink site was recognized in this scan.** \
+                     The scan does not show the code is safe.\n",
+                ),
+                Some(c) if c.files_not_analyzed() > 0 => {
+                    let _ = writeln!(
+                        md,
+                        "**No findings - only {} of {} source file(s) were analyzed.** \
+                         The rest were not scanned.\n",
+                        c.files_analyzed, c.files_found
+                    );
+                }
+                Some(c) if !c.fully_resolved() => {
+                    let _ = writeln!(
+                        md,
+                        "**No findings - {} sink site(s) were left undecided.**",
+                        c.unresolved_sites
+                    );
+                }
+                Some(_) => md.push_str("**Analysis Complete:** No findings.\n"),
+                None => md.push_str("**No findings reported.**\n"),
+            }
+            if let Some(c) = coverage {
+                md.push('\n');
+                let _ = writeln!(
+                    md,
+                    "- Files analyzed: {}/{}",
+                    c.files_analyzed, c.files_found
+                );
+                let _ = writeln!(
+                    md,
+                    "- Sink sites recognized: {} (in {} file(s))",
+                    c.sink_sites, c.files_with_sink_sites
+                );
+                let _ = writeln!(
+                    md,
+                    "- Files with no recognized sink: {}",
+                    c.files_without_sink_sites
+                );
+                let _ = writeln!(md, "- Undecided sink sites: {}", c.unresolved_sites);
+            }
             return md;
         }
         for sev in [
@@ -51,9 +107,26 @@ impl Reporter {
     #[must_use]
     pub fn to_sarif_detailed(
         advisories: &[Advisory],
+        root_path: &Path,
+        telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
+        incomplete: &[frensense_engine::scan::IncompleteFunction],
+    ) -> serde_json::Value {
+        Self::to_sarif_with_coverage(advisories, root_path, telemetry, incomplete, None)
+    }
+
+    /// [`to_sarif_detailed`](Self::to_sarif_detailed) plus what the run
+    /// actually covered.
+    ///
+    /// A SARIF report is how CI consumes a scan, so the coverage gaps travel
+    /// as `toolExecutionNotifications` (a consumer that ignores them still
+    /// gets every finding) and as `runs[].properties.frensense.coverage`.
+    #[must_use]
+    pub fn to_sarif_with_coverage(
+        advisories: &[Advisory],
         _root_path: &Path,
         telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
         incomplete: &[frensense_engine::scan::IncompleteFunction],
+        coverage: Option<&Coverage>,
     ) -> serde_json::Value {
         // One SARIF rule per stable rule id (never per message): code
         // scanning groups, suppresses and trends findings by it.
@@ -114,9 +187,75 @@ impl Reporter {
 
         let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
         let telem = telemetry.unwrap_or(&empty_telem);
+        let cov = coverage.cloned().unwrap_or_default();
         let is_complete = telem.is_complete() && incomplete.is_empty();
 
         let mut notifications = Vec::new();
+        // Coverage gaps are notifications, not results: they say how far the
+        // answer reaches, and a code-scanning consumer that ignores them
+        // still sees the findings. A SARIF report with no such note is a
+        // claim that the tool understood every file, which is not true.
+        if !cov.recognized_anything() {
+            notifications.push(serde_json::json!({
+                "message": {
+                    "text": format!(
+                        "No sink site was recognized in any of the {} analyzed file(s): \
+                         this analysis says nothing about whether the code is safe",
+                        cov.files_analyzed
+                    )
+                },
+                "level": "warning"
+            }));
+        } else if cov.files_without_sink_sites > 0 {
+            let sample = if cov.no_sink_files.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " (for example: {})",
+                    cov.no_sink_files
+                        .iter()
+                        .take(5)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            notifications.push(serde_json::json!({
+                "message": {
+                    "text": format!(
+                        "{} of {} analyzed file(s) contained no sink site the engine models; \
+                         findings there cannot be ruled out{}",
+                        cov.files_without_sink_sites, cov.files_analyzed, sample
+                    )
+                },
+                "level": "note"
+            }));
+        }
+        if cov.files_not_analyzed() > 0 {
+            notifications.push(serde_json::json!({
+                "message": {
+                    "text": format!(
+                        "{} of {} source file(s) were not analyzed ({} unsupported language, \
+                         {} failed to read/parse/lower); findings there cannot be ruled out",
+                        cov.files_not_analyzed(), cov.files_found,
+                        cov.files_unsupported, cov.files_failed
+                    )
+                },
+                "level": "warning"
+            }));
+        }
+        if cov.unresolved_sites > 0 {
+            notifications.push(serde_json::json!({
+                "message": {
+                    "text": format!(
+                        "{} sink site(s) were reached but not decided (the backward walk \
+                         could not resolve a value); an undecided site is not a clean one",
+                        cov.unresolved_sites
+                    )
+                },
+                "level": "warning"
+            }));
+        }
         for inc in incomplete {
             notifications.push(serde_json::json!({
                 "message": {
@@ -183,6 +322,25 @@ impl Reporter {
                     }
                 },
                 "invocations": invocations,
+                // What the run could recognize. Under `properties` so it
+                // rides along without changing a required SARIF field, and
+                // so a consumer that reads only `results` still gets the
+                // findings unchanged.
+                "properties": {
+                    "frensense": {
+                        "coverage": {
+                            "files_found": cov.files_found,
+                            "files_analyzed": cov.files_analyzed,
+                            "files_not_analyzed": cov.files_not_analyzed(),
+                            "files_unsupported": cov.files_unsupported,
+                            "files_failed": cov.files_failed,
+                            "sink_sites": cov.sink_sites,
+                            "files_with_sink_sites": cov.files_with_sink_sites,
+                            "files_without_sink_sites": cov.files_without_sink_sites,
+                            "unresolved_sites": cov.unresolved_sites,
+                        }
+                    }
+                },
                 "results": advisories.iter().map(|adv| {
                     serde_json::json!({
                         "ruleId": adv.rule_id(),
