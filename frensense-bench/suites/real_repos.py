@@ -32,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import manifest  # noqa: E402
-from blindness import PinnedRepo, clone_repo  # noqa: E402
+from pinned import PinnedRepo, clone_repo  # noqa: E402
 from scanproc import run_scan, time_wrapped  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -55,7 +55,7 @@ def load_repos(manifest_file: Optional[Path] = None) -> Tuple[PinnedRepo, ...]:
             name=e["name"], url=e["url"], commit=e["commit"], lang=e["lang"],
             targets=tuple(e["targets"]), note=e.get("note", ""), timeout=e.get("timeout"),
         )
-        for e in manifest.repos_for("real", manifest_file)
+        for e in manifest.repos(manifest_file)
     )
 
 
@@ -134,9 +134,9 @@ def main() -> int:
     if not (args.prepare or args.run):
         ap.error("pass --prepare and/or --run")
 
-    # Same rule as the blindness suite: a name that matches nothing is a typo,
-    # not an empty run. `--only redis` silently scanning zero repositories and
-    # exiting 0 reads exactly like a clean result.
+    # A name that matches nothing is a typo, not an empty run. `--only redis`
+    # silently scanning zero repositories and exiting 0 reads exactly like a
+    # clean result.
     try:
         repos = load_repos(args.manifest)
     except manifest.ManifestError as exc:

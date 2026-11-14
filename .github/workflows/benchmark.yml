@@ -8,6 +8,11 @@ on:
       - 'v*'
   workflow_dispatch:
 
+# Same group as the docs deploy: both push to gh-pages and must not race.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -66,6 +71,20 @@ jobs:
 
           cat benchmark-results.json
 
+      - name: Prepare published scorecard
+        # The full scorecard carries per-case verdicts (large). The page only
+        # needs provenance, totals and the per-CWE breakdown.
+        run: |
+          python3 -c "
+          import json
+          with open('benchmark_scorecard.json') as f:
+              scorecard = json.load(f)
+          published = {k: scorecard[k] for k in ('meta', 'total', 'by_cwe', 'legacy_any', 'attribution') if k in scorecard}
+          with open('benchmark-public.json', 'w') as out:
+              json.dump(published, out, indent=1)
+          "
+          cat benchmark-public.json | head -40
+
       - name: Upload Benchmark Scorecard Artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -73,6 +92,7 @@ jobs:
           path: |
             benchmark_report.md
             benchmark_scorecard.json
+            benchmark-public.json
 
       - name: Store and Publish Benchmark Results
         uses: benchmark-action/github-action-benchmark@d48d326b4ca9ba73ca0cd0d59f108f9e02a381c7 # v1.20.4
@@ -83,3 +103,20 @@ jobs:
           auto-push: true
           comment-on-alert: true
           fail-on-alert: false
+
+      - name: Stage benchmark data for GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p benchmark-site
+          # The Benchmarks docs page loads this file from /benchmarks/benchmark.json.
+          cp benchmark-public.json benchmark-site/benchmark.json
+
+      - name: Deploy benchmark data (gh-pages /benchmarks)
+        if: github.ref == 'refs/heads/main'
+        uses: peaceiris/actions-gh-pages@329bcc8f12caed2cefe5a5b80781499a6f3b361b # v4.0.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: benchmark-site
+          publish_branch: gh-pages
+          destination_dir: benchmarks
+          keep_files: true

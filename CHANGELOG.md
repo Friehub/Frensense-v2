@@ -72,6 +72,22 @@ harness and keeps no changelog.
   modeled sink. `runs[].results` is unchanged, so code-scanning consumers
   that ignore notifications keep every finding.
 
+#### Repository & Release Tooling
+
+- **A runnable example teaches the corpus → bundle → scan loop.** The README
+  told readers to build a `.frc` from pairs of vulnerable and fixed examples
+  but shipped no complete example: `examples/` held one unrelated engine repro,
+  and the only corpus family (`corpus/python/weak_random`) is a private asset
+  with no held-out pair. Added `examples/notes-app/app.py`, a small Flask notes
+  service with four bugs the built-in pack catches (SQL injection, path
+  traversal, open redirect, weak password hash) plus an unguarded
+  `delete_note` call it does not, and `examples/corpus`, a policy family
+  (`authz.missing`, CWE-862) with training and held-out twins.
+  `examples/README.md` walks through `frensense lint`, `frensense bundle`,
+  `frensense bundle info`, and the before/after scans: 5 findings bare, 6 with
+  the bundle, the held-out positive firing and the held-out negative silent.
+  The root README points at it in one line.
+
 ### Changed
 
 - **`analysis.clean` and the honest denominator in the JSON report.**
@@ -91,6 +107,63 @@ harness and keeps no changelog.
   siblings; `print_scan_summary_detailed`, `json_report_with_skips`,
   `Reporter::to_sarif_detailed`, `DiffScanOutcome` and `run_diff` keep their
   published signatures and delegate, so `0.8.1` consumers compile unchanged.
+
+#### Benchmarks
+
+- **The OWASP scorecard is published instead of pasted.** The README and
+  `docs/BENCHMARKING.md` carried a hand-copied table (31.0% / 38.1% / 7.1%,
+  172 / 55 / 280 / 723) that went stale the moment the engine moved. The
+  benchmark workflow now writes a slim `benchmark.json` (provenance, totals and
+  per-CWE rates) to gh-pages `/benchmarks/` on every `main` push and release
+  tag, and the Benchmarks docs page renders it with a new
+  `BenchmarkScorecard` component. The scorecard itself now carries
+  `version`, `commit`, `generated_at`, `elapsed_s`, `workers` and `bundle` in
+  its `meta` block, so a published number can be traced to the run that
+  produced it. README and guide prose link to the page; the committed
+  `docs-site/public/data/benchmark_scorecard.json` is only the local-preview
+  fallback. The `Status` block in `README.md` and `npm/README.md` and the
+  warning in `docs-site/guide/index.md` no longer quote the stale 38% / 7%
+  figures or a fixed list of missed classes; they point at the published
+  scorecard instead.
+
+#### Repository & Release Tooling
+
+- **The overview reads its version from the root crate.** The guide overview
+  hardcoded `v0.8.0`, so it disagreed with `Cargo.toml` on every release that
+  moved the binary. `docs-site/.vitepress/config.mts` now exposes the
+  `currentVersion` it already reads from the root `Cargo.toml` as
+  `themeConfig.version`, and `docs-site/guide/index.md` renders that theme
+  value instead of a literal. The remaining pinned numbers in the CLI and
+  installation guides are gone too: the CLI reference now says it matches
+  "the current release" and the install check documents that `--version`
+  prints the installed version, so neither page goes stale on a release.
+
+### Removed
+
+#### Repository & Release Tooling
+
+- **The Engine Blindness benchmark and its challenge/credit system were
+  removed.** The `blindness` suite had grown into two coupled layers — a
+  capability benchmark (`suites/blindness.py`, `suites/blindness_labelled.py`)
+  and a challenge/credit system (`suites/blindness_challenges.py`,
+  `contrib.py`, `badges.json`) — that no other suite or CI job used. The
+  challenge ledger was never wired to GitHub issues, so the published board
+  could not reflect the backlog it claimed to track. Deleting the whole stack
+  removes 6,300+ lines:
+  - `frensense-bench`: `suites/blindness.py`, `suites/blindness_challenges.py`,
+    `suites/blindness_labelled.py`, `contrib.py`, `badges.json`, the
+    `[[labelled]]` manifest entries, the node-goat/recent-CVE labels, and the
+    three suites' tests.
+  - workflows: `engine-blindness.yml`, `challenge-verify.yml`,
+    `challenge-verify-report.yml`.
+  - docs site: `/challenges` and `/architecture/blindness`, the
+    `BlindnessChallenges` / `BlindnessLeaderboard` / `BlindnessScores` /
+    `BlindnessSheet` theme components, the board/history JSON and announcement.
+
+  The real-repository suite keeps working: the pin/checkout rules it borrowed
+  from the blindness module now live in `frensense-bench/suites/pinned.py`, and
+  `repos.toml` / `manifest.py` were reduced to the `real-repos` suite. No
+  engine, language-spec, or packgen behaviour changed.
 
 ## [0.8.1] - 2026-11-11
 

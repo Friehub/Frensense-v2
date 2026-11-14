@@ -65,6 +65,7 @@ verdicts.
 import argparse
 import concurrent.futures
 import csv
+import datetime
 import hashlib
 import json
 import os
@@ -724,6 +725,16 @@ def main() -> None:
               f"{errors[0]['id']}: {errors[0]['error']}", file=sys.stderr)
 
     scorecard = score(results, cases, args.match, tag_cwe)
+    # Provenance travels with the numbers so a published scorecard says which
+    # binary, commit and run produced it instead of being a bare table.
+    scorecard["meta"].update({
+        "version": binary_version,
+        "commit": repo_commit,
+        "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "elapsed_s": round(elapsed, 1),
+        "workers": args.workers,
+        "bundle": bundle_desc,
+    })
     diff = compare_to_baseline(scorecard, baseline, args.tpr_tolerance, args.fpr_tolerance) if baseline else None
     print_scorecard(scorecard, elapsed, diff)
 

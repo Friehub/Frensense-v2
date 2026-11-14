@@ -18,8 +18,8 @@ getting any of them wrong changes the number that gets published:
 3. **A killed process can still fill a pipe.** `communicate()` after the kill is
    what drains stdout/stderr and lets the child be reaped.
 
-There is no third copy of this logic: `blindness.py` and `real_repos.py` both
-call in here.
+There is no second copy of this logic: every suite that shells out to
+`frensense` calls in here.
 """
 
 import os
