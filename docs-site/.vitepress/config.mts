@@ -358,6 +358,7 @@ export default defineConfig({
 
   themeConfig: {
     siteTitle: 'Frensense',
+    version: currentVersion,
 
     downloadStats,
 

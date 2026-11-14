@@ -121,7 +121,19 @@ harness and keeps no changelog.
   its `meta` block, so a published number can be traced to the run that
   produced it. README and guide prose link to the page; the committed
   `docs-site/public/data/benchmark_scorecard.json` is only the local-preview
-  fallback.
+  fallback. The `Status` block in `README.md` and `npm/README.md` and the
+  warning in `docs-site/guide/index.md` no longer quote the stale 38% / 7%
+  figures or a fixed list of missed classes; they point at the published
+  scorecard instead.
+
+#### Repository & Release Tooling
+
+- **The overview reads its version from the root crate.** The guide overview
+  hardcoded `v0.8.0`, so it disagreed with `Cargo.toml` on every release that
+  moved the binary. `docs-site/.vitepress/config.mts` now exposes the
+  `currentVersion` it already reads from the root `Cargo.toml` as
+  `themeConfig.version`, and `docs-site/guide/index.md` renders that theme
+  value instead of a literal.
 
 ### Removed
 

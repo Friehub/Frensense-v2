@@ -23,11 +23,10 @@ output.
 
 > **Status: young, and honest about it.** Frensense reports what it can show
 > and stays quiet about what it cannot, so it **misses real vulnerabilities**.
-> On the OWASP Benchmark for Python it finds 38% of the vulnerable cases with a
-> 7% false-alarm rate, and finds none of the cross-site scripting, weak
-> randomness, XML external entity, LDAP injection or trust-boundary cases. Treat
-> a clean scan as "nothing found", not "nothing there". Full numbers are in
-> [Benchmarks](https://frensense.friehub.cloud/architecture/benchmarks).
+> The current OWASP Benchmark for Python score, the per-class breakdown and the
+> cases it does not cover are published from CI in
+> [Benchmarks](https://frensense.friehub.cloud/architecture/benchmarks). Treat
+> a clean scan as "nothing found", not "nothing there".
 
 ## Install
 

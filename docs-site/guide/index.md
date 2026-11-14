@@ -3,6 +3,12 @@ title: Overview
 description: What Frensense is, what it scans, and where to go next.
 ---
 
+<script setup>
+import { useData } from 'vitepress'
+
+const { theme } = useData()
+</script>
+
 # Frensense overview
 
 Frensense is a static application security testing (SAST) scanner. It reads
@@ -15,12 +21,10 @@ and the editor server (`frensense lsp`) are all subcommands of `frensense`.
 
 ::: warning What to expect
 Frensense is young and deliberately conservative about what it reports, which
-means it **misses real vulnerabilities**. On the OWASP Benchmark for Python it
-currently finds 38% of the vulnerable cases, and it finds none of the cases
-for cross-site scripting, weak randomness, XML external entities, LDAP
-injection or trust-boundary violations. See
-the [benchmark record](/architecture/benchmarks) for the numbers, and treat a
-clean scan as "nothing found", not "nothing there".
+means it **misses real vulnerabilities**. The current score, the per-class
+breakdown and the cases it does not cover are published from CI on the
+[benchmark record](/architecture/benchmarks). Treat a clean scan as "nothing
+found", not "nothing there".
 :::
 
 ## Choose your path
@@ -84,7 +88,7 @@ details.
 
 ## Status
 
-Frensense is at version <span class="frensense-version">v0.8.0</span>. The
+Frensense is at version <span class="frensense-version">v{{ theme.version }}</span>. The
 documentation for the earlier 1.x line is kept at [/v1/](/v1/). Version 2
 is a rebuild of the engine.
 
