@@ -15,12 +15,10 @@ and the editor server (`frensense lsp`) are all subcommands of `frensense`.
 
 ::: warning What to expect
 Frensense is young and deliberately conservative about what it reports, which
-means it **misses real vulnerabilities**. On the OWASP Benchmark for Python it
-currently finds 38% of the vulnerable cases, and it finds none of the cases
-for cross-site scripting, weak randomness, XML external entities, LDAP
-injection or trust-boundary violations. See
-the [benchmark record](/architecture/benchmarks) for the numbers, and treat a
-clean scan as "nothing found", not "nothing there".
+means it **misses real vulnerabilities**. The current score, the per-class
+breakdown and the cases it does not cover are published from CI on the
+[benchmark record](/architecture/benchmarks). Treat a clean scan as "nothing
+found", not "nothing there".
 :::
 
 ## Choose your path
@@ -33,7 +31,6 @@ clean scan as "nothing found", not "nothing there".
 | See findings in my editor | [Editors (LSP)](/guide/lsp) |
 | Look up a flag or an exit code | [CLI reference](/guide/cli) |
 | Add knowledge about my framework | [Bundles](/bundles), then [How teaching works](/guide/teachability) |
-| Help improve the engine | [Engine Blindness Challenges](/challenges) |
 
 ## What it scans
 
@@ -85,7 +82,7 @@ details.
 
 ## Status
 
-Frensense is at version v0.8.0. The
+Frensense is at version v{{ theme.version }}. The
 documentation for the earlier 1.x line is kept at [/v1/](/v1/). Version 2
 is a rebuild of the engine.
 
@@ -176,7 +173,7 @@ against it with [slsa-verifier](https://github.com/slsa-framework/slsa-verifier)
 ## Check the install
 
 ```bash
-frensense --version     # prints: frensense 0.8.0
+frensense --version     # prints the installed version
 frensense --help        # lists every flag and subcommand
 ```
 
@@ -309,7 +306,7 @@ a sanitizer or a guard. Today that includes a literal allow-list check like the
 one above, `shlex.quote`, and bound query parameters. It does not recognise
 every validation: a `re.fullmatch` check, for example, still leaves the
 finding. If a fix you believe in does not clear a finding, that is an engine
-gap worth reporting, and a good [challenge](/challenges) to take on.
+gap worth reporting.
 :::
 
 ## What the exit code means
@@ -349,8 +346,8 @@ description: Every frensense command, flag, output format and exit code.
 
 # CLI reference
 
-This page matches `frensense --help` for version 0.8.0. If your installed
-version is older or newer, `frensense --help` is the final word.
+This page matches `frensense --help` for the current release. If your
+installed version is older or newer, `frensense --help` is the final word.
 
 ## Commands
 
@@ -2327,14 +2324,12 @@ Worth knowing when you read a clean scan:
 * **Library calls with no model** pass taint through by default, which can
   produce false positives.
 
-These are the engine's current limits, and each is a candidate for a
-[challenge](/challenges).
+These are the engine's current limits.
 
 ## Chapters
 
 * [The program graph](/architecture/program-graph)
 * [Checkers](/architecture/checkers)
-* [Engine blindness](/architecture/blindness)
 * [Benchmarks](/architecture/benchmarks)
 * [Bundles (.frc)](/bundles)
 
@@ -2391,201 +2386,6 @@ mere textual presence of a call.
 ---
 
 ---
-url: https://frensense.friehub.cloud/architecture/blindness.md
-description: >-
-  Real-world static analysis limits, safety valve truncations, and
-  commit-by-commit dataflow tracking across open-source codebases.
----
-
-# Engine Blindness & Capability Profile
-
-Traditional static analysis benchmarks like OWASP measure synthetic detection rates on deliberately crafted samples. While valuable, they cannot answer how the compiler behaves on complex, multi-thousand-file open-source codebases it was never trained on.
-
-The **Engine Blindness & Capability Profile** evaluates Frensense on real software (Flask, Express, libpng, Axum) to measure where the engine's abstractions hit limits, where dataflow halts, and what resources are consumed.
-
-***
-
-## Live Commit Tracking Sheet
-
-The sheet below tracks the global blindness rate and resource profile for every engine commit.
-
-***
-
-## What is the Blindness Rate?
-
-When Frensense explores potential vulnerability sinks (SQL queries, system commands, deserializers, buffer allocations), it performs demand-driven backward taint traversal.
-
-For each sink argument, the traversal yields one of four verdicts:
-
-1. **`vulnerable`**: The backward path traced cleanly to an untrusted attacker source.
-2. **`sanitized`**: The path crossed a recognized validation guard or sanitizer.
-3. **`clean`**: The backward walk exhausted all predecessors without finding a source.
-4. **`unknown`**: **The Blindspot.** The backward walk halted at an opaque boundary, unmodeled dynamic call, or missing library stub.
-
-The **Blindness Rate** is the proportion of sink arguments that could not be proved clean, sanitized, or vulnerable:
-
-$$\text{Blindness Rate} = \frac{\text{Unknown Sinks}}{\text{Total Sinks Explored}} \times 100%$$
-
-A declining blindness rate over time signifies an engine that understands more real-world idioms with fewer blindspots.
-
-***
-
-## Safety Valve Truncation Caps
-
-Static analysis must balance precision against halting. To guarantee fast termination, Frensense includes bounded safety valves recorded in scan telemetry:
-
-| Cap Identifier | Default Limit | When it Fires | Analytical Impact |
-| :--- | :--- | :--- | :--- |
-| `call_context_depth` | `k = 1` | Call stack exceeds depth ceiling | Collapses to context-insensitive ($k=0$) for that walk |
-| `call_context_chains` | 4,096 chains | Call context interning table full | Subsequent calls become context-insensitive |
-| `contexts_per_function` | 64 | Single function called from too many distinct contexts | Merges remaining call sites |
-| `forward_hops` | 16 hops | Lexical enclosing scope traversal limit hit | Free name / outer variable resolution aborted |
-| `callgraph_hops` | 8 hops | Function alias indirection walk hit limit | Callee target marked unresolved |
-| `value_iterations` | $10 \times (\text{blocks} + 1)$ | Worklist rounds exceed budget | Early exit; branch constant sharpening dropped |
-| `points_to_passes` | 12 passes | Andersen/Steensgaard fixed point does not converge | Field-sensitivity dropped for that function |
-
-When a cap fires, the engine remains sound and safe, but may miss a deeper taint chain or record an `unknown` verdict.
-
-***
-
-## Memory & Capability Profile
-
-Blind spots are only half of a benchmark: a scan that stops early because it
-ran out of memory is not *more* precise, it is truncated. The [challenge board](/challenges)
-therefore carries a profile band above the cards with, per repository:
-
-* **peak RSS** and **RSS per scanned file** — the number that turns "redis needs 2.5 GB" into a line item,
-* scanned files, analysed functions, explored / unknown sinks, truncation caps, wall time,
-* the engine-reported **phase totals** (lower, graph, taint, checks) and the binary identity (`frensense 0.8.0 · engine 0.8.0`).
-
-Peak RSS is the high-water mark of the scan process (`/usr/bin/time %M`), sampled
-per repository (per case for a `--synthetic` suite). To make it a gate rather
-than an observation:
-
-```bash
-python3 frensense-bench/run.py --suite blindness --run --max-rss-mb 1024
-```
-
-A scan above the budget is highlighted on the page, named in the Markdown card,
-and the run exits **4**, so a memory regression fails like a blindness
-regression instead of being found by a user.
-
-***
-
-## Contributing: Solving Engine Blindspots
-
-Our CI tracks blindness regressions on every commit. Open-source contributors can help drive the blindness rate down by tackling specific gaps:
-
-### 1. Add Missing Library Facts (`.frc`)
-
-Many `unknown` sink arguments occur because third-party libraries (e.g. specialized ORMs, sanitization libraries) have not been modeled. Contributors can author declarative rules in `.frc` bundles without touching the Rust compiler.
-
-### 2. Sharpen Pointer and Alias Resolution
-
-If `callgraph_hops` or `call_context_depth` is high in dynamic languages like Python or JavaScript, contributors can improve type-feedback heuristics or string constant propagation in `frensense-engine`.
-
-### 3. Tree-sitter AST Gaps
-
-If `files_partial` is greater than 0, Tree-sitter encountered syntax errors or unsupported grammar constructs. Improving Tree-sitter node mappings in `frensense-lang` restores 100% clean parsing.
-
-***
-
-## Choosing what gets scanned
-
-No repository is listed in code. Everything the suites scan comes from [`frensense-bench/repos.toml`](https://github.com/Friehub/Frensense-v2/blob/main/frensense-bench/repos.toml), so adding one is a single entry:
-
-```toml
-[[repo]]
-name = "zlib"
-url = "https://github.com/madler/zlib.git"
-commit = "51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf"   # full 40-character SHA; a tag's SHA works
-lang = "c"
-targets = ["."]
-note = "C compression library; hand-rolled buffers"
-```
-
-* `suites` (optional) picks where it runs: `"blindness"` for blind-spot challenges, `"real"` for timing, peak memory and findings. The default is both.
-* `timeout` (optional) raises the limit for one slow repository.
-* A bad entry (short SHA, unknown language, a target outside the repo, a duplicate name) stops the run before anything is scanned.
-* `--manifest PATH` (or `FRENSENSE_BENCH_REPOS`) points both suites at another file, which is how you try a repo locally before sending the entry.
-
-The current set covers Python (flask, django), JavaScript (express), C (libpng, zlib, curl, redis), Rust (axum, tokio, ripgrep) and Go (gin). The C and Rust entries matter for memory as much as blindness: pointer-heavy code is where peak RSS and the truncation caps move.
-
-### Labelled sources
-
-`--labelled` also scores apps whose flaws are known, so the board shows **missed bugs** and **false alarms**, not only unknown sinks. Those are the `[[labelled]]` entries (Juice Shop, NodeGoat, OWASP BenchmarkPython) plus the recent-CVE set in `frensense-bench/labels/recent_cves.json`, each case pinned to the commit that fixed it. A labelled source that fails to scan fails the run; it is never counted as "found nothing".
-
-## Timeouts, failures and exit codes
-
-Every scan has a time limit so a runaway analysis cannot hold CI forever, but a limit must never change the answer. The rules:
-
-| What | Default | How to change it |
-| :--- | :--- | :--- |
-| Time allowed per repository scan | 1800 s | `--timeout SECONDS`, or `FRENSENSE_BLINDNESS_TIMEOUT=SECONDS`, or `timeout=` on that repo's pin in `PINNED_REPOS` |
-| No limit | n/a | `--timeout 0` (also `none`, `off`, `unlimited`) |
-| Time allowed per file in synthetic suites (OWASP) | 120 s | `--case-timeout SECONDS` |
-| Memory allowed per scan | no limit | `--max-rss-mb N` (exit **4** when exceeded) |
-| Whole CI job | 240 min | `timeout-minutes` in `.github/workflows/engine-blindness.yml` |
-
-Order of precedence for a repository: the command line, then the environment variable, then the repo's own `timeout=`, then the 1800 s default. In CI, **Run workflow** has a `timeout` box that sets the same thing for one run.
-
-```bash
-# One slow repo, give it two hours
-python3 frensense-bench/run.py --suite blindness --run --timeout 7200
-
-# Remove the limit while investigating
-FRENSENSE_BLINDNESS_TIMEOUT=0 python3 frensense-bench/run.py --suite blindness --run --only flask,express
-```
-
-A scan that times out, crashes or prints unreadable output is a **failure, not a clean result**:
-
-* the run exits with code **3** and prints `[FAILED] <repo>: <reason>`; CI goes red and nothing is published;
-* the repo contributes no challenges, and its earlier challenges are **not** reported as solved (only repos that scanned successfully can have challenges solved).
-
-There is no cap on the number of challenges: every unknown sink becomes one, grouped by what blocks it. The only filters are deliberate and visible: test, example and benchmark paths are not worth a contributor's time, and the engine itself skips test files and machine-minified JavaScript (lines averaging over 300 bytes) before scanning.
-
-***
-
-## Running the Benchmark Locally
-
-You can run the blindness benchmark locally using the unified runner:
-
-```bash
-# 1. Build the release binary
-cargo build --release
-
-# 2. Clone the pinned repositories (one-time setup)
-python3 frensense-bench/run.py --suite blindness --prepare
-
-# 3. Run the scan and generate the scorecard, CSV sheet, and history JSON
-python3 frensense-bench/run.py --suite blindness --run
-
-# Same, plus missed bugs and false alarms from the labelled sources
-python3 frensense-bench/run.py --suite blindness --run --labelled
-
-# Only some repos (names come from repos.toml)
-python3 frensense-bench/run.py --suite blindness --prepare --run --only zlib,redis
-
-# Run against a specific repository
-python3 frensense-bench/run.py --suite blindness --run --only flask
-
-# Score a case-isolated synthetic suite (e.g. the OWASP BenchmarkPython cases)
-python3 frensense-bench/run.py --suite blindness --run \
-  --synthetic owasp=/path/to/BenchmarkPython/testcode --workers 8
-```
-
-Results are saved to:
-
-* `target/blindness/blindness_card.md` (Markdown summary)
-* `target/blindness/blindness_sheet.csv` (Spreadsheet format)
-* `target/blindness/blindness_history.json` (Commit history time-series)
-* `target/blindness/board.json` (the slim document the [challenge board](/challenges) loads)
-* `target/blindness/challenges.html` (standalone copy of the cards and memory profile)
-* `target/blindness/challenges.json` (the same cards, machine-readable; `--baseline` diffs against it)
-
----
-
----
 url: https://frensense.friehub.cloud/architecture/benchmarks.md
 description: >-
   How Frensense is scored, the current OWASP Benchmark for Python record, and
@@ -2604,69 +2404,19 @@ One benchmark is a narrow view. It covers a handful of vulnerability classes in
 one language, in small single-file programs. Read the numbers as a progress
 measure for the engine, not as a statement about how it performs on your code.
 
-## Published record
+## Current results
 
-Scored on 2026-11-06 with Frensense 0.8.0 built from the `main` branch at
-commit `c2e6ade`. No `.frc` bundle (built-in knowledge only), single-file
-scans, conservative matching (see "Scoring model").
-
-| metric | value |
-|---|---|
-| **Score (TPR - FPR)** | **31.0%** |
-| TPR (vulnerable cases found) | 38.1% |
-| FPR (safe cases flagged) | 7.1% |
-| TP / FP / FN / TN | 172 / 55 / 280 / 723 |
-| scan time | about 4 s for 1,230 cases (2 workers) |
-
-Compared with the previous record (v0.7.0, 2026-10-02):
-
-| | v0.7.0 | 0.8.0 (`c2e6ade`) |
-|---|---|---|
-| Score | 26.2% | 31.0% |
-| TPR | 28.5% | 38.1% |
-| FPR | 2.3% | 7.1% |
-| TP / FP | 129 / 18 | 172 / 55 |
-
-The engine finds more vulnerable cases, and it also raises more false alarms:
-the false-positive rate roughly tripled. Reducing it is an open engine
-priority, and many of the [challenges](/challenges) target it.
+The scorecard above is generated by the benchmark workflow on every push to
+`main` and every release tag. It records the binary version, commit and date
+the numbers came from, so a score can always be traced back to a run. The
+per-CWE table is the tuning roadmap: the lowest-scoring classes with the most
+cases are where source and sink coverage pays off first. If the live file
+cannot be loaded, the page falls back to the committed snapshot at
+`docs-site/public/data/benchmark_scorecard.json`.
 
 We do not publish a ranking against other tools on this benchmark. The OWASP
 project's published scorecards are for the Java benchmark, a different language
 and test suite, so their numbers cannot be compared with these.
-
-## Per-category results
-
-Lowest score first. A "case" is one test file. A finding counts for a
-vulnerable case only if it is attributed to that case's CWE.
-
-| CWE | class | cases | TP | FP | FN | TN | TPR | FPR | score |
-|---|---|---|---|---|---|---|---|---|---|
-| CWE-330 | weak randomness | 326 | 0 | 0 | 99 | 227 | 0.0% | 0.0% | 0.0% |
-| CWE-79 | cross-site scripting | 89 | 0 | 0 | 31 | 58 | 0.0% | 0.0% | 0.0% |
-| CWE-501 | trust boundary | 37 | 0 | 0 | 18 | 19 | 0.0% | 0.0% | 0.0% |
-| CWE-90 | LDAP injection | 29 | 0 | 0 | 16 | 13 | 0.0% | 0.0% | 0.0% |
-| CWE-611 | XML external entities | 28 | 0 | 0 | 8 | 20 | 0.0% | 0.0% | 0.0% |
-| CWE-643 | XPath injection | 186 | 14 | 25 | 37 | 110 | 27.5% | 18.5% | 8.9% |
-| CWE-94 | code injection | 53 | 11 | 14 | 9 | 19 | 55.0% | 42.4% | 12.6% |
-| CWE-601 | open redirect | 34 | 8 | 7 | 5 | 14 | 61.5% | 33.3% | 28.2% |
-| CWE-22 | path traversal | 168 | 26 | 6 | 39 | 97 | 40.0% | 5.8% | 34.2% |
-| CWE-78 | command injection | 20 | 5 | 0 | 8 | 7 | 38.5% | 0.0% | 38.5% |
-| CWE-89 | SQL injection | 16 | 2 | 0 | 3 | 11 | 40.0% | 0.0% | 40.0% |
-| CWE-502 | deserialization | 54 | 11 | 3 | 7 | 33 | 61.1% | 8.3% | 52.8% |
-| CWE-328 | weak hash | 151 | 71 | 0 | 0 | 80 | 100.0% | 0.0% | 100.0% |
-| CWE-614 | cookie flags | 39 | 24 | 0 | 0 | 15 | 100.0% | 0.0% | 100.0% |
-
-What this shows:
-
-* **Five classes score zero.** The built-in knowledge does not recognise the
-  sources or sinks those cases use. Weak randomness alone is 99 vulnerable
-  cases.
-* **Three classes have a high false-alarm rate**: XPath injection, code
-  injection and open redirect flag 18%, 42% and 33% of their safe cases. These
-  are the classes where the safe variant looks most like the vulnerable one.
-* **Weak hashes and cookie flags are solved** on this benchmark, because they
-  need no data-flow reasoning.
 
 ## Reproduce it yourself
 
@@ -2746,56 +2496,6 @@ real scanners.
 * The per-CWE table is the tuning roadmap: the lowest-scoring classes
   with the most cases are where sink/source coverage work pays off
   most.
-
----
-
----
-url: https://frensense.friehub.cloud/challenges.md
-description: >-
-  Every place the Frensense engine is silent or wrong on real code, as a
-  challenge anyone can fix and earn credit for.
----
-
-# Engine Blindness Challenges
-
-Each run of the **engine blindness** CI scans pinned real codebases and labelled vulnerable suites. Wherever the engine loses a value, misses a known bug, or raises a false alarm, that spot becomes a challenge here. Fix the engine, and the challenge drops off the board on the next run. Your merged fix earns points and badges.
-
-## How to take one
-
-1. **Pick** a challenge and open it. Run the command under *Where to start* against the pinned repo: it lists every sink the engine explored and where each walk stopped.
-2. **Fix the engine.** The [blindness page](/architecture/blindness) explains the verdicts and where fixes usually go.
-3. **Claim it.** Press *Copy claim line* and paste it into your pull request description:
-
-   ```text
-   Solves: BG-0123456789
-   ```
-
-   You can claim up to 10 challenges per pull request.
-4. **Watch the check.** CI rescans the repos your challenges belong to with your branch and comments with what changed. It also fails if your change adds open challenges, loses a detection, or adds a false alarm in a repo it scanned: a fix must not trade one blind spot for another.
-5. **Merge.** After the merge, the `main` run scans again. Every sink of a claimed challenge that is now gone earns you credit, and you appear on the leaderboard.
-
-Credit is decided by the scan of `main`, never by the pull request check, so it reflects what actually shipped.
-
-## Points and badges
-
-A challenge is worth **2** points (easy), **4** (medium) or **8** (hard), multiplied by `1 + log2(sinks you removed)`, plus the same amount again when you take it all the way to zero. A 300-sink challenge is not worth 300 small ones: the hard part is the first fix, and partial progress still counts.
-
-| Badge | How to earn it |
-|---|---|
-| First Light | Your first merged fix |
-| Sharp Eye | Remove 10 blind spots |
-| Clean Sweep | Take 3 challenges to zero |
-| Deep Diver | Clear a hard challenge |
-| Polyglot | Fix the engine in 3 languages |
-| **Core Contributor** | 5 merged fixes and 50 points |
-
-Thresholds live in [`frensense-bench/badges.json`](https://github.com/Friehub/Frensense-v2/blob/main/frensense-bench/badges.json) and badges are recomputed from the ledger on every run, so they never drift.
-
-## The Scoreboard
-
-The Scoreboard tab shows how the engine does on suites where the answer is known, such as OWASP BenchmarkPython: bugs found, bugs missed, false alarms, and cases it correctly left alone, per vulnerability category. The score is recall minus false-positive rate, the OWASP Benchmark's own measure, so a fix that finds more bugs by raising more false alarms does not move it.
-
-Looking for the commit-by-commit blindness rate? See [Engine blindness & capabilities](/architecture/blindness).
 
 ---
 
@@ -2889,6 +2589,22 @@ harness and keeps no changelog.
   modeled sink. `runs[].results` is unchanged, so code-scanning consumers
   that ignore notifications keep every finding.
 
+#### Repository & Release Tooling
+
+* **A runnable example teaches the corpus → bundle → scan loop.** The README
+  told readers to build a `.frc` from pairs of vulnerable and fixed examples
+  but shipped no complete example: `examples/` held one unrelated engine repro,
+  and the only corpus family (`corpus/python/weak_random`) is a private asset
+  with no held-out pair. Added `examples/notes-app/app.py`, a small Flask notes
+  service with four bugs the built-in pack catches (SQL injection, path
+  traversal, open redirect, weak password hash) plus an unguarded
+  `delete_note` call it does not, and `examples/corpus`, a policy family
+  (`authz.missing`, CWE-862) with training and held-out twins.
+  `examples/README.md` walks through `frensense lint`, `frensense bundle`,
+  `frensense bundle info`, and the before/after scans: 5 findings bare, 6 with
+  the bundle, the held-out positive firing and the held-out negative silent.
+  The root README points at it in one line.
+
 ### Changed
 
 * **`analysis.clean` and the honest denominator in the JSON report.**
@@ -2908,6 +2624,64 @@ harness and keeps no changelog.
   siblings; `print_scan_summary_detailed`, `json_report_with_skips`,
   `Reporter::to_sarif_detailed`, `DiffScanOutcome` and `run_diff` keep their
   published signatures and delegate, so `0.8.1` consumers compile unchanged.
+
+#### Benchmarks
+
+* **The OWASP scorecard is published instead of pasted.** The README and
+  `docs/BENCHMARKING.md` carried a hand-copied table (31.0% / 38.1% / 7.1%,
+  172 / 55 / 280 / 723) that went stale the moment the engine moved. The
+  benchmark workflow now writes a slim `benchmark.json` (provenance, totals and
+  per-CWE rates) to gh-pages `/benchmarks/` on every `main` push and release
+  tag, and the Benchmarks docs page renders it with a new
+  `BenchmarkScorecard` component. The scorecard itself now carries
+  `version`, `commit`, `generated_at`, `elapsed_s`, `workers` and `bundle` in
+  its `meta` block, so a published number can be traced to the run that
+  produced it. README and guide prose link to the page; the committed
+  `docs-site/public/data/benchmark_scorecard.json` is only the local-preview
+  fallback. The `Status` block in `README.md` and `npm/README.md` and the
+  warning in `docs-site/guide/index.md` no longer quote the stale 38% / 7%
+  figures or a fixed list of missed classes; they point at the published
+  scorecard instead.
+
+#### Repository & Release Tooling
+
+* **The overview reads its version from the root crate.** The guide overview
+  hardcoded `v0.8.0`, so it disagreed with `Cargo.toml` on every release that
+  moved the binary. `docs-site/.vitepress/config.mts` now exposes the
+  `currentVersion` it already reads from the root `Cargo.toml` as
+  `themeConfig.version`, and `docs-site/guide/index.md` renders that theme
+  value instead of a literal. The remaining pinned numbers in the CLI and
+  installation guides are gone too: the CLI reference now says it matches
+  "the current release" and the install check documents that `--version`
+  prints the installed version, so neither page goes stale on a release.
+
+### Removed
+
+#### Repository & Release Tooling
+
+* **The Engine Blindness benchmark and its challenge/credit system were
+  removed.** The `blindness` suite had grown into two coupled layers — a
+  capability benchmark (`suites/blindness.py`, `suites/blindness_labelled.py`)
+  and a challenge/credit system (`suites/blindness_challenges.py`,
+  `contrib.py`, `badges.json`) — that no other suite or CI job used. The
+  challenge ledger was never wired to GitHub issues, so the published board
+  could not reflect the backlog it claimed to track. Deleting the whole stack
+  removes 6,300+ lines:
+
+  * `frensense-bench`: `suites/blindness.py`, `suites/blindness_challenges.py`,
+    `suites/blindness_labelled.py`, `contrib.py`, `badges.json`, the
+    `[[labelled]]` manifest entries, the node-goat/recent-CVE labels, and the
+    three suites' tests.
+  * workflows: `engine-blindness.yml`, `challenge-verify.yml`,
+    `challenge-verify-report.yml`.
+  * docs site: `/challenges` and `/architecture/blindness`, the
+    `BlindnessChallenges` / `BlindnessLeaderboard` / `BlindnessScores` /
+    `BlindnessSheet` theme components, the board/history JSON and announcement.
+
+  The real-repository suite keeps working: the pin/checkout rules it borrowed
+  from the blindness module now live in `frensense-bench/suites/pinned.py`, and
+  `repos.toml` / `manifest.py` were reduced to the `real-repos` suite. No
+  engine, language-spec, or packgen behaviour changed.
 
 ## \[0.8.1] - 2026-11-11
 

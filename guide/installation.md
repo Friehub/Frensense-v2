@@ -66,7 +66,7 @@ against it with [slsa-verifier](https://github.com/slsa-framework/slsa-verifier)
 ## Check the install
 
 ```bash
-frensense --version     # prints: frensense 0.8.0
+frensense --version     # prints the installed version
 frensense --help        # lists every flag and subcommand
 ```
 

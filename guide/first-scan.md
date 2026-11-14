@@ -102,7 +102,7 @@ a sanitizer or a guard. Today that includes a literal allow-list check like the
 one above, `shlex.quote`, and bound query parameters. It does not recognise
 every validation: a `re.fullmatch` check, for example, still leaves the
 finding. If a fix you believe in does not clear a finding, that is an engine
-gap worth reporting, and a good [challenge](/challenges) to take on.
+gap worth reporting.
 :::
 
 ## What the exit code means
