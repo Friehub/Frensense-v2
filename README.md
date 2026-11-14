@@ -149,15 +149,12 @@ reproduce the run:
 | Start | [Overview](https://frensense.friehub.cloud/guide/) · [Install](https://frensense.friehub.cloud/guide/installation) · [First scan](https://frensense.friehub.cloud/guide/first-scan) · [CLI reference](https://frensense.friehub.cloud/guide/cli) |
 | Use | [CI](https://frensense.friehub.cloud/guide/github-actions) · [AI agents](https://frensense.friehub.cloud/guide/mcp) · [Editors](https://frensense.friehub.cloud/guide/lsp) |
 | Teach | [Bundles](https://frensense.friehub.cloud/bundles) · [How teaching works](https://frensense.friehub.cloud/guide/teachability) · [Authoring](https://frensense.friehub.cloud/corpus/authoring) |
-| Understand | [Architecture](https://frensense.friehub.cloud/architecture/) · [Engine blindness](https://frensense.friehub.cloud/architecture/blindness) |
-| Help | [Engine Blindness Challenges](https://frensense.friehub.cloud/challenges) · [Changelog](https://frensense.friehub.cloud/changelog) |
+| Understand | [Architecture](https://frensense.friehub.cloud/architecture/) |
+| Help | [Changelog](https://frensense.friehub.cloud/changelog) |
 
 ## Contributing
 
-The most useful contribution is a
-[blindness challenge](https://frensense.friehub.cloud/challenges): a vulnerable
-case the engine cannot see yet, with a pinned repository and a command to
-check your fix. Code contributions are welcome under GPL-3.0. Read
+Code contributions are welcome under GPL-3.0. Read
 [CONTRIBUTING.md](https://github.com/Friehub/frensense-v2/blob/main/CONTRIBUTING.md)
 and sign the lightweight
 [CLA](https://github.com/Friehub/frensense-v2/blob/main/CLA.md) (one click via

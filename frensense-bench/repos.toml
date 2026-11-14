@@ -1,21 +1,17 @@
-# The repositories the benchmark suites scan. Adding a repo is an edit to this file only:
-# no Python changes, and a new entry shows up in `--only`, the history sheet and the challenge board.
+# The repositories the real-repository benchmark scans. Adding a repo is an edit
+# to this file only: no Python changes, and a new entry shows up in `--only`
+# and the result table.
 #
 # Every entry pins a full 40-character commit SHA (a tag's SHA is fine). Moving a pin moves the
 # baseline, so do it on purpose and say so in the commit.
 #
-#   name      unique short name; used by --only and as the challenge repo name
+#   name      unique short name; used by `--only`
 #   url       git URL
 #   commit    full 40-char SHA
 #   lang      python | javascript | typescript | c | rust | go
 #   targets   paths scanned in ONE invocation (so the cross-file call graph links them)
 #   note      why this repo is here
 #   timeout   optional per-repo scan limit in seconds (the default is 1800)
-#   suites    which suites scan it: "blindness" (blind-spot challenges) and/or "real"
-#             (timing, peak RSS and findings). Default: both.
-#
-# C and Rust entries are here for the memory side as much as the blindness side:
-# pointer-heavy code is where peak RSS and the truncation caps move.
 
 [[repo]]
 name = "flask"
@@ -87,7 +83,6 @@ url = "https://github.com/tokio-rs/tokio.git"
 commit = "e3b89bbefa7564e2eba2fb9f849ef7bf87d60fad"
 lang = "rust"
 targets = ["tokio/src"]
-suites = ["real"]
 note = "Rust async runtime; reactor, timers and I/O primitives, unsafe-heavy (tag tokio-1.49.0)"
 
 [[repo]]
@@ -112,39 +107,5 @@ url = "https://github.com/vercel/next.js.git"
 commit = "c5de33e93ccccaf3bee60cf50603e2152f9886e1"
 lang = "typescript"
 targets = ["packages/next/src"]
-suites = ["real"]
 timeout = 3600
 note = "TypeScript framework, ~5k files; the scale test (tag v15.5.9)"
-
-# Apps whose flaws are known. These score the engine against ground truth (missed bugs and
-# false alarms) instead of only counting unknown sinks. `labels` picks how the ground truth is read:
-#   juice     vuln-line markers in the source
-#   owasp     the benchmark's expected-results CSV (file-level labels)
-#   anchored  frensense-bench/labels/<name>.json
-# `per_file = true` scans one file per process, as the benchmark suite defines its cases.
-# The recent-CVE set lives in labels/recent_cves.json, which carries its own pins.
-
-[[labelled]]
-name = "juice-shop"
-url = "https://github.com/juice-shop/juice-shop.git"
-commit = "717f5efa886b0417eeecb52378b03cf10567b7e2"
-lang = "typescript"
-targets = ["routes", "lib", "models"]
-labels = "juice"
-
-[[labelled]]
-name = "nodegoat"
-url = "https://github.com/OWASP/NodeGoat.git"
-commit = "c5cb68a7084e4ae7dcc60e6a98768720a81841e8"
-lang = "javascript"
-targets = ["app"]
-labels = "anchored"
-
-[[labelled]]
-name = "owasp-python"
-url = "https://github.com/OWASP-Benchmark/BenchmarkPython.git"
-commit = "f1291485808b66e20ddb6b01b10dc71b3df8c8ba"
-lang = "python"
-targets = ["testcode"]
-labels = "owasp"
-per_file = true

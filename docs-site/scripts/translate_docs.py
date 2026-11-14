@@ -48,8 +48,8 @@ from pathlib import Path
 DOCS_ROOT = Path(__file__).resolve().parent.parent
 
 # Pages translated into every locale. Deliberately excluded: blog/ (dated, high
-# churn), changelog (regenerated every release), challenges (prose lives in
-# board.json). Every link to an excluded page keeps pointing at English.
+# churn) and changelog (regenerated every release). Every link to an excluded
+# page keeps pointing at English.
 TRANSLATED_DIRS = ("guide", "architecture", "corpus")
 TRANSLATED_FILES = ("index.md", "bundles.md")
 
@@ -254,7 +254,7 @@ def localize_links(text: str, prefix: str, known: set[str]) -> str:
     """Point root-absolute links at the translated tree.
 
     `/guide/cli` in an English page becomes `/zh/guide/cli` in the Chinese one;
-    a link to a page we do not translate (`/challenges`, `/blog/...`) is left
+    a link to a page we do not translate (`/blog/...`, `/changelog`) is left
     alone so it cannot become a 404.
     """
 

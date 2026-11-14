@@ -129,7 +129,7 @@ class LinkTests(unittest.TestCase):
         self.assertEqual(out, "[CLI](/zh/guide/cli)")
 
     def test_links_to_untranslated_pages_stay_english(self):
-        for target in ("/challenges", "/blog/2026-10-09-post", "/v1/"):
+        for target in ("/changelog", "/blog/2026-10-09-post", "/v1/"):
             line = f"[x]({target})"
             self.assertEqual(td.localize_links(line, PREFIX, KNOWN), line)
 
@@ -293,10 +293,8 @@ class CorpusTests(unittest.TestCase):
         names = {str(page.relative_to(DOCS_ROOT)) for page in self.pages}
         self.assertIn("index.md", names)
         self.assertIn("guide/cli.md", names)
-        # Excluded on purpose: blog prose, the regenerated changelog, the
-        # data-driven challenge board.
+        # Excluded on purpose: blog prose and the regenerated changelog.
         self.assertNotIn("changelog.md", names)
-        self.assertNotIn("challenges.md", names)
         self.assertFalse(any(name.startswith("blog/") for name in names))
 
     def test_identity_round_trip_is_lossless(self):

@@ -33,7 +33,6 @@ clean scan as "nothing found", not "nothing there".
 | See findings in my editor | [Editors (LSP)](/guide/lsp) |
 | Look up a flag or an exit code | [CLI reference](/guide/cli) |
 | Add knowledge about my framework | [Bundles](/bundles), then [How teaching works](/guide/teachability) |
-| Help improve the engine | [Engine Blindness Challenges](/challenges) |
 
 ## What it scans
 

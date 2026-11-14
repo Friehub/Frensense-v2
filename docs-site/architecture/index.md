@@ -57,13 +57,11 @@ Worth knowing when you read a clean scan:
 - **Library calls with no model** pass taint through by default, which can
   produce false positives.
 
-These are the engine's current limits, and each is a candidate for a
-[challenge](/challenges).
+These are the engine's current limits.
 
 ## Chapters
 
 - [The program graph](/architecture/program-graph)
 - [Checkers](/architecture/checkers)
-- [Engine blindness](/architecture/blindness)
 - [Benchmarks](/architecture/benchmarks)
 - [Bundles (.frc)](/bundles)

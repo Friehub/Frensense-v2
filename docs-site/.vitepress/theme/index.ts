@@ -3,8 +3,6 @@ import DefaultTheme from 'vitepress/theme'
 import AnnouncementBanner from './AnnouncementBanner.vue'
 import BlogIndex from './BlogIndex.vue'
 import DownloadStrip from './DownloadStrip.vue'
-import BlindnessSheet from './BlindnessSheet.vue'
-import BlindnessChallenges from './BlindnessChallenges.vue'
 import './custom.css'
 
 export default {
@@ -15,8 +13,6 @@ export default {
   enhanceApp({ app, router }) {
     app.component('BlogIndex', BlogIndex)
     app.component('DownloadStrip', DownloadStrip)
-    app.component('BlindnessSheet', BlindnessSheet)
-    app.component('BlindnessChallenges', BlindnessChallenges)
 
     if (typeof window !== 'undefined') {
       const ensureMainLandmark = () => {

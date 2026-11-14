@@ -37,7 +37,7 @@ Compared with the previous record (v0.7.0, 2026-10-02):
 
 The engine finds more vulnerable cases, and it also raises more false alarms:
 the false-positive rate roughly tripled. Reducing it is an open engine
-priority, and many of the [challenges](/challenges) target it.
+priority.
 
 We do not publish a ranking against other tools on this benchmark. The OWASP
 project's published scorecards are for the Java benchmark, a different language

@@ -92,6 +92,33 @@ harness and keeps no changelog.
   `Reporter::to_sarif_detailed`, `DiffScanOutcome` and `run_diff` keep their
   published signatures and delegate, so `0.8.1` consumers compile unchanged.
 
+### Removed
+
+#### Repository & Release Tooling
+
+- **The Engine Blindness benchmark and its challenge/credit system were
+  removed.** The `blindness` suite had grown into two coupled layers — a
+  capability benchmark (`suites/blindness.py`, `suites/blindness_labelled.py`)
+  and a challenge/credit system (`suites/blindness_challenges.py`,
+  `contrib.py`, `badges.json`) — that no other suite or CI job used. The
+  challenge ledger was never wired to GitHub issues, so the published board
+  could not reflect the backlog it claimed to track. Deleting the whole stack
+  removes 6,300+ lines:
+  - `frensense-bench`: `suites/blindness.py`, `suites/blindness_challenges.py`,
+    `suites/blindness_labelled.py`, `contrib.py`, `badges.json`, the
+    `[[labelled]]` manifest entries, the node-goat/recent-CVE labels, and the
+    three suites' tests.
+  - workflows: `engine-blindness.yml`, `challenge-verify.yml`,
+    `challenge-verify-report.yml`.
+  - docs site: `/challenges` and `/architecture/blindness`, the
+    `BlindnessChallenges` / `BlindnessLeaderboard` / `BlindnessScores` /
+    `BlindnessSheet` theme components, the board/history JSON and announcement.
+
+  The real-repository suite keeps working: the pin/checkout rules it borrowed
+  from the blindness module now live in `frensense-bench/suites/pinned.py`, and
+  `repos.toml` / `manifest.py` were reduced to the `real-repos` suite. No
+  engine, language-spec, or packgen behaviour changed.
+
 ## [0.8.1] - 2026-11-11
 
 ### Added

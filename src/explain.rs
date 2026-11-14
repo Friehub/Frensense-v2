@@ -46,7 +46,7 @@ pub struct ExplainRecord {
 }
 
 impl ExplainRecord {
-    /// Machine-readable form, for `--explain-json` (blindness challenge cards).
+    /// Machine-readable form, for `--explain-json` and downstream tooling.
     #[must_use]
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::json!({

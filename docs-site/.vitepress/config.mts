@@ -236,13 +236,8 @@ const DOCS_SIDEBAR = [
       { text: 'Architecture', link: '/architecture/' },
       { text: 'The program graph', link: '/architecture/program-graph' },
       { text: 'Checkers', link: '/architecture/checkers' },
-      { text: 'Engine blindness', link: '/architecture/blindness' },
       { text: 'Benchmarks', link: '/architecture/benchmarks' }
     ]
-  },
-  {
-    text: 'Contribute',
-    items: [{ text: 'Engine Blindness Challenges', link: '/challenges' }]
   }
 ]
 
@@ -369,7 +364,6 @@ export default defineConfig({
     nav: [
       { text: 'Docs', link: '/guide/', activeMatch: '^/(guide|architecture|corpus)/' },
       { text: 'Bundles', link: '/bundles', activeMatch: '^/bundles' },
-      { text: 'Challenges', link: '/challenges', activeMatch: '^/challenges' },
       { text: 'Blog', link: '/blog/', activeMatch: '^/blog/' },
       {
         text: `v${currentVersion}`,
@@ -386,7 +380,7 @@ export default defineConfig({
     // guide, the bundle pages and the architecture notes never changes the
     // menu under the reader.
     sidebar: Object.fromEntries(
-      ['/guide/', '/architecture/', '/corpus/', '/bundles', '/challenges', '/changelog', '/whats-new'].map((k) => [k, DOCS_SIDEBAR])
+      ['/guide/', '/architecture/', '/corpus/', '/bundles', '/changelog', '/whats-new'].map((k) => [k, DOCS_SIDEBAR])
     ),
 
     socialLinks: [
