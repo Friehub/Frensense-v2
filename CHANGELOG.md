@@ -92,6 +92,21 @@ harness and keeps no changelog.
   `Reporter::to_sarif_detailed`, `DiffScanOutcome` and `run_diff` keep their
   published signatures and delegate, so `0.8.1` consumers compile unchanged.
 
+#### Benchmarks
+
+- **The OWASP scorecard is published instead of pasted.** The README and
+  `docs/BENCHMARKING.md` carried a hand-copied table (31.0% / 38.1% / 7.1%,
+  172 / 55 / 280 / 723) that went stale the moment the engine moved. The
+  benchmark workflow now writes a slim `benchmark.json` (provenance, totals and
+  per-CWE rates) to gh-pages `/benchmarks/` on every `main` push and release
+  tag, and the Benchmarks docs page renders it with a new
+  `BenchmarkScorecard` component. The scorecard itself now carries
+  `version`, `commit`, `generated_at`, `elapsed_s`, `workers` and `bundle` in
+  its `meta` block, so a published number can be traced to the run that
+  produced it. README and guide prose link to the page; the committed
+  `docs-site/public/data/benchmark_scorecard.json` is only the local-preview
+  fallback.
+
 ### Removed
 
 #### Repository & Release Tooling

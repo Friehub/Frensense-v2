@@ -128,19 +128,14 @@ before you rely on it. See
 
 ## Benchmarks
 
-Scored on the OWASP Benchmark for Python (1,230 cases), Frensense 0.8.0, no
-bundle, conservative matching (a finding must carry the case's CWE):
-
-| Score (TPR - FPR) | TPR | FPR | TP / FP / FN / TN |
-|---|---|---|---|
-| 31.0% | 38.1% | 7.1% | 172 / 55 / 280 / 723 |
-
-That is better than the previous record on detections (the false-alarm rate
-rose from 2.3% to 7.1%, which is a known priority). We do not publish a
-comparison with other tools: the OWASP project's scorecards are for the Java
-benchmark and cannot be compared with these. Per-category results and how to
-reproduce the run:
+Frensense is scored against the OWASP Benchmark for Python (1,230 cases) with
+no bundle and conservative matching (a finding must carry the case's CWE).
+The current score, the per-CWE breakdown and the reproduction steps are
+published from CI on every `main` build:
 [Benchmarks](https://frensense.friehub.cloud/architecture/benchmarks).
+
+We do not publish a comparison with other tools: the OWASP project's scorecards
+are for the Java benchmark and cannot be compared with these.
 
 ## Documentation
 
