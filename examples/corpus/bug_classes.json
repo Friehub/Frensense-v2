@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "class": [
+    {
+      "id": "authz.missing",
+      "name": "Missing authorization",
+      "cwe": "CWE-862",
+      "related_cwe": ["CWE-639"]
+    }
+  ]
+}

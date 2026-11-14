@@ -72,6 +72,22 @@ harness and keeps no changelog.
   modeled sink. `runs[].results` is unchanged, so code-scanning consumers
   that ignore notifications keep every finding.
 
+#### Repository & Release Tooling
+
+- **A runnable example teaches the corpus → bundle → scan loop.** The README
+  told readers to build a `.frc` from pairs of vulnerable and fixed examples
+  but shipped no complete example: `examples/` held one unrelated engine repro,
+  and the only corpus family (`corpus/python/weak_random`) is a private asset
+  with no held-out pair. Added `examples/notes-app/app.py`, a small Flask notes
+  service with four bugs the built-in pack catches (SQL injection, path
+  traversal, open redirect, weak password hash) plus an unguarded
+  `delete_note` call it does not, and `examples/corpus`, a policy family
+  (`authz.missing`, CWE-862) with training and held-out twins.
+  `examples/README.md` walks through `frensense lint`, `frensense bundle`,
+  `frensense bundle info`, and the before/after scans: 5 findings bare, 6 with
+  the bundle, the held-out positive firing and the held-out negative silent.
+  The root README points at it in one line.
+
 ### Changed
 
 - **`analysis.clean` and the honest denominator in the JSON report.**

@@ -124,7 +124,9 @@ pack does not know. Load one with `frensense . --bundle my.frc`, or build your
 own from pairs of vulnerable and fixed examples. A bundle can add detections and
 it can add false alarms, so compare a scan with and without it on your own code
 before you rely on it. See
-[Bundles](https://frensense.friehub.cloud/bundles).
+[Bundles](https://frensense.friehub.cloud/bundles). A complete worked example —
+vulnerable app, corpus family, held-out twins and the commands to build the
+`.frc` — is in [examples/README.md](examples/README.md).
 
 ## Benchmarks
 
