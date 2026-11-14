@@ -133,7 +133,10 @@ harness and keeps no changelog.
   moved the binary. `docs-site/.vitepress/config.mts` now exposes the
   `currentVersion` it already reads from the root `Cargo.toml` as
   `themeConfig.version`, and `docs-site/guide/index.md` renders that theme
-  value instead of a literal.
+  value instead of a literal. The remaining pinned numbers in the CLI and
+  installation guides are gone too: the CLI reference now says it matches
+  "the current release" and the install check documents that `--version`
+  prints the installed version, so neither page goes stale on a release.
 
 ### Removed
 

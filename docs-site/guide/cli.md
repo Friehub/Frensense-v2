@@ -5,8 +5,8 @@ description: Every frensense command, flag, output format and exit code.
 
 # CLI reference
 
-This page matches `frensense --help` for version 0.8.0. If your installed
-version is older or newer, `frensense --help` is the final word.
+This page matches `frensense --help` for the current release. If your
+installed version is older or newer, `frensense --help` is the final word.
 
 ## Commands
 
