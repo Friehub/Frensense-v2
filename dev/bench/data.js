@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794603362010,
+  "lastUpdate": 1794695878405,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -2427,6 +2427,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/2928adadbce699e7f98e45f472cdf40fd4d6b966"
         },
         "date": 1794603360822,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 33.9,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 38.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 4.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 172,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 32,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "515b1b127508daa6ddc2eab3fa9f0fe7a151f703",
+          "message": "Merge pull request #131 from Friehub/chore/remove-blindness-challenge\n\nRemove the engine-blindness suite, publish the OWASP scorecard, and fix stale docs claims",
+          "timestamp": "2026-11-14T23:37:05+01:00",
+          "tree_id": "4aee3511f5223e9326e9e2d32e587755571efd65",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/515b1b127508daa6ddc2eab3fa9f0fe7a151f703"
+        },
+        "date": 1794695877283,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
