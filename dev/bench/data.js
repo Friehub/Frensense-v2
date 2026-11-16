@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1794695878405,
+  "lastUpdate": 1794825106277,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -2476,6 +2476,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/515b1b127508daa6ddc2eab3fa9f0fe7a151f703"
         },
         "date": 1794695877283,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 33.9,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 38.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 4.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 172,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 32,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "ff68041226b132ebe5e50489db760ecf4b61a7d7",
+          "message": "Merge pull request #138 from Friehub/chore/remove-blindness-challenge\n\nfix: build under the deny lint tiers, ratchet clippy debt, dedupe IR helpers",
+          "timestamp": "2026-11-16T11:31:00+01:00",
+          "tree_id": "62534ce8d837305a76c08b621be0ffe58de70775",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/ff68041226b132ebe5e50489db760ecf4b61a7d7"
+        },
+        "date": 1794825105455,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
