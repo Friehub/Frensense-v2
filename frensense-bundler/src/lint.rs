@@ -57,8 +57,6 @@ pub const KNOWN_KEYS: &[&str] = &[
 /// Keys every training positive must carry.
 const REQUIRED_KEYS: &[&str] = &["observation", "impact", "improvement", "cwe", "severity"];
 
-const SEVERITIES: &[&str] = &["critical", "high", "medium", "low", "warning", "info"];
-
 const PURPOSES: &[&str] = &["knowledge", "precision", "anchor"];
 
 const SUPPORTED_EXTS: &[&str] = &[
@@ -1113,11 +1111,14 @@ fn lint_metadata(
     }
     // Severity and numeric fields.
     if let Some(s) = b.get("severity") {
-        if !SEVERITIES.contains(&s.to_ascii_lowercase().as_str()) {
+        if frensense_lang::severity::Severity::parse_label(s).is_none() {
             cx.err(
                 "M003",
                 file,
-                format!("severity `{s}` is not one of {}", SEVERITIES.join(", ")),
+                format!(
+                    "severity `{s}` is not one of {}",
+                    frensense_lang::severity::SEVERITY_LABELS.join(", ")
+                ),
             );
         }
     }

@@ -79,8 +79,8 @@ jobs:
       - name: Corpus lint (families must be teachable)
         run: ./.github/scripts/corpus-lint.sh
 
-      - name: Lint (Clippy, warnings are errors)
-        run: cargo clippy --all-features --all-targets -- -D warnings
+      - name: Lint (deny lints fail; warn-level debt may only shrink)
+        run: python3 .github/scripts/clippy-ratchet.py
 
 
   security:

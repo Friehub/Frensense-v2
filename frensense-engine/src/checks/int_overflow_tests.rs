@@ -5,7 +5,7 @@
 //! Tests for the allocation-size integer overflow prover (CWE-190/680).
 
 #[cfg(test)]
-pub mod int_overflow_spec {
+pub(super) mod int_overflow_spec {
     use crate::analysis::taint::facts::FactTable;
     use crate::checks::Provenance;
     use crate::checks::int_overflow;

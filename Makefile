@@ -10,7 +10,7 @@ all: fmt check audit test
 # `make discipline` (or ./.github/scripts/local-ci.sh) for the full pre-PR gate.
 check:
 	@echo "[CHECK] Running semantic lints (Clippy)..."
-	cargo clippy --all-targets --all-features -- -D warnings
+	python3 .github/scripts/clippy-ratchet.py
 
 fmt:
 	@echo "[FMT] Enforcing style (rustfmt)..."
@@ -102,3 +102,10 @@ bench-nodegoat:
 	@echo "[BENCH] Evaluating NodeGoat ground truth..."
 	cargo build --release --bin frensense
 	FRENSENSE_BIN=target/release/frensense python3 scripts/benchmark_nodegoat.py
+
+public-api:
+	@echo "# Auto-generated Public API Snapshot" > PUBLIC_API.txt
+	@for pkg in frensense frensense-engine frensense-lang frensense-bundler; do \
+		echo "\n=== $$pkg ===" >> PUBLIC_API.txt; \
+		cargo public-api -p $$pkg --simplified >> PUBLIC_API.txt; \
+	done

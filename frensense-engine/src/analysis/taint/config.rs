@@ -15,7 +15,10 @@ use rustc_hash::FxHashSet;
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct TaintConfig {
-    pub sources: FxHashSet<String>,    // e.g., "req.body", "getQuery()"
-    pub sinks: FxHashSet<String>,      // e.g., "db.execute", "eval"
-    pub sanitizers: FxHashSet<String>, // e.g., "escapeHtml", "sanitize"
+    /// Source patterns: calls or member-access paths whose results carry attacker-controlled data, such as `req.body` or `getQuery()`.
+    pub sources: FxHashSet<String>,
+    /// Sink calls that are dangerous when tainted data reaches them, such as `db.execute` or `eval`.
+    pub sinks: FxHashSet<String>,
+    /// Sanitizer calls that neutralize taint, such as `escapeHtml` or `sanitize`.
+    pub sanitizers: FxHashSet<String>,
 }

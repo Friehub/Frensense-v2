@@ -12,7 +12,7 @@
 
 use super::Engine;
 use crate::engine::files::{UnsupportedSourceFile, collect_files_detailed};
-use crate::{Advisory, Result};
+use crate::{Advisory, Result, Severity};
 use std::path::Path;
 
 use frensense_engine::analysis::taint::config::TaintConfig;
@@ -541,22 +541,6 @@ fn build_spec_tables(files: &[(String, String, String)]) -> (TaintConfig, FactTa
     tables_from_exts(files.iter().map(|(_, _, ext)| ext.as_str()))
 }
 
-/// Corpus `[frensense] severity:` labels -> CLI tier. CVSS-style labels;
-/// tier mapping is consumer policy (D4). Unknown labels return `None` so
-/// the finding keeps the registry's severity.
-fn corpus_severity(raw: &str) -> Option<crate::Severity> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "critical" => Some(crate::Severity::Critical),
-        // The CLI's advisory ladder is 3-tier (critical / warning / info):
-        // a CVSS `high` (7.0-8.9) ranks below `critical` (9.0+), so it
-        // shares the `warning` tier with `medium` instead of collapsing
-        // into the top tier.
-        "high" | "medium" => Some(crate::Severity::Warning),
-        "low" => Some(crate::Severity::Info),
-        _ => None,
-    }
-}
-
 /// Overlay a matched bundle pattern's advisory on a finding's advisory:
 /// declared severity, impact, improvement, and cwe/cvss/owasp tags
 /// override the registry. Observation is handled by the caller - only the
@@ -567,9 +551,20 @@ fn apply_bundle_pattern(
     pattern: &frensense_bundler::format::BundlePattern,
 ) {
     if let Some(raw) = pattern.severity.as_deref()
-        && let Some(tier) = corpus_severity(raw)
+        && !raw.trim().is_empty()
     {
-        advisory.severity = tier;
+        match frensense_lang::severity::Severity::parse_label(raw) {
+            Some(tier) => advisory.severity = tier,
+            // A bundle's metadata is lint-checked when it is compiled, so an
+            // unparseable label here is a producer/consumer-version bug. Say
+            // so and keep the finding's existing tier instead of silently
+            // inventing one.
+            None => tracing::warn!(
+                pattern = %pattern.id,
+                severity = raw,
+                "bundle pattern severity is not a recognised label; keeping the finding's severity"
+            ),
+        }
     }
     if let Some(impact) = &pattern.impact {
         advisory.impact = impact.clone();
@@ -590,7 +585,7 @@ fn apply_bundle_pattern(
 
 /// Strip internal corpus names, family identifiers, and training provenance
 /// from finding messages so corpus details remain hidden from end users.
-pub fn sanitize_corpus_provenance(s: &str) -> String {
+pub(crate) fn sanitize_corpus_provenance(s: &str) -> String {
     let mut clean = s.to_string();
     while let Some(idx) = clean.find("(learned from family ") {
         if let Some(end) = clean[idx..].find(')') {
@@ -609,6 +604,36 @@ pub fn sanitize_corpus_provenance(s: &str) -> String {
     clean = clean.replace("Corpus-verified policy violation:", "Policy violation:");
     clean = clean.replace("Corpus-verified ", "");
     clean.trim().to_string()
+}
+
+/// Resolve a checker finding's fact-authored severity onto the reporting
+/// ladder, falling back to the rule registry's level when the driving fact
+/// declared none.
+///
+/// An unparseable non-empty label is a producer bug (a hand-written bundle or
+/// a stale fact): keep the registry level and warn, never silently pick a
+/// tier. The fact's level outranks the registry's because the fact is what
+/// concluded the finding; a bundle pattern overlays both (see
+/// [`apply_bundle_pattern`]).
+fn fact_severity(
+    finding: &frensense_engine::checks::CheckerFinding,
+    registry: Severity,
+) -> Severity {
+    let raw = finding.severity.trim();
+    if raw.is_empty() {
+        return registry;
+    }
+    match frensense_lang::severity::Severity::parse_label(raw) {
+        Some(tier) => tier,
+        None => {
+            tracing::warn!(
+                rule = %finding.rule,
+                severity = raw,
+                "checker finding severity is not a recognised label; keeping the rule registry's severity"
+            );
+            registry
+        }
+    }
 }
 
 /// Build the compiler-style advisory for one non-dataflow policy finding.
@@ -630,7 +655,7 @@ fn advisory_from_checker(
     // bundle pattern whose `rules` contain this finding's rule overlays
     // registry severity/impact/tags (and the observation when no fact
     // prose exists).
-    let (severity, title, impact, improvement, tag, observation) =
+    let (registry_severity, title, impact, improvement, tag, observation) =
         frensense_lang::severity::checker_advisory(
             frensense_lang::spec_for_path(path),
             &c.rule,
@@ -639,6 +664,11 @@ fn advisory_from_checker(
             line,
             &c.params,
         );
+    // Severity precedence: rule registry < fact-authored level < bundle
+    // pattern. The fact's level must win over the registry - a learned rule
+    // or an authored policy says how bad *this* conclusion is, while the
+    // registry only describes the built-in rule id it happens to share.
+    let severity = fact_severity(c, registry_severity);
     let pattern = bundle_advisories.get(&c.rule);
     // Prose precedence: pattern-authored observation > fact message > lang template.
     // If the fact message was a generic policy fallback ("Policy violation: `call`"),
@@ -821,7 +851,7 @@ fn advisory_from_finding(
 /// make it cross-process stable too, but FNV-1a is deterministic by spec,
 /// cheap, and dependency-free. Two components joined with `\u{1f}` so
 /// ("ab","c") and ("a","bc") hash differently.
-pub fn stable_fingerprint(components: &[&str]) -> String {
+pub(crate) fn stable_fingerprint(components: &[&str]) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for (i, part) in components.iter().enumerate() {
         if i > 0 {
@@ -1092,7 +1122,7 @@ mod bundle_pattern_tests {
     //! Phase 2.3: bundle patterns join to findings through
     //! `BundlePattern::rules` and overlay the consumer advisory path.
 
-    use super::{advisory_from_checker, apply_bundle_pattern, corpus_severity};
+    use super::{advisory_from_checker, apply_bundle_pattern};
     use crate::Severity;
     use crate::engine::Engine;
     use frensense_bundler::format::{BundlePattern, BundlePayloadV6, write_bundle};
@@ -1108,6 +1138,13 @@ mod bundle_pattern_tests {
             span: None,
             severity: String::new(),
             provenance: Provenance::Spec,
+        }
+    }
+
+    fn checker_with(rule: &str, message: &str, severity: &str) -> CheckerFinding {
+        CheckerFinding {
+            severity: severity.to_string(),
+            ..checker(rule, message)
         }
     }
 
@@ -1134,15 +1171,73 @@ mod bundle_pattern_tests {
     }
 
     #[test]
-    fn corpus_severity_maps_cvss_labels_to_tiers() {
-        assert_eq!(corpus_severity("critical"), Some(Severity::Critical));
-        // CVSS `high` ranks below critical; the 3-tier advisory ladder
-        // puts it with `medium` on the warning tier.
-        assert_eq!(corpus_severity("High"), Some(Severity::Warning));
-        assert_eq!(corpus_severity("medium"), Some(Severity::Warning));
-        assert_eq!(corpus_severity("Low"), Some(Severity::Info));
-        assert_eq!(corpus_severity("Bogus"), None);
-        assert_eq!(corpus_severity(""), None);
+    fn fact_severity_outranks_the_rule_registry() {
+        let registry = advisory_from_checker(
+            &checker("weak_hash", ""),
+            "src/app.ts",
+            3,
+            1,
+            Engine::next_file_id(0),
+            &rustc_hash::FxHashMap::default(),
+        );
+        assert_eq!(registry.severity, Severity::Warning, "registry baseline");
+
+        // Promotion: the fact concluded this finding is critical.
+        let promoted = advisory_from_checker(
+            &checker_with("weak_hash", "", "critical"),
+            "src/app.ts",
+            3,
+            1,
+            Engine::next_file_id(0),
+            &rustc_hash::FxHashMap::default(),
+        );
+        assert_eq!(promoted.severity, Severity::Critical);
+
+        // Demotion: the fact says low; `low` is part of the six-label
+        // vocabulary now, not an unparsed label that silently keeps warning.
+        let demoted = advisory_from_checker(
+            &checker_with("weak_hash", "", "low"),
+            "src/app.ts",
+            3,
+            1,
+            Engine::next_file_id(0),
+            &rustc_hash::FxHashMap::default(),
+        );
+        assert_eq!(demoted.severity, Severity::Info);
+    }
+
+    /// A bundle pattern is the last word on severity: it overrides both the
+    /// registry and the fact.
+    #[test]
+    fn pattern_severity_overlays_the_fact_severity() {
+        let advisories = advisory_from_checker(
+            &checker_with("policy_custom_rule", "", "low"),
+            "src/app.ts",
+            3,
+            1,
+            Engine::next_file_id(0),
+            &pattern_map(&["policy_custom_rule"]),
+        );
+        assert_eq!(advisories.severity, Severity::Critical);
+    }
+
+    #[test]
+    fn bundle_pattern_uses_the_shared_six_label_vocabulary() {
+        let mut advisory = advisory_from_checker(
+            &checker("policy_custom_rule", ""),
+            "src/app.ts",
+            3,
+            1,
+            Engine::next_file_id(0),
+            &rustc_hash::FxHashMap::default(),
+        );
+        let mut p = pattern(&[]);
+        p.severity = Some("high".to_string());
+        apply_bundle_pattern(&mut advisory, &p);
+        assert_eq!(advisory.severity, Severity::Warning);
+        p.severity = Some("low".to_string());
+        apply_bundle_pattern(&mut advisory, &p);
+        assert_eq!(advisory.severity, Severity::Info);
     }
 
     #[test]

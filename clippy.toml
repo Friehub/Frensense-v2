@@ -17,12 +17,28 @@ type-complexity-threshold = 150
 # `disallowed_*` is the purpose-built mechanism for "do not call this here":
 # the diagnostic carries the reason and the replacement, so an agent can act on
 # it without reading prose.
-disallowed-macros = [
-    { path = "std::eprintln", reason = "library code reports through DiagnosticSink or tracing", replacement = "tracing::warn!" },
-    { path = "std::println", reason = "library code reports through DiagnosticSink or tracing", replacement = "tracing::info!" },
-    { path = "std::dbg", reason = "no debug output in library code" },
-]
-
 disallowed-methods = [
+    { path = "std::time::SystemTime::now", reason = "Wall-clock time breaks deterministic output." },
+    { path = "std::time::Instant::now", reason = "Timing measurements must not enter engine logic or reports." },
+    { path = "std::env::var", reason = "Pass configuration explicitly instead of reading ambient env vars inside the engine." },
+    { path = "std::env::var_os", reason = "Pass configuration explicitly instead of reading ambient env vars inside the engine." },
     { path = "std::thread::Builder::stack_size", reason = "stack depth is bounded or stacker-grown, never raised per call site", replacement = "stacker::maybe_grow" },
 ]
+disallowed-types = [
+    # Deterministic collections
+    { path = "std::collections::HashMap", reason = "Non-deterministic iteration order; use BTreeMap or FxHashMap (sorted before output)." },
+    { path = "std::collections::HashSet", reason = "Non-deterministic iteration order; use BTreeSet or FxHashSet (sorted before output)." },
+
+    # Deterministic concurrency: prevent threads from racing to push results
+    { path = "std::sync::Mutex", reason = "Shared mutable state across threads breaks determinism; compute per-file results independently and merge/sort." },
+    { path = "std::sync::RwLock", reason = "Shared mutable state across threads breaks determinism; compute per-file results independently and merge/sort." },
+    { path = "std::sync::mpsc::Sender", reason = "Channel arrival order depends on thread scheduling; use indexed parallel map/collect and sort." },
+    { path = "std::sync::mpsc::SyncSender", reason = "Channel arrival order depends on thread scheduling; use indexed parallel map/collect and sort." },
+]
+
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-print-in-tests = true
+allow-dbg-in-tests = true

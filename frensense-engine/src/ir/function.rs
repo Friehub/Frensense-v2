@@ -33,8 +33,11 @@ pub struct BlockId(pub usize);
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub enum AllocationKind {
+    /// A plain object (record, dictionary, struct literal).
     Object,
+    /// An array or list.
     Array,
+    /// An instance of the named class, constructor call, or struct type.
     ClassInstance(String),
 }
 
@@ -42,8 +45,11 @@ pub enum AllocationKind {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct VarMetadata {
+    /// Name of the variable as written in the source, when it has one. `None` for compiler temporaries.
     pub source_name: Option<String>,
+    /// Declared or inferred type name from the source, when the language provides one.
     pub type_name: Option<String>,
+    /// Byte range `(start, end)` of the defining source text, used to map findings back to source.
     pub byte_range: Option<(usize, usize)>,
     /// Flags if this VarId represents a hidden Memory State rather than a real code variable
     pub is_memory_state: bool,
@@ -66,12 +72,19 @@ pub struct VarMetadata {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub enum Operand {
+    /// A variable holding an SSA value.
     Var(VarId),
+    /// A string literal.
     StringLiteral(String),
+    /// An integer literal.
     IntLiteral(i64),
+    /// A floating-point literal.
     FloatLiteral(f64),
+    /// A boolean literal.
     BoolLiteral(bool),
+    /// The null / nil / None value.
     Null,
+    /// A value the lowering could not model (an unsupported expression form).
     Unknown,
 }
 
@@ -79,7 +92,9 @@ pub enum Operand {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct Phi {
+    /// Variable defined by the phi (the merged value).
     pub dest: VarId,
+    /// One `(predecessor block, variable)` pair per incoming control-flow edge: the phi takes the variable that arrives along that edge.
     pub incoming: Vec<(BlockId, VarId)>,
 }
 
@@ -88,58 +103,88 @@ pub struct Phi {
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub enum Instruction {
     /// v_dest = v_src
-    Assign { dest: VarId, src: Operand },
+    Assign {
+        /// Variable being defined.
+        dest: VarId,
+        /// Value assigned to `dest`.
+        src: Operand,
+    },
 
     // --- Object & Array Memory Access (Memory SSA Enabled) ---
     // Reads depend on a specific moment in time (mem_in).
     // Writes consume a moment in time, and generate a new one (mem_out).
     /// v_dest = base.field  @ mem_in
     LoadField {
+        /// Variable that receives the loaded value.
         dest: VarId,
+        /// Memory state the load reads from.
         mem_in: VarId,
+        /// Variable holding the object whose field is read.
         base: VarId,
+        /// Name of the field being read.
         field: String,
     },
 
     /// base.field = src  -> generates mem_out
     StoreField {
+        /// New memory state produced by the store.
         mem_out: VarId,
+        /// Memory state the store applies to.
         mem_in: VarId,
+        /// Variable holding the object being written.
         base: VarId,
+        /// Name of the field being written.
         field: String,
+        /// Value stored into the field.
         src: Operand,
     },
 
     /// `v_dest = base[index]  @ mem_in`
     LoadElement {
+        /// Variable that receives the loaded element.
         dest: VarId,
+        /// Memory state the load reads from.
         mem_in: VarId,
+        /// Variable holding the array or collection.
         base: VarId,
+        /// Index or key operand selecting the element.
         index: Operand,
     },
 
     /// `base[index] = src` generates `mem_out`.
     StoreElement {
+        /// New memory state produced by the store.
         mem_out: VarId,
+        /// Memory state the store applies to.
         mem_in: VarId,
+        /// Variable holding the array or collection being written.
         base: VarId,
+        /// Index or key operand selecting the element.
         index: Operand,
+        /// Value stored into the element.
         src: Operand,
     },
 
     // --- Global Environment ---
     /// v_dest = global_name
     LoadGlobal {
+        /// Variable that receives the global's value.
         dest: VarId,
+        /// Memory state the load reads from.
         mem_in: VarId,
+        /// Name of the global being read.
         name: String,
     },
 
     /// global_name = src
     StoreGlobal {
+        /// New memory state produced by the store.
         mem_out: VarId,
+        /// Memory state the store applies to.
         mem_in: VarId,
+        /// Name of the global being written.
         name: String,
+        /// Value stored into the global.
         src: Operand,
     },
 
@@ -147,10 +192,15 @@ pub enum Instruction {
     // Function calls can mutate memory, so they consume mem_in and return mem_out.
     /// mem_out, dest = func(args) @ mem_in
     CallStatic {
+        /// Variable receiving the call's return value, or `None` when the result is discarded.
         dest: Option<VarId>,
+        /// Memory state after the call (calls may mutate memory).
         mem_out: VarId,
+        /// Memory state the call executes in.
         mem_in: VarId,
+        /// Name of the called function as written at the call site.
         func: String,
+        /// Argument operands, in call order.
         args: Vec<Operand>,
         /// Keyword/keyed argument names, parallel to `args`: entry `i` is
         /// the name of `args[i]`, or empty when that argument is
@@ -162,11 +212,17 @@ pub enum Instruction {
 
     /// mem_out, dest = receiver.method(args) @ mem_in
     CallVirtual {
+        /// Variable receiving the call's return value, or `None` when the result is discarded.
         dest: Option<VarId>,
+        /// Memory state after the call (calls may mutate memory).
         mem_out: VarId,
+        /// Memory state the call executes in.
         mem_in: VarId,
+        /// Name of the invoked method.
         method: String,
+        /// The receiver the method is invoked on (`self`, `this`, or the object before the dot).
         receiver: Operand,
+        /// Argument operands, in call order, not including the receiver.
         args: Vec<Operand>,
         /// Parallel to `args`; see [`Instruction::CallStatic`].
         arg_names: Vec<String>,
@@ -174,10 +230,15 @@ pub enum Instruction {
 
     /// mem_out, dest = func_ptr(args) @ mem_in
     CallPointer {
+        /// Variable receiving the call's return value, or `None` when the result is discarded.
         dest: Option<VarId>,
+        /// Memory state after the call (calls may mutate memory).
         mem_out: VarId,
+        /// Memory state the call executes in.
         mem_in: VarId,
+        /// Operand holding the callee value (a function pointer, closure or callable variable).
         func_ptr: Operand,
+        /// Argument operands, in call order.
         args: Vec<Operand>,
         /// Parallel to `args`; see [`Instruction::CallStatic`].
         arg_names: Vec<String>,
@@ -186,56 +247,95 @@ pub enum Instruction {
     // --- Memory & Pointers (Systems Languages) ---
     /// mem_out, v_dest = new Object/Array() @ mem_in
     Allocate {
+        /// Variable that receives the new object or array.
         dest: VarId,
+        /// Memory state after the allocation.
         mem_out: VarId,
+        /// Memory state the allocation executes in.
         mem_in: VarId,
+        /// What is being allocated; used by points-to analysis to name the abstract object.
         kind: AllocationKind,
     },
 
     /// v_dest = &src
-    AddressOf { dest: VarId, src: VarId },
+    AddressOf {
+        /// Variable that receives the address.
+        dest: VarId,
+        /// Variable whose address is taken.
+        src: VarId,
+    },
 
     /// v_dest = *ptr @ mem_in
     Dereference {
+        /// Variable that receives the dereferenced value.
         dest: VarId,
+        /// Memory state the load reads from.
         mem_in: VarId,
+        /// Pointer operand being dereferenced.
         ptr: Operand,
     },
 
     // --- Types & Multiple Returns ---
+    /// Converts `src` to `target_type`, defining `dest`.
     Cast {
+        /// Variable that receives the converted value.
         dest: VarId,
+        /// Value being converted.
         src: Operand,
+        /// Name of the target type as written in the source.
         target_type: String,
     },
+    /// Extracts one component of a tuple or multiple-return value.
     ExtractValue {
+        /// Variable that receives the extracted component.
         dest: VarId,
+        /// The tuple (or multi-value result) being unpacked.
         tuple: Operand,
+        /// Zero-based position of the component.
         index: usize,
     },
 
     // --- Operations & Async ---
+    /// A binary operation, `dest = lhs op rhs`.
     BinaryOp {
+        /// Variable that receives the result.
         dest: VarId,
+        /// Operator as recorded by lowering: the token as written (for example `==`, `&&`), except that `+` is recorded as `concat`.
         op: String,
+        /// Left operand.
         lhs: Operand,
+        /// Right operand.
         rhs: Operand,
     },
+    /// A unary operation, `dest = op src`.
     UnaryOp {
+        /// Variable that receives the result.
         dest: VarId,
+        /// Operator token as written (for example `!`, `-`, `~`), or `neg` when none was found.
         op: String,
+        /// Operand.
         src: Operand,
     },
+    /// Awaits a promise or future; `dest` receives the resolved value.
     Await {
+        /// Variable that receives the resolved value.
         dest: VarId,
+        /// Memory state after the await (other code may run while suspended).
         mem_out: VarId,
+        /// Memory state the await starts in.
         mem_in: VarId,
+        /// The promise or future being awaited.
         promise: Operand,
     },
+    /// Yields a value from a generator or coroutine; `dest` receives whatever the caller sends back.
     Yield {
+        /// Variable that receives the value sent back into the generator, if it is used.
         dest: Option<VarId>,
+        /// Memory state after the yield.
         mem_out: VarId,
+        /// Memory state the yield starts in.
         mem_in: VarId,
+        /// The yielded value, if any.
         src: Option<Operand>,
     },
 }
@@ -244,38 +344,60 @@ pub enum Instruction {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub enum Terminator {
+    /// Unconditional jump to the given block.
     Jump(BlockId),
+    /// Two-way conditional branch on `cond`.
     Branch {
+        /// Condition operand.
         cond: Operand,
+        /// Block taken when the condition is truthy.
         true_block: BlockId,
+        /// Block taken when the condition is falsy.
         false_block: BlockId,
     },
+    /// Multi-way branch on `cond`.
     Switch {
+        /// Value being switched on.
         cond: Operand,
+        /// `(case value, target block)` pairs in source order.
         cases: Vec<(Operand, BlockId)>,
+        /// Block taken when no case matches.
         default_block: BlockId,
     },
+    /// Returns from the function.
     Return {
+        /// Returned value, or `None` for a bare return.
         src: Option<Operand>,
     },
+    /// Raises an exception or panics with the given value.
     Throw {
+        /// Value being thrown.
         src: Operand,
     },
+    /// No terminator yet: the block is still under construction (the state of every block created by [`BasicBlock::new`]).
     None,
 }
 
+/// A straight-line sequence of instructions with a single entry and a single terminator.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct BasicBlock {
+    /// Identifier of this block within its function.
     pub id: BlockId,
+    /// Phi nodes evaluated at block entry, before any instruction.
     pub phis: Vec<Phi>,
+    /// Instructions in execution order.
     pub instructions: Vec<Instruction>,
+    /// How control leaves the block.
     pub terminator: Terminator,
+    /// Blocks with an edge into this one.
     pub predecessors: Vec<BlockId>,
+    /// Blocks this one has an edge to.
     pub successors: Vec<BlockId>,
 }
 
 impl BasicBlock {
+    /// Creates an empty block with the given id: no phis, no instructions, [`Terminator::None`] and no edges.
     pub fn new(id: BlockId) -> Self {
         Self {
             id,
@@ -288,15 +410,23 @@ impl BasicBlock {
     }
 }
 
+/// The IR of one function: its parameters, control-flow graph and per-variable metadata.
+///
+/// The heap is modelled explicitly. Every function owns a hidden memory-state parameter ([`FunctionIR::initial_memory_state`]) and every memory-affecting instruction consumes and produces a memory-state variable, so flow-sensitive heap reasoning is ordinary SSA dataflow.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct FunctionIR {
+    /// Program-level name of the function.
     pub name: String,
+    /// Formal parameters in declaration order, not including the hidden memory-state parameter.
     pub parameters: Vec<VarId>,
     /// The initial Memory State parameter for the function (representing the heap upon entry)
     pub initial_memory_state: VarId,
+    /// All basic blocks, keyed by their [`BlockId`].
     pub blocks: FxHashMap<BlockId, BasicBlock>,
+    /// The block execution starts in.
     pub entry_block: BlockId,
+    /// Source-level metadata for every variable, including memory states.
     pub var_metadata: FxHashMap<VarId, VarMetadata>,
     /// Language key this IR was lowered from (`spec.fact_language()`:
     /// `"typescript"`,
@@ -343,6 +473,7 @@ pub struct FunctionIR {
 }
 
 impl FunctionIR {
+    /// Creates an empty function with one empty entry block, and allocates the hidden memory-state parameter as [`FunctionIR::initial_memory_state`].
     pub fn new(name: String) -> Self {
         let entry_id = BlockId(0);
         let mut blocks = FxHashMap::default();
@@ -377,6 +508,32 @@ impl FunctionIR {
         f
     }
 
+    /// Source name of `var`, or `v<id>` when lowering recorded none.
+    pub(crate) fn var_name(&self, var: VarId) -> String {
+        self.var_metadata
+            .get(&var)
+            .and_then(|m| m.source_name.clone())
+            .unwrap_or_else(|| format!("v{}", var.0))
+    }
+
+    /// Byte range of the expression that produced `var`, if lowering recorded one.
+    pub(crate) fn var_span(&self, var: VarId) -> Option<(usize, usize)> {
+        self.var_metadata.get(&var).and_then(|m| m.byte_range)
+    }
+
+    /// Byte range of a call instruction: the call result variable carries the
+    /// call expression's range. `None` for non-calls and calls with no result.
+    pub(crate) fn instr_span(&self, instr: &Instruction) -> Option<(usize, usize)> {
+        let dest = match instr {
+            Instruction::CallStatic { dest, .. }
+            | Instruction::CallVirtual { dest, .. }
+            | Instruction::CallPointer { dest, .. } => (*dest)?,
+            _ => return None,
+        };
+        self.var_span(dest)
+    }
+
+    /// Allocates a fresh variable id, records its `metadata` and returns the id.
     pub fn new_var(&mut self, metadata: VarMetadata) -> VarId {
         let id = VarId(self.next_var_id);
         self.next_var_id += 1;
@@ -384,6 +541,7 @@ impl FunctionIR {
         id
     }
 
+    /// Allocates a fresh, empty, unconnected block and returns its id.
     pub fn new_block(&mut self) -> BlockId {
         let id = BlockId(self.next_block_id);
         self.next_block_id += 1;
@@ -391,24 +549,28 @@ impl FunctionIR {
         id
     }
 
+    /// Appends a phi node to `block`. Does nothing if the block does not exist.
     pub fn push_phi(&mut self, block: BlockId, phi: Phi) {
         if let Some(b) = self.blocks.get_mut(&block) {
             b.phis.push(phi);
         }
     }
 
+    /// Appends an instruction to the end of `block`. Does nothing if the block does not exist.
     pub fn push_instruction(&mut self, block: BlockId, instr: Instruction) {
         if let Some(b) = self.blocks.get_mut(&block) {
             b.instructions.push(instr);
         }
     }
 
+    /// Sets how `block` exits. Does nothing if the block does not exist; the CFG edges are recorded separately by [`FunctionIR::add_edge`].
     pub fn set_terminator(&mut self, block: BlockId, terminator: Terminator) {
         if let Some(b) = self.blocks.get_mut(&block) {
             b.terminator = terminator;
         }
     }
 
+    /// Records a control-flow edge `from -> to` in both blocks' successor and predecessor lists. Idempotent: an edge that is already present is not added twice.
     pub fn add_edge(&mut self, from: BlockId, to: BlockId) {
         if let Some(f) = self.blocks.get_mut(&from)
             && !f.successors.contains(&to)
@@ -459,4 +621,19 @@ impl FunctionIR {
         }
         None
     }
+}
+
+/// Strips one pair of matching `'`, `"` or `` ` `` quotes from a string
+/// literal's source text, after trimming. Unmatched or lone quotes are left as is.
+pub(crate) fn strip_quotes(lit: &str) -> &str {
+    let lit = lit.trim();
+    let bytes = lit.as_bytes();
+    if let (Some(&first), Some(&last)) = (bytes.first(), bytes.last())
+        && bytes.len() >= 2
+        && matches!(first, b'\'' | b'"' | b'`')
+        && first == last
+    {
+        return &lit[1..bytes.len() - 1];
+    }
+    lit
 }

@@ -793,3 +793,126 @@ mod subpath_origin_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod conclusion_override_tests {
+    use crate::analysis::taint::facts::{FactTable, LearnedFactEntry};
+
+    fn weak_hash(severity: &str, message: &str, credential: bool) -> LearnedFactEntry {
+        LearnedFactEntry::WeakPrimitiveRule {
+            rule_id: "weak_hash".into(),
+            selector_calls: vec!["createHash".into()],
+            bare_calls: vec!["md5".into()],
+            selector_slot: 0,
+            weak_selectors: vec!["md5".into()],
+            requires_credential_context: credential,
+            severity: severity.into(),
+            message: message.into(),
+        }
+    }
+
+    fn insecure(severity: &str, message: &str) -> LearnedFactEntry {
+        LearnedFactEntry::InsecureConfigRule {
+            prefix: "jwt".into(),
+            selectors: vec!["none".into()],
+            rule_id: "insecure_jwt_algorithm".into(),
+            severity: severity.into(),
+            message: message.into(),
+        }
+    }
+
+    fn key_size(min_bits: i64, severity: &str, message: &str) -> LearnedFactEntry {
+        LearnedFactEntry::KeySizeRule {
+            rule_id: "weak_rsa_key_size".into(),
+            call: "generateKeyPair".into(),
+            slot: 0,
+            min_bits,
+            kind: "RSA".into(),
+            severity: severity.into(),
+            message: message.into(),
+        }
+    }
+
+    /// A consumer bundle re-authoring a rule must replace the earlier seed's
+    /// conclusion, not append a second rule the first-match loop never
+    /// reaches. Identity is the rule's call coverage, so an override may
+    /// change severity, message, and credential qualification freely.
+    #[test]
+    fn a_later_weak_hash_fact_overrides_the_same_coverage() {
+        let mut t = FactTable::default();
+        weak_hash("warning", "", true).apply(&mut t);
+        weak_hash("critical", "bundle prose", false).apply(&mut t);
+
+        assert_eq!(t.weak_hash_rules.len(), 1, "{:?}", t.weak_hash_rules);
+        let rule = &t.weak_hash_rules[0];
+        assert_eq!(rule.severity, "critical");
+        assert_eq!(rule.message, "bundle prose");
+        assert!(!rule.requires_credential_context);
+    }
+
+    /// Different call coverage is a different rule: both must survive, or a
+    /// bundle adding `new()` coverage would silently drop the default pack's.
+    #[test]
+    fn different_call_coverage_is_a_distinct_rule() {
+        let mut t = FactTable::default();
+        weak_hash("warning", "", true).apply(&mut t);
+        let mut other = weak_hash("warning", "", false);
+        if let LearnedFactEntry::WeakPrimitiveRule { selector_calls, .. } = &mut other {
+            selector_calls.push("new".into());
+        }
+        other.apply(&mut t);
+        assert_eq!(t.weak_hash_rules.len(), 2, "{:?}", t.weak_hash_rules);
+    }
+
+    #[test]
+    fn insecure_config_and_key_size_override_by_identity() {
+        let mut t = FactTable::default();
+        insecure("warning", "spec prose").apply(&mut t);
+        insecure("critical", "bundle prose").apply(&mut t);
+        assert_eq!(t.insecure_config_selectors.len(), 1);
+        assert_eq!(t.insecure_config_selectors[0].severity, "critical");
+        assert_eq!(t.insecure_config_selectors[0].message, "bundle prose");
+
+        key_size(2048, "warning", "spec prose").apply(&mut t);
+        key_size(3072, "critical", "bundle prose").apply(&mut t);
+        assert_eq!(t.key_size_rules.len(), 1);
+        assert_eq!(t.key_size_rules[0].min_bits, 3072);
+        assert_eq!(t.key_size_rules[0].severity, "critical");
+        assert_eq!(t.key_size_rules[0].message, "bundle prose");
+    }
+
+    /// The key-size floor is monotone: a later seed may tighten it, never
+    /// relax it, even while its prose and severity win.
+    #[test]
+    fn a_later_key_size_fact_cannot_lower_the_floor() {
+        let mut t = FactTable::default();
+        key_size(4096, "warning", "spec prose").apply(&mut t);
+        key_size(1024, "critical", "bundle prose").apply(&mut t);
+        assert_eq!(t.key_size_rules.len(), 1);
+        assert_eq!(t.key_size_rules[0].min_bits, 4096);
+        assert_eq!(t.key_size_rules[0].severity, "critical");
+    }
+
+    /// `merge` follows the same identity rules as `apply`, so two assembled
+    /// tables combine the way the seeding order promises.
+    #[test]
+    fn merge_overrides_by_identity() {
+        let mut base = FactTable::default();
+        weak_hash("warning", "", true).apply(&mut base);
+        insecure("warning", "").apply(&mut base);
+        key_size(2048, "warning", "").apply(&mut base);
+
+        let mut learned = FactTable::default();
+        weak_hash("critical", "bundle prose", false).apply(&mut learned);
+        insecure("critical", "bundle prose").apply(&mut learned);
+        key_size(4096, "critical", "bundle prose").apply(&mut learned);
+
+        base.merge(&learned);
+        assert_eq!(base.weak_hash_rules.len(), 1);
+        assert_eq!(base.weak_hash_rules[0].severity, "critical");
+        assert_eq!(base.insecure_config_selectors.len(), 1);
+        assert_eq!(base.insecure_config_selectors[0].message, "bundle prose");
+        assert_eq!(base.key_size_rules.len(), 1);
+        assert_eq!(base.key_size_rules[0].min_bits, 4096);
+    }
+}

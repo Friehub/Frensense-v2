@@ -350,7 +350,7 @@ use frensense_lang::severity::SanitizerKind;
 /// Returns true if this node is inside a sanitizer that actually defeats the candidate sink.
 ///
 /// Package-scoped sanitizer facts additionally require `origin_package`
-/// to name their package (import resolution) — pass `None` when no
+/// to name their package (import resolution), pass `None` when no
 /// origin is known; scoped facts then stay inert (recall-safe: they may
 /// only cut a flow under a confirmed origin).
 pub(crate) fn is_sanitizer_effective_for_role(
@@ -441,7 +441,7 @@ pub(crate) fn is_sanitizer_effective_for_role(
 ///
 /// Fact lookups pass no import origin (this path serves the forward
 /// relevance engine and summaries, which carry no per-file import
-/// context), so package-scoped sanitizer facts are inert here — the
+/// context), so package-scoped sanitizer facts are inert here, the
 /// recall-safe direction: universal sanitizers still cut, a bundle-
 /// scoped one never silences a flow it was not proven on.
 pub(crate) fn is_sanitizer_use_with_facts(
@@ -484,10 +484,7 @@ pub(crate) fn is_sanitizer_use_with_facts(
                     return true;
                 }
             }
-            if facts.sanitizer_fact(method).is_some() {
-                return true;
-            }
-            false
+            facts.sanitizer_fact(method).is_some()
         }
         _ => false,
     }
@@ -513,7 +510,7 @@ pub struct SinkAlert {
 /// *non-dangerous* slot (e.g. a parameterized query's binding array) does not
 /// alert. Callers build the [`FactTable`] once and pass it in. Package-scoped
 /// sink facts additionally require `origin_package` to name their package
-/// (import resolution) — pass `None` when no origin is known.
+/// (import resolution), pass `None` when no origin is known.
 pub(crate) fn sink_alert_with_facts(
     ir: &FunctionIR,
     config: &TaintConfig,

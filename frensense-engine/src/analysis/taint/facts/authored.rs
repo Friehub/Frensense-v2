@@ -24,9 +24,13 @@ pub enum AuthoredPolicyEntry {
     /// [`LearnedFactEntry::IntegerOverflowRule`] (the hand-authored
     /// precedent: `[frensense] wrap-max:` corpus metadata).
     IntegerOverflowRule {
+        /// Prover rule id.
         rule: String,
+        /// Largest value the size computation may reach without wrapping; a computation whose proven maximum exceeds it is reported.
         wrap_threshold: u128,
+        /// Advisory severity hint.
         severity: String,
+        /// Advisory text shown to the user.
         message: String,
     },
 }

@@ -21,25 +21,12 @@ use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
 use crate::checks::Provenance;
 use crate::checks::last_segment;
-use crate::ir::function::{FunctionIR, Instruction, Operand};
+use crate::ir::function::{FunctionIR, Instruction, Operand, strip_quotes};
 
 // Weak-hash, key-size and insecure-selector policy tables are FACT DATA:
 // the engine reads only `FactTable` fields, seeded by the language spec
 // (the default pack) and extended by `.frc` bundles. No bootstrap
 // vocabulary is referenced from this module.
-
-fn strip_quotes(lit: &str) -> &str {
-    let lit = lit.trim();
-    let bytes = lit.as_bytes();
-    let (core, _) = match bytes.first() {
-        Some(b'\'') | Some(b'"') | Some(b'`') => {
-            let end = bytes.len().saturating_sub(1);
-            (&lit[1..end], true)
-        }
-        _ => (lit, false),
-    };
-    core
-}
 
 /// Security-context qualification for the hash-wrapper rule: the
 /// enclosing function's name when it hints at security code
@@ -61,6 +48,36 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     check_function(ir, facts)
 }
 
+/// Scans one function for weak primitives: built-in and learned weak-crypto rules (including selector literals resolved through constant assignments) and suspicious hash wrappers. [`check`] is the entry point the check registry calls.
+///
+/// ```
+/// use frensense_engine::analysis::taint::facts::{FactTable, KeySizeRule};
+/// use frensense_engine::checks::weak_hash::check_function;
+/// use frensense_engine::harness::lower_source;
+///
+/// let mut facts = FactTable::default();
+/// facts.key_size_rules.push(KeySizeRule {
+///     rule_id: "weak_key_size".into(),
+///     call: "generateKey".into(),
+///     slot: 1,
+///     min_bits: 2048,
+///     kind: "rsa".into(),
+///     severity: "high".into(),
+///     message: String::new(),
+/// });
+/// let rules = |src: &str| -> Vec<String> {
+///     let fns = lower_source("t.ts", src, "ts").unwrap();
+///     check_function(&fns["f"], &facts).into_iter().map(|f| f.rule).collect()
+/// };
+///
+/// // A constant below the floor is reported ...
+/// assert_eq!(rules("declare function generateKey(k: string, bits: number): void\nfunction f() { generateKey('rsa', 1024) }"), ["weak_key_size"]);
+/// // ... also when it reaches the call through a constant assignment.
+/// assert_eq!(rules("declare function generateKey(k: string, bits: number): void\nfunction f() { const bits = 512; generateKey('rsa', bits) }"), ["weak_key_size"]);
+/// // At or above the floor, or not a provable constant: nothing.
+/// assert!(rules("declare function generateKey(k: string, bits: number): void\nfunction f() { generateKey('rsa', 2048) }").is_empty());
+/// assert!(rules("declare function generateKey(k: string, bits: number): void\nfunction f(n: number) { generateKey('rsa', n) }").is_empty());
+/// ```
 pub fn check_function(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     // The value lattice lets selector rules see through constant
     // assignments: `const alg = 'none'; jwt.sign(payload, secret, alg)`
@@ -76,7 +93,7 @@ pub fn check_function(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding>
                         func,
                         func,
                         args,
-                        instr_span(ir, instr),
+                        ir.instr_span(instr),
                         &values,
                         facts,
                         &mut findings,
@@ -94,7 +111,7 @@ pub fn check_function(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding>
                         method,
                         &path,
                         args,
-                        instr_span(ir, instr),
+                        ir.instr_span(instr),
                         &values,
                         facts,
                         &mut findings,
@@ -144,18 +161,6 @@ fn arg_int_literal(arg: &Operand, values: &crate::analysis::value::ValueInfo) ->
         Operand::Var(v) => values.const_int(*v),
         _ => None,
     }
-}
-
-fn instr_span(ir: &FunctionIR, instr: &Instruction) -> Option<(usize, usize)> {
-    // The call result var carries the call expression's byte range (set by
-    // the lowering pass). Find the dest of this instruction.
-    let dest = match instr {
-        Instruction::CallStatic { dest, .. }
-        | Instruction::CallVirtual { dest, .. }
-        | Instruction::CallPointer { dest, .. } => (*dest)?,
-        _ => return None,
-    };
-    ir.var_metadata.get(&dest)?.byte_range
 }
 
 #[allow(clippy::too_many_arguments)] // fact/lattice/out plumbing, no meaningful grouping
@@ -264,7 +269,7 @@ fn check_call(
                 provenance,
                 function: ir.name.clone(),
                 rule: rule.rule_id.to_string(),
-                message: String::new(),
+                message: rule.message.clone(),
                 params: vec![("callee", callee_seg.to_string()), ("sel", sel.to_string())],
                 span,
                 severity: rule.severity.to_string(),
@@ -281,7 +286,7 @@ fn check_call(
                 provenance,
                 function: ir.name.clone(),
                 rule: rule.rule_id.to_string(),
-                message: String::new(),
+                message: rule.message.clone(),
                 params: vec![("callee", callee_seg.to_string())],
                 span,
                 severity: rule.severity.to_string(),
@@ -308,7 +313,7 @@ fn check_call(
                         provenance: Provenance::Learned,
                         function: ir.name.clone(),
                         rule: fact.rule_id.clone(),
-                        message: String::new(),
+                        message: fact.message.clone(),
                         params: vec![("callee", callee_seg.to_string()), ("sel", sel.to_string())],
                         span,
                         severity: fact.severity.clone(),
@@ -320,7 +325,7 @@ fn check_call(
                     provenance: Provenance::Learned,
                     function: ir.name.clone(),
                     rule: fact.rule_id.clone(),
-                    message: String::new(),
+                    message: fact.message.clone(),
                     params: vec![("callee", callee_seg.to_string())],
                     span,
                     severity: fact.severity.clone(),
@@ -367,7 +372,7 @@ fn check_call(
                     provenance,
                     function: ir.name.clone(),
                     rule: rule.rule_id.to_string(),
-                    message: String::new(),
+                    message: rule.message.clone(),
                     params: vec![
                         ("callee", callee_seg.to_string()),
                         ("min_bits", rule.min_bits.to_string()),
@@ -406,7 +411,7 @@ fn check_call(
                     provenance,
                     function: ir.name.clone(),
                     rule: rule.rule_id.to_string(),
-                    message: String::new(),
+                    message: rule.message.clone(),
                     params: vec![("callee", callee_seg.to_string()), ("sel", lit.to_string())],
                     span,
                     severity: rule.severity.to_string(),

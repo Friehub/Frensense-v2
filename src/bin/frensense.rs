@@ -209,7 +209,7 @@ fn print_help() {
     println!("  -f, --format <format>      Report format: text, json, sarif, github");
     println!("  --strict                   Exit with code 1 if any findings");
     println!(
-        "  -s, --severity <level>     Minimum severity: critical, warning, info (default: warning)"
+        "  -s, --severity <level>     Minimum severity: critical, high, medium,\n                             warning, low, info (default: warning)"
     );
     println!(
         "  -p, --profile <profile>    Precision profile: default, recommended, strict (default: default)"

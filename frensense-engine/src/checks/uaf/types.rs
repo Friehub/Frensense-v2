@@ -20,8 +20,11 @@ pub enum Violation {
 /// One site that releases the object held by `var`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FreeSite {
+    /// Block containing the freeing instruction.
     pub block: BlockId,
+    /// Index of the freeing instruction within its block.
     pub idx: usize,
+    /// Variable holding the object that is released.
     pub var: VarId,
 }
 
@@ -33,13 +36,17 @@ pub enum PairCheck {
     /// Free lives in the callee entered at `call`; the call must precede the
     /// use AND every normal exit of `callee_fi` must pass a free.
     Callee {
+        /// Block and instruction index of the call in the scanned function.
         call: (BlockId, usize),
+        /// Index of the callee in the program's function list.
         callee_fi: usize,
     },
     /// Free lives in the caller that entered *this* function at `call`; the
     /// free must precede the call in the caller's CFG.
     Caller {
+        /// Block and instruction index of the call, in the caller's CFG.
         call: (BlockId, usize),
+        /// Index of the caller in the program's function list.
         caller_fi: usize,
     },
 }
@@ -47,10 +54,13 @@ pub enum PairCheck {
 /// One discovered pair awaiting must-validation.
 #[derive(Debug, Clone, Copy)]
 pub struct Pair {
+    /// Kind of violation this pair would be.
     pub violation: Violation,
+    /// How the pair must be validated before it is reported.
     pub check: PairCheck,
     /// Location of the free (its block / instruction index).
     pub free_block: BlockId,
+    /// Index of the freeing instruction within `free_block`.
     pub free_idx: usize,
 }
 
@@ -61,16 +71,23 @@ pub enum CrossCtx {
     None,
     /// Inside a callee entered from the start function at `call`.
     InCallee {
+        /// Block and instruction index of the call in the start function.
         call: (BlockId, usize),
+        /// Index of the callee in the program's function list.
         callee_fi: usize,
     },
     /// Inside the caller that entered the start function at `call`.
     InCaller {
+        /// Block and instruction index of the call, in the caller's CFG.
         call: (BlockId, usize),
+        /// Index of the caller in the program's function list.
         caller_fi: usize,
     },
 }
 
+/// Builds the checker finding for `violation` on `var`.
+///
+/// The variable is named from its source metadata (or `v<id>` when it has none), and the span is the byte range of `span_var` when one is given.
 pub fn finding(
     ir: &FunctionIR,
     violation: Violation,

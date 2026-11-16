@@ -12,6 +12,7 @@ use std::path::PathBuf;
 /// Configuration is minimal by design: the analysis knowledge lives in the
 /// language specs (`frensense-lang`) and the `.frc` bundle's learned facts,
 /// not in knobs on this struct.
+#[derive(Debug)]
 pub struct Engine {
     /// Optional `.frc` bundle bytes (static) whose learned facts are merged
     /// over the built-in fact table.

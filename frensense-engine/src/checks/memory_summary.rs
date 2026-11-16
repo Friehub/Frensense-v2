@@ -57,6 +57,7 @@ pub struct MemorySummary {
 /// and program functions.
 #[derive(Debug, Clone, Default)]
 pub struct MemorySummaryRegistry {
+    /// Contracts keyed by function or method name.
     pub summaries: FxHashMap<String, MemorySummary>,
 }
 

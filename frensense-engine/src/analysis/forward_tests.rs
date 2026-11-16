@@ -5,7 +5,7 @@
 //! Tests for the bottom-up interprocedural SVFG layer (task 4.2).
 
 #[cfg(test)]
-pub mod interprocedural_tests {
+pub(super) mod interprocedural_tests {
     use crate::analysis::forward::{InterproceduralTaintEngine, ProgramSvfg, SinkAlert};
     use crate::analysis::taint::config::TaintConfig;
     use crate::graph::svfg::{NodeKey, NodeKind, SvfgBuilder};
@@ -1200,7 +1200,7 @@ pub mod interprocedural_tests {
 }
 
 #[cfg(test)]
-pub mod is_source_tests {
+pub(super) mod is_source_tests {
     use crate::analysis::forward::{is_source, member_access_path};
     use crate::analysis::taint::config::TaintConfig;
     use crate::graph::svfg::NodeKey;

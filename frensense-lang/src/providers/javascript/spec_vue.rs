@@ -44,6 +44,7 @@ use super::{
 /// A `.vue` SFC whose script blocks are parsed with the TypeScript/TSX
 /// grammar after [`LanguageSpec::preprocess`] blanks the template and
 /// style sections in place.
+#[derive(Debug)]
 pub struct VueSpec;
 
 impl LanguageSpec for VueSpec {
@@ -181,7 +182,7 @@ fn find_ci(bytes: &[u8], tag: &str) -> Option<usize> {
 /// nothing once we blank it, and keeping the body region lets a stray
 /// `<script>` inside markup degrade to a parse error rather than vanish.
 #[must_use]
-pub fn extract_script_blocks(source: &str) -> Cow<'_, str> {
+pub(super) fn extract_script_blocks(source: &str) -> Cow<'_, str> {
     let bytes = source.as_bytes();
     // Fast path: the source is not an SFC at all (no `<script` and no
     // `<template`), so it is ordinary TS already: return it untouched. A

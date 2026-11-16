@@ -146,6 +146,7 @@ impl ContextPool {
 /// Phase 1 reuses [`InterproceduralTaintEngine`] (k=0) to compute the
 /// taint-relevant function set. Phase 2 re-runs propagation with
 /// `(function, node, context)` states, splitting only relevant functions.
+#[derive(Debug)]
 pub struct ContextSensitiveTaintEngine<'a> {
     prog: &'a ProgramSvfg<'a>,
     config: &'a TaintConfig,
@@ -157,6 +158,7 @@ pub struct ContextSensitiveTaintEngine<'a> {
 }
 
 impl<'a> ContextSensitiveTaintEngine<'a> {
+    /// Creates an engine over `prog` using `config`.
     pub fn new(prog: &'a ProgramSvfg<'a>, config: &'a TaintConfig) -> Self {
         Self {
             prog,
@@ -167,10 +169,12 @@ impl<'a> ContextSensitiveTaintEngine<'a> {
         }
     }
 
+    /// Statistics of the last run.
     pub fn stats(&self) -> &ContextStats {
         &self.stats
     }
 
+    /// Alerts raised by the last run, each with the call context it arose in.
     pub fn alerts(&self) -> &[ContextualAlert] {
         &self.alerts
     }

@@ -125,20 +125,9 @@ fn eval_alloc_capacity(
     }
 }
 
-fn var_name(ir: &FunctionIR, var: VarId) -> String {
-    ir.var_metadata
-        .get(&var)
-        .and_then(|m| m.source_name.clone())
-        .unwrap_or_else(|| format!("v{}", var.0))
-}
-
-fn var_span(ir: &FunctionIR, var: VarId) -> Option<(usize, usize)> {
-    ir.var_metadata.get(&var).and_then(|m| m.byte_range)
-}
-
 fn operand_span(ir: &FunctionIR, op: &Operand) -> Option<(usize, usize)> {
     match op {
-        Operand::Var(v) => var_span(ir, *v),
+        Operand::Var(v) => ir.var_span(*v),
         _ => None,
     }
 }
@@ -199,7 +188,7 @@ pub fn check_with_summaries(
         is_write: bool,
         span: Option<(usize, usize)>,
     ) {
-        let name = var_name(ir, base);
+        let name = ir.var_name(base);
         if idx_lo < 0 {
             findings.push(finding(
                 ir,
@@ -256,7 +245,7 @@ pub fn check_with_summaries(
                             BufferInfo {
                                 capacity_lo: cap_lo,
                                 capacity_hi: cap_hi,
-                                span: var_span(ir, *d),
+                                span: ir.var_span(*d),
                             },
                         );
                     }
@@ -286,10 +275,10 @@ pub fn check_with_summaries(
                             && let Some((len_lo, len_hi)) = eval_range(len_op, block_id, val_info)
                             && len_hi > buf.capacity_lo
                         {
-                            let name = var_name(ir, *dst_var);
+                            let name = ir.var_name(*dst_var);
                             let size_desc = format_range(len_lo, len_hi);
                             let cap_desc = format_range(buf.capacity_lo, buf.capacity_hi);
-                            let span = var_span(ir, *dst_var).or_else(|| operand_span(ir, len_op));
+                            let span = ir.var_span(*dst_var).or_else(|| operand_span(ir, len_op));
                             findings.push(finding(
                                 ir,
                                 Violation::BufferOverflow,
@@ -311,10 +300,10 @@ pub fn check_with_summaries(
                             && let Some((len_lo, len_hi)) = eval_range(len_op, block_id, val_info)
                             && len_hi > buf.capacity_lo
                         {
-                            let name = var_name(ir, *src_var);
+                            let name = ir.var_name(*src_var);
                             let size_desc = format_range(len_lo, len_hi);
                             let cap_desc = format_range(buf.capacity_lo, buf.capacity_hi);
-                            let span = var_span(ir, *src_var).or_else(|| operand_span(ir, len_op));
+                            let span = ir.var_span(*src_var).or_else(|| operand_span(ir, len_op));
                             findings.push(finding(
                                 ir,
                                 Violation::OutOfBoundsRead,
@@ -338,7 +327,7 @@ pub fn check_with_summaries(
                         && let Some((idx_lo, idx_hi)) = eval_range(index, block_id, val_info)
                     {
                         let span = operand_span(ir, index)
-                            .or_else(|| var_span(ir, *base))
+                            .or_else(|| ir.var_span(*base))
                             .or_else(|| operand_span(ir, src));
                         check_access(ir, findings, *base, buf, idx_lo, idx_hi, true, span);
                     }
@@ -351,7 +340,7 @@ pub fn check_with_summaries(
                         && let Some(c) = ps.class_for(pts, *base)
                         && let Some(buf) = ps.buffers.get(&c)
                     {
-                        let span = var_span(ir, *base).or_else(|| operand_span(ir, src));
+                        let span = ir.var_span(*base).or_else(|| operand_span(ir, src));
                         check_access(ir, findings, *base, buf, idx, idx, true, span);
                     }
                 }
@@ -365,8 +354,8 @@ pub fn check_with_summaries(
                         && let Some((idx_lo, idx_hi)) = eval_range(index, block_id, val_info)
                     {
                         let span = operand_span(ir, index)
-                            .or_else(|| var_span(ir, *base))
-                            .or_else(|| var_span(ir, *dest));
+                            .or_else(|| ir.var_span(*base))
+                            .or_else(|| ir.var_span(*dest));
                         check_access(ir, findings, *base, buf, idx_lo, idx_hi, false, span);
                     }
                 }
@@ -378,7 +367,7 @@ pub fn check_with_summaries(
                         && let Some(c) = ps.class_for(pts, *base)
                         && let Some(buf) = ps.buffers.get(&c)
                     {
-                        let span = var_span(ir, *base).or_else(|| var_span(ir, *dest));
+                        let span = ir.var_span(*base).or_else(|| ir.var_span(*dest));
                         check_access(ir, findings, *base, buf, idx, idx, false, span);
                     }
                 }

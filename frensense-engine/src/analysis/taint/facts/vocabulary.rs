@@ -101,6 +101,16 @@ pub const MIRROR_CALL_SUFFIXES: &[&str] = &["Async", "Sync", "Callback", "Promis
 ///
 /// `extractAllToAsync` -> `extractAllTo`. Returns `None` when the name carries
 /// no known decorator, or when stripping it would leave no base at all.
+///
+/// ```
+/// use frensense_engine::analysis::taint::facts::mirror_call_base;
+///
+/// assert_eq!(mirror_call_base("extractAllToAsync"), Some("extractAllTo"));
+/// assert_eq!(mirror_call_base("readSync"), Some("read"));
+/// // No known decorator, or nothing left once it is stripped.
+/// assert_eq!(mirror_call_base("extractAllTo"), None);
+/// assert_eq!(mirror_call_base("Async"), None);
+/// ```
 #[must_use]
 pub fn mirror_call_base(call: &str) -> Option<&str> {
     MIRROR_CALL_SUFFIXES

@@ -405,7 +405,7 @@ impl<'a> BackwardTaintEngine<'a> {
     /// resolves through the file's package-import table, a receiver call
     /// through its receiver root (import alias, then a root naming a
     /// package that carries scoped sanitizer facts, then the factory
-    /// singleton). `None` means unknown origin — package-scoped
+    /// singleton). `None` means unknown origin, package-scoped
     /// sanitizer facts then stay inert at the cut (recall-safe: they may
     /// only silence a flow under a confirmed origin).
     fn sanitizer_origin_package(

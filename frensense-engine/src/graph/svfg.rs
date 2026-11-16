@@ -75,9 +75,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct NodeKey {
+    /// Block the node belongs to.
     pub block: BlockId,
     /// `None` for Phi nodes, `Some(idx)` for regular instructions.
     pub instr_idx: Option<usize>,
+    /// Variable the node defines or uses.
     pub var: VarId,
 }
 
@@ -108,6 +110,7 @@ impl NodeKey {
 /// arguments, so they carry no slot number.
 pub const RECEIVER_ARG_INDEX: usize = usize::MAX;
 
+/// What role a node plays for its variable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub enum NodeKind {
@@ -121,11 +124,16 @@ pub enum NodeKind {
     FormalParam,
     /// `var` is passed as an argument at a call site (interprocedural attachment point).
     ActualArg {
+        /// The call instruction's node.
         call_site: NodeKey,
+        /// Argument position, or [`RECEIVER_ARG_INDEX`] for a call's receiver.
         arg_index: usize,
     },
     /// `var` receives the return value of a call (interprocedural attachment point).
-    ActualRet { call_site: NodeKey },
+    ActualRet {
+        /// The call instruction's node.
+        call_site: NodeKey,
+    },
     /// `var` is the value returned by a `Return` terminator.
     FormalRet,
 }
@@ -138,7 +146,9 @@ pub enum NodeKind {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct SvfgNode {
+    /// Identity of the node.
     pub key: NodeKey,
+    /// Role the node plays for its variable.
     pub kind: NodeKind,
     /// Edges leaving this node (i.e. nodes that use the value defined here).
     successors: FxHashSet<NodeKey>,
@@ -172,6 +182,7 @@ impl SvfgNode {
 /// methods.
 #[derive(Debug, Default, Clone)]
 pub struct Svfg {
+    /// All nodes, keyed by their [`NodeKey`].
     pub nodes: FxHashMap<NodeKey, SvfgNode>,
 }
 
@@ -264,6 +275,7 @@ impl Svfg {
 ///
 /// Step 3 is O(1) per use because SSA guarantees exactly one definition for
 /// every variable, we just look up the pre-built `def_site` table.
+#[derive(Debug)]
 pub struct SvfgBuilder<'a> {
     ir: &'a FunctionIR,
     graph: Svfg,
@@ -277,6 +289,7 @@ pub struct SvfgBuilder<'a> {
 }
 
 impl<'a> SvfgBuilder<'a> {
+    /// Creates a builder for the function `ir`.
     pub fn new(ir: &'a FunctionIR) -> Self {
         Self {
             ir,
@@ -292,6 +305,7 @@ impl<'a> SvfgBuilder<'a> {
         self.build_inner()
     }
 
+    /// Like [`SvfgBuilder::build`], but also models the given buffer-manipulation builtins, so that a call whose name matches a spec adds an edge from its source argument to later reads of its destination object (the base variable, with pointer arithmetic stripped). The edges are added only when the function's language is `c` or `cpp` and `specs` is non-empty; otherwise this behaves like [`SvfgBuilder::build`].
     pub fn build_with_buffer_builtins(
         mut self,
         specs: &[crate::analysis::taint::facts::BufferBuiltinSpec],

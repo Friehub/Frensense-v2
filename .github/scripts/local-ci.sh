@@ -71,8 +71,8 @@ echo -e "\n${BLUE}[8/12] Corpus lint (families must be teachable)...${NC}"
 echo -e "${GREEN}OK Corpus lint gate passed${NC}"
 
 # Lint (ci.yml `qa` job)
-echo -e "\n${BLUE}[9/12] Linting (clippy, warnings are errors)...${NC}"
-cargo clippy --all-features --all-targets -- -D warnings
+echo -e "\n${BLUE}[9/12] Linting (clippy ratchet: deny lints fail, warn debt may only shrink)...${NC}"
+python3 .github/scripts/clippy-ratchet.py
 echo -e "${GREEN}OK Clippy passed${NC}"
 
 # 6. Full regression suite (ci.yml `test-rust` job)

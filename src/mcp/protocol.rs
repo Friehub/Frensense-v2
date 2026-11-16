@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::io::{self, Write};
 
-#[derive(serde::Deserialize)]
+#[derive(Debug, serde::Deserialize)]
 #[allow(dead_code)]
 pub struct JsonRpcRequest {
     jsonrpc: String,
@@ -53,7 +53,7 @@ where
     }
 }
 
-#[derive(serde::Serialize)]
+#[derive(Debug, serde::Serialize)]
 pub struct JsonRpcResponse {
     jsonrpc: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -64,7 +64,7 @@ pub struct JsonRpcResponse {
     error: Option<JsonRpcError>,
 }
 
-#[derive(serde::Serialize)]
+#[derive(Debug, serde::Serialize)]
 pub struct JsonRpcError {
     code: i32,
     message: String,

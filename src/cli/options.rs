@@ -21,7 +21,8 @@ pub struct CliOptions {
     pub output_path: Option<PathBuf>,
     /// Fail with exit code 1 if any findings are found.
     pub is_strict: bool,
-    /// Minimum severity floor: critical, warning, info. Default: warning.
+    /// Minimum severity floor: critical, high, medium, warning, low, info.
+    /// Default: warning.
     pub severity_filter: Option<Severity>,
     /// Language filter (e.g., rust, go, typescript, javascript, python, c).
     pub language_filter: Option<String>,
@@ -165,16 +166,7 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
                 let level = args
                     .get(i + 1)
                     .ok_or_else(|| format!("missing value for {arg}"))?;
-                options.severity_filter = match level.to_lowercase().as_str() {
-                    "critical" => Some(Severity::Critical),
-                    "warning" => Some(Severity::Warning),
-                    "info" => Some(Severity::Info),
-                    other => {
-                        return Err(format!(
-                            "unknown severity level '{other}' (expected: critical, warning, info)"
-                        ));
-                    }
-                };
+                options.severity_filter = Some(crate::policy::severity_from_label(level)?);
                 i += 1;
             }
             "-l" | "--lang" | "--language" => {
@@ -301,6 +293,33 @@ mod tests {
             parse_options(&to_args(&["--severity", "info", "--language", "rust"])).expect("parse");
         assert_eq!(opts.severity_filter, Some(Severity::Info));
         assert_eq!(opts.language_filter.as_deref(), Some("rust"));
+    }
+
+    /// `--severity` speaks the same six-label vocabulary as corpus metadata
+    /// and the MCP thresholds; `high` is not a spelling error.
+    #[test]
+    fn severity_flag_accepts_every_shared_label() {
+        let expected = [
+            ("critical", Severity::Critical),
+            ("high", Severity::Warning),
+            ("medium", Severity::Warning),
+            ("warning", Severity::Warning),
+            ("low", Severity::Info),
+            ("info", Severity::Info),
+        ];
+        for (label, tier) in expected {
+            let opts =
+                parse_options(&to_args(&["--severity", label])).expect("six-label vocabulary");
+            assert_eq!(opts.severity_filter, Some(tier), "label `{label}`");
+        }
+    }
+
+    #[test]
+    fn unknown_severity_is_rejected_with_the_accepted_labels() {
+        let err = parse_options(&to_args(&["--severity", "highish"])).expect_err("must reject");
+        assert!(err.contains("unknown severity level 'highish'"), "{err}");
+        assert!(err.contains("critical"), "{err}");
+        assert!(err.contains("info"), "{err}");
     }
 
     #[test]

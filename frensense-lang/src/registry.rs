@@ -36,6 +36,21 @@ pub struct LanguageRegistry {
     by_name: FxHashMap<&'static str, Arc<dyn LanguageSpec>>,
 }
 
+impl std::fmt::Debug for LanguageRegistry {
+    /// Lists the registered language names and extensions, sorted so the
+    /// output is deterministic (the specs themselves are trait objects).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut languages: Vec<&str> = self.by_name.keys().copied().collect();
+        languages.sort_unstable();
+        let mut extensions: Vec<&str> = self.by_ext.keys().copied().collect();
+        extensions.sort_unstable();
+        f.debug_struct("LanguageRegistry")
+            .field("languages", &languages)
+            .field("extensions", &extensions)
+            .finish()
+    }
+}
+
 impl LanguageRegistry {
     // ── Global singleton ──────────────────────────────────────────────────
 

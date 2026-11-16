@@ -11,6 +11,22 @@ its replay gate, the corpus `lint` checks, and the embedded default-pack asset.
 in *this* file, so a format change - not the root changelog - is what records
 artifact compatibility.
 
+## [0.8.1]
+
+### Changed
+
+- **`lint` uses the shared severity vocabulary.** `SEVERITIES` was a private
+  copy of the six corpus labels; `M003` now validates with
+  `frensense_lang::severity::Severity::parse_label` and lists
+  `SEVERITY_LABELS`, so a label the CLI and MCP accept cannot fail corpus lint
+  (or vice versa). The error code and text are unchanged.
+- **The embedded default pack was regenerated.** `frensense-packgen` now
+  leaves `message` empty on the built-in weak-hash, insecure-config and
+  key-size rules; the engine renders those observations from the
+  `frensense-lang` templates instead of a second copy in the pack. No
+  `BUNDLE_VERSION` change: the fact shape is identical, only string content
+  moved.
+
 ## [0.8.0]
 
 ### Breaking

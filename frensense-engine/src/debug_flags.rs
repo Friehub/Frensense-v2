@@ -15,8 +15,9 @@
 //! * `FRENSdbg_DEADEND`   - trace dead-end classification decisions
 //! * `FRENSdbg_UNRES`     - trace unresolvable-node reasoning
 //! * `FRENSdbg_IS_SOURCE` - trace source-matching in the forward engine
-//! * `FRENSdbg_STATIC`    - harness-level static-analysis trace//! * `FRENSdbg_PTS`      - points-to fixed-point cost (passes, set sizes)
-//! * `FRENSdbg_MEM`      - phase boundary RSS + graph sizes (memory attribution)
+//! * `FRENSdbg_STATIC`    - harness-level static-analysis trace
+//! * `FRENSdbg_PTS`       - points-to fixed-point cost (passes, set sizes)
+//! * `FRENSdbg_MEM`       - phase boundary RSS + graph sizes (memory attribution)
 
 use std::ffi::OsString;
 use std::sync::OnceLock;
@@ -24,12 +25,19 @@ use std::sync::OnceLock;
 /// Cached per-process debug flags.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DebugFlags {
+    /// `FRENSdbg_WALK`: trace every node visit in the backward engine.
     pub walk: bool,
+    /// `FRENSdbg_DEADEND`: trace dead-end classification decisions.
     pub deadend: bool,
+    /// `FRENSdbg_UNRES`: trace unresolvable-node reasoning.
     pub unres: bool,
+    /// `FRENSdbg_IS_SOURCE`: trace source matching in the forward engine.
     pub is_source: bool,
+    /// `FRENSdbg_STATIC`: harness-level static-analysis trace.
     pub static_trace: bool,
+    /// `FRENSdbg_PTS`: points-to fixed-point cost (passes, set sizes).
     pub pts: bool,
+    /// `FRENSdbg_MEM`: phase-boundary resident memory and graph sizes.
     pub mem: bool,
 }
 

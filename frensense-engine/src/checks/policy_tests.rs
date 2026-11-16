@@ -6,7 +6,7 @@
 //! lossless legacy-`LearnedCheckFact` conversion path.
 
 #[cfg(test)]
-pub mod policy_spec {
+pub(super) mod policy_spec {
     use crate::analysis::taint::facts::{
         FactTable, LearnedCheckFact, LearnedFactEntry, PolicyFact, PolicyRequirement, PolicyScope,
         Provenance,
@@ -80,7 +80,7 @@ export function handler (cmd: string) {
     /// match the bare callable the corpus taught (`wipe_volume`): the
     /// learned-check matching reduces every callee through `.` and `::`
     /// separators, the same mechanism-first rule the sink vocabulary uses.
-    /// The bare-statement guard still suppresses when scanning — the
+    /// The bare-statement guard still suppresses when scanning, the
     /// dominance check only requires the guard to execute before the
     /// trigger on every path.
     fn rust_lower(src: &str) -> Vec<&'static FunctionIR> {

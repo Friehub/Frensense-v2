@@ -23,12 +23,17 @@ pub enum LearnedFactEntry {
     /// touching the built-in tables. Matches by full name or, for dotted
     /// entries, by last segment (same convention as sinks).
     Source {
+        /// Call name or member-access path whose result is attacker-controlled.
         pattern: String,
+        /// Optional package qualification: when set, the entry only applies where this package is in scope.
         #[cfg_attr(feature = "serialize", serde(default))]
         package: Option<String>,
     },
+    /// A taint sink: a call that is dangerous when tainted data reaches one of its argument slots.
     Sink {
+        /// Call name matched against the call's last segment.
         call: String,
+        /// Optional package qualification: when set, the entry only applies where this package is in scope.
         #[cfg_attr(feature = "serialize", serde(default))]
         package: Option<String>,
         /// Dangerous argument slots; empty = all slots dangerous.
@@ -36,31 +41,45 @@ pub enum LearnedFactEntry {
         /// Whether non-dangerous slots are safe binding channels.
         binding_args_safe: bool,
     },
+    /// A sanitizer: a call that neutralizes taint on the value it processes.
     Sanitizer {
+        /// Name of the sanitizing call.
         call: String,
+        /// Optional package qualification: when set, the entry only applies where this package is in scope.
         #[cfg_attr(feature = "serialize", serde(default))]
         package: Option<String>,
+        /// Sanitizer-kind label; see [`SanitizerFact::kind`].
         kind: String,
+        /// Whether this is a guard-style sanitizer; see [`SanitizerFact::guard_style`].
         guard_style: bool,
     },
     /// Install a corpus-verified co-occurrence policy (the generalized
     /// check fact; see [`PolicyFact`]).
     Policy {
+        /// Stable rule id reported when the policy is violated.
         rule: String,
+        /// Trigger call (last segment matched) that raises the policy question.
         when_call: String,
         /// Requirements that must hold for the trigger to be compliant.
         #[cfg_attr(feature = "serialize", serde(default))]
         require: Vec<PolicyRequirement>,
+        /// Where the trigger and requirements are evaluated.
         #[cfg_attr(feature = "serialize", serde(default))]
         scope: PolicyScope,
+        /// Advisory text shown to the user.
         message: String,
+        /// Advisory severity hint: `"warning"` or `"critical"`.
         severity: String,
     },
     /// Install a corpus-verified non-dataflow check.
     Check {
+        /// Stable rule id reported on a match.
         rule: String,
+        /// Trigger: a call whose last segment matches this name fires the rule.
         call: String,
+        /// Advisory text shown to the user.
         message: String,
+        /// Advisory severity hint: `"warning"` or `"critical"`.
         severity: String,
         /// Fire only when this guard call is absent from the function
         /// ("trigger without enforcement"). `None` = presence-only.
@@ -74,9 +93,13 @@ pub enum LearnedFactEntry {
     },
     /// Install a corpus-verified memory allocation or deallocation contract.
     MemoryContract {
+        /// Function or method name the contract describes.
         name: String,
+        /// Whether a call returns freshly allocated heap memory.
         returns_fresh: bool,
+        /// Capacity of the returned buffer.
         return_capacity: CapacitySpec,
+        /// Zero-based parameter indices the call frees or consumes.
         consumes_params: Vec<usize>,
     },
     /// A weak cryptographic primitive or selector rule.
@@ -87,86 +110,148 @@ pub enum LearnedFactEntry {
     SchemaPolicy(SchemaPolicyFact),
     /// Dynamic AST grammar role mapping taught by a bundle.
     GrammarRole {
+        /// Language key the mapping applies to.
         language: String,
+        /// Tree-sitter node kind being mapped.
         node_kind: String,
+        /// Role assigned to nodes of that kind.
         role: TeachableNodeRole,
     },
     /// Dynamic AST grammar feature taught by a bundle.
     GrammarFeature {
+        /// Language key the mapping applies to.
         language: String,
+        /// Tree-sitter node kind being flagged.
         node_kind: String,
+        /// Syntactic feature nodes of that kind have.
         feature: GrammarFeature,
     },
     /// Register a custom memory allocator function name.
-    Allocator { name: String },
+    Allocator {
+        /// Function name of the allocator.
+        name: String,
+    },
     /// Register a custom memory deallocator function name.
-    Deallocator { name: String },
+    Deallocator {
+        /// Function name of the deallocator.
+        name: String,
+    },
     /// Register an IDOR-class finder sink and optional custom IDOR query payload keys.
-    IdorFinderSink { call: String, keys: Vec<String> },
+    IdorFinderSink {
+        /// Finder call name.
+        call: String,
+        /// Query-payload keys that count as an object-level identity payload for this finder.
+        keys: Vec<String>,
+    },
     /// Register an IDOR-class query payload key (e.g. "tenant_id", "workspace_id").
-    IdorKey { key: String },
+    IdorKey {
+        /// Query-payload key name.
+        key: String,
+    },
     /// Register a taint propagator rule for a function/method.
     Propagator {
+        /// Call name the rule applies to.
         call: String,
+        /// Argument slots whose taint flows to the result.
         input_args: Vec<usize>,
+        /// Whether the result stays tainted when an input is tainted.
         preserves_taint: bool,
     },
     /// Register a string pattern indicating a denylist-style guard comparison.
-    GuardDenylistPattern { pattern: String },
+    GuardDenylistPattern {
+        /// Pattern string marking a denylist-style comparison.
+        pattern: String,
+    },
     /// Register/extend an allocation-size integer-overflow rule: the corpus
     /// declares the prover rule id, wrap threshold, and advisory; the
     /// engine's stable prover evaluates it (CWE-190 -> CWE-680).
     IntegerOverflowRule {
+        /// Prover rule id.
         rule: String,
+        /// Largest value the size computation may reach without wrapping; a computation whose proven maximum exceeds it is reported.
         wrap_threshold: u128,
+        /// Advisory severity hint.
         severity: String,
+        /// Advisory text shown to the user.
         message: String,
     },
     /// Substring-hint vocabulary for one hint table (Phase 6 format
     /// extension): bundles extend the URL/security/auth/credential hint
     /// sets the same way the spec seed provides them.
-    Hints { kind: HintKind, values: Vec<String> },
+    Hints {
+        /// Which hint table the values extend.
+        kind: HintKind,
+        /// Substring hints to add to that table.
+        values: Vec<String>,
+    },
     /// A weak-primitive policy rule (weak digest selectors), the bundle
     /// form of the bootstrap weak-hash table.
     WeakPrimitiveRule {
+        /// Stable rule id reported on a match.
         rule_id: String,
+        /// Calls whose selector argument names the algorithm.
         selector_calls: Vec<String>,
+        /// Calls that are weak primitives by name alone, with no selector.
         bare_calls: Vec<String>,
+        /// Argument slot of the selector in `selector_calls`.
         selector_slot: usize,
+        /// Selector values considered weak.
         weak_selectors: Vec<String>,
+        /// Whether the rule only fires in a credential-handling context.
         requires_credential_context: bool,
+        /// Advisory severity hint.
         severity: String,
+        /// Advisory text shown to the user.
         message: String,
     },
     /// A string-literal insecure-configuration selector rule (the bundle
     /// form of the bootstrap insecure-config table).
     InsecureConfigRule {
+        /// Selector prefix identifying the configuration family.
         prefix: String,
+        /// String literals that mark an insecure setting.
         selectors: Vec<String>,
+        /// Stable rule id reported on a match.
         rule_id: String,
+        /// Advisory severity hint.
         severity: String,
+        /// Advisory text shown to the user.
         message: String,
     },
     /// A minimum-key-size rule for a key-generation call (the bundle form
     /// of the bootstrap key-size table).
     KeySizeRule {
+        /// Stable rule id reported on a match.
         rule_id: String,
+        /// Key-generation call.
         call: String,
+        /// Argument slot holding the key size.
         slot: usize,
+        /// Minimum acceptable key size in bits.
         min_bits: i64,
+        /// Key kind the rule covers (for example the algorithm family).
         kind: String,
+        /// Advisory severity hint.
         severity: String,
+        /// Advisory text shown to the user.
         message: String,
     },
     /// Known wrapper calls whose entire purpose is hashing: the bundle
     /// form of the bootstrap suspicious-hash-wrapper vocabulary.
-    SuspiciousHashWrappers { calls: Vec<String> },
+    SuspiciousHashWrappers {
+        /// Wrapper call names.
+        calls: Vec<String>,
+    },
     /// A buffer-manipulation builtin with destination/source/length slots:
     /// the bundle form of the bootstrap buffer vocabulary.
     BufferBuiltin {
+        /// Builtin name.
         name: String,
+        /// Argument slot of the destination buffer, if the builtin has one.
         dst_arg: Option<usize>,
+        /// Argument slot of the source buffer, if the builtin has one.
         src_arg: Option<usize>,
+        /// Argument slot of the length.
         len_arg: usize,
     },
 
@@ -180,33 +265,47 @@ pub enum LearnedFactEntry {
     /// pack generator derived from its vocabulary label (snake_case
     /// [`crate::analysis::taint::role::SinkRole`] name).
     LanguageSink {
+        /// Language key the entry applies to; `"*"` matches every language.
         language: String,
+        /// Call name of the sink.
         call: String,
+        /// Snake-case [`crate::analysis::taint::role::SinkRole`] name.
         role: String,
     },
     /// Per-slot sink rules for one language (the generator's per-language
     /// sink signature vocabulary): which argument slots are
     /// dangerous / binding-safe.
     LanguageSinkSlots {
+        /// Language key the entry applies to; `"*"` matches every language.
         language: String,
+        /// Call name of the sink.
         call: String,
+        /// Optional package qualification: when set, the entry only applies where this package is in scope.
         #[cfg_attr(feature = "serialize", serde(default))]
         package: Option<String>,
+        /// Dangerous argument slots; empty means every slot.
         dangerous_args: BTreeSet<usize>,
+        /// Whether non-dangerous slots are safe binding channels.
         binding_args_safe: bool,
     },
     /// An IDOR-class finder sink for one language (the generator's
     /// per-language IDOR vocabulary).
     LanguageIdorSink {
+        /// Language key the entry applies to.
         language: String,
+        /// Finder call name.
         call: String,
+        /// Query-payload keys that count as an identity payload.
         keys: Vec<String>,
     },
     /// A taint source pattern for one language (the generator's per-language
     /// source vocabulary and the conventional request-parameter names).
     LanguageSource {
+        /// Language key the entry applies to.
         language: String,
+        /// Call name or member-access path whose result is attacker-controlled.
         pattern: String,
+        /// Optional package qualification: when set, the entry only applies where this package is in scope.
         #[cfg_attr(feature = "serialize", serde(default))]
         package: Option<String>,
     },
@@ -214,49 +313,86 @@ pub enum LearnedFactEntry {
     /// sanitizer vocabulary, with the predicate-guard
     /// classification precomputed by the pack generator).
     LanguageSanitizer {
+        /// Language key the entry applies to.
         language: String,
+        /// Name of the sanitizing call.
         call: String,
+        /// Optional package qualification: when set, the entry only applies where this package is in scope.
         #[cfg_attr(feature = "serialize", serde(default))]
         package: Option<String>,
+        /// Sanitizer-kind label; see [`SanitizerFact::kind`].
         kind: String,
+        /// Whether this is a guard-style sanitizer; see [`SanitizerFact::guard_style`].
         guard_style: bool,
     },
     /// A taint propagator rule for one language (the generator's
     /// per-language propagator vocabulary).
     LanguagePropagator {
+        /// Language key the entry applies to.
         language: String,
+        /// Call name the rule applies to.
         call: String,
+        /// Argument slot whose taint flows to the result, if any.
         tainted_arg: Option<usize>,
+        /// Whether the receiver's taint flows to the result.
         tainted_receiver: bool,
     },
     /// A session-root accessor for one language (the generator's
     /// per-language session-root vocabulary).
-    LanguageSessionRoot { language: String, root: String },
+    LanguageSessionRoot {
+        /// Language key the entry applies to.
+        language: String,
+        /// Name of the session-root accessor.
+        root: String,
+    },
     /// A route-registration call pattern for one language (the generator's
     /// per-language route vocabulary, formerly read from the language
     /// spec), keyed for the lowering
     /// harness.
-    LanguageRoutePattern { language: String, pattern: String },
+    LanguageRoutePattern {
+        /// Language key the entry applies to.
+        language: String,
+        /// Route-registration call pattern.
+        pattern: String,
+    },
     /// Stack-frame allocators (`alloca`, ...) - the leak checker's
     /// frame-lifetime exclusion set (Phase 6.5: moved from the spec seed
     /// into the pack; `GuardDenylistPattern` already carries the guard
     /// denylist the same way).
-    StackAllocators { values: Vec<String> },
+    StackAllocators {
+        /// Stack-frame allocator names.
+        values: Vec<String>,
+    },
     /// Collection constructors (`Set`, `Map`) whose literal elements the
     /// allowlist-definition check reads (Phase 6.5, pack-seeded).
-    CollectionConstructors { values: Vec<String> },
+    CollectionConstructors {
+        /// Collection constructor names.
+        values: Vec<String>,
+    },
     /// Schema-describing methods (`describe`, `description`) for the
     /// schema-policy check (Phase 6.5, pack-seeded).
-    SchemaDescribeMethods { values: Vec<String> },
+    SchemaDescribeMethods {
+        /// Schema-describing method names.
+        values: Vec<String>,
+    },
     /// String literals that compare as the language's null pointer
     /// (`NULL`) for the leak checker (Phase 6.5, pack-seeded).
-    NullTokens { values: Vec<String> },
+    NullTokens {
+        /// Literals that compare as the null pointer.
+        values: Vec<String>,
+    },
     /// Read-accessor method names of trusted session stores (`get`)
     /// (Phase 6.5, pack-seeded).
-    SessionAccessors { values: Vec<String> },
+    SessionAccessors {
+        /// Read-accessor method names of session stores.
+        values: Vec<String>,
+    },
     /// Formal parameter names receiving the implicit receiver (`self`,
     /// `this`) (Phase 6.5, pack-seeded).
-    ReceiverParams { values: Vec<String> },
+    ReceiverParams {
+        /// Parameter names that receive the implicit receiver.
+        values: Vec<String>,
+    },
     /// HTTP-method verbs that are ambiguous as bare last-segment call
     /// names (routers `app.get`, maps `m.set`, http clients `got.post`,
     /// caches `kv.put` all share them). A dotted sink entry with one of
@@ -266,7 +402,9 @@ pub enum LearnedFactEntry {
     /// `LanguageSpec::known_ambiguous_verbs` (a trait default no
     /// provider ever overrode) into the pack, one entry per language.
     LanguageAmbiguousVerbs {
+        /// Language key the entry applies to.
         language: String,
+        /// Verbs that are ambiguous as bare call names.
         values: Vec<String>,
     },
     /// A package-scoped co-occurrence policy (Phase 7: PolicyFact gained a
@@ -275,13 +413,19 @@ pub enum LearnedFactEntry {
     /// existing v6 bundles stay stable: old bundles deserialize the
     /// unscoped `Policy` variant (package = None) exactly as before.
     PolicyScoped {
+        /// Stable rule id reported when the policy is violated.
         rule: String,
+        /// Trigger call (last segment matched) that raises the policy question.
         when_call: String,
+        /// Requirements that must hold for the trigger to be compliant.
         #[cfg_attr(feature = "serialize", serde(default))]
         require: Vec<PolicyRequirement>,
+        /// Where the trigger and requirements are evaluated.
         #[cfg_attr(feature = "serialize", serde(default))]
         scope: PolicyScope,
+        /// Advisory text shown to the user.
         message: String,
+        /// Advisory severity hint: `"warning"` or `"critical"`.
         severity: String,
         /// Only fire in files that import this package.
         package: String,
@@ -292,7 +436,12 @@ pub enum LearnedFactEntry {
     /// `global_only` runtime flag: the bare call form is the sink, while a
     /// receiver-qualified call (`engine.eval(x)`) matches only once its
     /// origin resolves to a known package (WI-12).
-    LanguageSinkGlobalOnly { language: String, call: String },
+    LanguageSinkGlobalOnly {
+        /// Language key of the sink entry being marked.
+        language: String,
+        /// Call name of the sink entry being marked.
+        call: String,
+    },
     /// Appended last (bincode encodes the variant index first, so existing
     /// wire bytes keep decoding unchanged): the SAME rule as
     /// `IntegerOverflowRule` with the unbounded-operand modality taught -
@@ -301,9 +450,13 @@ pub enum LearnedFactEntry {
     /// New intent must be added as its own trailing variant; never insert
     /// a variant before an established one.
     IntegerOverflowUnboundedRule {
+        /// Prover rule id.
         rule: String,
+        /// Largest value the size computation may reach without wrapping; a computation whose proven maximum exceeds it is reported.
         wrap_threshold: u128,
+        /// Advisory severity hint.
         severity: String,
+        /// Advisory text shown to the user.
         message: String,
     },
 }
@@ -809,7 +962,19 @@ impl LearnedFactEntry {
                     severity: severity.clone(),
                     message: message.clone(),
                 };
-                if !table.weak_hash_rules.contains(&fact) {
+                // Identity is the rule's call coverage, not the whole struct:
+                // a later seed (consumer bundle over default pack) that keeps
+                // the same calls but changes severity/message/credential
+                // context overrides the earlier rule. Whole-struct dedup made
+                // those conclusion fields part of identity, so the "override"
+                // appended a second rule that the first-match loop never ran.
+                if let Some(existing) = table
+                    .weak_hash_rules
+                    .iter_mut()
+                    .find(|r| r.same_identity(&fact))
+                {
+                    *existing = fact;
+                } else {
                     table.weak_hash_rules.push(fact);
                 }
             }
@@ -827,7 +992,13 @@ impl LearnedFactEntry {
                     severity: severity.clone(),
                     message: message.clone(),
                 };
-                if !table.insecure_config_selectors.contains(&fact) {
+                if let Some(existing) = table
+                    .insecure_config_selectors
+                    .iter_mut()
+                    .find(|r| r.same_identity(&fact))
+                {
+                    *existing = fact;
+                } else {
                     table.insecure_config_selectors.push(fact);
                 }
             }
@@ -849,7 +1020,13 @@ impl LearnedFactEntry {
                     severity: severity.clone(),
                     message: message.clone(),
                 };
-                if !table.key_size_rules.contains(&fact) {
+                if let Some(existing) = table
+                    .key_size_rules
+                    .iter_mut()
+                    .find(|r| r.same_identity(&fact))
+                {
+                    existing.override_with(&fact);
+                } else {
                     table.key_size_rules.push(fact);
                 }
             }

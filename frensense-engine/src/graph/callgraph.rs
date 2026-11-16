@@ -55,7 +55,12 @@ pub enum CallTarget {
     /// A function in the analysed program, by its program-level key.
     Function(String),
     /// `Class.method` dispatch on a receiver of known class.
-    Method { class: String, method: String },
+    Method {
+        /// Class of the receiver.
+        class: String,
+        /// Method name.
+        method: String,
+    },
     /// Callee outside the analysed program (library, builtin, unresolved
     /// indirect). The source/sink fact layer classifies these by name.
     External(String),
@@ -73,6 +78,7 @@ impl CallTarget {
         }
     }
 
+    /// Whether the target lies outside the analysed program.
     pub fn is_external(&self) -> bool {
         matches!(self, CallTarget::External(_))
     }
@@ -81,6 +87,15 @@ impl CallTarget {
 /// Program-index key for a method implementation. The project lowering
 /// registers methods qualified as `Class.method`; bare-named duplicates are
 /// matched by the caller (interprocedural layer) as a fallback.
+///
+/// ```
+/// use frensense_engine::graph::callgraph::{CallTarget, method_key};
+///
+/// assert_eq!(method_key("User", "save"), "User.save");
+/// let t = CallTarget::Method { class: "User".into(), method: "save".into() };
+/// assert_eq!(t.internal_key().as_deref(), Some("User.save"));
+/// assert_eq!(CallTarget::External("fs.open".into()).internal_key(), None);
+/// ```
 pub fn method_key(class: &str, method: &str) -> String {
     format!("{class}.{method}")
 }
@@ -134,6 +149,7 @@ struct FnFacts {
 
 /// Input: every function's IR, keyed by program-level name (the same map the
 /// `ProgramSvfg` builder consumes).
+#[derive(Debug)]
 pub struct CallGraphBuilder<'a> {
     irs: &'a FxHashMap<String, &'a FunctionIR>,
     aliases: Option<&'a FxHashMap<String, FxHashMap<String, String>>>,
@@ -141,6 +157,7 @@ pub struct CallGraphBuilder<'a> {
 }
 
 impl<'a> CallGraphBuilder<'a> {
+    /// Creates a builder over `irs`, keyed by program-level function name, with no import aliases.
     pub fn new(irs: &'a FxHashMap<String, &'a FunctionIR>) -> Self {
         Self {
             irs,
@@ -149,6 +166,7 @@ impl<'a> CallGraphBuilder<'a> {
         }
     }
 
+    /// Supplies per-file import aliases and the function-to-file map, so a call through an imported symbol resolves to the function it names.
     pub fn with_aliases(
         mut self,
         aliases: Option<&'a FxHashMap<String, FxHashMap<String, String>>>,
@@ -171,6 +189,7 @@ impl<'a> CallGraphBuilder<'a> {
         symbol
     }
 
+    /// Resolves every call site in every function and returns the call graph.
     pub fn build(&self) -> CallGraph {
         let mut functions: Vec<String> = self.irs.keys().cloned().collect();
         functions.sort();

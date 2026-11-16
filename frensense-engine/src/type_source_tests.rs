@@ -23,7 +23,7 @@
 
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
-pub mod type_source_tests {
+pub(crate) mod type_source_tests {
     use crate::analysis::taint::engine::{BackwardVerdict, SinkFinding};
     use crate::analysis::taint::facts::seeded_tables_all;
     use crate::scan::{prepare, scan_prepared};

@@ -18,7 +18,7 @@
 //! conservative closure edges must not resurrect sanitized flows.
 
 #[cfg(test)]
-pub mod nested_flow_gate {
+pub(crate) mod nested_flow_gate {
     use crate::analysis::taint::engine::BackwardVerdict;
     use crate::analysis::taint::facts::{
         FactTable, PolicyFact, PolicyRequirement, PolicyScope, Provenance, seeded_tables_all,
@@ -278,7 +278,7 @@ export function outer (cmd: string) {
 }
 
 #[cfg(test)]
-pub mod duplicate_result_gate {
+pub(crate) mod duplicate_result_gate {
     use crate::analysis::taint::engine::BackwardVerdict;
     use crate::analysis::taint::facts::{FactTable, seeded_tables_all};
     use crate::checks::policy;
@@ -460,7 +460,7 @@ export function orderHistory () {
 }
 
 #[cfg(test)]
-pub mod c_taint_gate {
+pub(crate) mod c_taint_gate {
     use crate::analysis::taint::engine::BackwardVerdict;
     use crate::analysis::taint::facts::seeded_tables_all;
     use crate::scan::{ScanResult, scan};
@@ -553,7 +553,7 @@ void f(void) {
 }
 
 #[cfg(test)]
-pub mod spec_acceptance_gate {
+pub(crate) mod spec_acceptance_gate {
     use crate::analysis::taint::engine::BackwardVerdict;
     use crate::analysis::taint::facts::seeded_tables_all;
     use crate::scan::{ScanResult, scan};

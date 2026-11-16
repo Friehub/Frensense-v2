@@ -23,6 +23,7 @@ use super::{
 
 // ── JavaScript spec ────────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub struct JavaScriptSpec;
 
 impl LanguageSpec for JavaScriptSpec {

@@ -24,7 +24,7 @@ pub fn tool_definition() -> Value {
                 },
                 "severity_threshold": {
                     "type": "string",
-                    "enum": ["critical", "warning", "info"],
+                    "enum": frensense_lang::severity::SEVERITY_LABELS,
                     "default": "warning",
                     "description": "Minimum severity to report"
                 },
@@ -60,13 +60,15 @@ pub fn write_notification(params: &Value) {
 
 /// Severity + language filter. Severity comes from the one reporting
 /// policy ([`crate::policy::apply`]); the language scope is this
-/// tool's own argument.
+/// tool's own argument. The caller resolves the threshold with
+/// [`crate::policy::severity_from_label`], so an unknown label is rejected
+/// before any work is done.
 pub fn filter_advisories(
     advisories: Vec<Advisory>,
-    severity_threshold: &str,
+    severity_floor: Severity,
     language: Option<&str>,
 ) -> Vec<Advisory> {
-    let filtered = crate::policy::apply(advisories, 0.0, Some(Severity::parse(severity_threshold)));
+    let filtered = crate::policy::apply(advisories, 0.0, Some(severity_floor));
 
     let extensions = language.and_then(crate::parser::extensions_for);
 
@@ -92,6 +94,18 @@ pub fn run_audit_streamed(
     severity_threshold: &str,
     language: Option<&str>,
 ) {
+    let severity_floor = match crate::policy::severity_from_label(severity_threshold) {
+        Ok(floor) => floor,
+        Err(error) => {
+            let result = json!({
+                "clean": false,
+                "advisories": [],
+                "error": error
+            });
+            write_response(&rpc_result(id, result));
+            return;
+        }
+    };
     let target = Path::new(path);
     if !target.exists() {
         let result = json!({
@@ -122,7 +136,7 @@ pub fn run_audit_streamed(
         }
     };
 
-    let filtered = filter_advisories(advisories, severity_threshold, language);
+    let filtered = filter_advisories(advisories, severity_floor, language);
     let skipped = engine.take_skipped_unsupported();
     let coverage = engine.take_coverage();
     let telemetry = engine.take_telemetry();
@@ -156,6 +170,16 @@ pub fn run_audit_streamed(
 }
 
 pub fn run_audit(path: &str, severity_threshold: &str, language: Option<&str>) -> Value {
+    let severity_floor = match crate::policy::severity_from_label(severity_threshold) {
+        Ok(floor) => floor,
+        Err(error) => {
+            return json!({
+                "clean": false,
+                "advisories": [],
+                "error": error
+            });
+        }
+    };
     let target = Path::new(path);
     if !target.exists() {
         return json!({
@@ -182,7 +206,7 @@ pub fn run_audit(path: &str, severity_threshold: &str, language: Option<&str>) -
         }
     };
 
-    let filtered = filter_advisories(advisories, severity_threshold, language);
+    let filtered = filter_advisories(advisories, severity_floor, language);
     let skipped = engine.take_skipped_unsupported();
     let coverage = engine.take_coverage();
     let telemetry = engine.take_telemetry();
@@ -196,4 +220,37 @@ pub fn run_audit(path: &str, severity_threshold: &str, language: Option<&str>) -
         "unsupported_source_files": crate::cli::skipped_unsupported_json(&skipped),
         "analysis": analysis,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_audit;
+
+    /// The threshold is validated before the path check or any scanning, so
+    /// a client that spells a severity wrong is told instead of silently
+    /// receiving everything (`Severity::parse` used to map unknown -> info).
+    #[test]
+    fn unknown_severity_threshold_is_rejected() {
+        let out = run_audit(".", "extra-high", None);
+        assert_eq!(out["clean"], false);
+        assert!(
+            out["error"]
+                .as_str()
+                .unwrap()
+                .contains("unknown severity level 'extra-high'"),
+            "{out}"
+        );
+        assert!(out["advisories"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn shared_labels_reach_the_filter() {
+        for label in frensense_lang::severity::SEVERITY_LABELS {
+            let out = run_audit("/definitely/not/here", label, None);
+            assert_eq!(
+                out["error"], "path does not exist: /definitely/not/here",
+                "`{label}` must be accepted before the path check"
+            );
+        }
+    }
 }

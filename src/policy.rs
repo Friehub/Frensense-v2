@@ -23,6 +23,23 @@ use frensense_engine::scan::ScanResult;
 use frensense_lang::rule_card;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Parse a severity threshold label strictly, from the one shared six-label
+/// vocabulary ([`frensense_lang::severity::SEVERITY_LABELS`]).
+///
+/// # Errors
+/// Returns the accepted labels when `label` is not one of them. Callers must
+/// surface this error: mapping an unknown threshold to [`Severity::Info`]
+/// silently applies the least restrictive floor, disabling the filter the
+/// caller asked for.
+pub fn severity_from_label(label: &str) -> Result<Severity, String> {
+    Severity::parse_label(label).ok_or_else(|| {
+        format!(
+            "unknown severity level '{label}' (expected one of: {})",
+            frensense_lang::severity::SEVERITY_LABELS.join(", ")
+        )
+    })
+}
+
 /// Engine output that becomes an advisory: a vulnerable verdict on a
 /// dangerous sink slot (sink-signature aware), whose sink names a
 /// vulnerability class.

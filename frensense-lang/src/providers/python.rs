@@ -429,6 +429,7 @@ const PYTHON_CALL_QUERY: &str = r#"
 
 // ── PythonSpec ────────────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub struct PythonSpec;
 
 impl LanguageSpec for PythonSpec {

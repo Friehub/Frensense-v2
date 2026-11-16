@@ -58,9 +58,13 @@ use crate::graph::callgraph::{CallGraph, CallGraphBuilder};
 use crate::graph::svfg::{NodeKey, NodeKind, Svfg, SvfgBuilder};
 use crate::ir::function::*;
 
+/// Call-site bindings: which callees a call reaches and how arguments map to formals.
 pub mod bindings;
+/// Interprocedural value-flow edges between call sites and callees.
 pub mod edges;
+/// Source, sink and sanitizer predicates over the fact table.
 pub mod predicates;
+/// Per-function summaries used to cut or pass taint across calls.
 pub mod summaries;
 
 pub use bindings::*;
@@ -73,9 +77,13 @@ pub use summaries::*;
 // ---------------------------------------------------------------------------
 
 /// Everything the interprocedural layer knows about one function.
+#[derive(Debug)]
 pub struct FunctionEntry<'a> {
+    /// Program name of the function.
     pub name: String,
+    /// The function's IR.
     pub ir: &'a FunctionIR,
+    /// The function's value-flow graph.
     pub svfg: Svfg,
     /// Maps each VarId to the SVFG node that defines it.
     pub def_site: FxHashMap<VarId, NodeKey>,
@@ -94,6 +102,7 @@ pub struct FunctionEntry<'a> {
 
 /// The whole-program value-flow structure: per-function SVFGs linked by
 /// explicit interprocedural edges, with bottom-up summaries cached per fn.
+#[derive(Debug)]
 pub struct ProgramSvfg<'a> {
     /// Deterministic order: sorted by function name.
     pub functions: Vec<FunctionEntry<'a>>,
@@ -302,15 +311,18 @@ impl<'a> ProgramSvfg<'a> {
 /// Cost remains proportional to the taint-reachable subgraph: local successors
 /// plus explicit cross edges, no fixed-point loop, no visit to functions or
 /// variables off every taint path.
+#[derive(Debug)]
 pub struct InterproceduralTaintEngine<'a> {
     prog: &'a ProgramSvfg<'a>,
     config: &'a TaintConfig,
     facts: FactTable,
     tainted: FxHashSet<(usize, NodeKey)>,
+    /// Distinct sink alerts raised so far. [`Self::run`] appends to this list and never clears it.
     pub alerts: Vec<SinkAlert>,
 }
 
 impl<'a> InterproceduralTaintEngine<'a> {
+    /// Creates an engine over `prog` using `config`, with the fact table derived from the config.
     pub fn new(prog: &'a ProgramSvfg<'a>, config: &'a TaintConfig) -> Self {
         Self {
             prog,
@@ -328,6 +340,36 @@ impl<'a> InterproceduralTaintEngine<'a> {
     }
 
     /// Run the BFS from all source nodes across all functions.
+    ///
+    /// ```
+    /// use frensense_engine::analysis::forward::{InterproceduralTaintEngine, ProgramSvfg};
+    /// use frensense_engine::analysis::taint::config::TaintConfig;
+    /// use frensense_engine::harness::lower_source;
+    /// use frensense_engine::ir::function::FunctionIR;
+    ///
+    /// let cfg = TaintConfig {
+    ///     sources: ["req.body".to_string()].into_iter().collect(),
+    ///     sinks: ["query".to_string()].into_iter().collect(),
+    ///     sanitizers: Default::default(),
+    /// };
+    /// let src = "declare const db: any\n\
+    ///            function run(q: any) { db.query(q) }\n\
+    ///            export function h(req: any) { run(req.body.id) }";
+    /// let owned = lower_source("u.ts", src, "ts").unwrap();
+    /// let irs: rustc_hash::FxHashMap<String, &FunctionIR> =
+    ///     owned.iter().map(|(k, v)| (k.clone(), v)).collect();
+    /// let prog = ProgramSvfg::new(&irs, &cfg);
+    ///
+    /// let mut engine = InterproceduralTaintEngine::new(&prog, &cfg);
+    /// engine.run();
+    /// // The source is in `h`; taint crosses the call and reaches the sink in `run`.
+    /// let alert = &engine.alerts[0];
+    /// assert_eq!((alert.function.as_str(), alert.sink.as_str(), alert.slot), ("run", "query", 0));
+    /// // Running again does not duplicate alerts.
+    /// let before = engine.alerts.len();
+    /// engine.run();
+    /// assert_eq!(engine.alerts.len(), before);
+    /// ```
     pub fn run(&mut self) {
         let mut queue: VecDeque<(usize, NodeKey)> = VecDeque::new();
 

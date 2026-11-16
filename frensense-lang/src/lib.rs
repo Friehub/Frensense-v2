@@ -290,5 +290,7 @@ pub mod spec;
 // Convenient re-exports
 pub use intrinsics::is_container_verb;
 pub use registry::{all_specs, spec_for_ext, spec_for_path, LanguageRegistry};
-pub use severity::{checker_rule_tier, Profile, RuleTier, SanitizerKind, Severity, SinkRole};
+pub use severity::{
+    checker_rule_tier, Profile, RuleTier, SanitizerKind, Severity, SinkRole, SEVERITY_LABELS,
+};
 pub use spec::{Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin};

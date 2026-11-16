@@ -53,7 +53,7 @@ pub fn snapshot_mtimes(
 }
 
 /// Rolling watcher state: the last observation.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct FileWatcher {
     last: FxHashMap<PathBuf, u64>,
 }

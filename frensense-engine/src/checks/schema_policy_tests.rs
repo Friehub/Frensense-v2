@@ -8,7 +8,7 @@
 
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
-pub mod schema_policy_tests {
+pub(super) mod schema_policy_tests {
     use crate::analysis::taint::facts::FactTable;
     use crate::checks::Provenance;
     use crate::checks::check_all;

@@ -8,15 +8,15 @@
 //!
 //! Triplets:
 //! 1. import + factory singleton (`new PrismaClient()`) arms `@prisma/client`
-//!    — fires (the legitimate Prisma raw-SQL shape).
-//! 2. no import, unrelated receiver object — silent (the false-positive
+//!   , fires (the legitimate Prisma raw-SQL shape).
+//! 2. no import, unrelated receiver object, silent (the false-positive
 //!    class package scoping exists to close).
-//! 3. wrong-package import (`database-js` lookalike) — silent (origin
+//! 3. wrong-package import (`database-js` lookalike), silent (origin
 //!    mismatch must not fall back to another package's scoped fact).
 
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
-pub mod package_scoped_sink_tests {
+pub(crate) mod package_scoped_sink_tests {
     use crate::analysis::taint::facts::seeded_tables;
     use crate::scan::{prepare, scan_prepared};
 

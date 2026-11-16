@@ -16,6 +16,19 @@ are the reasons the asset moved.
 There is no semver contract here (nothing is published, and
 `cargo semver-checks` excludes it). The version tracks the workspace line.
 
+## [0.8.1]
+
+### Changed
+
+- **Built-in weak-hash, insecure-config and key-size rules carry no
+  `message`.** The scanner renders a spec rule's observation from the
+  `frensense-lang` template keyed by rule id and `params`; the pack's copy was
+  a second source of the same prose that the engine never read (and, while it
+  was part of the fact's identity, could not be overridden). Bundle-authored
+  rules keep their own message. The regenerated
+  `frensense-bundler/assets/frensense-default.frc` is committed with this
+  change.
+
 ## [0.8.0]
 
 ### Changed

@@ -9,6 +9,15 @@ use frensense_lang::NodeRole;
 use tree_sitter::Node;
 
 impl<'a> LoweringContext<'a> {
+    /// Lowers a call expression, `callee(args)`, into one call instruction whose result is a fresh variable.
+    ///
+    /// A callee that is a plain identifier becomes a `CallStatic`; a callee that is a member access (`obj.method`) becomes a `CallVirtual` with the object as receiver; anything else (a call result, a parenthesised expression) becomes a `CallPointer`. A keyword argument keeps its written position in `args` and records its name in `arg_names`. For C and C++, a call to a function that never returns (such as `exit`) also ends the block with a `Throw` terminator.
+    ///
+    /// Returns the variable holding the call's result.
+    ///
+    /// # Panics
+    ///
+    /// Does not panic in practice: the one `unwrap` on a keyword argument's value is guarded by an `is_some` check on the same node.
     pub fn visit_call(
         &mut self,
         node: Node,

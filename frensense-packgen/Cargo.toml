@@ -1,6 +1,6 @@
 [package]
 name = "frensense-packgen"
-version = "0.8.0"
+version = "0.8.1"
 license = "GPL-3.0-only"
 edition = "2021"
 description = "Generates the frensense default .frc pack asset from the generator-owned vocabularies"
@@ -12,6 +12,9 @@ homepage = "https://frensense.friehub.cloud"
 # uses it solely as a dev-dependency (test-time pack decode), so publishing
 # the engine does not require this crate on crates.io.
 publish = false
+
+[lints] 
+workspace = true
 
 [dependencies]
 bincode = "1.3"

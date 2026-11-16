@@ -28,6 +28,18 @@ pub const FUNCTION_COMPLEXITY: &str = "function_complexity";
 pub const MAX_COMPLEXITY: usize = 25;
 
 /// Cyclomatic complexity of one lowered function.
+///
+/// ```
+/// use frensense_engine::checks::health::cyclomatic_complexity;
+/// use frensense_engine::harness::lower_source;
+///
+/// let src = "function f(a: number) { if (a > 1) { return 1 } if (a > 2) { return 2 } return 3 }\nfunction g() { return 0 }";
+/// let fns = lower_source("t.ts", src, "ts").unwrap();
+/// // One plus one per two-way branch.
+/// assert_eq!(cyclomatic_complexity(&fns["f"]), 3);
+/// // A straight-line function has complexity 1.
+/// assert_eq!(cyclomatic_complexity(&fns["g"]), 1);
+/// ```
 pub fn cyclomatic_complexity(ir: &FunctionIR) -> usize {
     let decisions: usize = ir
         .blocks
@@ -43,11 +55,34 @@ pub fn cyclomatic_complexity(ir: &FunctionIR) -> usize {
 
 /// Number of IR instructions, a size proxy that is independent of
 /// formatting.
+///
+/// ```
+/// use frensense_engine::checks::health::instruction_count;
+/// use frensense_engine::harness::lower_source;
+///
+/// let fns = lower_source("t.ts", "function g() { return 0 }", "ts").unwrap();
+/// assert_eq!(instruction_count(&fns["g"]), 0);
+/// ```
 pub fn instruction_count(ir: &FunctionIR) -> usize {
     ir.blocks.values().map(|b| b.instructions.len()).sum()
 }
 
 /// Report `ir` when its complexity exceeds `max`.
+///
+/// ```
+/// use frensense_engine::checks::health::{check_with_limit, FUNCTION_COMPLEXITY};
+/// use frensense_engine::harness::lower_source;
+///
+/// let src = "function f(a: number) { if (a > 1) { return 1 } if (a > 2) { return 2 } return 3 }";
+/// let fns = lower_source("t.ts", src, "ts").unwrap();
+/// // Complexity 3 is not above a limit of 3 ...
+/// assert!(check_with_limit(&fns["f"], 3).is_empty());
+/// // ... but is above a limit of 2.
+/// let found = check_with_limit(&fns["f"], 2);
+/// assert_eq!(found.len(), 1);
+/// assert_eq!(found[0].rule, FUNCTION_COMPLEXITY);
+/// assert_eq!(found[0].function, "f");
+/// ```
 pub fn check_with_limit(ir: &FunctionIR, max: usize) -> Vec<CheckerFinding> {
     let complexity = cyclomatic_complexity(ir);
     if complexity <= max {
@@ -76,6 +111,14 @@ pub fn check_with_limit(ir: &FunctionIR, max: usize) -> Vec<CheckerFinding> {
 }
 
 /// Default-threshold entry point used by the registry.
+///
+/// ```
+/// use frensense_engine::checks::health::check;
+/// use frensense_engine::harness::lower_source;
+///
+/// let fns = lower_source("t.ts", "function g() { return 0 }", "ts").unwrap();
+/// assert!(check(&fns["g"]).is_empty());
+/// ```
 pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
     check_with_limit(ir, MAX_COMPLEXITY)
 }

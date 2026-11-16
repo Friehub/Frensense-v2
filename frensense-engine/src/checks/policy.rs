@@ -23,7 +23,7 @@ use super::learned::{call_segments, is_range_guarded};
 use crate::analysis::taint::facts::{FactTable, PolicyFact, PolicyRequirement, PolicyScope};
 use crate::graph::module::PackageImport;
 use crate::ir::control::{self, DomSets};
-use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand, VarId};
+use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand, VarId, strip_quotes};
 
 /// A taught callable matches a written callee in one of two modes:
 ///
@@ -65,6 +65,7 @@ fn callee_matches(taught: &str, written: &str) -> bool {
 /// came from, and which external packages each file imports. Policies
 /// carrying `package: Some(pkg)` only fire in functions whose file
 /// imports `pkg` (mirrors the sink/source package-scoping model).
+#[derive(Debug)]
 pub struct PackageScope<'a> {
     /// Function name -> source file path.
     pub fn_file: &'a FxHashMap<String, String>,
@@ -101,6 +102,41 @@ impl<'a> PackageScope<'a> {
 /// passes one scan's IR set here, which is the module the policy author
 /// refers to). Active `learned_checks` participate alongside native policies,
 /// ensuring both check representations fire harmoniously.
+///
+/// ```
+/// use frensense_engine::analysis::taint::facts::{FactTable, PolicyFact, PolicyRequirement, PolicyScope};
+/// use frensense_engine::checks::policy::check_program;
+/// use frensense_engine::checks::Provenance;
+/// use frensense_engine::harness::lower_source;
+/// use frensense_engine::ir::function::FunctionIR;
+///
+/// // Rule: a call to `deleteUser` requires an `authorize` call.
+/// let mut facts = FactTable::default();
+/// facts.policy_facts.push((
+///     PolicyFact {
+///         package: None,
+///         rule: "missing_authorize".into(),
+///         when_call: "deleteUser".into(),
+///         require: vec![PolicyRequirement::GuardCall { call: "authorize".into() }],
+///         scope: PolicyScope::Function,
+///         message: String::new(),
+///         severity: "warning".into(),
+///     },
+///     Provenance::Spec,
+/// ));
+/// let src = "declare function authorize(): void\n\
+///            declare function deleteUser(): void\n\
+///            function guarded() { authorize(); deleteUser() }\n\
+///            function unguarded() { deleteUser() }\n\
+///            function guard_after() { deleteUser(); authorize() }\n\
+///            function guard_on_one_path(c: boolean) { if (c) { authorize() } deleteUser() }";
+/// let fns = lower_source("t.ts", src, "ts").unwrap();
+/// let irs: Vec<&FunctionIR> = fns.values().collect();
+/// let mut flagged: Vec<String> = check_program(&irs, &facts).into_iter().map(|f| f.function).collect();
+/// flagged.sort();
+/// // Only a guard that runs before the trigger on every path counts.
+/// assert_eq!(flagged, ["guard_after", "guard_on_one_path", "unguarded"]);
+/// ```
 pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFinding> {
     check_program_scoped(irs, facts, None)
 }
@@ -230,7 +266,7 @@ pub fn check_program_scoped(
             for (bid, idx, args, arg_names, span) in
                 trigger_sites(ir, trigger_call, alias_maps.get(ir.name.as_str()))
             {
-                // A requirement violation is the finding — but a
+                // A requirement violation is the finding, but a
                 // presence-only policy (`require` empty) alerts whenever
                 // the trigger call occurs at all: the corpus twins proved
                 // the call site itself is the vulnerability (the negative
@@ -313,7 +349,7 @@ fn trigger_sites<'a>(
                 continue;
             }
             let (args, arg_names) = call_args(instr).unwrap_or((&[], &[]));
-            out.push((bid, idx, args, arg_names, instr_span(ir, instr)));
+            out.push((bid, idx, args, arg_names, ir.instr_span(instr)));
         }
     }
     out
@@ -596,19 +632,6 @@ fn arg_has_key(ir: &FunctionIR, start: VarId, keys: &[String]) -> bool {
     false
 }
 
-fn strip_quotes(lit: &str) -> &str {
-    let lit = lit.trim();
-    let bytes = lit.as_bytes();
-    let (core, _) = match bytes.first() {
-        Some(b'\'') | Some(b'"') | Some(b'`') => {
-            let end = bytes.len().saturating_sub(1);
-            (&lit[1..end], true)
-        }
-        _ => (lit, false),
-    };
-    core
-}
-
 /// Extract constant literal string/bool/int representation from an operand.
 fn extract_literal_string(
     op: &Operand,
@@ -703,14 +726,4 @@ fn guard_executes_before(
             doms.get(&trigger_block).is_some_and(|d| d.contains(&gb))
         }
     })
-}
-
-fn instr_span(ir: &FunctionIR, instr: &Instruction) -> Option<(usize, usize)> {
-    let dest = match instr {
-        Instruction::CallStatic { dest, .. }
-        | Instruction::CallVirtual { dest, .. }
-        | Instruction::CallPointer { dest, .. } => (*dest)?,
-        _ => return None,
-    };
-    ir.var_metadata.get(&dest)?.byte_range
 }

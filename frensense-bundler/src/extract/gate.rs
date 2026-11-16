@@ -91,6 +91,7 @@ pub fn scan_variant(
 /// scan lowers with (route-registration patterns since Phase 6.4,
 /// dynamic grammar facts once a family teaches them) - gate and CLI
 /// lowering can never diverge on pack vocabulary.
+#[derive(Debug)]
 pub struct PreparedFamily {
     pub id: String,
     pub pos: scan::PreparedProgram,

@@ -9,35 +9,35 @@
 //! Scoping a sanitizer is the **mirror image** of scoping a sink, and the
 //! asymmetry is the whole point:
 //!
-//! * A sink that fires when it should not is a false positive — annoying
+//! * A sink that fires when it should not is a false positive, annoying
 //!   but visible.
-//! * A sanitizer that cuts when it should not **silences a true finding** —
+//! * A sanitizer that cuts when it should not **silences a true finding**:
 //!   a false negative, the failure mode a scanner exists to prevent.
 //!
 //! So the fallback on unknown origin is *recall-safe*: a scoped sanitizer
 //! stays inert unless import resolution positively confirms its package. A
 //! genuine package sanitizer whose origin does not resolve surfaces an
 //! advisory (a precision cost), it never quietly drops a real one (a
-//! recall cost). Universal (unpackage-qualified) sanitizers are unaffected —
+//! recall cost). Universal (unpackage-qualified) sanitizers are unaffected,
 //! they were proven against the bare name and keep cutting everywhere.
 //!
 //! Triplets:
-//! 1. import origin matches the package — the scoped sanitizer cuts
+//! 1. import origin matches the package, the scoped sanitizer cuts
 //!    (Sanitized verdict, no alert). Scoping must not break the legitimate
 //!    shape.
-//! 2. no import, unrelated receiver object (`helper.scrub(...)`) — inert,
+//! 2. no import, unrelated receiver object (`helper.scrub(...)`), inert,
 //!    taint flows on to the sink (Vulnerable). The false-negative class
 //!    package scoping exists to close.
-//! 3. wrong-package import (`some-other-package` lookalike) — inert, the
+//! 3. wrong-package import (`some-other-package` lookalike), inert, the
 //!    origin mismatch must not inherit another package's sanitizer.
 //!
 //! Plus the recall-safety fallback:
-//! 4. a universal sanitizer keeps cutting with no origin at all — the
+//! 4. a universal sanitizer keeps cutting with no origin at all, the
 //!    fallback must not cost universal recall.
 
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
-pub mod package_scoped_sanitizer_tests {
+pub(crate) mod package_scoped_sanitizer_tests {
     use crate::analysis::taint::config::TaintConfig;
     use crate::analysis::taint::engine::BackwardVerdict;
     use crate::analysis::taint::facts::{
@@ -82,7 +82,7 @@ pub mod package_scoped_sanitizer_tests {
     }
 
     /// Legitimate shape: `@acme/sanitize` imported, `scrub` applied to the
-    /// source, the result fed to the sink. The scoped sanitizer must cut —
+    /// source, the result fed to the sink. The scoped sanitizer must cut,
     /// Sanitized verdict, no alert.
     const MATCHING_ORIGIN: &str = r#"
 import { scrub } from '@acme/sanitize'
@@ -116,7 +116,7 @@ export async function bad(req: any, res: any) {
 
     /// Production tables with `scrub` installed as a UNIVERSAL sanitizer
     /// (no package). The recall-safe fallback must keep universal facts
-    /// cutting with no origin at all — scoping a package fact must not
+    /// cutting with no origin at all, scoping a package fact must not
     /// cost universal recall.
     fn universal_tables() -> (TaintConfig, FactTable) {
         let (mut config, mut facts) = seeded_tables(["ts"]);
@@ -189,7 +189,7 @@ export async function bad(req: any, res: any) {
     #[test]
     fn universal_sanitizer_still_cuts_with_no_origin() {
         // The exact source that stays Vulnerable under the SCOPED table
-        // (no import, unrelated receiver) — under a UNIVERSAL table the
+        // (no import, unrelated receiver), under a UNIVERSAL table the
         // identical call name cuts. This isolates the package
         // qualification as the only difference, and proves the
         // unknown-origin fallback keeps universal sanitizers live.

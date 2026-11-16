@@ -19,6 +19,28 @@ Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
 
+## [0.8.3]
+
+### Fixed
+
+- **`--severity` and the MCP `severity_threshold` accept the same six labels,
+  and reject anything else.** The two surfaces previously had different
+  vocabularies: the CLI hard-errored on `--severity high` while the MCP tools
+  passed unknown strings to a parser that mapped them to `info`, the least
+  restrictive floor, so a client that used a corpus label silently received
+  every finding. The CLI now accepts `critical`, `high`, `medium`, `warning`,
+  `low` and `info` through `frensense-lang`'s one mapping, and
+  `frensense_audit`, `frensense_diff` and `frensense_scan_file` return
+  `{"clean": false, "advisories": [], "error": "unknown severity level ..."}`
+  before scanning. The MCP schemas advertise all six labels.
+- **Corpus and bundle severity reach the report.** A checker finding's
+  fact-authored severity now outranks the rule registry's default: a corpus
+  `severity: info` no longer reports as `warning`, a bundle can demote a
+  critical registry rule with `warning`, and `health`'s `low` findings are
+  `info` instead of `warning`. A matched bundle pattern still overlays both.
+  The mechanism is recorded in `frensense-engine/CHANGELOG.md` and the shared
+  vocabulary in `frensense-lang/CHANGELOG.md`.
+
 ## [0.8.2]
 
 ### Added

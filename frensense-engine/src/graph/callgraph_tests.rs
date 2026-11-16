@@ -7,7 +7,7 @@
 
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
-pub mod callgraph_tests {
+pub(super) mod callgraph_tests {
     use crate::analysis::forward::ProgramSvfg;
     use crate::analysis::taint::config::TaintConfig;
     use crate::graph::callgraph::{CallGraphBuilder, CallTarget, method_key};

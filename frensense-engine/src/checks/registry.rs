@@ -47,6 +47,7 @@ pub trait DiagnosticSink: Sync {
 }
 
 /// A no-op diagnostic sink used by default.
+#[derive(Debug)]
 pub struct NoopDiagnosticSink;
 
 impl DiagnosticSink for NoopDiagnosticSink {
@@ -54,6 +55,7 @@ impl DiagnosticSink for NoopDiagnosticSink {
     fn skipped(&self, _reason: &'static str) {}
 }
 
+/// Shared instance of [`NoopDiagnosticSink`].
 pub static NOOP_DIAGNOSTIC_SINK: NoopDiagnosticSink = NoopDiagnosticSink;
 
 /// Everything a non-dataflow check may consult.
@@ -80,8 +82,22 @@ pub struct CheckContext<'a> {
     pub diag: &'a dyn DiagnosticSink,
 }
 
+impl std::fmt::Debug for CheckContext<'_> {
+    /// Summarizes the context: the program size and the function under
+    /// check. The shared knowledge tables and the diagnostic sink are left out.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CheckContext")
+            .field("functions", &self.irs.len())
+            .field("current", &self.current.map(|ir| ir.name.as_str()))
+            .field("has_program_graph", &self.prog.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 impl<'a> CheckContext<'a> {
     /// The function under check.
+    ///
+    /// # Panics
     ///
     /// Panics when a [`CheckScope::Program`] check asks for a single
     /// subject: the scope method and `run` disagree, which is a
@@ -121,6 +137,15 @@ pub trait NonDataflowCheck: Sync {
 /// insertion order, which follows this list on function-scoped runs.
 pub struct CheckRegistry {
     checks: &'static [&'static dyn NonDataflowCheck],
+}
+
+impl std::fmt::Debug for CheckRegistry {
+    /// Lists the check ids in registry order.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.checks.iter().map(|c| c.id()))
+            .finish()
+    }
 }
 
 impl CheckRegistry {

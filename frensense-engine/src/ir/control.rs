@@ -28,9 +28,39 @@ fn sorted_blocks(ir: &FunctionIR) -> Vec<BlockId> {
 }
 
 /// Reflexive dominators: `dominators[b]` contains every block that lies on
-/// every path from the entry to `b` (including `b` itself). Unreachable
-/// blocks get the conservative universal set minus nothing meaningful -
-/// callers should only ask about reachable ones.
+/// every path from the entry to `b` (including `b` itself). A non-entry block
+/// with no predecessors (an unreachable block) is assigned the set of all
+/// blocks, so callers should only ask about reachable ones.
+///
+/// ```
+/// use frensense_engine::ir::control::dominators;
+/// use frensense_engine::ir::function::FunctionIR;
+///
+/// // entry -> {then, else} -> merge
+/// let mut ir = FunctionIR::new("f".into());
+/// let entry = ir.entry_block;
+/// let (then_b, else_b, merge) = (ir.new_block(), ir.new_block(), ir.new_block());
+/// ir.add_edge(entry, then_b);
+/// ir.add_edge(entry, else_b);
+/// ir.add_edge(then_b, merge);
+/// ir.add_edge(else_b, merge);
+///
+/// let doms = dominators(&ir);
+/// // Dominance is reflexive.
+/// assert!(doms[&merge].contains(&merge));
+/// // The entry dominates everything it reaches.
+/// assert!(doms[&merge].contains(&entry));
+/// // Neither arm is on every path to the merge block.
+/// assert!(!doms[&merge].contains(&then_b));
+/// assert!(!doms[&merge].contains(&else_b));
+/// // The entry is dominated only by itself.
+/// assert_eq!(doms[&entry].len(), 1);
+///
+/// // An unreachable block is assigned every block.
+/// let orphan = ir.new_block();
+/// let doms = dominators(&ir);
+/// assert_eq!(doms[&orphan].len(), ir.blocks.len());
+/// ```
 pub fn dominators(ir: &FunctionIR) -> DomSets {
     let blocks = sorted_blocks(ir);
     let all: FxHashSet<BlockId> = blocks.iter().copied().collect();

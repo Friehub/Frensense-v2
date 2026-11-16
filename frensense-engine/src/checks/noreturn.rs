@@ -30,6 +30,14 @@ const NORETURN: &[&str] = &[
 ];
 
 /// True if `func` (last path segment) is a noreturn library call.
+///
+/// ```
+/// use frensense_engine::checks::noreturn::is_noreturn;
+///
+/// assert!(is_noreturn("exit"));
+/// assert!(is_noreturn("libc::_exit")); // only the last path segment is compared
+/// assert!(!is_noreturn("printf"));
+/// ```
 pub fn is_noreturn(func: &str) -> bool {
     NORETURN.contains(&last_segment(func))
 }

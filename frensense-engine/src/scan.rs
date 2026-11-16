@@ -28,6 +28,58 @@ use frensense_lang::spec::{Export, Import, ModuleItem};
 /// `files` maps file path → extension (used to pick the language spec).
 /// Files are lowered one at a time through [`ProgramBuilder`] and then
 /// analyzed as one interprocedural program.
+///
+/// ```
+/// use frensense_engine::analysis::taint::config::TaintConfig;
+/// use frensense_engine::analysis::taint::engine::BackwardVerdict;
+/// use frensense_engine::analysis::taint::facts::FactTable;
+/// use frensense_engine::scan::scan;
+///
+/// let config = TaintConfig {
+///     sources: ["req.body".to_string()].into_iter().collect(),
+///     sinks: ["query".to_string()].into_iter().collect(),
+///     sanitizers: ["escape".to_string()].into_iter().collect(),
+/// };
+/// let facts = FactTable::from_config(&config);
+///
+/// let file = |path: &str, src: &str| (path.to_string(), src.to_string(), "ts".to_string());
+/// let vulnerable = |r: &frensense_engine::scan::ScanResult| {
+///     r.located.iter().any(|l| l.finding.verdict == BackwardVerdict::Vulnerable)
+/// };
+///
+/// // Source and sink in one file.
+/// let direct = scan(
+///     &[file("a.ts", "declare const db: any\nexport function h(req: any) {\n  const id = req.body.id\n  db.query('SELECT ' + id)\n}\n")],
+///     &config,
+///     &facts,
+/// );
+/// assert!(vulnerable(&direct));
+///
+/// // The same flow through a configured sanitizer is not reported as vulnerable.
+/// let sanitized = scan(
+///     &[file("a.ts", "declare const db: any\ndeclare function escape(s: string): string\nexport function h(req: any) {\n  const id = escape(req.body.id)\n  db.query('SELECT ' + id)\n}\n")],
+///     &config,
+///     &facts,
+/// );
+/// assert!(!vulnerable(&sanitized));
+///
+/// // Source in one file, sink in another: the finding is placed at the sink.
+/// let cross = scan(
+///     &[
+///         file("lib.ts", "declare const db: any\nexport function run(q: string) { db.query('SELECT ' + q) }\n"),
+///         file("app.ts", "import { run } from './lib'\nexport function h(req: any) { run(req.body.id) }\n"),
+///     ],
+///     &config,
+///     &facts,
+/// );
+/// let hit = cross
+///     .located
+///     .iter()
+///     .find(|l| l.finding.verdict == BackwardVerdict::Vulnerable)
+///     .expect("cross-file flow is found");
+/// assert_eq!(hit.file, "lib.ts");
+/// assert_eq!(hit.finding.function, "run");
+/// ```
 pub fn scan(
     files: &[(String, String, String)], // (path, source, ext)
     config: &TaintConfig,
@@ -51,6 +103,41 @@ pub fn scan(
 /// capability's job ([`scan`] / [`scan_prepared`]); a frontend picks the one
 /// that matches what it has in scope (an editor buffer, one path from
 /// `frensense_scan_file`, or a whole repository).
+///
+/// ```
+/// use frensense_engine::analysis::taint::config::TaintConfig;
+/// use frensense_engine::analysis::taint::engine::BackwardVerdict;
+/// use frensense_engine::analysis::taint::facts::FactTable;
+/// use frensense_engine::scan::scan_file;
+///
+/// let config = TaintConfig {
+///     sources: ["req.body".to_string()].into_iter().collect(),
+///     sinks: ["query".to_string()].into_iter().collect(),
+///     sanitizers: ["escape".to_string()].into_iter().collect(),
+/// };
+/// let facts = FactTable::from_config(&config);
+///
+/// // The sink is in `lib.ts`, which this call never sees, so the flow that
+/// // starts in this file is not found.
+/// let result = scan_file(
+///     "app.ts",
+///     "import { run } from './lib'\nexport function h(req: any) { run(req.body.id) }\n",
+///     "ts",
+///     &config,
+///     &facts,
+/// );
+/// assert!(result.located.iter().all(|l| l.finding.verdict != BackwardVerdict::Vulnerable));
+///
+/// // With source and sink in the same file it is found.
+/// let result = scan_file(
+///     "a.ts",
+///     "declare const db: any\nexport function h(req: any) {\n  db.query(req.body.id)\n}\n",
+///     "ts",
+///     &config,
+///     &facts,
+/// );
+/// assert!(result.located.iter().any(|l| l.finding.verdict == BackwardVerdict::Vulnerable));
+/// ```
 pub fn scan_file(
     path: &str,
     source: &str,
@@ -77,7 +164,9 @@ pub struct PreparedProgram {
     irs: FxHashMap<String, FunctionIR>,
     fn_file: FxHashMap<String, String>,
     file_source: FxHashMap<String, String>,
+    /// Per file, the local names that an import binds to a program function.
     pub file_aliases: FxHashMap<String, FxHashMap<String, String>>,
+    /// Per file, the local names that an import binds to an external package.
     pub file_package_imports:
         FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
     /// Import declarations per file (see [`ModuleResolution`]).
@@ -191,8 +280,8 @@ pub struct FileReport {
 /// Builds a [`PreparedProgram`] one file at a time.
 ///
 /// This is the per-file capability behind [`scan`]. A frontend submits files
-/// itself — so it owns the loop, the counter, any parallelism, and early
-/// cancellation — and acts on each [`FileReport`] immediately.
+/// itself. The caller owns the loop, the counter, any parallelism and early
+/// cancellation, and acts on each [`FileReport`] immediately.
 /// [`finish`](Self::finish) then merges the submitted files deterministically
 /// and resolves modules. Lowering is local, so submission order does not
 /// affect the result.
@@ -768,11 +857,40 @@ pub struct IncompleteFunction {
     pub file: String,
 }
 
-/// The result of one scan: vulnerable findings + non-fatal errors.
+/// The result of one scan: sink findings of every verdict, checker findings, non-fatal errors and telemetry.
 #[derive(Debug, Default)]
 pub struct ScanResult {
     /// All sink findings (every verdict); retain only findings whose verdict
     /// is `Vulnerable` to obtain the alert set.
+    ///
+    /// A sink signature with no explicit dangerous slots (what
+    /// [`FactTable::from_config`](crate::analysis::taint::facts::FactTable::from_config)
+    /// builds) also explores the receiver of a method call, which adds a
+    /// finding for slot `usize::MAX` per call. A signature with explicit slots
+    /// does not.
+    ///
+    /// ```
+    /// use frensense_engine::analysis::taint::config::TaintConfig;
+    /// use frensense_engine::analysis::taint::facts::{FactTable, SinkSignature};
+    /// use frensense_engine::scan::scan;
+    ///
+    /// let config = TaintConfig {
+    ///     sources: ["req.body".to_string()].into_iter().collect(),
+    ///     sinks: ["query".to_string()].into_iter().collect(),
+    ///     sanitizers: Default::default(),
+    /// };
+    /// let src = "declare const db: any\nexport function h(req: any) { db.query('SELECT ' + req.body.id) }\n";
+    /// let files = [("a.ts".to_string(), src.to_string(), "ts".to_string())];
+    /// let slots = |sig: SinkSignature| -> Vec<usize> {
+    ///     let mut facts = FactTable::from_config(&config);
+    ///     facts.sink_signatures.insert("query".into(), sig);
+    ///     let mut s: Vec<usize> = scan(&files, &config, &facts).findings.iter().map(|f| f.arg_slot).collect();
+    ///     s.sort();
+    ///     s
+    /// };
+    /// assert_eq!(slots(SinkSignature::with_args("query", &[0])), vec![0]);
+    /// assert_eq!(slots(SinkSignature::all_args("query")), vec![0, usize::MAX]);
+    /// ```
     pub findings: Vec<SinkFinding>,
     /// The same findings resolved to source locations (file/line/column).
     pub located: Vec<LocatedFinding>,
@@ -783,6 +901,7 @@ pub struct ScanResult {
     /// These have no taint path by definition; they are policy assertions
     /// over the API/constant choices in the lowered IR.
     pub checker: Vec<CheckerFinding>,
+    /// Errors collected during the scan (for example files that failed to lower).
     pub errors: Vec<String>,
     /// Functions analyzed in degraded form because their per-function work
     /// budget expired (see [`IncompleteFunction`]). Empty for a scan in
@@ -798,6 +917,7 @@ pub struct ScanResult {
 /// A [`CheckerFinding`] pinned to its source location.
 #[derive(Debug, Clone)]
 pub struct LocatedChecker {
+    /// The policy violation.
     pub finding: CheckerFinding,
     /// Path of the file containing the violating call.
     pub file: String,
@@ -813,8 +933,11 @@ pub struct LocatedChecker {
 /// A [`crate::analysis::taint::engine::CutSite`] pinned to its file and line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocatedCutSite {
+    /// Reason class of the stop site, as in [`crate::analysis::taint::engine::CutSite::kind`].
     pub kind: &'static str,
+    /// Function whose body contains the stop site.
     pub function: String,
+    /// Callee, parameter or global name; empty when none applies.
     pub detail: String,
     /// File holding the stop site (empty when the function's file is unknown).
     pub file: String,
@@ -825,6 +948,7 @@ pub struct LocatedCutSite {
 /// A [`SinkFinding`] pinned to its source location.
 #[derive(Debug, Clone)]
 pub struct LocatedFinding {
+    /// The sink finding.
     pub finding: SinkFinding,
     /// Path of the file containing the sink call.
     pub file: String,

@@ -19,25 +19,42 @@ pub const MAX_WALK_NODES: usize = 512;
 /// Forward-scan budget inside a callee when looking for parameter frees.
 pub const MAX_SCAN_NODES: usize = 256;
 
+/// Backward walker over SVFG value-flow edges that discovers free sites and the provenance of the freed object for one start function.
+#[derive(Debug)]
 pub struct Walker<'a> {
+    /// Index of the function being checked in the program's function list.
     pub start_fi: usize,
+    /// IR of the function being checked.
     pub start_ir: &'a FunctionIR,
+    /// Value-flow graph of the function being checked.
     pub start_svfg: &'a Svfg,
+    /// Program-wide graph for cross-function walks; `None` for a single-function check.
     pub prog: Option<&'a ProgramSvfg<'a>>,
+    /// Reverse cross-function edges: `(callee function, node)` to the `(caller function, node)` pairs that feed it.
     pub rev: &'a FxHashMap<(usize, NodeKey), Vec<(usize, NodeKey)>>,
+    /// Allocator and deallocator contracts, including callee summaries.
     pub summaries: &'a MemorySummaryRegistry,
+    /// Kind of violation being searched for.
     pub violation: Violation,
     /// 1 = in progress (cycle), 2 = done.
     pub state: FxHashMap<(usize, NodeKey), u8>,
+    /// Memoized provenance answers per `(function, node)`.
     pub prov_memo: FxHashMap<(usize, NodeKey), bool>,
+    /// Free sites found so far, each awaiting validation.
     pub pairs: Vec<Pair>,
     /// `(call, callee) → blocks in that callee containing a free` (for the
     /// all-returns exit check).
     pub cross_frees: FxHashMap<((BlockId, usize), usize), FxHashSet<BlockId>>,
+    /// Nodes visited so far, counted against [`MAX_WALK_NODES`].
     pub nodes: usize,
 }
 
 impl<'a> Walker<'a> {
+    /// IR of function `fi`: the start function's own IR, or the entry in the program graph.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `fi` is not the start function and the walker has no program graph.
     pub fn ir_of(&self, fi: usize) -> &'a FunctionIR {
         if fi == self.start_fi {
             self.start_ir
@@ -49,6 +66,11 @@ impl<'a> Walker<'a> {
         }
     }
 
+    /// Value-flow graph of function `fi`: the start function's own graph, or the entry in the program graph.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `fi` is not the start function and the walker has no program graph, as for [`Walker::ir_of`].
     pub fn svfg_of(&self, fi: usize) -> &'a Svfg {
         if fi == self.start_fi {
             self.start_svfg
@@ -61,6 +83,7 @@ impl<'a> Walker<'a> {
         }
     }
 
+    /// Whether `var` receives fresh memory through an out-parameter: its address is passed, via an address-of, at a slot the summary registry marks as returning fresh memory.
     pub fn is_out_param_fresh(&self, ir: &FunctionIR, var: VarId) -> bool {
         for blk in ir.blocks.values() {
             for instr in &blk.instructions {
@@ -282,6 +305,7 @@ impl<'a> Walker<'a> {
         ok
     }
 
+    /// The callee at the call whose actual-argument node is `arg_node`, or `None` when the call has no resolved callee or more than one.
     pub fn single_callee(&self, fi: usize, arg_node: &NodeKey) -> Option<usize> {
         let fe = &self.prog?.functions[fi];
         let (bi, _) = fe.arg_slots.get(arg_node)?;
@@ -337,6 +361,7 @@ impl<'a> Walker<'a> {
         Some(blocks)
     }
 
+    /// Records a free at `(block, idx)` found in context `ctx` as a pair to validate. Frees found inside a callee are also remembered for the all-returns exit check.
     pub fn record_free(&mut self, block: BlockId, idx: usize, ctx: CrossCtx) {
         let violation = self.violation;
         match ctx {

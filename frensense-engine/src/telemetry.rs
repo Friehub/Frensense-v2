@@ -233,7 +233,9 @@ pub struct InputAccounting {
     /// Files that could not be read, parsed, or lowered.
     pub failed: usize,
     /// An explicit input path was not a supported source file, or the target
-    /// contained no supported source files.
+    /// contained no supported source files. [`crate::scan::scan`] always
+    /// leaves this at 0; a frontend that discovers input sets it. A file whose
+    /// extension has no language spec is counted in `failed` instead.
     pub unsupported: usize,
     /// Paths of failed files, capped at [`PARTIAL_SAMPLE`].
     pub failed_files: Vec<String>,
@@ -253,8 +255,11 @@ pub const PARTIAL_SAMPLE: usize = 25;
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckOutcome {
+    /// The check ran to completion.
     Ok,
+    /// The check panicked; the message is the panic payload.
     Panicked(String),
+    /// The check did not run; the message gives the reason.
     Skipped(String),
 }
 
@@ -262,11 +267,17 @@ pub enum CheckOutcome {
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckTelemetry {
+    /// Stable identifier of the check.
     pub id: String,
+    /// Granularity the check runs at, for example `function` or `program`.
     pub scope: String,
+    /// Number of times the check ran.
     pub ran: usize,
+    /// Findings the check produced.
     pub findings: usize,
+    /// Wall time spent in the check, in milliseconds.
     pub millis: u128,
+    /// How the check ended.
     pub outcome: CheckOutcome,
 }
 
@@ -398,6 +409,29 @@ impl ScanTelemetry {
 
     /// True when nothing truncated, nothing degraded, every check succeeded, and every file parsed
     /// cleanly - i.e. when "no findings" actually means "nothing to find".
+    ///
+    /// ```
+    /// use frensense_engine::analysis::taint::config::TaintConfig;
+    /// use frensense_engine::analysis::taint::facts::FactTable;
+    /// use frensense_engine::scan::scan;
+    ///
+    /// let config = TaintConfig::default();
+    /// let facts = FactTable::from_config(&config);
+    /// let run = |path: &str, src: &str, ext: &str| {
+    ///     scan(&[(path.into(), src.into(), ext.into())], &config, &facts).telemetry
+    /// };
+    ///
+    /// // Every file parsed and every check ran: "no findings" means nothing to find.
+    /// assert!(run("a.ts", "export function f() { return 1 }", "ts").is_complete());
+    /// // A file the engine could not read is counted, so an empty result is not "clean".
+    /// let t = run("a.zzz", "hello", "zzz");
+    /// assert_eq!(t.input.failed, 1);
+    /// assert!(!t.is_complete());
+    /// // A file with syntax errors is analyzed from the recovered tree and flagged partial.
+    /// let t = run("a.ts", "export function f( { return 1 ", "ts");
+    /// assert_eq!(t.input.parse_partial, 1);
+    /// assert!(!t.is_complete());
+    /// ```
     #[must_use]
     pub fn is_complete(&self) -> bool {
         self.caps.is_empty()

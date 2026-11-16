@@ -392,7 +392,7 @@ pub(crate) mod learned {
     }
 
     /// Apply every learned check to one function.
-    pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
+    pub(super) fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
         if facts.learned_checks.is_empty() {
             return Vec::new();
         }
@@ -437,7 +437,7 @@ pub(crate) mod learned {
                         rule: fact.rule.clone(),
                         message: fact.message.clone(),
                         params: Vec::new(),
-                        span: instr_span(ir, instr),
+                        span: ir.instr_span(instr),
                         severity: fact.severity.clone(),
                         provenance,
                     });
@@ -445,15 +445,5 @@ pub(crate) mod learned {
             }
         }
         findings
-    }
-
-    fn instr_span(ir: &FunctionIR, instr: &Instruction) -> Option<(usize, usize)> {
-        let dest = match instr {
-            Instruction::CallStatic { dest, .. }
-            | Instruction::CallVirtual { dest, .. }
-            | Instruction::CallPointer { dest, .. } => (*dest)?,
-            _ => return None,
-        };
-        ir.var_metadata.get(&dest)?.byte_range
     }
 }

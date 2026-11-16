@@ -9,7 +9,7 @@
 
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
-pub mod session_trust_tests {
+pub(super) mod session_trust_tests {
     use crate::analysis::taint::engine::BackwardVerdict;
     use crate::analysis::taint::facts::seeded_tables;
     use crate::harness::lower_source;

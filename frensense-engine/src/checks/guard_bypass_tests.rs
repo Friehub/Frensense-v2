@@ -6,7 +6,7 @@
 
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
-pub mod guard_bypass_tests {
+pub(super) mod guard_bypass_tests {
     use crate::analysis::taint::facts::FactTable;
     use crate::checks::Provenance;
     use crate::checks::guard_bypass;

@@ -5,7 +5,7 @@
 //! Tests for interprocedural allocation & deallocation wrappers (Limitation M1).
 
 #[cfg(test)]
-pub mod memory_summary_spec {
+pub(super) mod memory_summary_spec {
     use crate::analysis::taint::facts::FactTable;
     use crate::checks::check_all;
     use crate::harness::lower_source;
