@@ -322,21 +322,10 @@ pub(crate) fn c_result_is_independent_of_args(func: &str) -> bool {
 
 /// True if the node is a use inside a configured sanitizer call.
 pub(crate) fn is_sanitizer_use(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) -> bool {
-    let NodeKey {
-        block,
-        instr_idx: Some(idx),
-        ..
-    } = *key
-    else {
+    let Some(instr) = key.instruction(ir) else {
         return false;
     };
-    let Some(b) = ir.blocks.get(&block) else {
-        return false;
-    };
-    if idx >= b.instructions.len() {
-        return false;
-    }
-    match &b.instructions[idx] {
+    match instr {
         Instruction::CallStatic { func, .. } => config.sanitizers.contains(func),
         Instruction::CallVirtual { method, .. } => config.sanitizers.contains(method),
         _ => false,
@@ -367,21 +356,10 @@ pub(crate) fn is_sanitizer_effective_for_role(
     // agnostically, bypassing role checks). Fact-table sanitizers
     // carry a `kind` slug that `from_slug` resolves.
     let _ = config;
-    let NodeKey {
-        block,
-        instr_idx: Some(idx),
-        ..
-    } = *key
-    else {
+    let Some(instr) = key.instruction(ir) else {
         return false;
     };
-    let Some(b) = ir.blocks.get(&block) else {
-        return false;
-    };
-    if idx >= b.instructions.len() {
-        return false;
-    }
-    match &b.instructions[idx] {
+    match instr {
         Instruction::CallStatic { func, .. } => {
             // A fresh allocation or a length is not the data it was sized
             // from. Allocator wrappers carry project-specific names
@@ -453,21 +431,10 @@ pub(crate) fn is_sanitizer_use_with_facts(
     if is_sanitizer_use(ir, config, key) {
         return true;
     }
-    let NodeKey {
-        block,
-        instr_idx: Some(idx),
-        ..
-    } = *key
-    else {
+    let Some(instr) = key.instruction(ir) else {
         return false;
     };
-    let Some(b) = ir.blocks.get(&block) else {
-        return false;
-    };
-    if idx >= b.instructions.len() {
-        return false;
-    }
-    match &b.instructions[idx] {
+    match instr {
         Instruction::CallStatic { func, .. } => facts.sanitizer_fact(func).is_some(),
         Instruction::CallVirtual {
             method, receiver, ..

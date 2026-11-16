@@ -166,6 +166,29 @@ enum ExportTarget {
     Barrel(String),
 }
 
+/// The package-import table that applies to `fn_name`: its own file's, or, when
+/// the function's file is untracked and the program has exactly one file's
+/// imports, that single table. `None` otherwise (unknown origin stays inert).
+///
+/// This is the one definition of the single-file fallback; the taint engine,
+/// its guard map and the policy scope all resolve imports through it.
+pub(crate) fn imports_for_function<'m>(
+    fn_file: &FxHashMap<String, String>,
+    file_package_imports: &'m FxHashMap<String, FxHashMap<String, PackageImport>>,
+    fn_name: &str,
+) -> Option<&'m FxHashMap<String, PackageImport>> {
+    fn_file
+        .get(fn_name)
+        .and_then(|file| file_package_imports.get(file))
+        .or_else(|| {
+            if file_package_imports.len() == 1 {
+                file_package_imports.values().next()
+            } else {
+                None
+            }
+        })
+}
+
 /// An imported package symbol: package name and optional imported symbol.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageImport {

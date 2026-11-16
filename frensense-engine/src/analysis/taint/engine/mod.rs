@@ -734,17 +734,11 @@ impl<'a> BackwardTaintEngine<'a> {
             // sanitizers through their import origin (single-file
             // fallback when the function's own file is untracked).
             let fn_name = self.prog.functions[fi].name.clone();
-            let imports = self
-                .fn_file
-                .get(&fn_name)
-                .and_then(|file| self.file_package_imports.get(file))
-                .or_else(|| {
-                    if self.file_package_imports.len() == 1 {
-                        self.file_package_imports.values().next()
-                    } else {
-                        None
-                    }
-                });
+            let imports = crate::graph::module::imports_for_function(
+                &self.fn_file,
+                &self.file_package_imports,
+                &fn_name,
+            );
             self.guard_maps
                 .entry(fi)
                 .or_insert_with(|| GuardMap::build(ir, &self.facts, self.config, imports));

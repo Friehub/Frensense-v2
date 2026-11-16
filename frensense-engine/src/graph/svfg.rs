@@ -92,6 +92,15 @@ impl NodeKey {
         }
     }
 
+    /// The instruction this node defines or uses, or `None` for phi nodes,
+    /// parameter sentinels and out-of-range indices.
+    pub(crate) fn instruction<'a>(&self, ir: &'a FunctionIR) -> Option<&'a Instruction> {
+        ir.blocks
+            .get(&self.block)?
+            .instructions
+            .get(self.instr_idx?)
+    }
+
     pub(crate) fn instr(block: BlockId, idx: usize, var: VarId) -> Self {
         Self {
             block,

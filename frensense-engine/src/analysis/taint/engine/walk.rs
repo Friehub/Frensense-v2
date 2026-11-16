@@ -420,17 +420,11 @@ impl<'a> BackwardTaintEngine<'a> {
             .instructions
             .get(key.instr_idx?)?;
         let fn_name = &self.prog.functions[cf].name;
-        let imports = self
-            .fn_file
-            .get(fn_name)
-            .and_then(|file| self.file_package_imports.get(file))
-            .or_else(|| {
-                if self.file_package_imports.len() == 1 {
-                    self.file_package_imports.values().next()
-                } else {
-                    None
-                }
-            });
+        let imports = crate::graph::module::imports_for_function(
+            &self.fn_file,
+            &self.file_package_imports,
+            fn_name,
+        );
         match ins {
             Instruction::CallStatic { func, .. } => {
                 imports.and_then(|m| m.get(func)).map(|p| p.package.clone())
@@ -1325,22 +1319,11 @@ impl<'a> BackwardTaintEngine<'a> {
             return false;
         }
         if node.kind == crate::graph::svfg::NodeKind::InstrDef {
-            let NodeKey {
-                block,
-                instr_idx: Some(idx),
-                ..
-            } = *key
-            else {
+            let Some(instr) = key.instruction(fe.ir) else {
                 return false;
             };
-            let Some(b) = fe.ir.blocks.get(&block) else {
-                return false;
-            };
-            if idx >= b.instructions.len() {
-                return false;
-            }
             if matches!(
-                &b.instructions[idx],
+                instr,
                 Instruction::LoadGlobal { .. }
                     | Instruction::Dereference { .. }
                     | Instruction::CallPointer { .. }
@@ -1354,7 +1337,7 @@ impl<'a> BackwardTaintEngine<'a> {
             // edges and never reach this dead-end classification.
             if matches!(node.kind, crate::graph::svfg::NodeKind::ActualRet { .. })
                 && matches!(
-                    &b.instructions[idx],
+                    instr,
                     Instruction::CallStatic { dest: Some(d), .. }
                         | Instruction::CallVirtual { dest: Some(d), .. }
                     if *d == key.var
