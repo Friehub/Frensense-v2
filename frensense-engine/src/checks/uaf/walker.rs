@@ -20,6 +20,7 @@ pub const MAX_WALK_NODES: usize = 512;
 pub const MAX_SCAN_NODES: usize = 256;
 
 /// Backward walker over SVFG value-flow edges that discovers free sites and the provenance of the freed object for one start function.
+#[derive(Debug)]
 pub struct Walker<'a> {
     /// Index of the function being checked in the program's function list.
     pub start_fi: usize,

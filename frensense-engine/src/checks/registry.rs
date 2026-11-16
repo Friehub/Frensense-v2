@@ -47,6 +47,7 @@ pub trait DiagnosticSink: Sync {
 }
 
 /// A no-op diagnostic sink used by default.
+#[derive(Debug)]
 pub struct NoopDiagnosticSink;
 
 impl DiagnosticSink for NoopDiagnosticSink {
@@ -79,6 +80,18 @@ pub struct CheckContext<'a> {
     pub summaries: &'a MemorySummaryRegistry,
     /// Non-fatal diagnostic sink (truncations, skips).
     pub diag: &'a dyn DiagnosticSink,
+}
+
+impl std::fmt::Debug for CheckContext<'_> {
+    /// Summarizes the context: the program size and the function under
+    /// check. The shared knowledge tables and the diagnostic sink are left out.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CheckContext")
+            .field("functions", &self.irs.len())
+            .field("current", &self.current.map(|ir| ir.name.as_str()))
+            .field("has_program_graph", &self.prog.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a> CheckContext<'a> {
@@ -124,6 +137,15 @@ pub trait NonDataflowCheck: Sync {
 /// insertion order, which follows this list on function-scoped runs.
 pub struct CheckRegistry {
     checks: &'static [&'static dyn NonDataflowCheck],
+}
+
+impl std::fmt::Debug for CheckRegistry {
+    /// Lists the check ids in registry order.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list()
+            .entries(self.checks.iter().map(|c| c.id()))
+            .finish()
+    }
 }
 
 impl CheckRegistry {

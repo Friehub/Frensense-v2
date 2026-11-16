@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
-pub mod tests {
+pub(super) mod tests {
     use crate::analysis::forward::ProgramSvfg;
     use crate::analysis::taint::config::TaintConfig;
     use crate::analysis::taint::engine::{BackwardTaintEngine, BackwardVerdict, SinkFinding};
@@ -704,5 +704,69 @@ pub mod tests {
         // There should be a Phi node in b_merge to merge x_0 (from entry/if false) and the x from the while loop
         let merge_phis = &ssa_ir.blocks[&b_merge].phis;
         assert_eq!(merge_phis.len(), 1, "Expected Phi node in if-merge block");
+    }
+
+    /// `o.x += 1` and `a[i] *= 2` lower as load, binary op, store: the
+    /// read-modify-write the compound operator means.
+    #[test]
+    fn compound_field_and_element_assignment_is_read_modify_write() {
+        let src = "function f(o: any, a: any, i: number) { o.x += 1; a[i] *= 2 }";
+        let fns = crate::harness::lower_source("t.ts", src, "ts").unwrap();
+        let instrs: Vec<&Instruction> = fns["f"]
+            .blocks
+            .values()
+            .flat_map(|b| b.instructions.iter())
+            .collect();
+        let kinds: Vec<String> = instrs
+            .iter()
+            .filter_map(|i| match i {
+                Instruction::LoadField { field, .. } => Some(format!("LoadField {field}")),
+                Instruction::StoreField { field, .. } => Some(format!("StoreField {field}")),
+                Instruction::LoadElement { .. } => Some("LoadElement".to_string()),
+                Instruction::StoreElement { .. } => Some("StoreElement".to_string()),
+                Instruction::BinaryOp { op, .. } => Some(format!("BinaryOp {op}")),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                "LoadField x",
+                "BinaryOp +",
+                "StoreField x",
+                "LoadElement",
+                "BinaryOp *",
+                "StoreElement",
+            ]
+        );
+    }
+
+    #[test]
+    fn function_ir_span_and_name_helpers() {
+        let mut f = FunctionIR::new("f".into());
+        let named = f.new_var(VarMetadata {
+            byte_range: Some((3, 9)),
+            ..dummy_meta("x")
+        });
+        let temp = f.new_var(VarMetadata {
+            source_name: None,
+            ..dummy_meta("")
+        });
+        assert_eq!(f.var_name(named), "x");
+        assert_eq!(f.var_name(temp), format!("v{}", temp.0));
+        assert_eq!(f.var_span(named), Some((3, 9)));
+        assert_eq!(f.var_span(temp), None);
+    }
+
+    #[test]
+    fn strip_quotes_strips_only_matching_pairs() {
+        use crate::ir::function::strip_quotes;
+        assert_eq!(strip_quotes(" \"md5\" "), "md5");
+        assert_eq!(strip_quotes("'a'"), "a");
+        assert_eq!(strip_quotes("`t`"), "t");
+        assert_eq!(strip_quotes("\""), "\"");
+        assert_eq!(strip_quotes("'a\""), "'a\"");
+        assert_eq!(strip_quotes("plain"), "plain");
+        assert_eq!(strip_quotes(""), "");
     }
 }

@@ -15,7 +15,7 @@ use crate::analysis::taint::engine::BackwardVerdict;
 use crate::analysis::taint::facts::seeded_tables;
 use crate::scan::{ScanResult, scan};
 
-pub fn scan_files(files: &[(&str, &str, &str)]) -> ScanResult {
+pub(crate) fn scan_files(files: &[(&str, &str, &str)]) -> ScanResult {
     // Scope the fact tables to the languages under test, exactly as the CLI
     // does for the files it is given. Merging EVERY language's vocabulary
     // instead drags in same-named facts from unrelated ecosystems - the JS
@@ -31,28 +31,28 @@ pub fn scan_files(files: &[(&str, &str, &str)]) -> ScanResult {
     scan(&file_tuples, &config, &facts)
 }
 
-pub fn scan_ts(src: &str) -> ScanResult {
+pub(crate) fn scan_ts(src: &str) -> ScanResult {
     scan_files(&[("app/probe.ts", src, "ts")])
 }
 
-pub fn scan_py(src: &str) -> ScanResult {
+pub(crate) fn scan_py(src: &str) -> ScanResult {
     scan_files(&[("app/probe.py", src, "py")])
 }
 
 #[allow(dead_code)]
-pub fn scan_c(src: &str) -> ScanResult {
+pub(crate) fn scan_c(src: &str) -> ScanResult {
     scan_files(&[("app/probe.c", src, "c")])
 }
 
-pub fn scan_go(src: &str) -> ScanResult {
+pub(crate) fn scan_go(src: &str) -> ScanResult {
     scan_files(&[("app/probe.go", src, "go")])
 }
 
-pub fn scan_rust(src: &str) -> ScanResult {
+pub(crate) fn scan_rust(src: &str) -> ScanResult {
     scan_files(&[("app/probe.rs", src, "rs")])
 }
 
-pub fn assert_detected(res: &ScanResult, probe_name: &str, expected_sink: &str) {
+pub(crate) fn assert_detected(res: &ScanResult, probe_name: &str, expected_sink: &str) {
     let found = res.located.iter().any(|l| {
         l.finding.sink.contains(expected_sink) && l.finding.verdict == BackwardVerdict::Vulnerable
     });
@@ -66,7 +66,7 @@ pub fn assert_detected(res: &ScanResult, probe_name: &str, expected_sink: &str) 
     );
 }
 
-pub fn assert_clean(res: &ScanResult, probe_name: &str) {
+pub(crate) fn assert_clean(res: &ScanResult, probe_name: &str) {
     let vulnerable: Vec<_> = res
         .located
         .iter()

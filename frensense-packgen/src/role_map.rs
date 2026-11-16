@@ -20,7 +20,7 @@ use frensense_lang::severity::SinkRole;
 
 /// Standard classification labels for sink functions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum SinkLabel {
+pub(crate) enum SinkLabel {
     CodeExecution,
     SqlInjection,
     NoSqlInjection,
@@ -60,7 +60,7 @@ impl SinkLabel {
     #[cfg(test)]
     /// Every label, for coverage tests (each must resolve a rule card with
     /// a CWE; see `rule_card_coverage`).
-    pub const ALL: &'static [SinkLabel] = &[
+    pub(crate) const ALL: &'static [SinkLabel] = &[
         Self::CodeExecution,
         Self::SqlInjection,
         Self::NoSqlInjection,
@@ -97,7 +97,7 @@ impl SinkLabel {
     ];
 
     #[must_use]
-    pub fn slug(&self) -> &'static str {
+    pub(crate) fn slug(&self) -> &'static str {
         match self {
             Self::PrototypePollution => "prototype",
             Self::Ssrf => "ssrf",
@@ -131,14 +131,14 @@ impl SinkLabel {
     }
 }
 
-pub use frensense_lang::severity::SanitizerKind;
+pub(crate) use frensense_lang::severity::SanitizerKind;
 
 /// A propagator rule describes how taint flows through a specific call.
 ///
 /// Example: `fmt.Sprintf` in Go - the format string is not tainted, but
 /// if *any argument* is tainted the return value is tainted.
 #[derive(Debug, Clone)]
-pub struct PropagatorRule {
+pub(crate) struct PropagatorRule {
     /// Short call name or method name, e.g. `"Sprintf"`, `"format"`, `"join"`.
     /// Matched against the last segment of a member chain.
     pub call: &'static str,
@@ -157,7 +157,7 @@ pub struct PropagatorRule {
 /// `Other` (conservative: treated as execution by the consumer). Moved
 /// verbatim from `frensense_lang::severity::SinkRole::from_label`.
 #[must_use]
-pub fn sink_role_for_label(label: SinkLabel) -> SinkRole {
+pub(crate) fn sink_role_for_label(label: SinkLabel) -> SinkRole {
     use SinkLabel as L;
     match label {
         L::SqlInjection
@@ -202,7 +202,7 @@ pub fn sink_role_for_label(label: SinkLabel) -> SinkRole {
 /// default: full sanitizers plus JS-style predicate naming (`test`,
 /// `isValid`, `is*`). No provider ever overrode it.
 #[must_use]
-pub fn is_predicate_guard(name: &str, kind: Option<&SanitizerKind>) -> bool {
+pub(crate) fn is_predicate_guard(name: &str, kind: Option<&SanitizerKind>) -> bool {
     kind.is_some_and(|k| matches!(k, SanitizerKind::Full))
         || name == "test"
         || name == "isValid"

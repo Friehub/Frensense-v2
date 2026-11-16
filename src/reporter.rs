@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::fmt::Write;
 use std::path::Path;
 
+#[derive(Debug)]
 pub struct Reporter;
 
 impl Reporter {

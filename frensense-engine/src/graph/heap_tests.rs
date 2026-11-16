@@ -6,7 +6,7 @@
 //! local store→load edges and cross-function heap edges.
 
 #[cfg(test)]
-pub mod heap_flow_tests {
+pub(super) mod heap_flow_tests {
     use crate::analysis::forward::ProgramSvfg;
     use crate::analysis::taint::config::TaintConfig;
     use crate::analysis::taint::engine::BackwardTaintEngine;
@@ -623,7 +623,7 @@ pub mod heap_flow_tests {
 }
 
 #[cfg(test)]
-pub mod points_to_convergence_tests {
+pub(super) mod points_to_convergence_tests {
     use crate::graph::heap::PointsToAnalysis;
     use crate::ir::function::*;
 

@@ -326,6 +326,7 @@ const GO_CALL_QUERY: &str = r#"
 
 // ── GoSpec ────────────────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub struct GoSpec;
 
 impl LanguageSpec for GoSpec {

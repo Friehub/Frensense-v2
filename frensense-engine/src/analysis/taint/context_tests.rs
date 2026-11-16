@@ -6,7 +6,7 @@
 
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
-pub mod context_tests {
+pub(super) mod context_tests {
     use crate::analysis::forward::{InterproceduralTaintEngine, ProgramSvfg};
     use crate::analysis::taint::config::TaintConfig;
     use crate::analysis::taint::context::{ContextSensitiveTaintEngine, ROOT_CTX};

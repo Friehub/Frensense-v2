@@ -585,7 +585,7 @@ fn apply_bundle_pattern(
 
 /// Strip internal corpus names, family identifiers, and training provenance
 /// from finding messages so corpus details remain hidden from end users.
-pub fn sanitize_corpus_provenance(s: &str) -> String {
+pub(crate) fn sanitize_corpus_provenance(s: &str) -> String {
     let mut clean = s.to_string();
     while let Some(idx) = clean.find("(learned from family ") {
         if let Some(end) = clean[idx..].find(')') {
@@ -851,7 +851,7 @@ fn advisory_from_finding(
 /// make it cross-process stable too, but FNV-1a is deterministic by spec,
 /// cheap, and dependency-free. Two components joined with `\u{1f}` so
 /// ("ab","c") and ("a","bc") hash differently.
-pub fn stable_fingerprint(components: &[&str]) -> String {
+pub(crate) fn stable_fingerprint(components: &[&str]) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for (i, part) in components.iter().enumerate() {
         if i > 0 {

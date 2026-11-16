@@ -5,7 +5,7 @@
 //! Tests for the CWE-401 allocation-lifetime (leak) checker.
 
 #[cfg(test)]
-pub mod leak_spec {
+pub(super) mod leak_spec {
     use crate::checks::leak;
     use crate::checks::memory_summary::MemorySummaryRegistry;
     use crate::harness::lower_source;

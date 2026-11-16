@@ -16,7 +16,7 @@
 
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
-pub mod package_scoped_sink_tests {
+pub(crate) mod package_scoped_sink_tests {
     use crate::analysis::taint::facts::seeded_tables;
     use crate::scan::{prepare, scan_prepared};
 

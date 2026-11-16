@@ -189,6 +189,7 @@ fn split_csv_keys(rest: &str) -> Vec<String> {
 }
 
 /// One corpus family: id + variant files.
+#[derive(Debug)]
 pub struct Family {
     pub id: String,
     /// (file name, source text, ext)

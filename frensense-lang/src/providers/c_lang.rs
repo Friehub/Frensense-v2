@@ -138,6 +138,7 @@ fn c_package_category(pkg: &str) -> Option<PackageCategory> {
 
 // ── CSpec ─────────────────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub struct CSpec;
 
 impl LanguageSpec for CSpec {

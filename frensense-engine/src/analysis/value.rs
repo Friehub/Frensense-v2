@@ -516,6 +516,7 @@ fn fixpoint(ir: &FunctionIR) -> (FxHashMap<BlockId, AbsState>, bool) {
 
 /// The per-function analysis result: each variable's value at the point
 /// where its defining instruction executes, plus block-entry states.
+#[derive(Debug)]
 pub struct ValueInfo {
     /// var → abstract value (only non-`Top` entries).
     pub values: FxHashMap<VarId, Value>,

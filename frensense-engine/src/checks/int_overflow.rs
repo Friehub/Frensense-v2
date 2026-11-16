@@ -143,20 +143,9 @@ fn flows_into_alloc_capacity(
     None
 }
 
-fn var_name(ir: &FunctionIR, var: VarId) -> String {
-    ir.var_metadata
-        .get(&var)
-        .and_then(|m| m.source_name.clone())
-        .unwrap_or_else(|| format!("v{}", var.0))
-}
-
-fn var_span(ir: &FunctionIR, var: VarId) -> Option<(usize, usize)> {
-    ir.var_metadata.get(&var).and_then(|m| m.byte_range)
-}
-
 fn operand_label(ir: &FunctionIR, op: &Operand) -> String {
     match op {
-        Operand::Var(v) => var_name(ir, *v),
+        Operand::Var(v) => ir.var_name(*v),
         Operand::IntLiteral(k) => k.to_string(),
         other => format!("{:?}", other),
     }
@@ -325,8 +314,8 @@ fn check_rule(
                     ("threshold", rule.wrap_threshold.to_string()),
                     ("allocator", allocator),
                 ],
-                span: var_span(ir, *dest).or_else(|| match lhs {
-                    Operand::Var(v) => var_span(ir, *v),
+                span: ir.var_span(*dest).or_else(|| match lhs {
+                    Operand::Var(v) => ir.var_span(*v),
                     _ => None,
                 }),
             });

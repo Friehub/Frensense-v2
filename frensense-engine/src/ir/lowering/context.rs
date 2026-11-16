@@ -12,6 +12,7 @@ use tree_sitter::Node;
 /// `break` jumps to `break_target`; `continue` jumps to the innermost
 /// *loop*'s `continue_target` (switches contribute `None` so a `continue`
 /// below them still finds the enclosing loop).
+#[derive(Debug)]
 pub struct LoopTarget {
     /// Block a `break` jumps to.
     pub break_target: BlockId,
@@ -59,6 +60,20 @@ pub struct LoweringContext<'a> {
     /// control flow can have changed it, so an entry means "the value at this
     /// point is this, on every path that reaches here".
     pub(super) const_values: FxHashMap<VarId, super::const_eval::ConstValue>,
+}
+
+impl std::fmt::Debug for LoweringContext<'_> {
+    /// Summarizes the lowering state: the function name, the current block,
+    /// the scope depth and the loop depth. The language spec, the source
+    /// text and the IR under construction are left out.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoweringContext")
+            .field("function", &self.ir.name)
+            .field("current_block", &self.current_block)
+            .field("scope_depth", &self.env.len())
+            .field("loop_depth", &self.loop_stack.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a> LoweringContext<'a> {

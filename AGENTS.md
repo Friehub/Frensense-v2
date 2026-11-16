@@ -24,6 +24,63 @@ One binary, three surfaces: `frensense [path]` (CLI/CI), `frensense mcp`
 (AI agents), `frensense lsp` (editors). All share one analysis engine and
 one stable finding-identity scheme (`FRN-…`).
 
+## 1A. Reuse before you write (read this before adding any function)
+
+Most bloat in this repo came from writing a new helper when one already
+existed. Before you add a function, type, or module:
+
+1. **Search for it.** `rg -n "fn <verb>" frensense-*/src` and
+   `rg -n "<concept>" frensense-*/src`. Check the public surface in
+   `PUBLIC_API.txt` (below) and the helper index in this section.
+2. **Search by behavior, not just name.** The same helper was copied four times
+   under different call sites (`var_span`, `strip_quotes`, `instr_span`,
+   `var_name`). Grep for the body, e.g. `rg -n "byte_range" frensense-engine/src`.
+3. **Extend, don't fork.** If an existing helper is close, change it (and its
+   tests) instead of writing a sibling. If two files need the same private
+   function, move it to the lowest module both can reach, not into one file and
+   a copy in the other.
+4. **Check for clones after you write.**
+   `npx -y jscpd@5.4.3 frensense-engine/src -k 60 -l 6` lists duplicated
+   blocks (it includes `*_tests.rs`, so read the file names). Do not add a
+   clone that the report did not already contain.
+
+### Helper index (verified present; extend these, do not rewrite them)
+
+| need | use | defined in |
+|---|---|---|
+| source name of a `VarId` (`v<id>` fallback) | `FunctionIR::var_name` | `frensense-engine/src/ir/function.rs` |
+| byte range of a variable's defining expression | `FunctionIR::var_span` | same |
+| byte range of a call instruction | `FunctionIR::instr_span` | same |
+| strip matching quotes from a string-literal operand | `ir::function::strip_quotes` | same |
+
+These are `pub(crate)`. Add to this table when you add a helper others should find.
+
+### Visibility and lint budget
+
+- **Default is private.** Use `pub(crate)` when another module in the same crate needs it.
+  Use `pub` only when another crate in this workspace, or an external consumer, calls it.
+  Writing `pub` "just in case" widens the semver surface: narrowing it later is a
+  breaking change in 0.x (see §7.2).
+- `unreachable_pub` is `deny`: a `pub` item that no external path reaches will not compile.
+  Do not satisfy it by re-exporting; make the item `pub(crate)`.
+- Lint tiers live in the root `Cargo.toml`. `deny` lints have zero violations and must stay that way
+  (`unsafe_code`, `unreachable_pub`, `missing_debug_implementations`, `private_interfaces`,
+  `private_bounds`, `panic_in_result_fn`, `todo`, `unimplemented`, `dbg_macro`).
+  `warn` lints are known debt counted by `.github/scripts/clippy-ratchet.py`.
+  A new warning fails CI even though the lint is only `warn`. Fix the code.
+  After you remove debt, run `python3 .github/scripts/clippy-ratchet.py --update` in the same PR.
+  Never raise a baseline number to make CI pass.
+- Never add `#[allow(...)]` to silence a lint to get green; `allow_attributes` counts them.
+
+### Finding the public API fast
+
+`make public-api` writes `PUBLIC_API.txt` for the four publishable crates (it runs
+`cargo public-api`, which needs the `cargo-public-api` binary and a nightly toolchain
+installed for rustdoc JSON). The file is generated and git-ignored, so run `make public-api`
+at the start of a session, then read it instead of crawling the source to see what already
+exists. Regenerate it after you change a `pub` item.
+`frensense-engine/AGENTS.md` describes the engine's module layout.
+
 ## 2. Engine architecture (read this before touching analysis code)
 
 The pipeline, in order:
@@ -117,7 +174,7 @@ spec seed → default pack → consumer bundle
    / `.frc` bundles — that is the whole point of the architecture.
 2. **The purity ratchet enforces this mechanically.** CI runs
    `python3 .github/scripts/purity-ratchet.py` (see
-   [docs/ENGINE_PURITY_REFACTOR.md](docs/ENGINE_PURITY_REFACTOR.md)): it
+   `.github/scripts/purity-ratchet.py` (its docstring lists every counter)): it
    counts debt classes (engine `format!` prose, tier strings, policy refs
    outside lang, provider vocab in lang) and **fails if any count grows**.
    If your change must add to a counted class, justify lowering the
@@ -156,7 +213,7 @@ steps also cover security, release compatibility, and feature isolation.
 4. `cargo machete --with-metadata ...` — unused workspace dependencies
 5. `cargo hack check -p frensense-engine --each-feature --locked` — isolated engine features
 6. `cargo run -p frensense-packgen -- --check` — default pack asset must not drift
-7. `cargo clippy --all-features --all-targets -- -D warnings` — warnings are errors
+7. `python3 .github/scripts/clippy-ratchet.py` — clippy over the whole workspace (including `frensense-packgen` and `frensense-devtools`): `deny` lints fail outright, `warn` lints may not grow per crate (see §1A)
 8. `cargo test --workspace --all-features` — full regression suite
 9. `cargo deny check` — advisories, licenses, bans, and sources
 10. `python3 .github/scripts/semver-gate.py --base-ref HEAD` — per-crate public-API compatibility for every publishable crate (one binary, four independently versioned crates)
@@ -404,11 +461,9 @@ why every crate ended up on one version.
 | doc | contents |
 |---|---|
 | [frensense-engine/AGENTS.md](frensense-engine/AGENTS.md) | crate-specific library API, modularization, and verification contract |
-| [docs/ENGINE_MAINTAINERS_GUIDE.md](docs/ENGINE_MAINTAINERS_GUIDE.md) | engine hotspots, staged file splits, API stability, and Rust tooling recommendations |
 | [docs/TEACHABILITY.md](docs/TEACHABILITY.md) | the 13 teachable fact subsystems, twin-example learning model |
 | [docs/FRENSENSE_CORPUS_GUIDE.md](docs/FRENSENSE_CORPUS_GUIDE.md) | authoring corpus families, the `[frensense]` metadata block |
 | [docs/AGENT_INTEGRATION.md](docs/AGENT_INTEGRATION.md) | baselines, `--github` annotations, agent-fixes/CI-judges workflow |
 | [docs/MCP_USAGE.md](docs/MCP_USAGE.md) | MCP tools + a worked end-to-end agent session |
 | [docs/LSP_USAGE.md](docs/LSP_USAGE.md) | editor setup and protocol walkthrough |
 | [docs/BENCHMARKING.md](docs/BENCHMARKING.md) | benchmark methodology and per-CWE results |
-| [docs/ENGINE_PURITY_REFACTOR.md](docs/ENGINE_PURITY_REFACTOR.md) | the purity refactor and what the ratchet counts |

@@ -48,12 +48,6 @@ pub struct BundlePattern {
     pub rules: Vec<String>,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct Bundle {
-    pub header: BundleHeader,
-    pub patterns: Vec<BundlePattern>,
-}
-
 /// The v4 payload shape: patterns plus learned facts, no `policy_pack`.
 /// Read-only since v5 - kept so v4 bundles keep loading through the
 /// version-branched load in [`load_bundle`].

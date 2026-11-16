@@ -31,10 +31,10 @@ if ! cargo fmt --all -- --check; then
     FAILURES=$((FAILURES + 1))
 fi
 
-# 2. Clippy Semantic Lints (same flags as CI: warnings are errors)
-echo "[CHECK 2/6] Running workspace lints (clippy, warnings are errors)..."
-if ! cargo clippy --all-features --all-targets -- -D warnings; then
-    echo "[FAIL] Clippy found warnings or errors."
+# 2. Clippy Semantic Lints (same ratchet as CI)
+echo "[CHECK 2/6] Running workspace lints (clippy ratchet)..."
+if ! python3 .github/scripts/clippy-ratchet.py; then
+    echo "[FAIL] Clippy ratchet failed (deny lint, or warn debt grew)."
     FAILURES=$((FAILURES + 1))
 fi
 

@@ -275,6 +275,7 @@ impl Svfg {
 ///
 /// Step 3 is O(1) per use because SSA guarantees exactly one definition for
 /// every variable, we just look up the pre-built `def_site` table.
+#[derive(Debug)]
 pub struct SvfgBuilder<'a> {
     ir: &'a FunctionIR,
     graph: Svfg,

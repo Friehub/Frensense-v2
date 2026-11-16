@@ -421,6 +421,7 @@ const RUST_CALL_QUERY: &str = r#"
 
 // ── LanguageSpec ────────────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub struct RustSpec;
 
 impl LanguageSpec for RustSpec {

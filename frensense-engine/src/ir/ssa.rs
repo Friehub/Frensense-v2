@@ -29,6 +29,7 @@ pub const DEFAULT_SSA_BUDGET: u64 = 5_000_000;
 /// Converts a [`FunctionIR`] into SSA form: dominators, dominance frontiers, phi placement and renaming, for ordinary variables and memory states alike.
 ///
 /// Work is bounded by a budget; see [`DEFAULT_SSA_BUDGET`].
+#[derive(Debug)]
 pub struct SSABuilder {
     ir: FunctionIR,
     /// Phi rename bookkeeping: `new_dest → original variable`. Filled while

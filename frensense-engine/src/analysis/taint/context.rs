@@ -146,6 +146,7 @@ impl ContextPool {
 /// Phase 1 reuses [`InterproceduralTaintEngine`] (k=0) to compute the
 /// taint-relevant function set. Phase 2 re-runs propagation with
 /// `(function, node, context)` states, splitting only relevant functions.
+#[derive(Debug)]
 pub struct ContextSensitiveTaintEngine<'a> {
     prog: &'a ProgramSvfg<'a>,
     config: &'a TaintConfig,

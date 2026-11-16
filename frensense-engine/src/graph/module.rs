@@ -198,6 +198,7 @@ pub struct ModuleResolution {
 }
 
 /// Computes module aliases and external package imports per file.
+#[derive(Debug)]
 pub struct ModuleAliasResolver;
 
 impl ModuleAliasResolver {

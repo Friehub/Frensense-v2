@@ -22,6 +22,7 @@ use super::{
 
 // ── TypeScript spec ───────────────────────────────────────────────────────────
 
+#[derive(Debug)]
 pub struct TypeScriptSpec;
 
 impl LanguageSpec for TypeScriptSpec {

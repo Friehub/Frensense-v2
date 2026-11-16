@@ -89,10 +89,6 @@ struct Edge {
 /// variable holding it.
 type PointsTo = FxHashMap<VarId, FxHashSet<VarId>>;
 
-fn var_span(ir: &FunctionIR, var: VarId) -> Option<(usize, usize)> {
-    ir.var_metadata.get(&var).and_then(|m| m.byte_range)
-}
-
 /// Fresh allocations (vocab from `facts`) and the alias edges between
 /// variables that can denote them. Stack allocators are excluded: their
 /// storage is frame-local by definition and can never leak.
@@ -606,7 +602,7 @@ pub fn check(
         if !emitted.insert(id) {
             continue;
         }
-        let span = var_span(ir, id);
+        let span = ir.var_span(id);
         out.push(CheckerFinding {
             provenance: Provenance::Spec,
             function: ir.name.clone(),

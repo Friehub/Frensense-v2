@@ -10,7 +10,7 @@ all: fmt check audit test
 # `make discipline` (or ./.github/scripts/local-ci.sh) for the full pre-PR gate.
 check:
 	@echo "[CHECK] Running semantic lints (Clippy)..."
-	cargo clippy --all-targets --all-features -- -D warnings
+	python3 .github/scripts/clippy-ratchet.py
 
 fmt:
 	@echo "[FMT] Enforcing style (rustfmt)..."

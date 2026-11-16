@@ -6,7 +6,7 @@
 
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
-pub mod steensgaard_tests {
+pub(super) mod steensgaard_tests {
     use crate::graph::steensgaard::Steensgaard;
     use crate::harness::lower_source;
 

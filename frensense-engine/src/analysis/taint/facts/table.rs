@@ -6,6 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::*;
 use crate::analysis::taint::config::TaintConfig;
+use crate::ir::function::strip_quotes;
 
 /// The merged fact table: built-in language tables + bundle-learned facts.
 ///
@@ -846,17 +847,4 @@ impl FactTable {
     pub fn source_patterns(&self) -> impl Iterator<Item = &str> {
         self.learned_sources.iter().map(|s| s.as_str())
     }
-}
-
-fn strip_quotes(lit: &str) -> &str {
-    let lit = lit.trim();
-    let bytes = lit.as_bytes();
-    if bytes.len() >= 2 {
-        let first = bytes[0];
-        let last = bytes[bytes.len() - 1];
-        if (first == b'\'' || first == b'"' || first == b'`') && first == last {
-            return &lit[1..bytes.len() - 1];
-        }
-    }
-    lit
 }

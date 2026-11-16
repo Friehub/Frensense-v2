@@ -508,6 +508,31 @@ impl FunctionIR {
         f
     }
 
+    /// Source name of `var`, or `v<id>` when lowering recorded none.
+    pub(crate) fn var_name(&self, var: VarId) -> String {
+        self.var_metadata
+            .get(&var)
+            .and_then(|m| m.source_name.clone())
+            .unwrap_or_else(|| format!("v{}", var.0))
+    }
+
+    /// Byte range of the expression that produced `var`, if lowering recorded one.
+    pub(crate) fn var_span(&self, var: VarId) -> Option<(usize, usize)> {
+        self.var_metadata.get(&var).and_then(|m| m.byte_range)
+    }
+
+    /// Byte range of a call instruction: the call result variable carries the
+    /// call expression's range. `None` for non-calls and calls with no result.
+    pub(crate) fn instr_span(&self, instr: &Instruction) -> Option<(usize, usize)> {
+        let dest = match instr {
+            Instruction::CallStatic { dest, .. }
+            | Instruction::CallVirtual { dest, .. }
+            | Instruction::CallPointer { dest, .. } => (*dest)?,
+            _ => return None,
+        };
+        self.var_span(dest)
+    }
+
     /// Allocates a fresh variable id, records its `metadata` and returns the id.
     pub fn new_var(&mut self, metadata: VarMetadata) -> VarId {
         let id = VarId(self.next_var_id);
@@ -596,4 +621,19 @@ impl FunctionIR {
         }
         None
     }
+}
+
+/// Strips one pair of matching `'`, `"` or `` ` `` quotes from a string
+/// literal's source text, after trimming. Unmatched or lone quotes are left as is.
+pub(crate) fn strip_quotes(lit: &str) -> &str {
+    let lit = lit.trim();
+    let bytes = lit.as_bytes();
+    if let (Some(&first), Some(&last)) = (bytes.first(), bytes.last())
+        && bytes.len() >= 2
+        && matches!(first, b'\'' | b'"' | b'`')
+        && first == last
+    {
+        return &lit[1..bytes.len() - 1];
+    }
+    lit
 }

@@ -5,7 +5,7 @@
 //! Tests for the spatial memory safety checker (buffer overflow, out-of-bounds read/write).
 
 #[cfg(test)]
-pub mod oob_spec {
+pub(super) mod oob_spec {
     use crate::checks::oob;
     use crate::harness::lower_source;
 
@@ -277,7 +277,7 @@ void handler (char *p, int idx) {
 }
 
 #[cfg(test)]
-pub mod oob_lowering_regressions {
+pub(super) mod oob_lowering_regressions {
     use crate::checks::oob;
     use crate::harness::lower_source;
 

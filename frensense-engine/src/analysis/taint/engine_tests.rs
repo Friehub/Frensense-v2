@@ -5,7 +5,7 @@
 //! Tests for the demand-driven backward taint engine (task 4.4).
 
 #[cfg(test)]
-pub mod demand_tests {
+pub(super) mod demand_tests {
     use crate::analysis::forward::ProgramSvfg;
     use crate::analysis::taint::config::TaintConfig;
     use crate::analysis::taint::engine::{BackwardTaintEngine, BackwardVerdict};

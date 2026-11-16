@@ -17,7 +17,7 @@ use super::*;
 /// never passes through it. The fix is structural: the branch condition is
 /// derived from a guard call on `x`; if that branch dominates the block the
 /// sink lives in, any `x` value flowing there was checked.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(super) struct GuardMap {
     /// var → blocks whose terminator branch is derived from a guard-style
     /// call on that var.

@@ -6,7 +6,7 @@
 //! lossless legacy-`LearnedCheckFact` conversion path.
 
 #[cfg(test)]
-pub mod policy_spec {
+pub(super) mod policy_spec {
     use crate::analysis::taint::facts::{
         FactTable, LearnedCheckFact, LearnedFactEntry, PolicyFact, PolicyRequirement, PolicyScope,
         Provenance,

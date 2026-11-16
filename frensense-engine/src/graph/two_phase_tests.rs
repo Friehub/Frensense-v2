@@ -8,7 +8,7 @@
 
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
-pub mod two_phase_tests {
+pub(super) mod two_phase_tests {
     use crate::graph::heap::PointsToAnalysis;
     use crate::graph::steensgaard::Steensgaard;
     use crate::harness::lower_source;

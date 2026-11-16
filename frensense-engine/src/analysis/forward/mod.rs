@@ -77,6 +77,7 @@ pub use summaries::*;
 // ---------------------------------------------------------------------------
 
 /// Everything the interprocedural layer knows about one function.
+#[derive(Debug)]
 pub struct FunctionEntry<'a> {
     /// Program name of the function.
     pub name: String,
@@ -101,6 +102,7 @@ pub struct FunctionEntry<'a> {
 
 /// The whole-program value-flow structure: per-function SVFGs linked by
 /// explicit interprocedural edges, with bottom-up summaries cached per fn.
+#[derive(Debug)]
 pub struct ProgramSvfg<'a> {
     /// Deterministic order: sorted by function name.
     pub functions: Vec<FunctionEntry<'a>>,
@@ -309,6 +311,7 @@ impl<'a> ProgramSvfg<'a> {
 /// Cost remains proportional to the taint-reachable subgraph: local successors
 /// plus explicit cross edges, no fixed-point loop, no visit to functions or
 /// variables off every taint path.
+#[derive(Debug)]
 pub struct InterproceduralTaintEngine<'a> {
     prog: &'a ProgramSvfg<'a>,
     config: &'a TaintConfig,

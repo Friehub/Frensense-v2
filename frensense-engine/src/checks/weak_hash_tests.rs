@@ -5,7 +5,7 @@
 //! Tests for the non-dataflow checker layer (`graph::checker`).
 
 #[cfg(test)]
-pub mod checker_tests {
+pub(super) mod checker_tests {
     use crate::analysis::taint::facts::{FactTable, LearnedFactEntry};
     use crate::checks::check_all;
     use crate::harness::lower_source;

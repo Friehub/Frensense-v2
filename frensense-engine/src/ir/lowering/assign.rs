@@ -72,6 +72,37 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
+    /// Value stored by a field or element assignment.
+    ///
+    /// For a plain assignment this is `rhs`. For a compound assignment
+    /// (`op` is `Some`) it first loads the current value with the
+    /// instruction `load(cur)` builds, then returns the temporary holding
+    /// `cur <op> rhs`.
+    fn compound_store_value(
+        &mut self,
+        node: Node,
+        op: Option<&str>,
+        rhs: Operand,
+        load: impl FnOnce(VarId) -> Instruction,
+    ) -> Operand {
+        let Some(op) = op else {
+            return rhs;
+        };
+        let cur = self.new_temp(node);
+        self.ir.push_instruction(self.current_block, load(cur));
+        let tmp = self.new_temp(node);
+        self.ir.push_instruction(
+            self.current_block,
+            Instruction::BinaryOp {
+                dest: tmp,
+                op: op.to_string(),
+                lhs: Operand::Var(cur),
+                rhs,
+            },
+        );
+        Operand::Var(tmp)
+    }
+
     /// Lowers an assignment `lhs = rhs`; the field names of the two sides come from the language spec's role for the node.
     ///
     /// A variable target becomes an `Assign`, a field target a `StoreField` and an element target a `StoreElement`. A compound operator (`+=`, `*=`) lowers as a read-modify-write: a `BinaryOp` of the target and the right side, then the store. A multi-target left side (`a, b = f()`) binds the right side to every plain-variable target.
@@ -156,33 +187,15 @@ impl<'a> LoweringContext<'a> {
                 }
             },
             Some(LValue::Field { base, field }) => {
-                let src = match &compound {
-                    Some(op) => {
-                        // Read the current field value before overwriting it.
-                        let cur = self.new_temp(node);
-                        self.ir.push_instruction(
-                            self.current_block,
-                            Instruction::LoadField {
-                                dest: cur,
-                                mem_in: self.memory_var,
-                                base,
-                                field: field.clone(),
-                            },
-                        );
-                        let tmp = self.new_temp(node);
-                        self.ir.push_instruction(
-                            self.current_block,
-                            Instruction::BinaryOp {
-                                dest: tmp,
-                                op: op.clone(),
-                                lhs: Operand::Var(cur),
-                                rhs: rhs_op,
-                            },
-                        );
-                        Operand::Var(tmp)
+                let mem_in = self.memory_var;
+                let src = self.compound_store_value(node, compound.as_deref(), rhs_op, |cur| {
+                    Instruction::LoadField {
+                        dest: cur,
+                        mem_in,
+                        base,
+                        field: field.clone(),
                     }
-                    None => rhs_op,
-                };
+                });
                 self.ir.push_instruction(
                     self.current_block,
                     Instruction::StoreField {
@@ -195,32 +208,15 @@ impl<'a> LoweringContext<'a> {
                 );
             }
             Some(LValue::Element { base, index }) => {
-                let src = match &compound {
-                    Some(op) => {
-                        let cur = self.new_temp(node);
-                        self.ir.push_instruction(
-                            self.current_block,
-                            Instruction::LoadElement {
-                                dest: cur,
-                                mem_in: self.memory_var,
-                                base,
-                                index: index.clone(),
-                            },
-                        );
-                        let tmp = self.new_temp(node);
-                        self.ir.push_instruction(
-                            self.current_block,
-                            Instruction::BinaryOp {
-                                dest: tmp,
-                                op: op.clone(),
-                                lhs: Operand::Var(cur),
-                                rhs: rhs_op,
-                            },
-                        );
-                        Operand::Var(tmp)
+                let mem_in = self.memory_var;
+                let src = self.compound_store_value(node, compound.as_deref(), rhs_op, |cur| {
+                    Instruction::LoadElement {
+                        dest: cur,
+                        mem_in,
+                        base,
+                        index: index.clone(),
                     }
-                    None => rhs_op,
-                };
+                });
                 self.ir.push_instruction(
                     self.current_block,
                     Instruction::StoreElement {

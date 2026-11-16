@@ -37,7 +37,7 @@
 
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
-pub mod package_scoped_sanitizer_tests {
+pub(crate) mod package_scoped_sanitizer_tests {
     use crate::analysis::taint::config::TaintConfig;
     use crate::analysis::taint::engine::BackwardVerdict;
     use crate::analysis::taint::facts::{

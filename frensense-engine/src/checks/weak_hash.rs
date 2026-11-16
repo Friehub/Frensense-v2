@@ -21,25 +21,12 @@ use crate::analysis::taint::facts::FactTable;
 use crate::checks::CheckerFinding;
 use crate::checks::Provenance;
 use crate::checks::last_segment;
-use crate::ir::function::{FunctionIR, Instruction, Operand};
+use crate::ir::function::{FunctionIR, Instruction, Operand, strip_quotes};
 
 // Weak-hash, key-size and insecure-selector policy tables are FACT DATA:
 // the engine reads only `FactTable` fields, seeded by the language spec
 // (the default pack) and extended by `.frc` bundles. No bootstrap
 // vocabulary is referenced from this module.
-
-fn strip_quotes(lit: &str) -> &str {
-    let lit = lit.trim();
-    let bytes = lit.as_bytes();
-    let (core, _) = match bytes.first() {
-        Some(b'\'') | Some(b'"') | Some(b'`') => {
-            let end = bytes.len().saturating_sub(1);
-            (&lit[1..end], true)
-        }
-        _ => (lit, false),
-    };
-    core
-}
 
 /// Security-context qualification for the hash-wrapper rule: the
 /// enclosing function's name when it hints at security code
@@ -106,7 +93,7 @@ pub fn check_function(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding>
                         func,
                         func,
                         args,
-                        instr_span(ir, instr),
+                        ir.instr_span(instr),
                         &values,
                         facts,
                         &mut findings,
@@ -124,7 +111,7 @@ pub fn check_function(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding>
                         method,
                         &path,
                         args,
-                        instr_span(ir, instr),
+                        ir.instr_span(instr),
                         &values,
                         facts,
                         &mut findings,
@@ -174,18 +161,6 @@ fn arg_int_literal(arg: &Operand, values: &crate::analysis::value::ValueInfo) ->
         Operand::Var(v) => values.const_int(*v),
         _ => None,
     }
-}
-
-fn instr_span(ir: &FunctionIR, instr: &Instruction) -> Option<(usize, usize)> {
-    // The call result var carries the call expression's byte range (set by
-    // the lowering pass). Find the dest of this instruction.
-    let dest = match instr {
-        Instruction::CallStatic { dest, .. }
-        | Instruction::CallVirtual { dest, .. }
-        | Instruction::CallPointer { dest, .. } => (*dest)?,
-        _ => return None,
-    };
-    ir.var_metadata.get(&dest)?.byte_range
 }
 
 #[allow(clippy::too_many_arguments)] // fact/lattice/out plumbing, no meaningful grouping

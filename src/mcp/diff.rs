@@ -35,6 +35,7 @@ pub type DiffScanOutcome = (BTreeMap<String, Vec<AddedRange>>, Vec<Advisory>, us
 /// where "clean" is consumed as a decision: an agent that reads `clean:
 /// true` from a file the engine recognized nothing in has been told the
 /// wrong thing.
+#[derive(Debug)]
 pub struct DiffScan {
     pub ranges: BTreeMap<String, Vec<AddedRange>>,
     pub advisories: Vec<Advisory>,

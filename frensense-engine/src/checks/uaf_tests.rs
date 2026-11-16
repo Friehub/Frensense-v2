@@ -11,7 +11,7 @@ fn c_facts() -> crate::analysis::taint::facts::FactTable {
 }
 
 #[cfg(test)]
-pub mod uaf_spec {
+pub(super) mod uaf_spec {
     use crate::checks::uaf;
     use crate::harness::lower_source;
 

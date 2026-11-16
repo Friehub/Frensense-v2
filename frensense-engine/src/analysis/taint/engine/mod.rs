@@ -393,7 +393,7 @@ pub struct BackwardStats {
 
 /// One link in an interned k=1 call-site stack (phase 5): the call through
 /// which the current function was entered, chained to the previous link.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct CtxLink {
     parent: u32,
     caller_fn: usize,
@@ -416,6 +416,7 @@ pub type RouteRegistration = fn(
 ) -> bool;
 
 /// Demand-driven backward taint engine over the whole-program SVFG.
+#[derive(Debug)]
 pub struct BackwardTaintEngine<'a> {
     pub(crate) prog: &'a ProgramSvfg<'a>,
     config: &'a TaintConfig,

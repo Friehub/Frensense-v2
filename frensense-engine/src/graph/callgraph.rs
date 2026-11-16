@@ -149,6 +149,7 @@ struct FnFacts {
 
 /// Input: every function's IR, keyed by program-level name (the same map the
 /// `ProgramSvfg` builder consumes).
+#[derive(Debug)]
 pub struct CallGraphBuilder<'a> {
     irs: &'a FxHashMap<String, &'a FunctionIR>,
     aliases: Option<&'a FxHashMap<String, FxHashMap<String, String>>>,

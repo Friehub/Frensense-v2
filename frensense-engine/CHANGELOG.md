@@ -10,6 +10,24 @@ Built-in vocabulary tables live in `frensense-packgen`; the `.frc` envelope
 lives in `frensense-bundler`. Their changes appear here only when they alter
 what this crate does.
 
+## [Unreleased]
+
+### Added
+
+- `Debug` for the language spec structs, `LanguageRegistry`, `CheckContext`,
+  `CheckRegistry`, `LoweringContext`, `GuardMap` and `CtxLink`, required by
+  the `missing_debug_implementations` lint.
+
+### Changed
+
+- String-literal unquoting is one function (`ir::function::strip_quotes`,
+  crate-private). The `policy` and `weak_hash` checks previously stripped the
+  first and last byte of any literal that began with a quote character; they
+  now strip only a matching pair, so a lone `"` or a mismatched `'a"` is left
+  unchanged instead of being sliced (the lone-quote case could panic).
+- Items that no external path could reach are now `pub(crate)`; no
+  reachable public item changed.
+
 ## [0.8.2]
 
 ### Added

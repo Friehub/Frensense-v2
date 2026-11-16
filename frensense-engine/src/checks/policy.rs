@@ -23,7 +23,7 @@ use super::learned::{call_segments, is_range_guarded};
 use crate::analysis::taint::facts::{FactTable, PolicyFact, PolicyRequirement, PolicyScope};
 use crate::graph::module::PackageImport;
 use crate::ir::control::{self, DomSets};
-use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand, VarId};
+use crate::ir::function::{BlockId, FunctionIR, Instruction, Operand, VarId, strip_quotes};
 
 /// A taught callable matches a written callee in one of two modes:
 ///
@@ -65,6 +65,7 @@ fn callee_matches(taught: &str, written: &str) -> bool {
 /// came from, and which external packages each file imports. Policies
 /// carrying `package: Some(pkg)` only fire in functions whose file
 /// imports `pkg` (mirrors the sink/source package-scoping model).
+#[derive(Debug)]
 pub struct PackageScope<'a> {
     /// Function name -> source file path.
     pub fn_file: &'a FxHashMap<String, String>,
@@ -348,7 +349,7 @@ fn trigger_sites<'a>(
                 continue;
             }
             let (args, arg_names) = call_args(instr).unwrap_or((&[], &[]));
-            out.push((bid, idx, args, arg_names, instr_span(ir, instr)));
+            out.push((bid, idx, args, arg_names, ir.instr_span(instr)));
         }
     }
     out
@@ -631,19 +632,6 @@ fn arg_has_key(ir: &FunctionIR, start: VarId, keys: &[String]) -> bool {
     false
 }
 
-fn strip_quotes(lit: &str) -> &str {
-    let lit = lit.trim();
-    let bytes = lit.as_bytes();
-    let (core, _) = match bytes.first() {
-        Some(b'\'') | Some(b'"') | Some(b'`') => {
-            let end = bytes.len().saturating_sub(1);
-            (&lit[1..end], true)
-        }
-        _ => (lit, false),
-    };
-    core
-}
-
 /// Extract constant literal string/bool/int representation from an operand.
 fn extract_literal_string(
     op: &Operand,
@@ -738,14 +726,4 @@ fn guard_executes_before(
             doms.get(&trigger_block).is_some_and(|d| d.contains(&gb))
         }
     })
-}
-
-fn instr_span(ir: &FunctionIR, instr: &Instruction) -> Option<(usize, usize)> {
-    let dest = match instr {
-        Instruction::CallStatic { dest, .. }
-        | Instruction::CallVirtual { dest, .. }
-        | Instruction::CallPointer { dest, .. } => (*dest)?,
-        _ => return None,
-    };
-    ir.var_metadata.get(&dest)?.byte_range
 }

@@ -7,7 +7,7 @@
 //! the taint engine's Clean-verdict promotion for provable constants.
 
 #[cfg(test)]
-pub mod value_spec {
+pub(super) mod value_spec {
     use crate::analysis::value::{Value, analyze};
     use crate::harness::lower_source;
 

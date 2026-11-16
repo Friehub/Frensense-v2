@@ -43,7 +43,7 @@ contributors, with a few ground rules that keep main stable:
 | Feature isolation | `cargo hack check -p frensense-engine --each-feature --locked` | every engine feature compiles alone |
 | Public API (per crate) | `python3 .github/scripts/semver-gate.py --base-ref HEAD` | each publishable crate that broke its API carries its own bump; see `AGENTS.md` §7.2 |
 | Pack drift | `cargo run -p frensense-packgen -- --check` | default pack asset must match generator |
-| Lint | `cargo clippy --all-features --all-targets -- -D warnings` | warnings are errors |
+| Lint | `python3 .github/scripts/clippy-ratchet.py` | `deny` lints fail; `warn` lints may not grow per crate |
 | Tests | `cargo test --workspace --all-features` | must pass |
 | MSRV | `cargo +1.95 check --all-features` | must compile |
 | Supply chain | `cargo deny` (advisories, licenses, bans) | must pass |
