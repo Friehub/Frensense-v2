@@ -484,10 +484,7 @@ pub(crate) fn is_sanitizer_use_with_facts(
                     return true;
                 }
             }
-            if facts.sanitizer_fact(method).is_some() {
-                return true;
-            }
-            false
+            facts.sanitizer_fact(method).is_some()
         }
         _ => false,
     }
