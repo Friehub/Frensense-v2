@@ -39,6 +39,13 @@ pub enum CheckScope {
 }
 
 /// Receiver for diagnostics emitted during check execution.
+///
+/// This is an embedder seam, not the truncation accounting path: the default
+/// driver installs [`NoopDiagnosticSink`] and no check calls it today. Safety
+/// caps that affect a reported result must be recorded through
+/// [`crate::telemetry::Cap`] so they reach `truncations`, as the UAF walker
+/// and SSA builder now do. A driver that wants per-check callbacks can supply
+/// its own sink; wiring this trait alone does not make truncations visible.
 pub trait DiagnosticSink: Sync {
     /// Report that the check truncated its analysis due to a safety cap or budget.
     fn truncated(&self, cap: &'static str);

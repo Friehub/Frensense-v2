@@ -18,6 +18,8 @@
 //! * `FRENSdbg_STATIC`    - harness-level static-analysis trace
 //! * `FRENSdbg_PTS`       - points-to fixed-point cost (passes, set sizes)
 //! * `FRENSdbg_MEM`       - phase boundary RSS + graph sizes (memory attribution)
+//! * `FRENSdbg_CAPS`      - announce each safety-cap firing once per scan
+//! * `FRENSdbg_CHECKS`    - announce learned-check path divergences
 
 use std::ffi::OsString;
 use std::sync::OnceLock;
@@ -43,13 +45,20 @@ pub struct DebugFlags {
 
 static FLAGS: OnceLock<DebugFlags> = OnceLock::new();
 
+/// `FRENSdbg_CAPS`, kept out of [`DebugFlags`] so adding the flag does not
+/// change the shape of that public struct (an additive method instead).
+static CAPS: OnceLock<bool> = OnceLock::new();
+
+/// `FRENSdbg_CHECKS`, kept out of [`DebugFlags`] for the same reason.
+static CHECKS: OnceLock<bool> = OnceLock::new();
+
 impl DebugFlags {
     /// Install the process-wide flags by querying the caller's lookup for
     /// each `FRENSdbg_*` name. The first install wins; once [`Self::get`]
     /// has cached a value (any earlier call), later installs are ignored -
     /// binaries call this as the first statement of `main`.
     pub fn install_from(lookup: impl Fn(&'static str) -> Option<OsString>) {
-        let _ = FLAGS.set(DebugFlags {
+        let flags = DebugFlags {
             walk: lookup("FRENSdbg_WALK").is_some(),
             deadend: lookup("FRENSdbg_DEADEND").is_some(),
             unres: lookup("FRENSdbg_UNRES").is_some(),
@@ -57,7 +66,29 @@ impl DebugFlags {
             static_trace: lookup("FRENSdbg_STATIC").is_some(),
             pts: lookup("FRENSdbg_PTS").is_some(),
             mem: lookup("FRENSdbg_MEM").is_some(),
-        });
+        };
+        // The separate flags follow the same first-install-wins rule: do not
+        // set them when `get()` already initialized the shared flags.
+        if FLAGS.set(flags).is_ok() {
+            let _ = CAPS.set(lookup("FRENSdbg_CAPS").is_some());
+            let _ = CHECKS.set(lookup("FRENSdbg_CHECKS").is_some());
+        }
+    }
+
+    /// `FRENSdbg_CAPS`: announce each safety-cap firing once per scan.
+    ///
+    /// Kept separate from [`DebugFlags::get`] so the public struct keeps its
+    /// shape; like the other flags, the first [`Self::install_from`] wins.
+    #[must_use]
+    pub fn caps_enabled() -> bool {
+        *CAPS.get_or_init(|| false)
+    }
+
+    /// `FRENSdbg_CHECKS`: report findings that only one of the two
+    /// learned-check evaluation paths produced.
+    #[must_use]
+    pub fn checks_enabled() -> bool {
+        *CHECKS.get_or_init(|| false)
     }
 
     /// The installed flags (all-off default until [`Self::install_from`]

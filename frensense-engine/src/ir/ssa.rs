@@ -173,6 +173,9 @@ impl SSABuilder {
     /// over-approximating direction the engine already commits to.
     fn finish_degraded(mut self) -> FunctionIR {
         self.ir.analysis_incomplete = true;
+        // Lowering runs on a worker thread whose caps are drained into the
+        // scan's `truncations`, and `FRENSdbg_CAPS` announces it there.
+        crate::telemetry::Cap::SsaDegraded.record();
         self.ir
     }
 
@@ -730,5 +733,24 @@ impl SSABuilder {
                 process(mem_out);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FunctionIR, SSABuilder};
+
+    /// Exhausting the work budget is a reported truncation, not a silent
+    /// weakening: the IR is flagged and the cap counter fires.
+    #[test]
+    fn exhausted_budget_records_the_cap() {
+        let _ = crate::telemetry::drain_caps();
+
+        let built = SSABuilder::new(FunctionIR::new("f".into()))
+            .with_budget(0)
+            .build();
+
+        assert!(built.analysis_incomplete);
+        assert_eq!(crate::telemetry::Cap::SsaDegraded.recorded(), 1);
     }
 }

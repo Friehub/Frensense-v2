@@ -13,7 +13,10 @@ use super::discovery::{free_of, instr_at};
 use super::types::{CrossCtx, Pair, PairCheck, Violation};
 
 /// Backward-walk budget per start site: bounds provenance + discovery work
-/// on deep or cyclic value-flow chains (exhaustion = unprovable = silent).
+/// on deep or cyclic value-flow chains. Exhaustion makes the pair unprovable
+/// and drops it, so it is recorded as [`Cap::UafWalkNodes`].
+///
+/// [`Cap::UafWalkNodes`]: crate::telemetry::Cap::UafWalkNodes
 pub const MAX_WALK_NODES: usize = 512;
 
 /// Forward-scan budget inside a callee when looking for parameter frees.
@@ -114,6 +117,7 @@ impl<'a> Walker<'a> {
     pub fn visit_walker(&mut self, fi: usize, key: NodeKey, depth: u8, ctx: CrossCtx) -> bool {
         self.nodes += 1;
         if self.nodes > MAX_WALK_NODES {
+            crate::telemetry::Cap::UafWalkNodes.record();
             return false;
         }
         match self.state.get(&(fi, key)) {
@@ -342,6 +346,7 @@ impl<'a> Walker<'a> {
         while let Some(n) = queue.pop_front() {
             budget = budget.saturating_sub(1);
             if budget == 0 {
+                crate::telemetry::Cap::UafCalleeScanNodes.record();
                 break;
             }
             if let Some(instr) = instr_at(ir, n.block, n.instr_idx)
@@ -390,5 +395,47 @@ impl<'a> Walker<'a> {
                 free_idx: idx,
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::svfg::SvfgBuilder;
+
+    /// Hitting the backward-walk budget used to make the pair unprovable
+    /// without a trace. It must now be counted as a truncation.
+    #[test]
+    fn exhausted_walk_budget_records_a_cap() {
+        let _ = crate::telemetry::drain_caps();
+        let fns = crate::harness::lower_source("t.c", "void f(void) { }", "c").unwrap();
+        let ir = fns.values().next().unwrap();
+        let svfg = SvfgBuilder::new(ir).build().0;
+        let summaries = MemorySummaryRegistry::default();
+        let rev = FxHashMap::default();
+        let mut walker = Walker {
+            start_fi: 0,
+            start_ir: ir,
+            start_svfg: &svfg,
+            prog: None,
+            rev: &rev,
+            summaries: &summaries,
+            violation: Violation::UseAfterFree,
+            state: FxHashMap::default(),
+            prov_memo: FxHashMap::default(),
+            pairs: Vec::new(),
+            cross_frees: FxHashMap::default(),
+            nodes: MAX_WALK_NODES,
+        };
+
+        let provable = walker.visit_walker(
+            0,
+            NodeKey::instr(ir.entry_block, 0, VarId(0)),
+            0,
+            CrossCtx::None,
+        );
+
+        assert!(!provable, "an exhausted budget cannot prove provenance");
+        assert_eq!(crate::telemetry::Cap::UafWalkNodes.recorded(), 1);
     }
 }
