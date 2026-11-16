@@ -44,33 +44,10 @@ impl GuardMap {
         // Walk: cond var → def instruction, up to 3 hops, collecting
         // guard-call vars along the way (handles `!ALLOWED.has(x)`,
         // `x != null && SAFE.test(x)` shape fragments).
-        fn defs_of(instr: &Instruction) -> Vec<VarId> {
-            let mut v = Vec::with_capacity(2);
-            match instr {
-                Instruction::Assign { dest, .. }
-                | Instruction::AddressOf { dest, .. }
-                | Instruction::LoadField { dest, .. }
-                | Instruction::LoadElement { dest, .. }
-                | Instruction::LoadGlobal { dest, .. }
-                | Instruction::Cast { dest, .. }
-                | Instruction::ExtractValue { dest, .. }
-                | Instruction::BinaryOp { dest, .. }
-                | Instruction::UnaryOp { dest, .. } => v.push(*dest),
-                Instruction::CallStatic { dest, .. }
-                | Instruction::CallVirtual { dest, .. }
-                | Instruction::CallPointer { dest, .. } => {
-                    if let Some(d) = dest {
-                        v.push(*d);
-                    }
-                }
-                _ => {}
-            }
-            v
-        }
         fn def_site_of(ir: &FunctionIR, v: VarId) -> Option<&Instruction> {
             for b in ir.blocks.values() {
                 for i in &b.instructions {
-                    if defs_of(i).contains(&v) {
+                    if i.dest() == Some(v) {
                         return Some(i);
                     }
                 }

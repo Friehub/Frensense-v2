@@ -980,7 +980,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 }
             }
             for ins in &b.instructions {
-                if Self::instr_defines(ins, root.var) {
+                if ins.dest() == Some(root.var) {
                     return matches!(
                         ins,
                         Instruction::LoadField { .. } | Instruction::LoadElement { .. }
@@ -1008,30 +1008,6 @@ impl<'a> BackwardTaintEngine<'a> {
             .get(&block)
             .and_then(|b| b.instructions.get(i))
             .is_some_and(|ins| matches!(ins, Instruction::Allocate { dest, .. } if *dest == var))
-    }
-
-    /// Does this instruction define `var` (value destinations only)?
-    fn instr_defines(instr: &Instruction, var: VarId) -> bool {
-        let dest = match instr {
-            Instruction::Assign { dest, .. }
-            | Instruction::LoadField { dest, .. }
-            | Instruction::LoadElement { dest, .. }
-            | Instruction::LoadGlobal { dest, .. }
-            | Instruction::AddressOf { dest, .. }
-            | Instruction::Dereference { dest, .. }
-            | Instruction::Cast { dest, .. }
-            | Instruction::ExtractValue { dest, .. }
-            | Instruction::BinaryOp { dest, .. }
-            | Instruction::UnaryOp { dest, .. }
-            | Instruction::Allocate { dest, .. }
-            | Instruction::Await { dest, .. } => Some(*dest),
-            Instruction::CallStatic { dest, .. }
-            | Instruction::CallVirtual { dest, .. }
-            | Instruction::CallPointer { dest, .. }
-            | Instruction::Yield { dest, .. } => *dest,
-            _ => None,
-        };
-        dest == Some(var)
     }
 
     /// Backward BFS from `root` within one root's exploration state.

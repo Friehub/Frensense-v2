@@ -355,7 +355,7 @@ impl SSABuilder {
 
         for (b_id, block) in &self.ir.blocks {
             for instr in &block.instructions {
-                for dest in Self::get_instruction_dests(instr) {
+                for dest in instr.defs() {
                     def_blocks.entry(dest).or_default().insert(*b_id);
                 }
             }
@@ -648,43 +648,6 @@ impl SSABuilder {
             }
             _ => {}
         }
-    }
-
-    fn get_instruction_dests(instr: &Instruction) -> Vec<VarId> {
-        let mut dests = Vec::new();
-        match instr {
-            Instruction::Assign { dest, .. }
-            | Instruction::LoadField { dest, .. }
-            | Instruction::LoadElement { dest, .. }
-            | Instruction::LoadGlobal { dest, .. }
-            | Instruction::AddressOf { dest, .. }
-            | Instruction::Dereference { dest, .. }
-            | Instruction::Cast { dest, .. }
-            | Instruction::ExtractValue { dest, .. }
-            | Instruction::BinaryOp { dest, .. }
-            | Instruction::UnaryOp { dest, .. } => dests.push(*dest),
-
-            Instruction::StoreField { mem_out, .. }
-            | Instruction::StoreElement { mem_out, .. }
-            | Instruction::StoreGlobal { mem_out, .. } => dests.push(*mem_out),
-
-            Instruction::Allocate { dest, mem_out, .. }
-            | Instruction::Await { dest, mem_out, .. } => {
-                dests.push(*dest);
-                dests.push(*mem_out);
-            }
-
-            Instruction::CallStatic { dest, mem_out, .. }
-            | Instruction::CallVirtual { dest, mem_out, .. }
-            | Instruction::CallPointer { dest, mem_out, .. }
-            | Instruction::Yield { dest, mem_out, .. } => {
-                if let Some(d) = dest {
-                    dests.push(*d);
-                }
-                dests.push(*mem_out);
-            }
-        }
-        dests
     }
 
     fn rename_instruction_defs(

@@ -169,7 +169,7 @@ fn feeds_predicate(ir: &FunctionIR, dest: VarId) -> bool {
                 }
                 for instr in &blk.instructions {
                     if uses_var(instr, *v)
-                        && let Some(d) = dest_of(instr)
+                        && let Some(d) = instr.dest()
                         && seen.insert(d)
                     {
                         next.push(d);
@@ -206,26 +206,6 @@ fn uses_var(instr: &Instruction, v: VarId) -> bool {
         Instruction::ExtractValue { tuple, .. } => eq(tuple),
         Instruction::Await { promise, .. } => eq(promise),
         Instruction::Yield { src, .. } => src.as_ref().is_some_and(eq),
-    }
-}
-
-/// The variable `instr` defines, when it defines one.
-fn dest_of(instr: &Instruction) -> Option<VarId> {
-    match instr {
-        Instruction::Assign { dest, .. }
-        | Instruction::LoadField { dest, .. }
-        | Instruction::LoadElement { dest, .. }
-        | Instruction::LoadGlobal { dest, .. }
-        | Instruction::Cast { dest, .. }
-        | Instruction::ExtractValue { dest, .. }
-        | Instruction::BinaryOp { dest, .. }
-        | Instruction::UnaryOp { dest, .. }
-        | Instruction::Await { dest, .. } => Some(*dest),
-        Instruction::CallStatic { dest, .. }
-        | Instruction::CallVirtual { dest, .. }
-        | Instruction::CallPointer { dest, .. }
-        | Instruction::Yield { dest, .. } => *dest,
-        _ => None,
     }
 }
 

@@ -800,33 +800,10 @@ fn push_var(work: &mut Vec<VarId>, op: &Operand) {
 
 /// The instruction defining `v`, if any (first match - IR is SSA-shaped).
 fn def_of(ir: &FunctionIR, v: VarId) -> Option<&Instruction> {
-    for b in ir.blocks.values() {
-        for instr in &b.instructions {
-            let defines = match instr {
-                Instruction::Assign { dest, .. } => *dest == v,
-                Instruction::LoadField { dest, .. } => *dest == v,
-                Instruction::StoreField { .. } => false,
-                Instruction::LoadElement { dest, .. } => *dest == v,
-                Instruction::LoadGlobal { dest, .. } => *dest == v,
-                Instruction::CallStatic { dest, .. } => *dest == Some(v),
-                Instruction::CallVirtual { dest, .. } => *dest == Some(v),
-                Instruction::CallPointer { dest, .. } => *dest == Some(v),
-                Instruction::Allocate { dest, .. } => *dest == v,
-                Instruction::Dereference { dest, .. } => *dest == v,
-                Instruction::Cast { dest, .. } => *dest == v,
-                Instruction::ExtractValue { dest, .. } => *dest == v,
-                Instruction::BinaryOp { dest, .. } => *dest == v,
-                Instruction::UnaryOp { dest, .. } => *dest == v,
-                Instruction::Await { dest, .. } => *dest == v,
-                Instruction::Yield { dest, .. } => *dest == Some(v),
-                _ => false,
-            };
-            if defines {
-                return Some(instr);
-            }
-        }
-    }
-    None
+    ir.blocks
+        .values()
+        .flat_map(|b| b.instructions.iter())
+        .find(|instr| instr.dest() == Some(v))
 }
 
 /// True when `path` names an auth call per the spec/bundle vocabulary

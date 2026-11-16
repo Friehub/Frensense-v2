@@ -340,6 +340,75 @@ pub enum Instruction {
     },
 }
 
+impl Instruction {
+    /// The value variable this instruction defines, if any.
+    ///
+    /// Covers every instruction kind that produces a value: assignments,
+    /// loads, calls (when the result is used), allocations, address-of,
+    /// dereference, casts, aggregate extraction, unary/binary operations,
+    /// `await` and `yield`. Memory-state outputs are not included; see
+    /// [`Instruction::mem_out`]. This is the one definition of "what does this
+    /// instruction define"; do not re-match the variants elsewhere, because
+    /// a copy that forgets a variant silently drops findings on it.
+    #[must_use]
+    pub fn dest(&self) -> Option<VarId> {
+        match self {
+            Self::Assign { dest, .. }
+            | Self::LoadField { dest, .. }
+            | Self::LoadElement { dest, .. }
+            | Self::LoadGlobal { dest, .. }
+            | Self::Allocate { dest, .. }
+            | Self::AddressOf { dest, .. }
+            | Self::Dereference { dest, .. }
+            | Self::Cast { dest, .. }
+            | Self::ExtractValue { dest, .. }
+            | Self::BinaryOp { dest, .. }
+            | Self::UnaryOp { dest, .. }
+            | Self::Await { dest, .. } => Some(*dest),
+            Self::CallStatic { dest, .. }
+            | Self::CallVirtual { dest, .. }
+            | Self::CallPointer { dest, .. }
+            | Self::Yield { dest, .. } => *dest,
+            // No `_` arm on purpose: a new instruction kind must decide here
+            // whether it defines a value.
+            Self::StoreField { .. } | Self::StoreElement { .. } | Self::StoreGlobal { .. } => None,
+        }
+    }
+
+    /// The memory-state variable this instruction produces, if any.
+    #[must_use]
+    pub fn mem_out(&self) -> Option<VarId> {
+        match self {
+            Self::StoreField { mem_out, .. }
+            | Self::StoreElement { mem_out, .. }
+            | Self::StoreGlobal { mem_out, .. }
+            | Self::CallStatic { mem_out, .. }
+            | Self::CallVirtual { mem_out, .. }
+            | Self::CallPointer { mem_out, .. }
+            | Self::Allocate { mem_out, .. }
+            | Self::Await { mem_out, .. }
+            | Self::Yield { mem_out, .. } => Some(*mem_out),
+            Self::Assign { .. }
+            | Self::LoadField { .. }
+            | Self::LoadElement { .. }
+            | Self::LoadGlobal { .. }
+            | Self::AddressOf { .. }
+            | Self::Dereference { .. }
+            | Self::Cast { .. }
+            | Self::ExtractValue { .. }
+            | Self::BinaryOp { .. }
+            | Self::UnaryOp { .. } => None,
+        }
+    }
+
+    /// Every variable this instruction defines: the value result first, then
+    /// the memory-state output.
+    #[must_use]
+    pub fn defs(&self) -> Vec<VarId> {
+        self.dest().into_iter().chain(self.mem_out()).collect()
+    }
+}
+
 /// Determines how control flow exits a BasicBlock.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]

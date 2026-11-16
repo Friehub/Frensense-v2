@@ -359,7 +359,7 @@ impl<'a> SvfgBuilder<'a> {
 
             // --- Regular instructions ---
             for (idx, instr) in block.instructions.iter().enumerate() {
-                for def_var in Self::instruction_defs(instr) {
+                for def_var in instr.defs() {
                     let key = NodeKey::instr(block_id, idx, def_var);
                     self.graph.ensure_node(key, NodeKind::InstrDef);
                     self.def_site.insert(def_var, key);
@@ -384,7 +384,7 @@ impl<'a> SvfgBuilder<'a> {
 
             // --- Regular instructions ---
             for (idx, instr) in block.instructions.iter().enumerate() {
-                let defs = Self::instruction_defs(instr);
+                let defs = instr.defs();
 
                 // Memory-state handling: mem_in is consumed and (if the
                 // instruction produces mem_out) the memory flows onward.
@@ -950,43 +950,6 @@ impl<'a> SvfgBuilder<'a> {
     // These mirror `SSABuilder::get_instruction_dests` / `replace_uses` but
     // return owned lists rather than mutating in place.
     // -----------------------------------------------------------------------
-
-    fn instruction_defs(instr: &Instruction) -> Vec<VarId> {
-        let mut v = Vec::with_capacity(2);
-        match instr {
-            Instruction::Assign { dest, .. }
-            | Instruction::LoadField { dest, .. }
-            | Instruction::LoadElement { dest, .. }
-            | Instruction::LoadGlobal { dest, .. }
-            | Instruction::AddressOf { dest, .. }
-            | Instruction::Dereference { dest, .. }
-            | Instruction::Cast { dest, .. }
-            | Instruction::ExtractValue { dest, .. }
-            | Instruction::BinaryOp { dest, .. }
-            | Instruction::UnaryOp { dest, .. } => v.push(*dest),
-
-            Instruction::StoreField { mem_out, .. }
-            | Instruction::StoreElement { mem_out, .. }
-            | Instruction::StoreGlobal { mem_out, .. } => v.push(*mem_out),
-
-            Instruction::Allocate { dest, mem_out, .. }
-            | Instruction::Await { dest, mem_out, .. } => {
-                v.push(*dest);
-                v.push(*mem_out);
-            }
-
-            Instruction::CallStatic { dest, mem_out, .. }
-            | Instruction::CallVirtual { dest, mem_out, .. }
-            | Instruction::CallPointer { dest, mem_out, .. }
-            | Instruction::Yield { dest, mem_out, .. } => {
-                if let Some(d) = dest {
-                    v.push(*d);
-                }
-                v.push(*mem_out);
-            }
-        }
-        v
-    }
 
     fn instruction_uses(instr: &Instruction) -> Vec<VarId> {
         let mut v: Vec<VarId> = Vec::with_capacity(4);

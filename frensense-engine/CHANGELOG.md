@@ -14,6 +14,9 @@ what this crate does.
 
 ### Added
 
+- `Instruction::dest`, `Instruction::mem_out` and `Instruction::defs`: the single
+  definition of which variables an instruction defines. Both matches are
+  exhaustive, so a new instruction kind has to be classified.
 - `Debug` for the language spec structs, `LanguageRegistry`, `CheckContext`,
   `CheckRegistry`, `LoweringContext`, `GuardMap` and `CtxLink`, required by
   the `missing_debug_implementations` lint.
@@ -25,6 +28,12 @@ what this crate does.
   first and last byte of any literal that began with a quote character; they
   now strip only a matching pair, so a lone `"` or a mismatched `'a"` is left
   unchanged instead of being sliced (the lone-quote case could panic).
+- Nine hand-written "what does this instruction define" matches (taint guard
+  and walk, forward predicates, `guard_bypass`, UAF `uninit`, `leak`, SSA and
+  SVFG construction) now call `Instruction::dest`/`defs`. The copies disagreed:
+  the guard map ignored `Allocate`/`Dereference`/`Await`/`Yield`, `guard_bypass`
+  ignored `Allocate`/`AddressOf`/`Dereference`, and `predicates` ignored
+  `AddressOf`. All now cover every value-producing kind.
 - Items that no external path could reach are now `pub(crate)`; no
   reachable public item changed.
 
