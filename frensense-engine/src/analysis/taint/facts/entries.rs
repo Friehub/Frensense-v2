@@ -692,17 +692,9 @@ impl LearnedFactEntry {
                     severity: severity.clone(),
                     package: None,
                 };
-                if let Some(existing) = table
-                    .policy_facts
-                    .iter_mut()
-                    .find(|(e, _)| e.rule == fact.rule && e.when_call == fact.when_call)
-                {
-                    if provenance > existing.1 {
-                        *existing = (fact, provenance);
-                    }
-                } else {
-                    table.policy_facts.push((fact, provenance));
-                }
+                upsert_by_provenance(&mut table.policy_facts, fact, provenance, |a, b| {
+                    a.rule == b.rule && a.when_call == b.when_call
+                });
             }
             LearnedFactEntry::PolicyScoped {
                 rule,
@@ -722,17 +714,9 @@ impl LearnedFactEntry {
                     severity: severity.clone(),
                     package: Some(package.clone()),
                 };
-                if let Some(existing) = table
-                    .policy_facts
-                    .iter_mut()
-                    .find(|(e, _)| e.rule == fact.rule && e.when_call == fact.when_call)
-                {
-                    if provenance > existing.1 {
-                        *existing = (fact, provenance);
-                    }
-                } else {
-                    table.policy_facts.push((fact, provenance));
-                }
+                upsert_by_provenance(&mut table.policy_facts, fact, provenance, |a, b| {
+                    a.rule == b.rule && a.when_call == b.when_call
+                });
             }
             LearnedFactEntry::Check {
                 rule,
@@ -750,17 +734,9 @@ impl LearnedFactEntry {
                     unless_guard: unless_guard.clone(),
                     unless_range_check: unless_range_check.clone(),
                 };
-                if let Some(existing) = table
-                    .learned_checks
-                    .iter_mut()
-                    .find(|(e, _)| e.rule == fact.rule && e.call == fact.call)
-                {
-                    if provenance > existing.1 {
-                        *existing = (fact, provenance);
-                    }
-                } else {
-                    table.learned_checks.push((fact, provenance));
-                }
+                upsert_by_provenance(&mut table.learned_checks, fact, provenance, |a, b| {
+                    a.rule == b.rule && a.call == b.call
+                });
             }
             LearnedFactEntry::MemoryContract {
                 name,
@@ -917,15 +893,12 @@ impl LearnedFactEntry {
                         LearnedFactEntry::IntegerOverflowUnboundedRule { .. }
                     ),
                 };
-                if let Some(existing) = table.integer_overflow_rules.iter_mut().find(|(r, _)| {
-                    r.rule_id == fact.rule_id && r.wrap_threshold == fact.wrap_threshold
-                }) {
-                    if provenance > existing.1 {
-                        *existing = (fact, provenance);
-                    }
-                } else {
-                    table.integer_overflow_rules.push((fact, provenance));
-                }
+                upsert_by_provenance(
+                    &mut table.integer_overflow_rules,
+                    fact,
+                    provenance,
+                    |a, b| a.rule_id == b.rule_id && a.wrap_threshold == b.wrap_threshold,
+                );
             }
             LearnedFactEntry::Hints { kind, values } => {
                 let set = match kind {

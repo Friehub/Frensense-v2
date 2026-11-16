@@ -17,6 +17,28 @@
 //! with bundler-extracted learned facts via a [`FactTable`]). The engine only
 //! consumes them; updating a framework never touches engine code.
 
+/// Insert `fact` into a provenance-tagged table, or resolve a key collision.
+///
+/// `same_key` says whether an existing entry is the same fact. On a collision
+/// the higher-ranked provenance wins (`Spec < Authored < Learned`) and a tie
+/// keeps the existing entry, so merging is order-independent across tiers.
+/// This is the one implementation of that rule; every table that ranks facts
+/// by provenance goes through it.
+pub(crate) fn upsert_by_provenance<T>(
+    items: &mut Vec<(T, Provenance)>,
+    fact: T,
+    provenance: Provenance,
+    same_key: impl Fn(&T, &T) -> bool,
+) {
+    if let Some(existing) = items.iter_mut().find(|(e, _)| same_key(e, &fact)) {
+        if provenance > existing.1 {
+            *existing = (fact, provenance);
+        }
+    } else {
+        items.push((fact, provenance));
+    }
+}
+
 /// Where the knowledge behind a fact or finding came from. Stored
 /// per-entry in the [`FactTable`] so checks report the real origin of the
 /// knowledge that fired (spec seed vs bundle) instead of guessing.

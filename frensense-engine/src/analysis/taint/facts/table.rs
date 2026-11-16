@@ -436,31 +436,15 @@ impl FactTable {
         // collision (Spec < Authored < Learned) and ties keep the existing
         // entry, so merge is order-independent across provenance tiers.
         for (c, prov) in &other.learned_checks {
-            if let Some(existing) = self
-                .learned_checks
-                .iter_mut()
-                .find(|(e, _)| e.rule == c.rule && e.call == c.call)
-            {
-                if *prov > existing.1 {
-                    *existing = (c.clone(), *prov);
-                }
-            } else {
-                self.learned_checks.push((c.clone(), *prov));
-            }
+            upsert_by_provenance(&mut self.learned_checks, c.clone(), *prov, |a, b| {
+                a.rule == b.rule && a.call == b.call
+            });
         }
         // Policy facts order the same way, dedup on (rule, when_call).
         for (p, prov) in &other.policy_facts {
-            if let Some(existing) = self
-                .policy_facts
-                .iter_mut()
-                .find(|(e, _)| e.rule == p.rule && e.when_call == p.when_call)
-            {
-                if *prov > existing.1 {
-                    *existing = (p.clone(), *prov);
-                }
-            } else {
-                self.policy_facts.push((p.clone(), *prov));
-            }
+            upsert_by_provenance(&mut self.policy_facts, p.clone(), *prov, |a, b| {
+                a.rule == b.rule && a.when_call == b.when_call
+            });
         }
         // Memory contracts accumulate, with newer/learned contracts replacing older ones on collision.
         for mc in &other.memory_contracts {
@@ -546,17 +530,9 @@ impl FactTable {
         // redefining a spec-seeded rule now overrides it (Learned >
         // Spec), ties keep the existing entry.
         for (r, p) in &other.integer_overflow_rules {
-            if let Some(existing) = self
-                .integer_overflow_rules
-                .iter_mut()
-                .find(|(e, _)| e.rule_id == r.rule_id && e.wrap_threshold == r.wrap_threshold)
-            {
-                if *p > existing.1 {
-                    *existing = (r.clone(), *p);
-                }
-            } else {
-                self.integer_overflow_rules.push((r.clone(), *p));
-            }
+            upsert_by_provenance(&mut self.integer_overflow_rules, r.clone(), *p, |a, b| {
+                a.rule_id == b.rule_id && a.wrap_threshold == b.wrap_threshold
+            });
         }
         for s in &other.insecure_config_selectors {
             if let Some(existing) = self
