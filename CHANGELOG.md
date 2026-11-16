@@ -19,6 +19,24 @@ Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
 
+## [Unreleased]
+
+### Removed
+
+Code in the consumer library with no caller anywhere (verified by search over
+every crate and the binary), plus thin wrappers that only tests reached, so
+that tests now exercise the function production calls:
+
+- `Reporter::to_markdown` and `to_markdown_detailed` (no output format used them).
+- `Reporter::to_sarif`, `to_sarif_detailed` and `describe_path_step`: use
+  `to_sarif_with_coverage` and `describe_step`.
+- `cli::reporting::{print_results, print_results_detailed, print_results_with_skips,
+  print_scan_summary, print_scan_summary_detailed, json_report,
+  json_report_with_telemetry}` and the empty stub `apply_filters`: use
+  `print_results_with_coverage`, `print_scan_summary_detailed_with_coverage`
+  and `json_report_with_coverage`.
+- `cli::options::get_input_path` (use `get_input_paths`).
+
 ## [0.8.3]
 
 ### Fixed

@@ -2,7 +2,6 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-use super::options::CliOptions;
 use crate::engine::files::UnsupportedSourceFile;
 use crate::explain::ExplainRecord;
 use crate::policy::Coverage;
@@ -169,37 +168,7 @@ fn status_label(status: ScanStatus, findings: usize, coverage: Option<&Coverage>
     }
 }
 
-/// Print a structured scan summary block.
-pub fn print_scan_summary(
-    advisories: &[Advisory],
-    input_path: &std::path::Path,
-    duration: std::time::Duration,
-    output_path: Option<&std::path::Path>,
-) {
-    print_scan_summary_detailed(advisories, input_path, duration, output_path, None, &[]);
-}
-
-/// Print a structured scan summary block with status and caveats.
-pub fn print_scan_summary_detailed(
-    advisories: &[Advisory],
-    input_path: &std::path::Path,
-    duration: std::time::Duration,
-    output_path: Option<&std::path::Path>,
-    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
-    incomplete: &[frensense_engine::scan::IncompleteFunction],
-) {
-    print_scan_summary_detailed_with_coverage(
-        advisories,
-        input_path,
-        duration,
-        output_path,
-        telemetry,
-        incomplete,
-        None,
-    );
-}
-
-/// [`print_scan_summary_detailed`] plus what the scan actually covered.
+/// Prints the scan summary block, including what the scan actually covered.
 ///
 /// The coverage line is the denominator behind "no findings": without it a
 /// scan that analyzed 3 of 40 files is indistinguishable from one that
@@ -370,23 +339,6 @@ pub fn print_scan_summary_detailed_with_coverage(
     }
 }
 
-/// The JSON report envelope: `schema_version` + `producer` identity block,
-/// then the finding payload, plus `analysis_incomplete`: the functions whose
-/// per-function work budget expired and were therefore analyzed in degraded
-/// (flow-insensitive) form. Additive - consumers already ignoring unknown
-/// keys keep working - so the schema version is unchanged.
-///
-/// Extracted so the shape is testable (and golden-assertable) without a
-/// filesystem. Bump [`crate::REPORT_SCHEMA_VERSION`] when a key here is
-/// renamed, removed, or changes type.
-#[must_use]
-pub fn json_report(
-    advisories: &[Advisory],
-    incomplete: &[frensense_engine::scan::IncompleteFunction],
-) -> serde_json::Value {
-    json_report_with_skips(advisories, incomplete, None, &[])
-}
-
 /// The one-line headline above the summary when the scan reported nothing.
 ///
 /// "Analysis Complete: No findings." was printed for every empty result,
@@ -412,16 +364,6 @@ fn no_findings_headline(status: ScanStatus, coverage: Option<&Coverage>) -> Stri
         (ScanStatus::Partial, _) => "No findings (analysis incomplete).".to_string(),
         (ScanStatus::Failed, _) => "Analysis failed.".to_string(),
     }
-}
-
-/// The JSON report envelope with full `analysis` telemetry object.
-#[must_use]
-pub fn json_report_with_telemetry(
-    advisories: &[Advisory],
-    incomplete: &[frensense_engine::scan::IncompleteFunction],
-    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
-) -> serde_json::Value {
-    json_report_with_skips(advisories, incomplete, telemetry, &[])
 }
 
 /// The JSON report envelope including the source files the scan skipped
@@ -565,91 +507,7 @@ pub fn json_report_with_coverage(
     })
 }
 
-/// Print results in the requested format.
-///
-/// `incomplete` names the functions analyzed in degraded form because their
-/// per-function work budget expired; they are announced on stderr (never
-/// silently) and reported under `analysis_incomplete` in JSON.
-///
-/// If `output_path` is provided, writes the formatted report to that destination
-/// and prints status summary to stdout.
-///
-/// # Errors
-/// Returns an error if serialization or file writing fails.
-pub fn print_results(
-    advisories: &[Advisory],
-    incomplete: &[frensense_engine::scan::IncompleteFunction],
-    format: &str,
-    input_path: &std::path::Path,
-    duration: Option<std::time::Duration>,
-    output_path: Option<&std::path::Path>,
-) -> Result<()> {
-    print_results_with_skips(
-        advisories,
-        incomplete,
-        None,
-        &[],
-        format,
-        input_path,
-        duration,
-        output_path,
-    )
-}
-
-/// Print results with full telemetry and status reporting.
-pub fn print_results_detailed(
-    advisories: &[Advisory],
-    incomplete: &[frensense_engine::scan::IncompleteFunction],
-    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
-    format: &str,
-    input_path: &std::path::Path,
-    duration: Option<std::time::Duration>,
-    output_path: Option<&std::path::Path>,
-) -> Result<()> {
-    print_results_with_skips(
-        advisories,
-        incomplete,
-        telemetry,
-        &[],
-        format,
-        input_path,
-        duration,
-        output_path,
-    )
-}
-
-/// Print results and say which source files the scan could not analyze
-/// because the engine has no language spec for them.
-///
-/// The warning goes to stderr so it never contaminates stdout reports, and it
-/// prints even when the scan of the supported files was otherwise complete: a
-/// polyglot repository where 30 of 40 files are Ruby must not present itself
-/// as a clean JavaScript scan.
-#[allow(clippy::too_many_arguments)]
-pub fn print_results_with_skips(
-    advisories: &[Advisory],
-    incomplete: &[frensense_engine::scan::IncompleteFunction],
-    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
-    skipped: &[UnsupportedSourceFile],
-    format: &str,
-    input_path: &std::path::Path,
-    duration: Option<std::time::Duration>,
-    output_path: Option<&std::path::Path>,
-) -> Result<()> {
-    print_results_with_coverage(
-        advisories,
-        incomplete,
-        telemetry,
-        skipped,
-        None,
-        format,
-        input_path,
-        duration,
-        output_path,
-    )
-}
-
-/// [`print_results_with_skips`] plus what the scan could recognize.
+/// Prints the findings and the scan summary, including what the scan could recognize.
 ///
 /// `coverage` is the denominator behind "no findings": a report that prints
 /// "Clean" without it cannot be falsified, because a scan that recognized no
@@ -1240,11 +1098,6 @@ pub fn compare_baseline(advisories: &[Advisory], path: &str) -> Result<bool> {
     Ok(regression_detected)
 }
 
-/// Apply CLI filters to advisories.
-pub fn apply_filters(advisories: &mut [Advisory], options: &CliOptions) {
-    let _ = (advisories, options);
-}
-
 /// `frensense explain <rule-id>`: what one built-in rule means and how to fix
 /// it, rendered from its card so the CLI cannot drift from the report.
 ///
@@ -1635,7 +1488,7 @@ mod explain_rule_tests {
 /// `REPORT_SCHEMA_VERSION` and this test move together.
 #[cfg(test)]
 mod json_report_schema_tests {
-    use super::{json_report, json_report_with_coverage, json_report_with_telemetry};
+    use super::json_report_with_coverage;
     use crate::Advisory;
     use crate::engine::files::UnsupportedSourceFile;
     use frensense_engine::telemetry::ScanTelemetry;
@@ -1653,7 +1506,7 @@ mod json_report_schema_tests {
 
     #[test]
     fn envelope_carries_schema_version_and_producer() {
-        let report = json_report(&[adv()], &[]);
+        let report = json_report_with_coverage(&[adv()], &[], None, &[], None);
         assert_eq!(report["schema_version"], crate::REPORT_SCHEMA_VERSION);
         assert_eq!(report["clean"], false);
         assert_eq!(report["advisory_count"], 1);
@@ -1670,7 +1523,7 @@ mod json_report_schema_tests {
 
     #[test]
     fn clean_report_still_has_the_envelope() {
-        let report = json_report(&[], &[]);
+        let report = json_report_with_coverage(&[], &[], None, &[], None);
         assert_eq!(report["clean"], true);
         assert_eq!(report["advisory_count"], 0);
         // The producer block is present even with no findings - a consumer
@@ -1680,7 +1533,7 @@ mod json_report_schema_tests {
 
     #[test]
     fn analysis_envelope_has_required_keys() {
-        let report = json_report_with_telemetry(&[], &[], None);
+        let report = json_report_with_coverage(&[], &[], None, &[], None);
         let analysis = &report["analysis"];
         // All top-level keys must be present.
         assert!(analysis["status"].is_string(), "analysis.status missing");
@@ -1711,7 +1564,7 @@ mod json_report_schema_tests {
     #[test]
     fn analysis_status_reflects_scan_telemetry() {
         // No engine telemetry supplied → legacy API treats it as complete.
-        let report = json_report_with_telemetry(&[], &[], None);
+        let report = json_report_with_coverage(&[], &[], None, &[], None);
         assert_eq!(report["analysis"]["status"], "complete");
 
         // With a partial-parse file recorded → Partial.
@@ -1719,7 +1572,7 @@ mod json_report_schema_tests {
         telem.input.scanned = 1;
         telem.input.parse_partial = 1;
         telem.input.parse_partial_files.push("bad.py".into());
-        let report = json_report_with_telemetry(&[], &[], Some(&telem));
+        let report = json_report_with_coverage(&[], &[], Some(&telem), &[], None);
         assert_eq!(report["analysis"]["status"], "partial");
     }
 
@@ -1750,7 +1603,7 @@ mod json_report_schema_tests {
 
     #[test]
     fn reports_without_skips_keep_an_empty_unsupported_object() {
-        let report = json_report_with_telemetry(&[], &[], None);
+        let report = json_report_with_coverage(&[], &[], None, &[], None);
         let coverage = &report["analysis"]["coverage"]["unsupported_source_files"];
         assert_eq!(coverage["count"], 0);
         assert_eq!(coverage["languages"].as_array().map(Vec::len), Some(0));
