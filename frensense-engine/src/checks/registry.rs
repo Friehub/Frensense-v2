@@ -54,6 +54,7 @@ impl DiagnosticSink for NoopDiagnosticSink {
     fn skipped(&self, _reason: &'static str) {}
 }
 
+/// Shared instance of [`NoopDiagnosticSink`].
 pub static NOOP_DIAGNOSTIC_SINK: NoopDiagnosticSink = NoopDiagnosticSink;
 
 /// Everything a non-dataflow check may consult.
@@ -82,6 +83,8 @@ pub struct CheckContext<'a> {
 
 impl<'a> CheckContext<'a> {
     /// The function under check.
+    ///
+    /// # Panics
     ///
     /// Panics when a [`CheckScope::Program`] check asks for a single
     /// subject: the scope method and `run` disagree, which is a

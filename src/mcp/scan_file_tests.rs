@@ -63,11 +63,38 @@ fn filter_respects_severity_and_confidence() {
         mk(Severity::Warning, 0.5),
         mk(Severity::Info, 0.2),
     ];
-    assert_eq!(filter_advisories(all.clone(), "info", 0.0).len(), 3);
-    assert_eq!(filter_advisories(all.clone(), "warning", 0.0).len(), 2);
-    assert_eq!(filter_advisories(all.clone(), "critical", 0.0).len(), 1);
+    assert_eq!(filter_advisories(all.clone(), Severity::Info, 0.0).len(), 3);
+    assert_eq!(
+        filter_advisories(all.clone(), Severity::Warning, 0.0).len(),
+        2
+    );
+    assert_eq!(
+        filter_advisories(all.clone(), Severity::Critical, 0.0).len(),
+        1
+    );
     // Confidence floor drops the 0.2-confidence info finding.
-    assert_eq!(filter_advisories(all, "info", 0.3).len(), 2);
+    assert_eq!(filter_advisories(all, Severity::Info, 0.3).len(), 2);
+}
+
+#[test]
+fn unknown_severity_threshold_is_rejected_not_downgraded() {
+    let dir = tempdir("bad-severity");
+    let file = dir.join("ok.py");
+    std::fs::write(&file, "x = 1\n").unwrap();
+    let out = run_scan_file(&json!({
+        "path": file.display().to_string(),
+        "severity_threshold": "extra-high",
+    }));
+    assert_eq!(out["clean"], false, "{out}");
+    assert!(
+        out["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown severity level 'extra-high'"),
+        "an unknown threshold must be refused, not mapped to info: {out}"
+    );
+    assert!(out["advisories"].as_array().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

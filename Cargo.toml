@@ -13,24 +13,50 @@ resolver = "2"
 # See frensense-engine/AGENTS.md for the rationale and the review-only rules.
 [workspace.lints.rust]
 unsafe_code = "forbid"
-unreachable_pub = "warn"
-missing_debug_implementations = "warn"
+unreachable_pub = "deny"
+missing_debug_implementations = "deny"
+# Prevent leaking private types inside public function signatures.
+private_interfaces = "deny"
+private_bounds = "deny"
 
 [workspace.lints.clippy]
 # Contract integrity: a library reports, it does not panic or print.
-unwrap_used = "warn"
-expect_used = "warn"
-missing_panics_doc = "warn"
-missing_errors_doc = "warn"
-allow_attributes_without_reason = "warn"
+# Zero-panic guarantee: never crash the host process.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+panic_in_result_fn = "deny"
+unreachable = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
+exit = "deny"
+missing_panics_doc = "deny"
+missing_errors_doc = "deny"
+allow_attributes = "deny"
+
+# Visibility & API stability: prevent over-exposing internal items.
+redundant_pub_crate = "deny"
+exhaustive_enums = "deny"
+exhaustive_structs = "deny"
+
+# No accidental stdout/stderr pollution from library code.
+print_stdout = "deny"
+print_stderr = "deny"
+dbg_macro = "deny"
+
+# Determinism: prevent floating-point drift across architectures.
+float_cmp = "deny"
+float_arithmetic = "deny"
+
 # Structure: one responsibility per function.
-too_many_lines = "warn"
-implicit_clone = "warn"
-needless_pass_by_value = "warn"
+too_many_lines = "deny"
+implicit_clone = "deny"
+needless_pass_by_value = "deny"
 
 [package]
 name = "frensense"
-version = "0.8.2"
+version = "0.8.3"
 authors = ["Friehub Developers"]
 edition = "2024"
 description = "Frensense: deterministic dataflow security scanner."
@@ -52,8 +78,8 @@ name = "frensense"
 path = "src/bin/frensense.rs"
 
 [dependencies]
-frensense-engine = { path = "frensense-engine", version = "0.8.1", features = ["serialize"] }
-frensense-lang = { path = "frensense-lang", version = "0.8.0" }
+frensense-engine = { path = "frensense-engine", version = "0.8.2", features = ["serialize"] }
+frensense-lang = { path = "frensense-lang", version = "0.8.1" }
 thiserror = "1.0"
 tracing = { version = "0.1", features = ["attributes"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -61,8 +87,10 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 walkdir = "2"
 rustc-hash = "1.1"
-
-frensense-bundler = { version = "0.8.0", path = "frensense-bundler" }
+frensense-bundler = { version = "0.8.1", path = "frensense-bundler" }
 
 [dev-dependencies]
 tempfile = "3"
+
+[lints]
+workspace = true

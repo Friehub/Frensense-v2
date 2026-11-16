@@ -63,7 +63,7 @@ pub fn tool_definition() -> Value {
                 },
                 "severity_threshold": {
                     "type": "string",
-                    "enum": ["critical", "warning", "info"],
+                    "enum": frensense_lang::severity::SEVERITY_LABELS,
                     "default": "info",
                     "description": "Minimum severity to report"
                 },
@@ -279,14 +279,10 @@ fn path_matches(advisory_path: &str, diff_path: &str) -> bool {
 #[must_use]
 pub fn filter_advisories(
     advisories: Vec<Advisory>,
-    severity_threshold: &str,
+    severity_floor: Severity,
     min_confidence: f64,
 ) -> Vec<Advisory> {
-    crate::policy::apply(
-        advisories,
-        min_confidence,
-        Some(Severity::parse(severity_threshold)),
-    )
+    crate::policy::apply(advisories, min_confidence, Some(severity_floor))
 }
 
 /// Run `git diff HEAD` in `repo` and append synthetic added-file hunks
@@ -367,6 +363,11 @@ pub fn run_diff_detailed(
     min_confidence: f64,
     corpus_bundle: Option<&str>,
 ) -> crate::Result<DiffScan> {
+    // Resolve the one shared vocabulary before touching the tree: an unknown
+    // threshold is a caller error, not a reason to fall back to `info` (the
+    // least restrictive floor) and silently report everything.
+    let severity_floor = crate::policy::severity_from_label(severity_threshold)
+        .map_err(crate::FrensenseError::Config)?;
     let diff = match diff_text {
         Some(d) => d.to_string(),
         None => git_diff_head(repo).map_err(crate::FrensenseError::Config)?,
@@ -411,7 +412,7 @@ pub fn run_diff_detailed(
     coverage.files_found += unsupported_touched;
     coverage.files_unsupported += unsupported_touched;
 
-    let all = filter_advisories(all, severity_threshold, min_confidence);
+    let all = filter_advisories(all, severity_floor, min_confidence);
     let on_added: Vec<Advisory> = all
         .into_iter()
         .filter(|adv| {
@@ -506,6 +507,13 @@ pub fn run_diff_tool(args: &Value) -> Value {
         .get("severity_threshold")
         .and_then(Value::as_str)
         .unwrap_or("info");
+    if let Err(error) = crate::policy::severity_from_label(severity_threshold) {
+        return json!({
+            "clean": false,
+            "advisories": [],
+            "error": error
+        });
+    }
     let min_confidence = args
         .get("min_confidence")
         .and_then(Value::as_f64)

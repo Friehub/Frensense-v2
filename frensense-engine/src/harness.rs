@@ -29,6 +29,21 @@ use crate::ir::ssa::SSABuilder;
 /// Handler names are synthetic and file-position-stable
 /// (`<path:handler@byte>`), so bundles derived from the same file hash to the
 /// same keys.
+///
+/// ```
+/// use frensense_engine::harness::lower_source;
+///
+/// let src = "declare const app: any\n\
+///            app.get('/x', (req: any, res: any) => { res.send(req.query.a) })\n\
+///            function f() { return 1 }";
+/// let fns = lower_source("t.ts", src, "ts").unwrap();
+/// // Ordinary declarations are keyed by their name.
+/// assert!(fns.contains_key("f"));
+/// // The route handler gets a synthetic name built from the path and the byte
+/// // offset of the handler, here the start of the arrow function's parameters.
+/// let offset = src.find("(req").unwrap();
+/// assert!(fns.contains_key(&format!("<t.ts:handler@{offset}>")));
+/// ```
 pub fn lower_source(
     path: &str,
     source: &str,
@@ -66,7 +81,7 @@ pub fn lower_source_detailed(
 
     // Single-file-container formats (e.g. Vue SFCs) rewrite the source
     // before parsing: the spec blanks non-code markup into same-length
-    // whitespace, so every byte offset — and every reported line/column —
+    // whitespace, so every byte offset, and every reported line/column,
     // still points at the original file.
     let rewritten = spec.preprocess(source);
     let source: &str = rewritten.as_ref();

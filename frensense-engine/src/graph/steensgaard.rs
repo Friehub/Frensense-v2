@@ -88,6 +88,26 @@ impl Steensgaard {
     ///   field structure survives: two loads of the same base.field land in
     ///   the same class, loads of different fields stay separate at this
     ///   stage (phase 2 refines).
+    ///
+    /// ```
+    /// use frensense_engine::graph::steensgaard::Steensgaard;
+    /// use frensense_engine::harness::lower_source;
+    ///
+    /// let fns = lower_source("t.ts", "function g(a: any) { const b = a; const c = 5; return b }", "ts").unwrap();
+    /// let g = &fns["g"];
+    /// let var = |name: &str| {
+    ///     *g.var_metadata
+    ///         .iter()
+    ///         .find(|(_, m)| m.source_name.as_deref() == Some(name))
+    ///         .map(|(v, _)| v)
+    ///         .unwrap()
+    /// };
+    /// let classes = Steensgaard::analyze(g);
+    /// // `const b = a` unifies `b` with `a`.
+    /// assert_eq!(classes.class_of[&var("a")], classes.class_of[&var("b")]);
+    /// // `c` is assigned a literal, so it is not unified with them.
+    /// assert_ne!(classes.class_of.get(&var("c")), classes.class_of.get(&var("a")));
+    /// ```
     pub fn analyze(ir: &FunctionIR) -> Self {
         let mut uf = UnionFind::default();
         let mut field_var: FxHashMap<(VarId, String), VarId> = FxHashMap::default();

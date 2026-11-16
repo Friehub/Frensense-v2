@@ -36,7 +36,7 @@ pub fn tool_definition() -> Value {
                 },
                 "severity_threshold": {
                     "type": "string",
-                    "enum": ["critical", "warning", "info"],
+                    "enum": frensense_lang::severity::SEVERITY_LABELS,
                     "default": "info",
                     "description": "Minimum severity to report (default: report everything)"
                 },
@@ -69,18 +69,16 @@ pub fn is_supported(path: &Path) -> bool {
 /// No language filter here - the file's own extension decides what runs.
 ///
 /// Thin wrapper over [`crate::policy::apply`], the one reporting
-/// policy every surface shares.
+/// policy every surface shares. The caller resolves the threshold with
+/// [`crate::policy::severity_from_label`], so an unknown label is rejected
+/// before any work is done.
 #[must_use]
 pub fn filter_advisories(
     advisories: Vec<Advisory>,
-    severity_threshold: &str,
+    severity_floor: Severity,
     min_confidence: f64,
 ) -> Vec<Advisory> {
-    crate::policy::apply(
-        advisories,
-        min_confidence,
-        Some(Severity::parse(severity_threshold)),
-    )
+    crate::policy::apply(advisories, min_confidence, Some(severity_floor))
 }
 
 /// A single-file scan plus what it actually covered.
@@ -279,6 +277,16 @@ pub fn run_scan_file(args: &Value) -> Value {
         .get("severity_threshold")
         .and_then(Value::as_str)
         .unwrap_or("info");
+    let severity_floor = match crate::policy::severity_from_label(severity_threshold) {
+        Ok(floor) => floor,
+        Err(error) => {
+            return json!({
+                "clean": false,
+                "advisories": [],
+                "error": error
+            });
+        }
+    };
     let min_confidence = args
         .get("min_confidence")
         .and_then(Value::as_f64)
@@ -297,7 +305,7 @@ pub fn run_scan_file(args: &Value) -> Value {
 
     match scan_file_detailed(path, min_confidence, corpus_bundle) {
         Ok(scan) => {
-            let filtered = filter_advisories(scan.advisories, severity_threshold, min_confidence);
+            let filtered = filter_advisories(scan.advisories, severity_floor, min_confidence);
             result_payload_detailed(
                 path,
                 &filtered,

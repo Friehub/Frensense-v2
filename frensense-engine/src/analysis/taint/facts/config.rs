@@ -331,7 +331,7 @@ fn install_language_group(
                     Some(pkg) => {
                         // Package-scoped fact: install ONLY under
                         // (package, call). No universal signature, no
-                        // bare-name aliases, no `config.sinks` entry —
+                        // bare-name aliases, no `config.sinks` entry,
                         // matching is origin-gated (`is_sink_call_scoped`
                         // -> `sink_signature_scoped`), so an unrelated
                         // receiver or an unimported file never inherits
@@ -433,7 +433,7 @@ fn install_language_group(
                     Some(pkg) => {
                         // Package-scoped sanitizer: install ONLY under
                         // (package, call). No universal `sanitizer_facts`
-                        // entry and no `config.sanitizers` entry — both
+                        // entry and no `config.sanitizers` entry, both
                         // are consulted without import context, so a
                         // universal alias would cut the call on ANY
                         // receiver and silence true findings whose origin

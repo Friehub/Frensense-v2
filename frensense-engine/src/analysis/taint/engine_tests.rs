@@ -2409,7 +2409,7 @@ export function b(id: any): void {
     /// WI-11: scope-separated callees (`std::fs::read_to_string`,
     /// `fs::read_to_string`) must match the entry that matches the bare
     /// `read_to_string(..)`. The engine resolves them at fact-matching time
-    /// through `::` suffix fallbacks — an engine-mechanism rule, keeping the
+    /// through `::` suffix fallbacks. This is an engine-mechanism rule, keeping the
     /// engine free of Rust-specific vocabulary. Qualified entries keep exact
     /// precedence (the `Command::new` family stays qualified), and the
     /// negative (literal path) stays silent.
@@ -2456,7 +2456,7 @@ export function b(id: any): void {
 
     /// WI-41: a call whose callee is defined in this program must not be
     /// armed as a sink even when the name matches a library sink (`run`),
-    /// otherwise the same bug reports twice — once at the call site and once
+    /// otherwise the same bug reports twice: once at the call site and once
     /// at the callee's real sink. The callee's own sink reports once, its
     /// backward path crossing the caller.
     #[test]

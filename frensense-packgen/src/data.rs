@@ -151,12 +151,13 @@ pub static BOOTSTRAP_CREDENTIAL_CONTEXT_HINTS: &[&str] = &[
     "apikey",
 ];
 
-/// Shared advisory body for the bootstrap weak-hash rules (the `weak_hash`
-/// observation template's text, static form).
-const WEAK_HASH_MESSAGE: &str = "Weak hash primitive selected, not acceptable \
-                                 for passwords or security-sensitive digests \
-                                 (use bcrypt/argon2/scrypt or SHA-256+)";
-
+// The weak-hash, insecure-config and key-size rules deliberately carry no
+// `message`: the observation body for a spec rule renders from the
+// `frensense-lang` template keyed by rule id and params. A copy here would be a
+// second, unreachable source of the same prose; only bundle-authored rules
+// carry their own message (`LearnedFactEntry`). The allocation-overflow rule
+// below is the exception: its `message` is a template *param*, not the
+// observation body, so it is a live input rather than dead prose.
 /// The bootstrap weak-hash policy table: universal crypto policy facts
 /// (Node `createHash`, Python `hashlib.new`, bare `md5`/`sha1`).
 pub static BOOTSTRAP_WEAK_HASH_RULES: std::sync::LazyLock<Vec<WeakPrimitiveRule>> =
@@ -174,7 +175,7 @@ pub static BOOTSTRAP_WEAK_HASH_RULES: std::sync::LazyLock<Vec<WeakPrimitiveRule>
                     .collect(),
                 requires_credential_context: true,
                 severity: "warning".to_string(),
-                message: WEAK_HASH_MESSAGE.to_string(),
+                message: String::new(),
             },
             // Python hashlib / passlib: hashlib.new('md5', ...)
             WeakPrimitiveRule {
@@ -188,7 +189,7 @@ pub static BOOTSTRAP_WEAK_HASH_RULES: std::sync::LazyLock<Vec<WeakPrimitiveRule>
                     .collect(),
                 requires_credential_context: false,
                 severity: "warning".to_string(),
-                message: WEAK_HASH_MESSAGE.to_string(),
+                message: String::new(),
             },
         ]
     });
@@ -222,9 +223,7 @@ pub static BOOTSTRAP_INSECURE_CONFIG_SELECTORS: std::sync::LazyLock<Vec<Insecure
                 selectors: ["none", "hs1"].iter().map(|s| s.to_string()).collect(),
                 rule_id: "insecure_jwt_algorithm".to_string(),
                 severity: "warning".to_string(),
-                message: "Insecure configuration: an insecure JWT algorithm selector \
-                          ('none'/'hs1') was accepted (use RS256/ES256)"
-                    .to_string(),
+                message: String::new(),
             },
         ]
     });
@@ -240,9 +239,7 @@ pub static BOOTSTRAP_KEY_SIZE_RULES: std::sync::LazyLock<Vec<KeySizeRule>> =
                 min_bits: 2048,
                 kind: "RSA".to_string(),
                 severity: "warning".to_string(),
-                message: "Key generation call with RSA key size below 2048 bits \
-                          (use >= 2048 bits for RSA)"
-                    .to_string(),
+                message: String::new(),
             },
             KeySizeRule {
                 rule_id: "weak_rsa_key_size".to_string(),
@@ -251,9 +248,7 @@ pub static BOOTSTRAP_KEY_SIZE_RULES: std::sync::LazyLock<Vec<KeySizeRule>> =
                 min_bits: 128,
                 kind: "symmetric keys".to_string(),
                 severity: "warning".to_string(),
-                message: "Key generation call with symmetric key size below 128 bits \
-                          (use >= 128 bits for symmetric keys)"
-                    .to_string(),
+                message: String::new(),
             },
         ]
     });

@@ -15,6 +15,7 @@ use super::*;
 /// free at the summary-application step.
 #[derive(Debug, Clone, Default)]
 pub struct TaintSummary {
+    /// Program name of the function the summary describes.
     pub function_name: String,
     /// Indexed by formal parameter slot. `true` if taint introduced at that
     /// parameter can reach any of the function's return values.

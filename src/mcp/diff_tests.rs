@@ -127,6 +127,32 @@ fn argument_errors() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An unknown threshold is refused before any tree is touched: mapping it to
+/// `info` would silently report everything while the client believes it
+/// filtered.
+#[test]
+fn unknown_severity_threshold_is_rejected() {
+    let dir = tempdir("bad-severity");
+    let out = run_diff_tool(&json!({
+        "repo": dir.display().to_string(),
+        "diff_text": DIFF,
+        "severity_threshold": "extra-high",
+    }));
+    assert_eq!(out["clean"], false, "{out}");
+    assert!(
+        out["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown severity level 'extra-high'"),
+        "{out}"
+    );
+    assert!(out["advisories"].as_array().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let err = run_diff(&dir, Some(DIFF), "extra-high", 0.0, None).expect_err("library rejects it");
+    assert!(err.to_string().contains("unknown severity level"), "{err}");
+}
+
 #[test]
 fn end_to_end_explicit_diff_text() {
     let dir = tempdir("e2e");

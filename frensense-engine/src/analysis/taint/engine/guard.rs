@@ -29,7 +29,7 @@ pub(super) struct GuardMap {
 impl GuardMap {
     /// `file_package_imports`: the owning file's package-import table (or
     /// the single-file fallback table), used to arm package-scoped
-    /// guard-style sanitizer facts through their import origin — a
+    /// guard-style sanitizer facts through their import origin, a
     /// scoped guard only registers when the callee's origin names its
     /// package; unknown origin leaves it inert (recall-safe: an
     /// unproven guard must never validate a value).

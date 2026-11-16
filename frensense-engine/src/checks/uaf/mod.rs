@@ -12,10 +12,15 @@
 //! - `walker`: Backward SVFG traversal for provenance and free-site discovery
 //! - `uninit`: Uninitialized pointer deallocation detection on error paths
 
+/// Candidate collection and alias checks.
 pub mod discovery;
+/// Greatest-fixpoint must-reach dataflow used to validate discovered pairs.
 pub mod must_exec;
+/// Core data structures: violations, free sites, pairs and cross-function context.
 pub mod types;
+/// Uninitialized pointer deallocation detection on error paths.
 pub mod uninit;
+/// Backward SVFG traversal for provenance and free-site discovery.
 pub mod walker;
 
 use rustc_hash::FxHashMap;
@@ -39,6 +44,38 @@ pub use walker::{MAX_SCAN_NODES, MAX_WALK_NODES, Walker};
 /// Run the UAF / double-free check over one function with an
 /// interprocedural memory summary registry (intraprocedural graph mode: frees of parameters
 /// are recognised at consuming call sites via `summaries.consumes_params`).
+///
+/// ```
+/// use frensense_engine::checks::memory_summary::{CapacitySpec, MemorySummary, MemorySummaryRegistry};
+/// use frensense_engine::harness::lower_source;
+///
+/// // `malloc` returns fresh memory, `free` consumes parameter 0.
+/// let mut summaries = MemorySummaryRegistry::default();
+/// summaries.summaries.insert("malloc".into(), MemorySummary {
+///     returns_fresh: true,
+///     return_capacity: CapacitySpec::Unknown,
+///     consumes_params: vec![],
+///     out_params_fresh: vec![],
+/// });
+/// summaries.summaries.insert("free".into(), MemorySummary {
+///     returns_fresh: false,
+///     return_capacity: CapacitySpec::Unknown,
+///     consumes_params: vec![0],
+///     out_params_fresh: vec![],
+/// });
+/// let rules = |src: &str| -> Vec<String> {
+///     let fns = lower_source("t.c", src, "c").unwrap();
+///     frensense_engine::checks::uaf::check_with_summaries(&fns["f"], &summaries)
+///         .into_iter()
+///         .map(|f| f.rule)
+///         .collect()
+/// };
+///
+/// assert_eq!(rules("void f(void) { char *p = malloc(8); free(p); free(p); }"), ["double_free"]);
+/// assert_eq!(rules("void f(void) { char *p = malloc(8); free(p); p[0] = 1; }"), ["use_after_free"]);
+/// // Freed once and not used again: nothing to report.
+/// assert!(rules("void f(void) { char *p = malloc(8); free(p); }").is_empty());
+/// ```
 pub fn check_with_summaries(
     ir: &FunctionIR,
     summaries: &MemorySummaryRegistry,

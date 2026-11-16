@@ -58,6 +58,7 @@ impl Default for PointsToAnalysis {
 }
 
 impl PointsToAnalysis {
+    /// Creates an empty analysis; location ids start at 1 because `LocId(0)` is reserved for the global frame.
     pub fn new() -> Self {
         Self {
             pts: FxHashMap::default(),

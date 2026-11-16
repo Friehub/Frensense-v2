@@ -36,10 +36,14 @@ pub enum Provenance {
 }
 
 pub mod authored;
+/// Seeding a taint config and fact table from language-keyed pack entries.
 pub mod config;
 pub mod entries;
+/// The fact data types: sink signatures, sanitizer, check, policy and grammar facts.
 pub mod kinds;
+/// Lookup of sink signatures for a call site's import origin.
 pub mod signatures;
+/// The merged [`FactTable`] consulted during analysis.
 pub mod table;
 pub mod vocabulary;
 

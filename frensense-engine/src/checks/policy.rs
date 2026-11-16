@@ -101,6 +101,41 @@ impl<'a> PackageScope<'a> {
 /// passes one scan's IR set here, which is the module the policy author
 /// refers to). Active `learned_checks` participate alongside native policies,
 /// ensuring both check representations fire harmoniously.
+///
+/// ```
+/// use frensense_engine::analysis::taint::facts::{FactTable, PolicyFact, PolicyRequirement, PolicyScope};
+/// use frensense_engine::checks::policy::check_program;
+/// use frensense_engine::checks::Provenance;
+/// use frensense_engine::harness::lower_source;
+/// use frensense_engine::ir::function::FunctionIR;
+///
+/// // Rule: a call to `deleteUser` requires an `authorize` call.
+/// let mut facts = FactTable::default();
+/// facts.policy_facts.push((
+///     PolicyFact {
+///         package: None,
+///         rule: "missing_authorize".into(),
+///         when_call: "deleteUser".into(),
+///         require: vec![PolicyRequirement::GuardCall { call: "authorize".into() }],
+///         scope: PolicyScope::Function,
+///         message: String::new(),
+///         severity: "warning".into(),
+///     },
+///     Provenance::Spec,
+/// ));
+/// let src = "declare function authorize(): void\n\
+///            declare function deleteUser(): void\n\
+///            function guarded() { authorize(); deleteUser() }\n\
+///            function unguarded() { deleteUser() }\n\
+///            function guard_after() { deleteUser(); authorize() }\n\
+///            function guard_on_one_path(c: boolean) { if (c) { authorize() } deleteUser() }";
+/// let fns = lower_source("t.ts", src, "ts").unwrap();
+/// let irs: Vec<&FunctionIR> = fns.values().collect();
+/// let mut flagged: Vec<String> = check_program(&irs, &facts).into_iter().map(|f| f.function).collect();
+/// flagged.sort();
+/// // Only a guard that runs before the trigger on every path counts.
+/// assert_eq!(flagged, ["guard_after", "guard_on_one_path", "unguarded"]);
+/// ```
 pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFinding> {
     check_program_scoped(irs, facts, None)
 }
@@ -230,7 +265,7 @@ pub fn check_program_scoped(
             for (bid, idx, args, arg_names, span) in
                 trigger_sites(ir, trigger_call, alias_maps.get(ir.name.as_str()))
             {
-                // A requirement violation is the finding — but a
+                // A requirement violation is the finding, but a
                 // presence-only policy (`require` empty) alerts whenever
                 // the trigger call occurs at all: the corpus twins proved
                 // the call site itself is the vulnerability (the negative

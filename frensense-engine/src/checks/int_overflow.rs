@@ -165,6 +165,46 @@ fn operand_label(ir: &FunctionIR, op: &Operand) -> String {
 /// Run the allocation-size integer overflow check over one function for
 /// every active rule in the spec-seeded, bundle-extended rule table
 /// (`FactTable::integer_overflow_rules`), deduplicated by id + threshold.
+///
+/// ```
+/// use frensense_engine::analysis::taint::facts::{FactTable, IntegerOverflowRule};
+/// use frensense_engine::checks::int_overflow::check;
+/// use frensense_engine::checks::memory_summary::{CapacitySpec, MemorySummary, MemorySummaryRegistry};
+/// use frensense_engine::checks::Provenance;
+/// use frensense_engine::harness::lower_source;
+///
+/// // `malloc` takes its size from argument 0.
+/// let mut summaries = MemorySummaryRegistry::default();
+/// summaries.summaries.insert("malloc".into(), MemorySummary {
+///     returns_fresh: true,
+///     return_capacity: CapacitySpec::Param(0),
+///     consumes_params: vec![],
+///     out_params_fresh: vec![],
+/// });
+/// // A deliberately small threshold keeps the arithmetic obvious.
+/// let mut facts = FactTable::default();
+/// facts.integer_overflow_rules.push((
+///     IntegerOverflowRule {
+///         rule_id: "int_overflow".into(),
+///         wrap_threshold: 1000,
+///         severity: "high".into(),
+///         message: String::new(),
+///         unbounded_product: false,
+///     },
+///     Provenance::Spec,
+/// ));
+/// let rules = |src: &str| -> Vec<String> {
+///     let fns = lower_source("t.c", src, "c").unwrap();
+///     check(&fns["f"], &summaries, &facts).into_iter().map(|f| f.rule).collect()
+/// };
+///
+/// // 100 * 100 = 10000 exceeds the threshold and feeds an allocation size.
+/// assert_eq!(rules("void f(void) { int a = 100; int b = 100; char *p = malloc(a * b); }"), ["int_overflow"]);
+/// // 10 * 10 = 100 does not.
+/// assert!(rules("void f(void) { int a = 10; int b = 10; char *p = malloc(a * b); }").is_empty());
+/// // Operands that are not provable ranges skip the site.
+/// assert!(rules("void f(int a, int b) { char *p = malloc(a * b); }").is_empty());
+/// ```
 pub fn check(
     ir: &FunctionIR,
     summaries: &MemorySummaryRegistry,

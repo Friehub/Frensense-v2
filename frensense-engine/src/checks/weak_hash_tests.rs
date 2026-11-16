@@ -574,4 +574,51 @@ export function hashToken (token: string) {
             learned
         );
     }
+
+    /// An authored fact message reaches the finding verbatim; a spec rule
+    /// leaves it empty so the consumer renders the `frensense-lang` template
+    /// from `params`. A dead message field made the pack's own copy of the
+    /// template unreachable and let a bundle-authored observation be dropped
+    /// on the floor.
+    #[test]
+    fn authored_messages_reach_findings_and_spec_messages_stay_empty() {
+        use crate::analysis::taint::facts::WeakCryptoFact;
+        let src = r#"
+import * as crypto from 'crypto'
+export function hashPassword (clearTextPassword: string): string {
+  return crypto.createHash('md5').update(clearTextPassword).digest('hex')
+}
+"#;
+        let fns = lower_source("test.ts", src, "ts").expect("lowering failed");
+        let spec = check_all(fns.values(), &ts_facts());
+        let weak = spec
+            .iter()
+            .find(|f| f.rule == "weak_hash")
+            .expect("weak_hash finding expected");
+        assert_eq!(
+            weak.message, "",
+            "spec findings render from the lang template, not a second copy: {weak:?}"
+        );
+
+        let mut facts = ts_facts();
+        facts.weak_crypto_rules.push(WeakCryptoFact {
+            rule_id: "learned_broken_hash_func".into(),
+            call: "brokenCustomHash".into(),
+            selector_slot: None,
+            weak_selectors: vec![],
+            severity: "critical".into(),
+            message: "authored observation".into(),
+        });
+        let pos_src = r#"
+export function hashToken (token: string) {
+  return brokenCustomHash(token);
+}
+"#;
+        let fns = lower_source("test.ts", pos_src, "ts").expect("lowering failed");
+        let learned = check_all(fns.values(), &facts)
+            .into_iter()
+            .find(|f| f.rule == "learned_broken_hash_func")
+            .expect("learned finding expected");
+        assert_eq!(learned.message, "authored observation");
+    }
 }

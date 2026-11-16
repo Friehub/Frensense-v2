@@ -8,10 +8,10 @@
 //!
 //! Triplets:
 //! 1. import + factory singleton (`new PrismaClient()`) arms `@prisma/client`
-//!    — fires (the legitimate Prisma raw-SQL shape).
-//! 2. no import, unrelated receiver object — silent (the false-positive
+//!   , fires (the legitimate Prisma raw-SQL shape).
+//! 2. no import, unrelated receiver object, silent (the false-positive
 //!    class package scoping exists to close).
-//! 3. wrong-package import (`database-js` lookalike) — silent (origin
+//! 3. wrong-package import (`database-js` lookalike), silent (origin
 //!    mismatch must not fall back to another package's scoped fact).
 
 #[cfg(test)]

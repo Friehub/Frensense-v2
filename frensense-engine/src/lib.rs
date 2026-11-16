@@ -24,6 +24,8 @@
 //!   program graph", shared by the scanner, e2e drivers, and the bundler.
 //! * [`scan`], the stable query API: files + config + facts → findings.
 
+#![warn(missing_docs)]
+
 /// The engine crate version as published. Bundles record this as
 /// `built_by_engine`; the compatibility decision itself is made on
 /// [`analysis::taint::facts::fact_vocabulary_fingerprint`], because the
@@ -61,6 +63,7 @@ mod type_source_tests;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FileId(pub u32);
 
+/// Opaque identifier for a scope within a single analysis session, the scope-level counterpart of [`FileId`].
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScopeId(pub u64);

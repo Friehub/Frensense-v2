@@ -10,6 +10,41 @@ Built-in vocabulary tables live in `frensense-packgen`; the `.frc` envelope
 lives in `frensense-bundler`. Their changes appear here only when they alter
 what this crate does.
 
+## [0.8.2]
+
+### Added
+
+- `WeakPrimitiveRule::same_identity`, `InsecureConfigRule::same_identity`,
+  and `KeySizeRule::same_identity` / `override_with` are the one definition of
+  rule identity both install paths use; they are additive and do not change
+  the fact wire shape.
+
+### Fixed
+
+- **Fact-authored severity is no longer dropped.** `CheckerFinding.severity`
+  was copied from the driving fact (spec rule, learned check, authored policy)
+  and then ignored: `advisory_from_checker` re-derived the level from the
+  language registry. A learned `severity: critical` stayed at the registry's
+  warning, a corpus `severity: info` became warning, and `health`'s `low`
+  became warning. Severity now resolves registry < fact < bundle pattern
+  through the shared six-label parser; an unparseable non-empty label warns
+  and keeps the registry level instead of silently choosing a tier.
+- **Weak-hash, insecure-config and key-size messages are live.** The six
+  emissions in `checks/weak_hash.rs` wrote `message: String::new()`, so
+  `WeakPrimitiveRule.message`, `WeakCryptoFact.message`, `KeySizeRule.message`
+  and `InsecureConfigRule.message` were authored but unread. They are now
+  carried verbatim: a bundle's prose wins, and the spec default pack leaves the
+  field empty so the `frensense-lang` template renders from `params`.
+- **A later fact overrides a rule with the same identity instead of
+  appending.** `FactTable::apply_with` / `merge` deduped these tables with a
+  whole-struct `contains`, so a consumer bundle overriding severity, message,
+  or credential context appended a second rule that the first-match loop never
+  reached: the documented "consumer bundle overrides the default pack" order
+  was false for weak-hash, insecure-config and key-size rules. Identity is now
+  the rule's call coverage (`rule_id` + selector/bare calls, `rule_id` +
+  prefix, `rule_id` + call + slot), and the key-size floor is monotone
+  (`max(existing, new)`) so a later seed can tighten it but never relax it.
+
 ## [0.8.1]
 
 ### Added
@@ -38,6 +73,25 @@ what this crate does.
   `ProgramBuilder` and reads its own RSS. Relative to the published `0.8.0`,
   `0.8.1` is purely additive (the builder and `scan_file`), so dependents
   keep their `^0.8.0` requirement and no sibling manifest moves.
+- **Every public item of `frensense-engine` is now documented, and the crate
+  enforces it.** `cargo check` with `-W missing_docs` reported 507 undocumented
+  public items (IR instructions and terminators, fact and entry kinds, the
+  `uaf` check types, SVFG node kinds, taint path steps, lowering visitors,
+  scan result types); it now reports 0. `#![warn(missing_docs)]` is set in
+  `lib.rs`, so the existing `clippy -D warnings` gate rejects new
+  undocumented public items. The `FRENSdbg_STATIC` and `FRENSdbg_PTS` lines in
+  the `debug_flags` module docs, which had been merged onto one line, are
+  separate again. Where a documented function can panic, a `# Panics` section
+  says so (clippy's `missing_panics_doc` fires only on documented items).
+  Doc examples run as doctests and assert the behaviour the text claims
+  (sink matching and package scoping, `scan` and `scan_file`, SSA phis and the
+  budget fallback, dominance, UAF, leak, weak key size, integer overflow,
+  policy guards, scan completeness). Corrected docs that did not match the
+  code: `ScanResult::findings`, `SSABuilder::work_used`, `InputAccounting::unsupported`,
+  `wrap_threshold`. Documentation only: no behaviour or public API change. Measured:
+  `RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links"
+  cargo doc -p frensense-engine --all-features --no-deps` is clean and
+  `cargo test -p frensense-engine --all-features` passes (526 passed, 27 ignored); `cargo test -p frensense-engine --all-features --doc` passes.
 
 ## [0.8.0]
 

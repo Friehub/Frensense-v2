@@ -13,13 +13,19 @@ use tree_sitter::Node;
 /// *loop*'s `continue_target` (switches contribute `None` so a `continue`
 /// below them still finds the enclosing loop).
 pub struct LoopTarget {
+    /// Block a `break` jumps to.
     pub break_target: BlockId,
+    /// Block a `continue` jumps to; `None` for a switch.
     pub continue_target: Option<BlockId>,
 }
 
+/// State for lowering one function body from tree-sitter nodes into a [`FunctionIR`]: the current block, lexical scopes, the heap-state variable and the loop stack.
 pub struct LoweringContext<'a> {
+    /// Language spec that classifies node kinds.
     pub spec: &'a dyn LanguageSpec,
+    /// Source text the nodes are slices of.
     pub source: &'a str,
+    /// The IR under construction.
     pub ir: FunctionIR,
 
     /// The current BasicBlock being populated
@@ -56,10 +62,12 @@ pub struct LoweringContext<'a> {
 }
 
 impl<'a> LoweringContext<'a> {
+    /// Creates a context that lowers the function `func_name`, with no learned grammar overrides.
     pub fn new(spec: &'a dyn LanguageSpec, source: &'a str, func_name: String) -> Self {
         Self::new_with_facts(spec, source, func_name, None)
     }
 
+    /// Like [`LoweringContext::new`], but consults `facts` for learned grammar roles and features before falling back to the language spec.
     pub fn new_with_facts(
         spec: &'a dyn LanguageSpec,
         source: &'a str,
@@ -213,6 +221,11 @@ impl<'a> LoweringContext<'a> {
         self.spec.is_property_kind(kind)
     }
 
+    /// Resolves an identifier to a variable: the innermost scope that binds the name wins, otherwise a new variable is created and bound in the current scope (a global, an undeclared name or a first use).
+    ///
+    /// # Panics
+    ///
+    /// Panics if the scope stack is empty. A context built by [`LoweringContext::new`] starts with one scope, so this only happens if every scope has been popped.
     pub fn resolve_identifier(&mut self, node: Node) -> Operand {
         let name = self.source[node.start_byte()..node.end_byte()].to_string();
 

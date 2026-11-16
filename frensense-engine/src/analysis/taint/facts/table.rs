@@ -46,6 +46,7 @@ pub struct FactTable {
     ///
     /// [`lang_sink_signatures`]: FactTable::lang_sink_signatures
     pub lang_sources: FxHashMap<String, FxHashSet<String>>,
+    /// Sanitizer facts keyed by call name.
     pub sanitizer_facts: FxHashMap<String, SanitizerFact>,
     /// Scoped sink signatures: (package, call_name) -> SinkSignature.
     pub scoped_sink_signatures: FxHashMap<(String, String), SinkSignature>,
@@ -383,6 +384,7 @@ impl FactTable {
         None
     }
 
+    /// Merges `other` into this table. A blanket sink signature never widens an existing slot-restricted one, and for provenance-tracked entries the higher provenance wins.
     pub fn merge(&mut self, other: &FactTable) {
         for (k, v) in &other.sink_signatures {
             let widens = v.dangerous_args.is_empty()
@@ -528,8 +530,14 @@ impl FactTable {
             .extend(other.prepared_statement_prefixes.iter().cloned());
         self.weak_hash_disclaimer_tokens
             .extend(other.weak_hash_disclaimer_tokens.iter().cloned());
+        // Same identity rules as `LearnedFactEntry::apply_with`: a later
+        // table overrides an earlier one on the rule's call coverage, so a
+        // consumer bundle can replace a learned/default conclusion without
+        // appending a duplicate the first-match loop never reaches.
         for r in &other.weak_hash_rules {
-            if !self.weak_hash_rules.contains(r) {
+            if let Some(existing) = self.weak_hash_rules.iter_mut().find(|e| e.same_identity(r)) {
+                *existing = r.clone();
+            } else {
                 self.weak_hash_rules.push(r.clone());
             }
         }
@@ -550,12 +558,20 @@ impl FactTable {
             }
         }
         for s in &other.insecure_config_selectors {
-            if !self.insecure_config_selectors.contains(s) {
+            if let Some(existing) = self
+                .insecure_config_selectors
+                .iter_mut()
+                .find(|e| e.same_identity(s))
+            {
+                *existing = s.clone();
+            } else {
                 self.insecure_config_selectors.push(s.clone());
             }
         }
         for r in &other.key_size_rules {
-            if !self.key_size_rules.contains(r) {
+            if let Some(existing) = self.key_size_rules.iter_mut().find(|e| e.same_identity(r)) {
+                existing.override_with(r);
+            } else {
                 self.key_size_rules.push(r.clone());
             }
         }

@@ -9,6 +9,9 @@ use rustc_hash::FxHashMap;
 use tree_sitter::Node;
 
 impl<'a> LoweringContext<'a> {
+    /// Lowers a loop into a header block, a body block and an exit block.
+    ///
+    /// The header evaluates the condition (the first child that is not a statement, block, declarator, update or initializer; unknown if there is none) and branches to the body or the exit. The body jumps back to the header unless it already ended. `break` and `continue` target the exit and the header while the body is lowered. Always returns `None`; afterwards lowering continues in the exit block.
     pub fn visit_loop(&mut self, node: Node) -> Option<Operand> {
         // Find condition and body children by grammar convention.
         let mut cursor = node.walk();
@@ -272,6 +275,9 @@ impl<'a> LoweringContext<'a> {
         None
     }
 
+    /// Lowers a ternary expression without branching: the condition and both arms are evaluated in the current block.
+    ///
+    /// When both arms are variables, a fresh variable is assigned both of them, so it may hold either. When only one arm is a variable, that variable is the result. A node that does not have exactly three named children is lowered by walking its children. Because no branch is created, a guard inside an arm does not constrain the other arm.
     pub fn visit_ternary_straight_line(&mut self, node: Node) -> Option<Operand> {
         let mut cursor = node.walk();
         let children: Vec<Node> = node
@@ -339,6 +345,9 @@ impl<'a> LoweringContext<'a> {
         result
     }
 
+    /// Lowers a ternary conditional expression as a real branch.
+    ///
+    /// The condition block branches to a true block and a false block, each of which assigns its arm's value to one shared fresh variable and jumps to a merge block; the SSA pass later turns the two assignments into a phi. Which of the three children is the condition comes from the language spec. Nodes with fewer than three named children are lowered by walking their children. Returns the shared variable.
     pub fn visit_conditional(&mut self, node: Node) -> Option<Operand> {
         let mut cursor = node.walk();
         let children: Vec<Node> = node
@@ -526,6 +535,9 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
+    /// Lowers an `if`, and branch-role kinds whose name contains `switch` other than `switch_statement` (which has its own visitor): optional initializer, condition, consequence and alternative, joined at a merge block.
+    ///
+    /// When the condition is a known constant, only the arm that is taken is lowered, with no branch (not for `switch`). A `switch` pushes a `break` target for the merge block while its body is lowered. Always returns `None`.
     pub fn visit_branch(&mut self, node: Node) -> Option<Operand> {
         let mut cursor = node.walk();
         let children: Vec<Node> = node
@@ -694,6 +706,7 @@ impl<'a> LoweringContext<'a> {
         out
     }
 
+    /// Lowers a `return`: sets the current block's terminator to `Return`, carrying the value of the first non-comment child (none for a bare return). Returns `None`.
     pub fn visit_return(&mut self, node: Node) -> Option<Operand> {
         let mut cursor = node.walk();
         let value: Option<Operand> = node
@@ -705,6 +718,7 @@ impl<'a> LoweringContext<'a> {
         None
     }
 
+    /// Lowers a `goto`: jumps from the current block (when it has no terminator yet) to the block for the named label, then continues in a fresh unreachable block. Returns `None`.
     pub fn visit_goto(&mut self, node: Node) -> Option<Operand> {
         let label_name = node
             .child_by_field_name("label")
@@ -776,6 +790,7 @@ impl<'a> LoweringContext<'a> {
         self.current_block = self.ir.new_block();
     }
 
+    /// Lowers a labeled statement: jumps to the label's block (when the current block has no terminator yet), continues lowering there, and lowers the labelled statement into it. Returns `None`.
     pub fn visit_labeled_statement(&mut self, node: Node) -> Option<Operand> {
         let label_name = node
             .child_by_field_name("label")
@@ -819,6 +834,9 @@ impl<'a> LoweringContext<'a> {
         None
     }
 
+    /// Lowers a `match` or `switch` into a dispatch chain, one block per arm and a merge block.
+    ///
+    /// Each arm is selected by a branch on an opaque temporary, not by a comparison against the scrutinee; the arm pattern is bound to the scrutinee inside its block. Each arm's value is assigned to one shared fresh variable, which is returned. For a `match_statement` over a known constant, only the selected arm is lowered. A node with no recognisable arms is lowered by walking its children.
     pub fn visit_match(&mut self, node: Node) -> Option<Operand> {
         let mut cursor = node.walk();
         let children: Vec<Node> = node

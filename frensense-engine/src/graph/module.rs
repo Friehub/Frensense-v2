@@ -29,6 +29,28 @@ fn concat3(a: &str, b: &str, c: &str) -> String {
 
 /// Resolves a module specifier (e.g. `"./sink_raw"`, `".utils"`) relative to `from_file`
 /// against the known file paths in the program.
+///
+/// ```
+/// use frensense_engine::graph::module::resolve_module_path;
+///
+/// let known = vec![
+///     "src/a.ts".to_string(),
+///     "src/lib/util.ts".to_string(),
+///     "src/lib/index.ts".to_string(),
+///     "pkg/mod.py".to_string(),
+/// ];
+/// // Relative specifier, extension filled in.
+/// assert_eq!(resolve_module_path("src/a.ts", "./lib/util", &known).as_deref(), Some("src/lib/util.ts"));
+/// // `..` climbs one directory.
+/// assert_eq!(resolve_module_path("src/lib/util.ts", "../a", &known).as_deref(), Some("src/a.ts"));
+/// // A directory resolves to its index file.
+/// assert_eq!(resolve_module_path("src/a.ts", "./lib", &known).as_deref(), Some("src/lib/index.ts"));
+/// // Python-style leading dot.
+/// assert_eq!(resolve_module_path("pkg/x.py", ".mod", &known).as_deref(), Some("pkg/mod.py"));
+/// // Unknown files and bare package names do not resolve.
+/// assert_eq!(resolve_module_path("src/a.ts", "./missing", &known), None);
+/// assert_eq!(resolve_module_path("src/a.ts", "react", &known), None);
+/// ```
 pub fn resolve_module_path(
     from_file: &str,
     specifier: &str,
@@ -147,7 +169,9 @@ enum ExportTarget {
 /// An imported package symbol: package name and optional imported symbol.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageImport {
+    /// Name of the imported package.
     pub package: String,
+    /// The imported symbol, or `None` for a whole-package import.
     pub symbol: Option<String>,
 }
 
@@ -160,7 +184,9 @@ pub struct PackageImport {
 /// of truth about the same source text.
 #[derive(Debug, Clone, Default)]
 pub struct ModuleResolution {
+    /// Per file, the local names that an import binds to a program function.
     pub file_aliases: FxHashMap<String, FxHashMap<String, String>>,
+    /// Per file, the local names that an import binds to an external package.
     pub file_package_imports: FxHashMap<String, FxHashMap<String, PackageImport>>,
     /// Import declarations per file, aliases included.
     pub file_imports: FxHashMap<String, Vec<Import>>,
@@ -175,6 +201,7 @@ pub struct ModuleResolution {
 pub struct ModuleAliasResolver;
 
 impl ModuleAliasResolver {
+    /// Resolves the imports and exports of `files` (`(path, source, extension)` rows) against the program's functions `ir_names`, using `fn_file` to place each function in its file.
     pub fn build(
         files: &[(String, String, String)], // (path, source, ext)
         ir_names: &FxHashSet<String>,

@@ -21,6 +21,16 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Every severity label [`Severity::parse_label`] accepts, highest rank
+/// first.
+///
+/// `critical`/`high`/`medium`/`low` are the CVSS-style corpus vocabulary and
+/// `warning`/`info` are the reporting-ladder names. Corpus metadata, bundle
+/// patterns, the bundler's metadata lint, the CLI `--severity` flag and every
+/// MCP threshold all parse through this one table, so a label cannot mean one
+/// thing in a corpus and another at the CLI.
+pub const SEVERITY_LABELS: [&str; 6] = ["critical", "high", "medium", "warning", "low", "info"];
+
 /// Advisory severity ranking.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Severity {
@@ -40,13 +50,35 @@ impl Severity {
         }
     }
 
-    /// Parse a level name; unknown names rank as [`Severity::Info`].
-    pub fn parse(level: &str) -> Severity {
-        match level {
-            "critical" => Severity::Critical,
-            "warning" => Severity::Warning,
-            _ => Severity::Info,
+    /// Parse a label from the shared six-label vocabulary
+    /// ([`SEVERITY_LABELS`]), case-insensitively and ignoring surrounding
+    /// whitespace.
+    ///
+    /// Returns `None` for an unknown label so callers can reject bad input
+    /// loudly. Use [`Severity::parse`] only where an unknown label must fall
+    /// back to [`Severity::Info`].
+    #[must_use]
+    pub fn parse_label(level: &str) -> Option<Severity> {
+        match level.trim().to_ascii_lowercase().as_str() {
+            "critical" => Some(Severity::Critical),
+            // A CVSS `high` (7.0-8.9) ranks below `critical` (9.0+); the
+            // 3-tier advisory ladder therefore puts `high` with `medium` on
+            // the warning tier.
+            "high" | "medium" | "warning" => Some(Severity::Warning),
+            "low" | "info" => Some(Severity::Info),
+            _ => None,
         }
+    }
+
+    /// Parse a level name, falling back to [`Severity::Info`] for an unknown
+    /// label. Delegates to [`Severity::parse_label`], which owns the
+    /// vocabulary.
+    ///
+    /// Deliberately not `#[must_use]`: adding the attribute to an existing
+    /// method is a semver break (downstream crates start failing on
+    /// `let _ = Severity::parse(x);` under `-D warnings`).
+    pub fn parse(level: &str) -> Severity {
+        Self::parse_label(level).unwrap_or(Severity::Info)
     }
 }
 
@@ -973,5 +1005,61 @@ mod tier_profile_tests {
         assert_eq!(RuleTier::Beta.required_profile(), "recommended");
         assert_eq!(RuleTier::Experimental.required_profile(), "strict");
         assert_eq!(RuleTier::Hygiene.required_profile(), "strict");
+    }
+}
+
+#[cfg(test)]
+mod severity_label_tests {
+    use super::{Severity, SEVERITY_LABELS};
+
+    /// The shared vocabulary is exactly six labels: every one parses, and the
+    /// table and the parser can never disagree.
+    #[test]
+    fn every_published_label_parses() {
+        assert_eq!(SEVERITY_LABELS.len(), 6);
+        for label in SEVERITY_LABELS {
+            assert!(
+                Severity::parse_label(label).is_some(),
+                "published label `{label}` must parse"
+            );
+        }
+    }
+
+    #[test]
+    fn labels_map_onto_the_three_tier_ladder() {
+        let expected = [
+            ("critical", Severity::Critical),
+            ("high", Severity::Warning),
+            ("medium", Severity::Warning),
+            ("warning", Severity::Warning),
+            ("low", Severity::Info),
+            ("info", Severity::Info),
+        ];
+        for (label, tier) in expected {
+            assert_eq!(Severity::parse_label(label), Some(tier), "label `{label}`");
+        }
+    }
+
+    #[test]
+    fn parsing_is_case_and_whitespace_tolerant() {
+        assert_eq!(
+            Severity::parse_label(" Critical "),
+            Some(Severity::Critical)
+        );
+        assert_eq!(Severity::parse_label("HIGH"), Some(Severity::Warning));
+        assert_eq!(Severity::parse_label("\tLow\n"), Some(Severity::Info));
+    }
+
+    /// Unknown input is rejected rather than silently mapped to a tier:
+    /// callers decide whether that is an error or a documented fallback.
+    #[test]
+    fn unknown_labels_return_none_and_parse_falls_back_to_info() {
+        assert_eq!(Severity::parse_label("bogus"), None);
+        assert_eq!(Severity::parse_label(""), None);
+        assert_eq!(Severity::parse_label("severity"), None);
+        assert_eq!(Severity::parse("bogus"), Severity::Info);
+        assert_eq!(Severity::parse("HIGH"), Severity::Warning);
+        // Surrounding whitespace is not an unknown label.
+        assert_eq!(Severity::parse_label(" warning "), Some(Severity::Warning));
     }
 }

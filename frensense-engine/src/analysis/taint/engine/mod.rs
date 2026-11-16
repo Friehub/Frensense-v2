@@ -100,6 +100,7 @@ pub enum FindingClass {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct CutSite {
+    /// Reason class of the stop site; see the list above.
     pub kind: &'static str,
     /// Function whose body contains the stop site.
     pub function: String,
@@ -119,12 +120,57 @@ pub struct CutSite {
 pub struct SinkFinding {
     /// Function in which the sink call lives.
     pub function: String,
+    /// Name of the sink call.
     pub sink: String,
-    /// Formal slot of the tainted argument (receiver = slot 0 on virtual calls).
+    /// Zero-based position of the tainted argument as written in the call, not counting the receiver. `usize::MAX` ([`crate::graph::svfg::RECEIVER_ARG_INDEX`]) marks the receiver of a method call.
+    ///
+    /// ```
+    /// use frensense_engine::analysis::forward::ProgramSvfg;
+    /// use frensense_engine::analysis::taint::config::TaintConfig;
+    /// use frensense_engine::analysis::taint::engine::{BackwardTaintEngine, BackwardVerdict};
+    /// use frensense_engine::harness::lower_source;
+    /// use frensense_engine::ir::function::FunctionIR;
+    ///
+    /// let src = r#"
+    /// declare const req: any
+    /// declare const db: any
+    /// export function run() {
+    ///   const q = req.body.x
+    ///   db.execute(q)
+    ///   q.execute("select 1")
+    /// }
+    /// "#;
+    /// let cfg = TaintConfig {
+    ///     sources: ["req.body".to_string()].into_iter().collect(),
+    ///     sinks: ["execute".to_string()].into_iter().collect(),
+    ///     sanitizers: Default::default(),
+    /// };
+    /// let owned = lower_source("t.ts", src, "ts").unwrap();
+    /// let irs: rustc_hash::FxHashMap<String, &FunctionIR> =
+    ///     owned.iter().map(|(k, v)| (k.clone(), v)).collect();
+    /// let prog = ProgramSvfg::new(&irs, &cfg);
+    /// let mut engine = BackwardTaintEngine::new(&prog, &cfg);
+    /// engine.run();
+    ///
+    /// let slots_of = |v: BackwardVerdict| -> Vec<usize> {
+    ///     let mut s: Vec<usize> = engine
+    ///         .findings
+    ///         .iter()
+    ///         .filter(|f| f.verdict == v)
+    ///         .map(|f| f.arg_slot)
+    ///         .collect();
+    ///     s.sort();
+    ///     s
+    /// };
+    /// // `db.execute(q)`: `q` is argument 0, the receiver `db` is clean.
+    /// // `q.execute(..)`: the tainted value is the receiver, slot `usize::MAX`.
+    /// assert_eq!(slots_of(BackwardVerdict::Vulnerable), vec![0, usize::MAX]);
+    /// ```
     pub arg_slot: usize,
     /// Structured sink alert (present exactly when the slot is dangerous);
     /// `None` when the slot is a safe channel.
     pub alert: Option<SinkAlert>,
+    /// Verdict of the backward walk for this argument.
     pub verdict: BackwardVerdict,
     /// Shape classification of the finding (`"idor"` for access-control
     /// query payloads, `"injection"` for everything else). Consumers rank
@@ -243,7 +289,7 @@ impl SinkFindingBuilder {
         self.sink = v.into();
         self
     }
-    /// Set the tainted argument slot (receiver = 0).
+    /// Set the tainted argument slot: a zero-based position excluding the receiver, or `usize::MAX` for the receiver.
     pub fn arg_slot(mut self, v: usize) -> Self {
         self.arg_slot = v;
         self
@@ -333,8 +379,11 @@ pub struct BackwardStats {
     pub sink_args_explored: usize,
     /// Per-verdict counts.
     pub vulnerable: usize,
+    /// Sink arguments judged sanitized.
     pub sanitized: usize,
+    /// Sink arguments the walk could not decide.
     pub unknown: usize,
+    /// Sink arguments with no path to a source.
     pub clean: usize,
 }
 
@@ -382,7 +431,9 @@ pub struct BackwardTaintEngine<'a> {
     /// `(callee_fn, to_node) → [(caller_fn, from_node)]`.
     reverse_cross: FxHashMap<(usize, NodeKey), Vec<(usize, NodeKey)>>,
 
+    /// Every explored sink argument with its verdict.
     pub findings: Vec<SinkFinding>,
+    /// Exploration statistics.
     pub stats: BackwardStats,
     /// Per-function guard maps, built lazily on first entry into the fn.
     guard_maps: FxHashMap<usize, GuardMap>,
@@ -547,6 +598,7 @@ pub(crate) fn source_description(
 }
 
 impl<'a> BackwardTaintEngine<'a> {
+    /// Creates an engine over `prog` using `config`, with the fact table derived from the config, summary suppression on and path capture on.
     pub fn new(prog: &'a ProgramSvfg<'a>, config: &'a TaintConfig) -> Self {
         Self {
             prog,
@@ -599,6 +651,7 @@ impl<'a> BackwardTaintEngine<'a> {
         self
     }
 
+    /// Provides, per file, the packages that file imports, so package-scoped sources, sinks and sanitizers only apply in files that import their package.
     pub fn with_file_package_imports(
         mut self,
         imports: &FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,

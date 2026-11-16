@@ -131,6 +131,26 @@ impl FactTable {
     /// receiver root). This is what keeps a bundle fact like
     /// `(@prisma/client).$queryRawUnsafe` from firing on a local object
     /// whose method happens to share the name.
+    ///
+    /// ```
+    /// use frensense_engine::analysis::taint::facts::{FactTable, SinkSignature};
+    ///
+    /// let mut t = FactTable::default();
+    /// // Only a package-scoped fact: `(@prisma/client, $queryRawUnsafe)`.
+    /// t.scoped_sink_signatures.insert(
+    ///     ("@prisma/client".into(), "$queryRawUnsafe".into()),
+    ///     SinkSignature::all_args("$queryRawUnsafe"),
+    /// );
+    /// // Confirmed origin: the scoped fact applies.
+    /// assert!(t.sink_signature_scoped("$queryRawUnsafe", Some("@prisma/client"), None).is_some());
+    /// // Unknown origin, or another package: it does not.
+    /// assert!(t.sink_signature_scoped("$queryRawUnsafe", None, None).is_none());
+    /// assert!(t.sink_signature_scoped("$queryRawUnsafe", Some("my-orm"), None).is_none());
+    ///
+    /// // A universal fact still applies under any origin.
+    /// t.sink_signatures.insert("eval".into(), SinkSignature::all_args("eval"));
+    /// assert!(t.sink_signature_scoped("eval", Some("my-orm"), None).is_some());
+    /// ```
     pub fn sink_signature_scoped(
         &self,
         call: &str,
@@ -227,18 +247,42 @@ impl FactTable {
     /// Scoping semantics (recall-safe): a fact installed under
     /// `(package, call)` applies ONLY when `origin_package` names that
     /// package. Origin known-but-different falls back to universal
-    /// facts only — a foreign package's sanitizer must never cut this
+    /// facts only, a foreign package's sanitizer must never cut this
     /// call. Origin unknown also matches universal facts only.
     ///
     /// Recall-safety analysis (why unknown origin does NOT take the
     /// any-package fallback): a sanitizer CUTS a finding, so a scoped
     /// fact that fires on an unconfirmed origin can silence a true
-    /// finding — the one error that costs recall. The reverse error
+    /// finding, the one error that costs recall. The reverse error
     /// (a genuine package sanitizer whose origin does not resolve goes
     /// uncut) surfaces an advisory, which costs precision only.
     /// Universal facts were proven for the bare call name regardless of
     /// receiver, so they remain safe under any origin; a scoped fact
     /// suppresses only once import resolution confirms its package.
+    ///
+    /// ```
+    /// use frensense_engine::analysis::taint::facts::{FactTable, SanitizerFact};
+    ///
+    /// let fact = |pkg: Option<&str>| SanitizerFact {
+    ///     call: "scrub".into(),
+    ///     package: pkg.map(String::from),
+    ///     kind: "html".into(),
+    ///     sanitizes_args: Default::default(),
+    ///     guard_style: false,
+    /// };
+    /// let mut t = FactTable::default();
+    /// t.scoped_sanitizer_facts.insert(("sanitize-pkg".into(), "scrub".into()), fact(Some("sanitize-pkg")));
+    ///
+    /// // Cuts only under its confirmed package.
+    /// assert!(t.sanitizer_fact_scoped("scrub", Some("sanitize-pkg")).is_some());
+    /// assert!(t.sanitizer_fact_scoped("scrub", None).is_none());
+    /// assert!(t.sanitizer_fact_scoped("scrub", Some("other-pkg")).is_none());
+    ///
+    /// // A universal fact applies under any origin.
+    /// t.sanitizer_facts.insert("scrub".into(), fact(None));
+    /// assert!(t.sanitizer_fact_scoped("scrub", None).is_some());
+    /// assert!(t.sanitizer_fact_scoped("scrub", Some("other-pkg")).is_some());
+    /// ```
     pub fn sanitizer_fact_scoped(
         &self,
         call: &str,
@@ -251,7 +295,7 @@ impl FactTable {
             let is_package_scoped = self.scoped_sanitizer_facts.keys().any(|(_, c)| c == call);
             if is_package_scoped {
                 // Known-package mismatch: another package's sanitizer
-                // must never cut this call — universal facts only.
+                // must never cut this call, universal facts only.
                 return self.sanitizer_facts.get(call);
             }
         }
@@ -281,7 +325,7 @@ impl FactTable {
             // one carve-out: a global-only fact (schema §WI-12) arms the
             // bare / unqualified call form only. A receiver-qualified call
             // (`engine.eval(x)`) matches just once its origin resolves to a
-            // known package — an unrelated receiver's method must never
+            // known package, an unrelated receiver's method must never
             // inherit a global builtin's semantics.
             if let Some(sig) = self.sink_signature_scoped(last, origin_package, language) {
                 if sig.global_only && receiver_root.is_some() && origin_package.is_none() {
@@ -398,6 +442,20 @@ impl FactTable {
     /// every sink's last segment, including the ambiguous verbs and the
     /// receiver-qualified shadows that receiver gating exists for, so a
     /// bare `contains` must not arm either on its own.
+    ///
+    /// ```
+    /// use frensense_engine::analysis::taint::facts::{FactTable, SinkSignature};
+    ///
+    /// let mut t = FactTable::default();
+    /// t.sink_signatures.insert("get".into(), SinkSignature::all_args("get"));
+    /// t.verb_sinks.insert("get".into());
+    /// let flat: rustc_hash::FxHashSet<String> = ["get".to_string(), "eval".to_string()].into_iter().collect();
+    ///
+    /// // A bare `contains` in the flat set does not arm an ambiguous verb ...
+    /// assert!(!t.sink_name_armed(&flat, "get", Some("m"), None, None, true));
+    /// // ... but arms an ordinary name.
+    /// assert!(t.sink_name_armed(&flat, "eval", None, None, None, false));
+    /// ```
     pub fn sink_name_armed(
         &self,
         flat_sinks: &rustc_hash::FxHashSet<String>,
@@ -428,6 +486,26 @@ impl FactTable {
     ///   from dotted client entries AND the receiver root is a known
     ///   client, `m.get(t)` on an arbitrary Map is never a sink, while
     ///   `got.get(taint)` is.
+    ///
+    /// ```
+    /// use frensense_engine::analysis::taint::facts::{FactTable, SinkSignature};
+    /// use frensense_engine::analysis::taint::role::SinkRole;
+    ///
+    /// let mut t = FactTable::default();
+    /// // An ordinary sink: the name alone decides.
+    /// t.sink_signatures.insert("eval".into(), SinkSignature::all_args("eval"));
+    /// assert!(t.is_sink_call("eval", None));
+    /// assert!(t.is_sink_call("eval", Some("anything")));
+    /// assert!(!t.is_sink_call("print", None));
+    ///
+    /// // An ambiguous verb that only came from a dotted client entry (`got.get`).
+    /// t.sink_signatures.insert("get".into(), SinkSignature::all_args("get"));
+    /// t.verb_sinks.insert("get".into());
+    /// t.client_roots.insert("got".into());
+    /// t.receiver_roles.insert(("got".into(), "get".into()), SinkRole::Other);
+    /// assert!(t.is_sink_call("get", Some("got")));   // `got.get(url)`
+    /// assert!(!t.is_sink_call("get", Some("m")));    // `m.get(key)` on some map
+    /// ```
     pub fn is_sink_call(&self, last: &str, receiver_root: Option<&str>) -> bool {
         self.is_sink_call_scoped(last, receiver_root, None, None)
     }

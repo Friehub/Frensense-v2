@@ -74,11 +74,32 @@ impl SinkSignature {
     }
 
     /// Is argument slot `slot` dangerous when tainted?
+    ///
+    /// ```
+    /// use frensense_engine::analysis::taint::facts::SinkSignature;
+    ///
+    /// // No explicit slots: every slot is dangerous.
+    /// assert!(SinkSignature::all_args("eval").is_dangerous(3));
+    /// // Explicit slots: only those.
+    /// let sig = SinkSignature::with_args("query", &[0]);
+    /// assert!(sig.is_dangerous(0));
+    /// assert!(!sig.is_dangerous(1));
+    /// ```
     pub fn is_dangerous(&self, slot: usize) -> bool {
         self.dangerous_args.is_empty() || self.dangerous_args.contains(&slot)
     }
 
     /// Is this slot an explicitly-safe binding channel?
+    ///
+    /// ```
+    /// use frensense_engine::analysis::taint::facts::SinkSignature;
+    ///
+    /// let mut sig = SinkSignature::with_args("query", &[0]);
+    /// assert!(!sig.is_binding(1)); // `binding_args_safe` is off by default
+    /// sig.binding_args_safe = true;
+    /// assert!(sig.is_binding(1));
+    /// assert!(!sig.is_binding(0)); // a dangerous slot is never a binding channel
+    /// ```
     pub fn is_binding(&self, slot: usize) -> bool {
         self.binding_args_safe && !self.is_dangerous(slot)
     }
@@ -112,6 +133,7 @@ pub const ALLOWLIST_SANITIZER_KIND: &str = "allowlist";
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct SanitizerFact {
+    /// Name of the sanitizing call.
     pub call: String,
     /// Optional package qualification (e.g. "pg", "validator").
     /// `None` indicates a universal sanitizer.
@@ -147,7 +169,10 @@ pub struct LearnedCheckFact {
     pub call: String,
     /// Advisory text shown to the user (bundle-authored).
     pub message: String,
-    /// Advisory severity hint: "warning" or "critical".
+    /// Advisory severity label from the shared six-label vocabulary
+    /// ([`frensense_lang::severity::SEVERITY_LABELS`]); consumers map it onto
+    /// the reporting ladder with
+    /// [`frensense_lang::severity::Severity::parse_label`].
     pub severity: String,
     /// Optional guard qualification (bundle-authored): the rule only fires
     /// when NO call whose last segment matches this name appears in the
@@ -188,7 +213,10 @@ pub enum PolicyRequirement {
     },
     /// A call must NOT be present in the scope (forbid a deprecated or
     /// banned alternative from co-occurring with the trigger).
-    NotCall { call: String },
+    NotCall {
+        /// Call name or last segment that must be absent.
+        call: String,
+    },
     /// The trigger's guarded argument must participate in a comparison
     /// against a literal bound with one of `ops`. Direct generalization
     /// of `LearnedCheckFact::unless_range_check` (inverted).
@@ -204,10 +232,20 @@ pub enum PolicyRequirement {
     },
     /// The call's argument at `slot` must NOT match any of `values`
     /// (case-insensitive comparison over string, boolean, or integer literals).
-    BannedArgLiteral { slot: usize, values: Vec<String> },
+    BannedArgLiteral {
+        /// Zero-based argument slot to inspect.
+        slot: usize,
+        /// Literal values that are forbidden at that slot.
+        values: Vec<String>,
+    },
     /// The call's argument at `slot` MUST match one of `values`
     /// (case-insensitive comparison over string, boolean, or integer literals).
-    RequiredArgLiteral { slot: usize, values: Vec<String> },
+    RequiredArgLiteral {
+        /// Zero-based argument slot to inspect.
+        slot: usize,
+        /// Literal values, one of which the argument must be.
+        values: Vec<String>,
+    },
     /// The call's argument at `slot` must trace to an object construction
     /// carrying at least one of `keys` as an object-literal pair key
     /// (`updateMany({ where: ... })`: the where clause scopes which rows
@@ -217,7 +255,12 @@ pub enum PolicyRequirement {
     /// lower to `Allocate(kind: Object)` plus one `StoreField` per key,
     /// and the lowering records the pair keys on the composite var, so
     /// key presence is checkable in the IR without value analysis.
-    RequireArgKey { slot: usize, keys: Vec<String> },
+    RequireArgKey {
+        /// Argument slot to inspect; `usize::MAX` matches any argument position.
+        slot: usize,
+        /// Object-literal keys, at least one of which must be present in the argument.
+        keys: Vec<String>,
+    },
     /// The **named** argument `name` must be present and, when its value is
     /// a provable literal, carry one of `values` (case-insensitive).
     ///
@@ -233,14 +276,24 @@ pub enum PolicyRequirement {
     ///
     /// Appended last: bincode encodes the variant index first, so existing
     /// wire bytes keep decoding with their original indices.
-    RequireNamedArgLiteral { name: String, values: Vec<String> },
+    RequireNamedArgLiteral {
+        /// Name of the keyword argument.
+        name: String,
+        /// Literal values the argument must carry (case-insensitive).
+        values: Vec<String>,
+    },
     /// When `name` is present as a named argument, its value must NOT match
     /// any of `values` (case-insensitive literal comparison).
     ///
     /// Distinct from [`Self::RequireNamedArgLiteral`]: absent name is NOT a
     /// violation (allows framework defaults / benign calls to omit the flag
     /// without false positives).
-    BannedNamedArgLiteral { name: String, values: Vec<String> },
+    BannedNamedArgLiteral {
+        /// Name of the keyword argument.
+        name: String,
+        /// Literal values the argument must not carry (case-insensitive).
+        values: Vec<String>,
+    },
 }
 
 impl PolicyRequirement {
@@ -305,7 +358,9 @@ pub struct PolicyFact {
     pub scope: PolicyScope,
     /// Advisory text shown to the user (bundle-authored).
     pub message: String,
-    /// Advisory severity hint: "warning" or "critical".
+    /// Advisory severity label from the shared vocabulary owned by
+    /// `frensense-lang` ([`frensense_lang::severity::Severity`]); consumers
+    /// map it onto the three-tier reporting ladder.
     pub severity: String,
     /// Optional package qualification: when `Some(pkg)`, the policy only
     /// fires in files that import `pkg` (mirrors the sink/source
@@ -356,11 +411,17 @@ pub struct MemoryContractFact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct WeakCryptoFact {
+    /// Stable rule id reported on a match.
     pub rule_id: String,
+    /// Call whose last segment triggers the rule.
     pub call: String,
+    /// Argument slot holding the algorithm selector literal. When `None` the rule fires on any call to `call`, with no selector check.
     pub selector_slot: Option<usize>,
+    /// Selector literals considered weak (compared case-insensitively against the argument at `selector_slot`).
     pub weak_selectors: Vec<String>,
-    /// Advisory severity hint: "warning" or "critical".
+    /// Advisory severity label from the shared vocabulary owned by
+    /// `frensense-lang` ([`frensense_lang::severity::Severity`]); consumers
+    /// map it onto the three-tier reporting ladder.
     #[cfg_attr(feature = "serialize", serde(default))]
     pub severity: String,
     /// Corpus-authored advisory observation.
@@ -372,10 +433,13 @@ pub struct WeakCryptoFact {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct GuardBypassFact {
+    /// Calls that perform a containment or allowlist check on a value.
     #[cfg_attr(feature = "serialize", serde(default))]
     pub containment_callees: Vec<String>,
+    /// Calls that store, set or hash a credential.
     #[cfg_attr(feature = "serialize", serde(default))]
     pub credential_sinks: Vec<String>,
+    /// Parameter names that identify a credential.
     #[cfg_attr(feature = "serialize", serde(default))]
     pub credential_params: Vec<String>,
 }
@@ -384,10 +448,13 @@ pub struct GuardBypassFact {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub struct SchemaPolicyFact {
+    /// Schema-builder method names (for example a number or string constructor of a validation library).
     #[cfg_attr(feature = "serialize", serde(default))]
     pub builders: Vec<String>,
+    /// Methods that enforce or finalise a schema.
     #[cfg_attr(feature = "serialize", serde(default))]
     pub enforcers: Vec<String>,
+    /// Schema keywords that bound a value (for example a minimum or maximum).
     #[cfg_attr(feature = "serialize", serde(default))]
     pub bound_keywords: Vec<String>,
 }
@@ -494,14 +561,23 @@ impl HintKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub enum GrammarFeature {
+    /// A type cast or type assertion node (`x as T`, `(T)x`).
     Cast,
+    /// A template or interpolated string node.
     TemplateString,
+    /// An untainted literal text fragment of a template string (it carries no interpolated value).
     TemplateFragment,
+    /// A destructuring pattern (`{ a, b }`, `[x, y]`).
     DestructuringPattern,
+    /// A key/value pair inside a destructuring pattern.
     PairPattern,
+    /// A key/value pair inside an object literal.
     PairEntry,
+    /// A ternary-style conditional (`ternary_expression`, `conditional_expression`) whose condition and arms are evaluated straight-line in the current block instead of forming a branch.
     TernaryStraightLine,
+    /// A node kind that can be the left-hand side of an assignment written in declaration position (for example Python `subscript` and `attribute`: `m["k"] = v`, `obj.attr = v`), so the assignment lowers as a store to that member or element instead of a plain declaration.
     DeclarationAssignment,
+    /// The node kind of the property child of a member access (for example Python `identifier`, Go `field_identifier`). A wrong answer turns method calls into pointer calls and loses sink matching.
     PropertyKind,
 }
 
@@ -509,60 +585,106 @@ pub enum GrammarFeature {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 pub enum TeachableNodeRole {
+    /// A function, method or closure definition. Mirrors [`frensense_lang::NodeRole::Function`].
     Function {
+        /// Whether the grammar distinguishes methods from free functions.
         is_method: bool,
+        /// Field holding the function's name, if any.
         name_field: Option<String>,
+        /// Field holding the parameter list.
         params_field: String,
+        /// Field holding the body.
         body_field: String,
     },
+    /// A variable declaration with an initializer. Mirrors [`frensense_lang::NodeRole::Declaration`].
     Declaration {
+        /// Field holding the declared name.
         name_field: String,
+        /// Field holding the initializer.
         value_field: String,
     },
+    /// A mutation of an existing binding. Mirrors [`frensense_lang::NodeRole::Assignment`].
     Assignment {
+        /// Field holding the assignment target.
         lhs_field: String,
+        /// Field holding the assigned value.
         rhs_field: String,
     },
+    /// A function or method invocation. Mirrors [`frensense_lang::NodeRole::Call`].
     Call {
+        /// Field holding the callee expression.
         callee_field: String,
+        /// Field holding the argument list.
         args_field: String,
     },
+    /// A member or field access that produces a value. Mirrors [`frensense_lang::NodeRole::MemberAccess`].
     MemberAccess {
+        /// Field holding the object being accessed.
         object_field: String,
+        /// Field holding the member name.
         property_field: String,
     },
+    /// A branch: `if`, `switch` or a match arm.
     Branch,
+    /// A ternary conditional expression whose arms are values.
     Conditional,
+    /// A `for`, `while`, `do` or `loop` construct.
     Loop,
+    /// A return statement or expression.
     Return,
+    /// A `try` block.
     Try,
+    /// A `catch` or `except` clause.
     Catch,
+    /// A `finally` clause.
     Finally,
+    /// A `throw` or `raise`.
     Throw,
+    /// An error-propagation guard such as Go `if err != nil { return … }`.
     ErrorGuard,
+    /// A context-manager entry such as Python `with expr as var:`.
     ContextManager,
+    /// An error-propagating postfix operator such as Rust `?`.
     ErrorPropagation,
+    /// An `await` expression or async block entry.
     Await,
+    /// A braced or indented statement block.
     Block,
+    /// A value-position composite literal (object or array).
     Composite,
+    /// An import, `use` or `require`.
     Import,
+    /// An export (JavaScript and TypeScript).
     Export,
+    /// A bare name reference.
     Identifier,
+    /// A string, number or boolean literal.
     Literal,
+    /// A parameter list node.
     Parameters,
+    /// An argument list node.
     Arguments,
     /// A named call argument: the name travels with the value so slot
     /// policies can key on the argument's identity, not its position.
     KeywordArgument {
+        /// Field holding the argument name.
         name_field: String,
+        /// Field holding the argument value.
         value_field: String,
     },
+    /// A class or type definition.
     ClassDef,
+    /// A binary operation.
     BinaryOp,
+    /// A unary operation.
     UnaryOp,
+    /// A pattern match: `match`, or a `switch` that matches on a type or value.
     Match,
+    /// An `unsafe` block.
     Unsafe,
+    /// An async block.
     AsyncBlock,
+    /// A node kind with no specific role.
     Other,
 }
 
@@ -758,7 +880,9 @@ pub struct WeakPrimitiveRule {
     /// When true, the selector shape fires only inside a credential
     /// context; bare weak names fire unconditionally.
     pub requires_credential_context: bool,
-    /// Advisory severity hint: "warning" or "critical".
+    /// Advisory severity label from the shared vocabulary owned by
+    /// `frensense-lang` ([`frensense_lang::severity::Severity`]); consumers
+    /// map it onto the three-tier reporting ladder.
     pub severity: String,
     /// Advisory observation body.
     pub message: String,
@@ -803,7 +927,9 @@ pub struct InsecureConfigRule {
     pub selectors: Vec<String>,
     /// Finding rule id.
     pub rule_id: String,
-    /// Advisory severity hint: "warning" or "critical".
+    /// Advisory severity label from the shared vocabulary owned by
+    /// `frensense-lang` ([`frensense_lang::severity::Severity`]); consumers
+    /// map it onto the three-tier reporting ladder.
     pub severity: String,
     /// Advisory observation body.
     pub message: String,
@@ -824,10 +950,56 @@ pub struct KeySizeRule {
     pub min_bits: i64,
     /// Human label of what the key protects.
     pub kind: String,
-    /// Advisory severity hint: "warning" or "critical".
+    /// Advisory severity label from the shared vocabulary owned by
+    /// `frensense-lang` ([`frensense_lang::severity::Severity`]); consumers
+    /// map it onto the three-tier reporting ladder.
     pub severity: String,
     /// Advisory observation body.
     pub message: String,
+}
+
+impl WeakPrimitiveRule {
+    /// Whether `other` names the same rule: same rule id and the same call
+    /// coverage.
+    ///
+    /// Identity deliberately excludes severity, message, and
+    /// `requires_credential_context`: those are the conclusion a later seed
+    /// (a consumer bundle) may want to override. Two facts with the same
+    /// identity replace each other; two with different calls are distinct
+    /// rules and both fire.
+    #[must_use]
+    pub fn same_identity(&self, other: &Self) -> bool {
+        self.rule_id == other.rule_id
+            && self.selector_calls == other.selector_calls
+            && self.bare_calls == other.bare_calls
+    }
+}
+
+impl InsecureConfigRule {
+    /// Whether `other` names the same rule: same rule id and callee prefix.
+    /// Selectors, severity, and message are overridable conclusion fields.
+    #[must_use]
+    pub fn same_identity(&self, other: &Self) -> bool {
+        self.rule_id == other.rule_id && self.prefix == other.prefix
+    }
+}
+
+impl KeySizeRule {
+    /// Whether `other` names the same rule: same rule id, call, and bit-length
+    /// slot. Severity, message, and `kind` are overridable conclusion fields.
+    #[must_use]
+    pub fn same_identity(&self, other: &Self) -> bool {
+        self.rule_id == other.rule_id && self.call == other.call && self.slot == other.slot
+    }
+
+    /// Replace this rule with a newer fact of the same identity, keeping the
+    /// security floor monotone: a later seed may raise `min_bits`, never
+    /// lower it.
+    pub fn override_with(&mut self, newer: &Self) {
+        let min_bits = self.min_bits.max(newer.min_bits);
+        *self = newer.clone();
+        self.min_bits = min_bits;
+    }
 }
 
 /// Capacity of a fresh allocation, derived from the call's arguments.

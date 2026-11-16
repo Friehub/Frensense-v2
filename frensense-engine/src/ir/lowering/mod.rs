@@ -10,13 +10,20 @@
 //! Integrates Memory SSA: heap state is tracked via `self.memory_var` and
 //! versioned into memory states by the SSA Builder.
 
+/// Lowering of assignments to variables, fields and elements.
 pub mod assign;
+/// Lowering of call expressions.
 pub mod call;
 mod const_eval;
+/// The per-function lowering state.
 pub mod context;
+/// Lowering of loops, branches, conditionals, `match`, returns and jumps.
 pub mod control_flow;
+/// Lowering of declarations.
 pub mod decl;
+/// Lowering of expressions: operators, member access, composite literals, literals and casts.
 pub mod expr;
+/// Classification of assignment targets.
 pub mod lvalue;
 
 pub use context::{LoopTarget, LoweringContext};
@@ -27,6 +34,11 @@ use frensense_lang::NodeRole;
 use tree_sitter::Node;
 
 impl<'a> LoweringContext<'a> {
+    /// Lowers one AST node into the current block, dispatching on the node's role (a learned bundle role first, then the language spec).
+    ///
+    /// Dispatch is by role (declaration, assignment, member access, call, loop, branch, match, return, try, operators, identifier, literal, composite), with a few kind-specific cases (`switch_statement`, preprocessor conditionals, `goto`, labels, `break`, `continue`). Function definitions are skipped, and any other node is lowered by walking its children.
+    ///
+    /// Returns the operand holding the node's value, or `None` for statements and nodes that produce no value.
     pub fn visit_node(&mut self, node: Node) -> Option<Operand> {
         let role = self.classify_node(node.kind());
 

@@ -28,34 +28,63 @@ use crate::ir::function::{FunctionIR, Instruction};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathStep {
     /// The origin: a configured source (access path or call name).
-    Source { description: String },
+    Source {
+        /// Description of the source: an access path or call name.
+        description: String,
+    },
     /// A `phi` merging several incoming values.
-    Phi { function: String, variable: u32 },
+    Phi {
+        /// Function containing the phi.
+        function: String,
+        /// Number of the variable the phi defines.
+        variable: u32,
+    },
     /// A load from an object field (`x = obj.f`).
     FieldLoad {
+        /// Function containing the load.
         function: String,
+        /// Name of the object the field is read from.
         base: String,
+        /// Name of the field.
         field: String,
     },
     /// A value returned by a call (interprocedural hop into the callee).
     CallReturn {
+        /// Function containing the call.
         function: String,
+        /// Name of the called function.
         callee: String,
         /// `true` when the callee could not be resolved in-program.
         external: bool,
     },
     /// A value passed as an argument at a call site (hop into the callee).
     CallArgument {
+        /// Function containing the call.
         function: String,
+        /// Name of the called function.
         callee: String,
+        /// Argument slot the value is passed in.
         slot: usize,
     },
     /// A value bound to a callee's formal parameter (callee side of the hop).
-    FormalParam { function: String, param: String },
+    FormalParam {
+        /// Callee the parameter belongs to.
+        function: String,
+        /// Parameter name.
+        param: String,
+    },
     /// A value returned from a callee back to its call site (callee→caller).
-    ReturnToCaller { caller: String },
+    ReturnToCaller {
+        /// Function the value returns to.
+        caller: String,
+    },
     /// Any other def→use propagation inside one function.
-    Assignment { function: String, variable: u32 },
+    Assignment {
+        /// Function containing the step.
+        function: String,
+        /// Number of the variable defined.
+        variable: u32,
+    },
 }
 
 impl PathStep {
@@ -145,10 +174,10 @@ impl TaintPath {
     /// The backward walk records every SVFG node it stepped through, which
     /// floods human-facing output with noise:
     ///
-    /// 1. *Adjacent duplicate steps* — the walk visits both the def node and
+    /// 1. *Adjacent duplicate steps*: the walk visits both the def node and
     ///    the use node of one instruction, producing two identical entries
     ///    back to back;
-    /// 2. *Runs of `Assignment` hops* — SSA def→use renames inside one
+    /// 2. *Runs of `Assignment` hops*: SSA def→use renames inside one
     ///    function (`flows through vNNN`) carry no user-visible content;
     ///    value-shaping events (loads, phis, calls, interprocedural
     ///    boundaries) are never `Assignment` steps.
@@ -162,7 +191,7 @@ impl TaintPath {
         let mut steps: Vec<PathStep> = Vec::with_capacity(self.steps.len());
         let mut spans: Vec<Option<(String, (usize, usize))>> = Vec::with_capacity(self.spans.len());
         for (step, span) in self.steps.iter().zip(self.spans.iter()) {
-            // (1) identical neighbor (same kind, function, variable — the
+            // (1) identical neighbor (same kind, function, variable, the
             // def/use pair of one instruction).
             if steps.last().is_some_and(|prev| prev == step) {
                 continue;
