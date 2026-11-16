@@ -54,16 +54,7 @@ impl<'a> LoweringContext<'a> {
         let const_before = self.const_snapshot();
 
         // A preceding `break`/`return` already terminated this block.
-        if self
-            .ir
-            .blocks
-            .get(&self.current_block)
-            .is_none_or(|b| matches!(b.terminator, Terminator::None))
-        {
-            self.ir
-                .set_terminator(self.current_block, Terminator::Jump(loop_header));
-            self.ir.add_edge(self.current_block, loop_header);
-        }
+        self.jump_if_open(loop_header);
 
         // Header (Evaluate Condition)
         self.current_block = loop_header;
@@ -93,16 +84,7 @@ impl<'a> LoweringContext<'a> {
             self.visit_node(body);
         }
         // A body ending in `break`/`continue`/`return` owns its edge.
-        if self
-            .ir
-            .blocks
-            .get(&self.current_block)
-            .is_none_or(|b| matches!(b.terminator, Terminator::None))
-        {
-            self.ir
-                .set_terminator(self.current_block, Terminator::Jump(loop_header));
-            self.ir.add_edge(self.current_block, loop_header);
-        }
+        self.jump_if_open(loop_header);
         self.env.pop();
         self.loop_stack.pop();
 
@@ -234,15 +216,8 @@ impl<'a> LoweringContext<'a> {
         // A switch with only `default` (or no condition) always takes it.
         if value_idx.is_empty()
             && let Some(d) = default_idx
-            && self
-                .ir
-                .blocks
-                .get(&self.current_block)
-                .is_none_or(|b| matches!(b.terminator, Terminator::None))
         {
-            self.ir
-                .set_terminator(self.current_block, Terminator::Jump(bodies[d]));
-            self.ir.add_edge(self.current_block, bodies[d]);
+            self.jump_if_open(bodies[d]);
         }
 
         // Case bodies, in source order: each falls through to the next.
@@ -251,21 +226,12 @@ impl<'a> LoweringContext<'a> {
             for stmt in stmts {
                 self.visit_node(*stmt);
             }
-            if self
-                .ir
-                .blocks
-                .get(&self.current_block)
-                .is_none_or(|b| matches!(b.terminator, Terminator::None))
-            {
-                let fall = if i + 1 < clauses.len() {
-                    bodies[i + 1]
-                } else {
-                    merge_block
-                };
-                self.ir
-                    .set_terminator(self.current_block, Terminator::Jump(fall));
-                self.ir.add_edge(self.current_block, fall);
-            }
+            let fall = if i + 1 < clauses.len() {
+                bodies[i + 1]
+            } else {
+                merge_block
+            };
+            self.jump_if_open(fall);
         }
 
         self.env.pop();
@@ -523,16 +489,7 @@ impl<'a> LoweringContext<'a> {
     /// Jump the current block to `merge` unless it already ended in a
     /// terminator (`return`, `goto`, ...).
     fn close_arm(&mut self, merge: BlockId) {
-        if self
-            .ir
-            .blocks
-            .get(&self.current_block)
-            .is_none_or(|b| matches!(b.terminator, Terminator::None))
-        {
-            self.ir
-                .set_terminator(self.current_block, Terminator::Jump(merge));
-            self.ir.add_edge(self.current_block, merge);
-        }
+        self.jump_if_open(merge);
     }
 
     /// Lowers an `if`, and branch-role kinds whose name contains `switch` other than `switch_statement` (which has its own visitor): optional initializer, condition, consequence and alternative, joined at a merge block.
@@ -653,16 +610,7 @@ impl<'a> LoweringContext<'a> {
         if let Some(cons) = cons_node {
             self.visit_node(cons);
         }
-        if self
-            .ir
-            .blocks
-            .get(&self.current_block)
-            .is_none_or(|b| matches!(b.terminator, Terminator::None))
-        {
-            self.ir
-                .set_terminator(self.current_block, Terminator::Jump(merge_block));
-            self.ir.add_edge(self.current_block, merge_block);
-        }
+        self.jump_if_open(merge_block);
         Self::hoist_arm_scope(&mut self.env);
 
         // False Branch
@@ -670,16 +618,7 @@ impl<'a> LoweringContext<'a> {
             self.env.push(FxHashMap::default());
             self.current_block = false_block;
             self.visit_node(alt);
-            if self
-                .ir
-                .blocks
-                .get(&self.current_block)
-                .is_none_or(|b| matches!(b.terminator, Terminator::None))
-            {
-                self.ir
-                    .set_terminator(self.current_block, Terminator::Jump(merge_block));
-                self.ir.add_edge(self.current_block, merge_block);
-            }
+            self.jump_if_open(merge_block);
             Self::hoist_arm_scope(&mut self.env);
         }
 
@@ -731,17 +670,7 @@ impl<'a> LoweringContext<'a> {
 
         if let Some(name) = label_name {
             let target_block = self.get_or_create_label_block(&name);
-            if self
-                .ir
-                .blocks
-                .get(&self.current_block)
-                .is_none_or(|b| matches!(b.terminator, Terminator::None))
-            {
-                self.ir
-                    .set_terminator(self.current_block, Terminator::Jump(target_block));
-                self.ir.add_edge(self.current_block, target_block);
-            }
-            self.current_block = self.ir.new_block();
+            self.jump_to(target_block);
         }
         None
     }
@@ -774,9 +703,10 @@ impl<'a> LoweringContext<'a> {
         None
     }
 
-    /// Terminate the current block with a jump to `target`, then move to a
-    /// fresh block so any following statements lower as unreachable code.
-    fn jump_to(&mut self, target: BlockId) {
+    /// Ends the current block with a jump to `target`, unless an earlier
+    /// `break`/`continue`/`return` already terminated it (that statement owns
+    /// the edge).
+    fn jump_if_open(&mut self, target: BlockId) {
         if self
             .ir
             .blocks
@@ -787,6 +717,12 @@ impl<'a> LoweringContext<'a> {
                 .set_terminator(self.current_block, Terminator::Jump(target));
             self.ir.add_edge(self.current_block, target);
         }
+    }
+
+    /// Terminate the current block with a jump to `target`, then move to a
+    /// fresh block so any following statements lower as unreachable code.
+    fn jump_to(&mut self, target: BlockId) {
+        self.jump_if_open(target);
         self.current_block = self.ir.new_block();
     }
 
@@ -803,16 +739,7 @@ impl<'a> LoweringContext<'a> {
 
         if let Some(name) = label_name {
             let label_block = self.get_or_create_label_block(&name);
-            if self
-                .ir
-                .blocks
-                .get(&self.current_block)
-                .is_none_or(|b| matches!(b.terminator, Terminator::None))
-            {
-                self.ir
-                    .set_terminator(self.current_block, Terminator::Jump(label_block));
-                self.ir.add_edge(self.current_block, label_block);
-            }
+            self.jump_if_open(label_block);
             self.current_block = label_block;
         }
 
@@ -955,16 +882,7 @@ impl<'a> LoweringContext<'a> {
                 );
             }
 
-            if self
-                .ir
-                .blocks
-                .get(&self.current_block)
-                .is_none_or(|b| matches!(b.terminator, Terminator::None))
-            {
-                self.ir
-                    .set_terminator(self.current_block, Terminator::Jump(merge_block));
-                self.ir.add_edge(self.current_block, merge_block);
-            }
+            self.jump_if_open(merge_block);
 
             // Python case blocks are function-scoped: a name first bound in
             // one arm is visible after the `match`, exactly like an `if` arm.
