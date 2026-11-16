@@ -5,8 +5,10 @@ test-core = "test --no-default-features --features rust,typescript,fingerprintin
 # Doc-test run without node bindings.
 test-doc = "test --no-default-features --features rust,typescript,fingerprinting,remediation,solidity --doc"
 
-# Full linting pass (excludes node crate - clippy on napi cdylib requires napi-build toolchain).
-lint = "clippy --all-features -- -W clippy::pedantic -D warnings"
+# Full linting pass over the workspace. The gate is
+# `.github/scripts/clippy-ratchet.py`: deny lints fail, warn-level debt may
+# only shrink, so this alias does not pass `-D warnings`.
+lint = "clippy --workspace --all-features --all-targets --locked"
 
 # Build the native .node addon for Node.js consumption.
 # Requires: `npm install -g @napi-rs/cli`

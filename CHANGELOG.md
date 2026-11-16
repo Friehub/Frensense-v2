@@ -41,6 +41,18 @@ harness and keeps no changelog.
   The mechanism is recorded in `frensense-engine/CHANGELOG.md` and the shared
   vocabulary in `frensense-lang/CHANGELOG.md`.
 
+#### Repository & Release Tooling
+
+- **`cargo lint` lints the whole workspace again, and points at the real
+  gate.** The alias ran clippy from the root package only
+  (`--all-features -- -W clippy::pedantic -D warnings`), so
+  `frensense-packgen` and `frensense-devtools` were never linted, and its
+  comment referred to a `frensense-node` crate that is not in the workspace.
+  It now runs the same invocation as `.github/scripts/clippy-ratchet.py`
+  (`--workspace --all-features --all-targets --locked`); the ratchet, not
+  `-D warnings`, is the gate
+  ([#136](https://github.com/Friehub/Frensense-v2/issues/136)).
+
 ## [0.8.2]
 
 ### Added
