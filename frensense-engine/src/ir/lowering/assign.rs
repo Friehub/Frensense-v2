@@ -88,6 +88,23 @@ impl<'a> LoweringContext<'a> {
         let Some(op) = op else {
             return rhs;
         };
+        let (_, tmp) = self.read_modify(node, op, rhs, load);
+        Operand::Var(tmp)
+    }
+
+    /// Loads the current value with `load(cur)`, then defines a temporary
+    /// holding `cur <op> rhs`. Returns `(cur, result)`.
+    ///
+    /// The one lowering of a read-modify-write on a field or element: both
+    /// compound assignment (`o.f += 2`) and update expressions (`o.f++`,
+    /// which also needs `cur` for the postfix value) go through it.
+    pub(super) fn read_modify(
+        &mut self,
+        node: Node,
+        op: &str,
+        rhs: Operand,
+        load: impl FnOnce(VarId) -> Instruction,
+    ) -> (VarId, VarId) {
         let cur = self.new_temp(node);
         self.ir.push_instruction(self.current_block, load(cur));
         let tmp = self.new_temp(node);
@@ -100,7 +117,7 @@ impl<'a> LoweringContext<'a> {
                 rhs,
             },
         );
-        Operand::Var(tmp)
+        (cur, tmp)
     }
 
     /// Lowers an assignment `lhs = rhs`; the field names of the two sides come from the language spec's role for the node.

@@ -217,26 +217,16 @@ impl<'a> LoweringContext<'a> {
                 result
             }
             LValue::Field { base, field } => {
-                let cur = self.new_temp(node);
-                self.ir.push_instruction(
-                    self.current_block,
+                let mem_in = self.memory_var;
+                let load_field = field.clone();
+                let (cur, step) = self.read_modify(node, bin_op, Operand::IntLiteral(1), |dest| {
                     Instruction::LoadField {
-                        dest: cur,
-                        mem_in: self.memory_var,
+                        dest,
+                        mem_in,
                         base,
-                        field: field.clone(),
-                    },
-                );
-                let step = self.new_temp(node);
-                self.ir.push_instruction(
-                    self.current_block,
-                    Instruction::BinaryOp {
-                        dest: step,
-                        op: bin_op.to_string(),
-                        lhs: Operand::Var(cur),
-                        rhs: Operand::IntLiteral(1),
-                    },
-                );
+                        field: load_field,
+                    }
+                });
                 self.ir.push_instruction(
                     self.current_block,
                     Instruction::StoreField {
@@ -254,26 +244,16 @@ impl<'a> LoweringContext<'a> {
                 }
             }
             LValue::Element { base, index } => {
-                let cur = self.new_temp(node);
-                self.ir.push_instruction(
-                    self.current_block,
+                let mem_in = self.memory_var;
+                let load_index = index.clone();
+                let (cur, step) = self.read_modify(node, bin_op, Operand::IntLiteral(1), |dest| {
                     Instruction::LoadElement {
-                        dest: cur,
-                        mem_in: self.memory_var,
+                        dest,
+                        mem_in,
                         base,
-                        index: index.clone(),
-                    },
-                );
-                let step = self.new_temp(node);
-                self.ir.push_instruction(
-                    self.current_block,
-                    Instruction::BinaryOp {
-                        dest: step,
-                        op: bin_op.to_string(),
-                        lhs: Operand::Var(cur),
-                        rhs: Operand::IntLiteral(1),
-                    },
-                );
+                        index: load_index,
+                    }
+                });
                 self.ir.push_instruction(
                     self.current_block,
                     Instruction::StoreElement {
