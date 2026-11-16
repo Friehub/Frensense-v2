@@ -269,14 +269,7 @@ impl<'a> LoweringContext<'a> {
         // carries no taint, so the var arm dominates the may-analysis.
         let result = match (true_val, false_val) {
             (Some(Operand::Var(tv)), Some(Operand::Var(fv))) => {
-                let dest = self.ir.new_var(VarMetadata {
-                    source_name: None,
-                    type_name: None,
-                    byte_range: Some((node.start_byte(), node.end_byte())),
-                    is_memory_state: false,
-                    object_keys: Vec::new(),
-                    declared: false,
-                });
+                let dest = self.new_temp(node);
                 self.ir.push_instruction(
                     self.current_block,
                     Instruction::Assign {
@@ -337,14 +330,7 @@ impl<'a> LoweringContext<'a> {
         let cond_op = self.visit_node(cond_node).unwrap_or(Operand::Unknown);
         let const_before = self.const_snapshot();
 
-        let dest = self.ir.new_var(VarMetadata {
-            source_name: None,
-            type_name: None,
-            byte_range: Some((node.start_byte(), node.end_byte())),
-            is_memory_state: false,
-            object_keys: Vec::new(),
-            declared: false,
-        });
+        let dest = self.new_temp(node);
 
         let true_block = self.ir.new_block();
         let false_block = self.ir.new_block();
@@ -832,14 +818,7 @@ impl<'a> LoweringContext<'a> {
         let const_before = self.const_snapshot();
         let dispatch_block = self.current_block;
         let merge_block = self.ir.new_block();
-        let dest = self.ir.new_var(VarMetadata {
-            source_name: None,
-            type_name: None,
-            byte_range: Some((node.start_byte(), node.end_byte())),
-            is_memory_state: false,
-            object_keys: Vec::new(),
-            declared: false,
-        });
+        let dest = self.new_temp(node);
 
         let arm_blocks: Vec<BlockId> = arms.iter().map(|_| self.ir.new_block()).collect();
 

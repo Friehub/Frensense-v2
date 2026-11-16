@@ -54,14 +54,7 @@ impl<'a> LoweringContext<'a> {
         let mut it = operands.into_iter();
         let mut acc = it.next().unwrap();
         for rhs in it {
-            let next_dest = self.ir.new_var(VarMetadata {
-                source_name: None,
-                type_name: None,
-                byte_range: Some((node.start_byte(), node.end_byte())),
-                is_memory_state: false,
-                object_keys: Vec::new(),
-                declared: false,
-            });
+            let next_dest = self.new_temp(node);
             self.ir.push_instruction(
                 self.current_block,
                 Instruction::BinaryOp {
@@ -149,14 +142,7 @@ impl<'a> LoweringContext<'a> {
             return Some(Operand::Var(dest));
         }
 
-        let dest = self.ir.new_var(VarMetadata {
-            source_name: None,
-            type_name: None,
-            byte_range: Some((node.start_byte(), node.end_byte())),
-            is_memory_state: false,
-            object_keys: Vec::new(),
-            declared: false,
-        });
+        let dest = self.new_temp(node);
         self.ir.push_instruction(
             self.current_block,
             Instruction::UnaryOp {

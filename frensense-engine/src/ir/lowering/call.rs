@@ -93,14 +93,7 @@ impl<'a> LoweringContext<'a> {
             }
         }
 
-        let dest = self.ir.new_var(VarMetadata {
-            source_name: None,
-            type_name: None,
-            byte_range: Some((node.start_byte(), node.end_byte())),
-            is_memory_state: false,
-            object_keys: Vec::new(),
-            declared: false,
-        });
+        let dest = self.new_temp(node);
 
         let callee_role = self.classify_node(callee_node.kind());
         if matches!(callee_role, NodeRole::Identifier) {
@@ -145,64 +138,46 @@ impl<'a> LoweringContext<'a> {
                     arg_names,
                 },
             );
-        } else if let NodeRole::MemberAccess {
-            object_field,
-            property_field,
-        } = callee_role
-        {
-            let obj_node = callee_node.child_by_field_name(&*object_field);
-            let prop_node = callee_node.child_by_field_name(&*property_field);
-            if let (Some(obj), Some(prop)) = (obj_node, prop_node) {
-                let method = self.source[prop.start_byte()..prop.end_byte()].to_string();
-                let obj_op = self.visit_node(obj).unwrap_or(Operand::Unknown);
-                let recv_var = match obj_op {
-                    Operand::Var(v) => v,
-                    other => {
-                        let temp = self.ir.new_var(VarMetadata {
-                            source_name: None,
-                            type_name: None,
-                            byte_range: Some((obj.start_byte(), obj.end_byte())),
-                            is_memory_state: false,
-                            object_keys: Vec::new(),
-                            declared: false,
-                        });
-                        self.ir.push_instruction(
-                            self.current_block,
-                            Instruction::Assign {
-                                dest: temp,
-                                src: other,
-                            },
-                        );
-                        temp
-                    }
-                };
-                self.ir.push_instruction(
-                    self.current_block,
-                    Instruction::CallVirtual {
-                        dest: Some(dest),
-                        mem_out: self.memory_var,
-                        mem_in: self.memory_var,
-                        method,
-                        receiver: Operand::Var(recv_var),
-                        args,
-                        arg_names,
-                    },
-                );
-            } else {
-                let func_op = self.visit_node(callee_node).unwrap_or(Operand::Unknown);
-                self.ir.push_instruction(
-                    self.current_block,
-                    Instruction::CallPointer {
-                        dest: Some(dest),
-                        mem_out: self.memory_var,
-                        mem_in: self.memory_var,
-                        func_ptr: func_op,
-                        args,
-                        arg_names,
-                    },
-                );
-            }
+        } else if let Some((obj, prop)) = match callee_role {
+            NodeRole::MemberAccess {
+                object_field,
+                property_field,
+            } => callee_node
+                .child_by_field_name(&*object_field)
+                .zip(callee_node.child_by_field_name(&*property_field)),
+            _ => None,
+        } {
+            let method = self.source[prop.start_byte()..prop.end_byte()].to_string();
+            let obj_op = self.visit_node(obj).unwrap_or(Operand::Unknown);
+            let recv_var = match obj_op {
+                Operand::Var(v) => v,
+                other => {
+                    let temp = self.new_temp(obj);
+                    self.ir.push_instruction(
+                        self.current_block,
+                        Instruction::Assign {
+                            dest: temp,
+                            src: other,
+                        },
+                    );
+                    temp
+                }
+            };
+            self.ir.push_instruction(
+                self.current_block,
+                Instruction::CallVirtual {
+                    dest: Some(dest),
+                    mem_out: self.memory_var,
+                    mem_in: self.memory_var,
+                    method,
+                    receiver: Operand::Var(recv_var),
+                    args,
+                    arg_names,
+                },
+            );
         } else {
+            // Unresolvable callee shape: an indirect call through whatever
+            // the callee expression evaluates to.
             let func_op = self.visit_node(callee_node).unwrap_or(Operand::Unknown);
             self.ir.push_instruction(
                 self.current_block,
