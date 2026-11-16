@@ -28,6 +28,37 @@ what this crate does.
 - Items that no external path could reach are now `pub(crate)`; no
   reachable public item changed.
 
+### Fixed
+
+- **Three safety caps stopped truncating silently.** `MAX_WALK_NODES` and
+  `MAX_SCAN_NODES` in the UAF walker returned a partial answer with no trace,
+  and the SSA work budget only set `analysis_incomplete` on the function (the
+  report named the function but not why or how often). They now record
+  `Cap::UafWalkNodes`, `Cap::UafCalleeScanNodes` and `Cap::SsaDegraded`, so a
+  scan that dropped a free/use pair or lowered a function flow-insensitively
+  says so in `truncations` instead of looking clean.
+- **`FRENSdbg_CAPS` announces cap firings.** With the flag set, each cap
+  prints one `frensense: cap fired: <id> - <effect>` line to stderr per scan
+  (re-armed when the counters are drained), so a silently truncated analysis
+  is visible in a debug run without adding a debugger or reading the cap
+  sites. The flag is exposed as `DebugFlags::caps_enabled()` rather than a new
+  field on the public `DebugFlags` struct.
+- **The two learned-check evaluators now report where they disagree.**
+  `LearnedChecks` (function-scoped: last-segment matching, a guard anywhere in
+  the function suppresses) and `Policies` (program-scoped: the same facts via
+  `PolicyFact::from_legacy`, import aliases, the guard must dominate the
+  trigger) both consume `facts.learned_checks`, and the driver keeps the union
+  of their findings. The paths are not equivalent: a qualified fact
+  (`payments.runTool`) fires on a bare `runTool` only through the legacy path,
+  while a non-dominating guard suppresses there but fires through the policy
+  path. `FRENSdbg_CHECKS` prints `learned-check divergence (legacy only |
+  policy only): <function> <rule> @<span>` for every such finding, and
+  `checks/divergence_tests.rs` pins both directions. The flag is additive
+  (`DebugFlags::checks_enabled()`), so the public `DebugFlags` shape is
+  unchanged. This is observability, not a semantic fix: choosing one evaluator
+  has to preserve the legacy `unless_range_check` interval logic, which the
+  policy requirement does not reproduce.
+
 ## [0.8.2]
 
 ### Added

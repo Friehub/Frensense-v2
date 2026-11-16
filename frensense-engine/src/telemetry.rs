@@ -50,13 +50,25 @@ pub enum Cap {
     /// The points-to fixed point spent `MAX_PASSES` without converging;
     /// field precision was dropped for that function.
     PointsToPasses,
+    /// The UAF walker's backward provenance walk hit `MAX_WALK_NODES`; the
+    /// free/use pair stayed unprovable and was dropped.
+    UafWalkNodes,
+    /// The UAF walker's forward callee scan hit `MAX_SCAN_NODES`; frees in
+    /// the unvisited tail of the callee were not seen.
+    UafCalleeScanNodes,
+    /// SSA construction exhausted its work budget; the function was returned
+    /// flow-insensitive and flagged `analysis_incomplete`.
+    SsaDegraded,
 }
 
 /// Slots in [`CAP_COUNTS`]. Keep in sync with [`Cap::slot`].
-const CAP_SLOTS: usize = 7;
+const CAP_SLOTS: usize = 10;
 
 thread_local! {
     static CAP_COUNTS: RefCell<[u64; CAP_SLOTS]> = const { RefCell::new([0; CAP_SLOTS]) };
+    /// One announcement per cap per report window, so a debug run says each
+    /// silent cap fired without flooding stderr from a hot loop.
+    static CAP_ANNOUNCED: RefCell<[bool; CAP_SLOTS]> = const { RefCell::new([false; CAP_SLOTS]) };
 }
 
 impl Cap {
@@ -69,6 +81,9 @@ impl Cap {
             Cap::ForwardHops => 4,
             Cap::CallgraphHops => 5,
             Cap::PointsToPasses => 6,
+            Cap::UafWalkNodes => 7,
+            Cap::UafCalleeScanNodes => 8,
+            Cap::SsaDegraded => 9,
         }
     }
 
@@ -83,6 +98,9 @@ impl Cap {
             Cap::ForwardHops => "forward_hops",
             Cap::CallgraphHops => "callgraph_hops",
             Cap::PointsToPasses => "points_to_passes",
+            Cap::UafWalkNodes => "uaf_walk_nodes",
+            Cap::UafCalleeScanNodes => "uaf_callee_scan_nodes",
+            Cap::SsaDegraded => "ssa_degraded",
         }
     }
 
@@ -108,15 +126,47 @@ impl Cap {
             Cap::PointsToPasses => {
                 "points-to did not converge in its pass budget; field precision was dropped"
             }
+            Cap::UafWalkNodes => {
+                "UAF provenance walk hit its node budget; the site was treated as unprovable"
+            }
+            Cap::UafCalleeScanNodes => {
+                "UAF callee scan hit its node budget; frees past the cap were not seen"
+            }
+            Cap::SsaDegraded => {
+                "SSA construction hit its work budget; the function stayed flow-insensitive"
+            }
         }
     }
 
     /// Record one firing of this cap in the current scan thread.
+    ///
+    /// Set `FRENSdbg_CAPS` to announce each cap once per report window on
+    /// stderr. The counter is always updated; only the announcement is
+    /// debug-gated.
     pub fn record(self) {
         CAP_COUNTS.with(|counts| {
             let mut counts = counts.borrow_mut();
             counts[self.slot()] = counts[self.slot()].saturating_add(1);
         });
+        let first = CAP_ANNOUNCED.with(|announced| {
+            let mut announced = announced.borrow_mut();
+            match announced.get_mut(self.slot()) {
+                Some(flag) => {
+                    let first = !*flag;
+                    *flag = true;
+                    first
+                }
+                None => false,
+            }
+        });
+        if first {
+            crate::dbg_trace!(
+                crate::debug_flags::DebugFlags::caps_enabled(),
+                "frensense: cap fired: {} - {}",
+                self.id(),
+                self.effect()
+            );
+        }
     }
 
     /// How many times this cap has fired on the current thread since its
@@ -142,8 +192,15 @@ pub fn drain_caps() -> Vec<CapHit> {
         Cap::ForwardHops,
         Cap::CallgraphHops,
         Cap::PointsToPasses,
+        Cap::UafWalkNodes,
+        Cap::UafCalleeScanNodes,
+        Cap::SsaDegraded,
     ];
     let counts = CAP_COUNTS.with(|counts| std::mem::take(&mut *counts.borrow_mut()));
+    // The announcement is per report window: re-arm it for the next scan.
+    CAP_ANNOUNCED.with(|announced| {
+        *announced.borrow_mut() = [false; CAP_SLOTS];
+    });
     all.into_iter()
         .filter_map(|cap| {
             let hits = counts[cap.slot()];
@@ -450,4 +507,28 @@ impl ScanTelemetry {
 #[must_use]
 pub fn millis_since(start: std::time::Instant) -> u128 {
     start.elapsed().as_millis()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cap, drain_caps};
+
+    /// The caps that used to truncate silently must reach the report with
+    /// their stable ids, and a drain must reset them for the next scan.
+    #[test]
+    fn formerly_silent_caps_reach_the_report() {
+        let _ = drain_caps();
+
+        Cap::UafWalkNodes.record();
+        Cap::UafWalkNodes.record();
+        Cap::UafCalleeScanNodes.record();
+        Cap::SsaDegraded.record();
+
+        let hits = drain_caps();
+        let hits_for = |id: &str| hits.iter().find(|hit| hit.cap == id).map(|hit| hit.hits);
+        assert_eq!(hits_for("uaf_walk_nodes"), Some(2));
+        assert_eq!(hits_for("uaf_callee_scan_nodes"), Some(1));
+        assert_eq!(hits_for("ssa_degraded"), Some(1));
+        assert!(drain_caps().is_empty(), "drain resets every cap counter");
+    }
 }

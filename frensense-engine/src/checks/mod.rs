@@ -33,6 +33,8 @@ pub mod uaf;
 pub mod weak_hash;
 
 #[cfg(test)]
+mod divergence_tests;
+#[cfg(test)]
 mod guard_bypass_tests;
 #[cfg(test)]
 mod int_overflow_tests;
@@ -108,6 +110,75 @@ fn finding_key(f: &CheckerFinding) -> (String, String, usize) {
     )
 }
 
+/// Name each learned-check finding that only one evaluator produced.
+///
+/// `LearnedChecks` (function-scoped: last-segment matching, a guard anywhere
+/// in the function suppresses) and `Policies` (program-scoped: the same
+/// facts via `PolicyFact::from_legacy`, import-alias resolution, the guard
+/// must dominate the trigger) both consume `facts.learned_checks`. The
+/// driver keeps the union, so a disagreement silently widens or narrows the
+/// reported set. `FRENSdbg_CHECKS` makes that visible without changing the
+/// result, which is the prerequisite for choosing one evaluator deliberately.
+fn trace_learned_divergence(
+    irs: &[&FunctionIR],
+    facts: &FactTable,
+    pkg_scope: Option<&policy::PackageScope<'_>>,
+) {
+    if !crate::debug_flags::DebugFlags::checks_enabled() || facts.learned_checks.is_empty() {
+        return;
+    }
+    let (legacy_only, policy_only) = learned_divergence(irs, facts, pkg_scope);
+    for (path, only) in [("legacy", legacy_only), ("policy", policy_only)] {
+        for (function, rule, span) in only {
+            crate::dbg_trace!(
+                true,
+                "frensense: learned-check divergence ({path} only): {function} {rule} @{span}"
+            );
+        }
+    }
+}
+
+/// Findings that only one of the two learned-check evaluators produced.
+///
+/// Returns `(legacy_only, policy_only)`, each sorted by
+/// `(function, rule, span)`. Exposed to the test module so a change to either
+/// path's semantics shows up as a fixture failure rather than a silent shift
+/// in the reported union.
+type FindingKey = (String, String, usize);
+
+fn learned_divergence(
+    irs: &[&FunctionIR],
+    facts: &FactTable,
+    pkg_scope: Option<&policy::PackageScope<'_>>,
+) -> (Vec<FindingKey>, Vec<FindingKey>) {
+    let key = |f: &CheckerFinding| {
+        (
+            f.function.clone(),
+            f.rule.clone(),
+            f.span.map(|s| s.0).unwrap_or(usize::MAX),
+        )
+    };
+    let legacy: std::collections::BTreeSet<_> = irs
+        .iter()
+        .flat_map(|ir| learned::check(ir, facts))
+        .map(|f| key(&f))
+        .collect();
+    let learned_rules: FxHashSet<&str> = facts
+        .learned_checks
+        .iter()
+        .map(|(fact, _)| fact.rule.as_str())
+        .collect();
+    let policy: std::collections::BTreeSet<_> = policy::check_program_scoped(irs, facts, pkg_scope)
+        .into_iter()
+        .filter(|f| learned_rules.contains(f.rule.as_str()))
+        .map(|f| key(&f))
+        .collect();
+    (
+        legacy.difference(&policy).cloned().collect(),
+        policy.difference(&legacy).cloned().collect(),
+    )
+}
+
 /// Push a finding unless an earlier check already reported the same
 /// `(function, rule, span)` identity.
 fn push_unique(
@@ -176,6 +247,7 @@ pub fn check_all_with_registry_and_telemetry<'a>(
     pkg_scope: Option<&policy::PackageScope<'_>>,
 ) -> (Vec<CheckerFinding>, Vec<crate::telemetry::CheckTelemetry>) {
     let irs: Vec<&FunctionIR> = irs.into_iter().collect();
+    trace_learned_divergence(&irs, facts, pkg_scope);
     // One memory-summary registry per scan: program summaries are inferred
     // from the whole IR set once, then shared by every memory check.
     let summaries =
