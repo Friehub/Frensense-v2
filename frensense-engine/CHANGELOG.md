@@ -21,6 +21,17 @@ what this crate does.
   `CheckRegistry`, `LoweringContext`, `GuardMap` and `CtxLink`, required by
   the `missing_debug_implementations` lint.
 
+### Removed
+
+- **Breaking:** `analysis::taint::context` (`ContextSensitiveTaintEngine`,
+  `ContextualAlert`, `ContextStats`, `ROOT_CTX`, `CtxId`,
+  `MAX_CONTEXTS_PER_FN`), 356 lines plus 483 lines of tests. It layered k=1
+  call-site context sensitivity on the old forward engine, which production
+  never constructs; the backward engine has its own call contexts and its own
+  sibling-caller test (`call_site_context_separates_sibling_callers`).
+- `check_all_with_graph` and `check_all_with_graph_scoped`, which had no caller;
+  use `check_all_with_telemetry`.
+
 ### Changed
 
 - Duplicate logic collapsed into one definition each (no behaviour change

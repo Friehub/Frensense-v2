@@ -5,7 +5,7 @@
 //! The non-dataflow check seam: one trait, one registry, one driver.
 //!
 //! Every non-dataflow check declares *how often it runs* and *how to run*;
-//! the driver in [`super::check_all_with_graph_scoped`] supplies everything
+//! the driver in [`super::check_all_with_telemetry`] supplies everything
 //! that is common to all of them - the IR set, the whole-program value-flow
 //! graph, the fact table, the package scope, the interprocedural memory
 //! summaries - and owns the single finding-identity/dedup rule.

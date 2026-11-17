@@ -212,34 +212,17 @@ pub fn check_all<'a>(
     irs: impl IntoIterator<Item = &'a FunctionIR>,
     facts: &FactTable,
 ) -> Vec<CheckerFinding> {
-    check_all_with_graph(irs, facts, None)
+    check_all_with_telemetry(irs, facts, None, None).0
 }
 
-/// [`check_all`] with the program value-flow graph: the UAF checker walks
-/// interprocedural free/use edges (callee parameter frees, caller-side
-/// frees, factory provenance) that intraprocedural IR alone cannot see.
-pub fn check_all_with_graph<'a>(
-    irs: impl IntoIterator<Item = &'a FunctionIR>,
-    facts: &FactTable,
-    prog: Option<&ProgramSvfg<'_>>,
-) -> Vec<CheckerFinding> {
-    check_all_with_graph_scoped(irs, facts, prog, None)
-}
-
-/// [`check_all_with_graph`] with package-scope filtering for policy facts:
-/// policies carrying `package: Some(pkg)` only fire in functions whose
-/// file imports `pkg`. `scope = None` disables filtering.
-pub fn check_all_with_graph_scoped<'a>(
-    irs: impl IntoIterator<Item = &'a FunctionIR>,
-    facts: &FactTable,
-    prog: Option<&ProgramSvfg<'_>>,
-    pkg_scope: Option<&policy::PackageScope<'_>>,
-) -> Vec<CheckerFinding> {
-    check_all_with_telemetry(irs, facts, prog, pkg_scope).0
-}
-
-/// [`check_all_with_graph_scoped`] while also collecting execution telemetry
-/// (timings, run counts, findings, and outcomes with catch_unwind failure isolation).
+/// [`check_all`] with the program value-flow graph and package scope, while
+/// also collecting execution telemetry (timings, run counts, findings, and
+/// outcomes with catch_unwind failure isolation).
+///
+/// `prog` lets the UAF checker walk interprocedural free/use edges (callee
+/// parameter frees, caller-side frees, factory provenance) that intraprocedural
+/// IR alone cannot see. `pkg_scope`: policies carrying `package: Some(pkg)`
+/// only fire in functions whose file imports `pkg`; `None` disables filtering.
 pub fn check_all_with_telemetry<'a>(
     irs: impl IntoIterator<Item = &'a FunctionIR>,
     facts: &FactTable,
