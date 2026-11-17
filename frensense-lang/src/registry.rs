@@ -57,7 +57,7 @@ impl LanguageRegistry {
     /// Returns the process-wide default registry, constructed once on first call.
     ///
     /// The default registry includes every language enabled via Cargo features.
-    /// See [`build_default`](Self::build_default).
+    /// See the private `build_default`.
     pub fn global() -> &'static Self {
         static INSTANCE: OnceLock<LanguageRegistry> = OnceLock::new();
         INSTANCE.get_or_init(Self::build_default)

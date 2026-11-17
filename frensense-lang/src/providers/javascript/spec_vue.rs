@@ -24,134 +24,26 @@
 
 use std::borrow::Cow;
 
-use tree_sitter::Node;
-
-use crate::spec::{
-    Export, Import, LanguageSpec, ModuleItem, NodeRole, PackageCategory, TaintOrigin,
-};
-
-use super::spec_ts::TypeScriptSpec;
-use super::{
-    ast::{
-        is_js_cast, is_js_destructuring_pattern, is_js_pair_entry, is_js_pair_pattern,
-        is_js_template_literal_fragment, is_js_template_string, is_js_ternary_straight_line,
-    },
-    imports::{extract_js_exports, extract_js_imports, extract_js_module_items},
-    packages::js_package_category,
-    params::classify_js_param,
-};
+use super::family::{JsDialect, JsFamily};
 
 /// A `.vue` SFC whose script blocks are parsed with the TypeScript/TSX
-/// grammar after [`LanguageSpec::preprocess`] blanks the template and
-/// style sections in place.
+/// grammar after its `preprocess` blanks the template and style sections in
+/// place.
+///
+/// The script blocks are TypeScript, so every behavioural method comes from
+/// the JavaScript family's blanket [`LanguageSpec`](crate::spec::LanguageSpec)
+/// implementation; this type adds only the SFC rewrite.
 #[derive(Debug)]
 pub struct VueSpec;
 
-impl LanguageSpec for VueSpec {
-    fn name(&self) -> &'static str {
-        "vue"
-    }
+impl JsFamily for VueSpec {
+    const DIALECT: JsDialect = JsDialect::Vue;
 
-    fn extensions(&self) -> &'static [&'static str] {
-        &["vue"]
-    }
-
-    fn tree_sitter_language(&self) -> tree_sitter::Language {
-        #[cfg(feature = "typescript")]
-        return tree_sitter_typescript::LANGUAGE_TSX.into();
-        #[cfg(not(feature = "typescript"))]
-        panic!("frensense-lang: 'typescript' feature not enabled");
-    }
-
-    fn preprocess<'a>(&self, source: &'a str) -> Cow<'a, str> {
+    /// Blank everything outside a `<script>` body into same-length runs of
+    /// spaces (newlines kept), so the TSX grammar sees a plain TS module and
+    /// every offset still points at the original file.
+    fn preprocess_source<'a>(&self, source: &'a str) -> Cow<'a, str> {
         extract_script_blocks(source)
-    }
-
-    /// The script blocks are TypeScript (or plain JS — the TS grammar sees
-    /// both), so the pack language sections and consumer bundles that carry
-    /// the `typescript`/`javascript` vocabulary apply to SFC code too.
-    fn fact_language(&self) -> &'static str {
-        TypeScriptSpec.name()
-    }
-
-    fn classify(&self, kind: &str) -> NodeRole {
-        TypeScriptSpec.classify(kind)
-    }
-
-    fn is_cast(&self, kind: &str) -> bool {
-        is_js_cast(kind)
-    }
-
-    fn is_template_string(&self, kind: &str) -> bool {
-        is_js_template_string(kind)
-    }
-
-    fn is_template_literal_fragment(&self, kind: &str) -> bool {
-        is_js_template_literal_fragment(kind)
-    }
-
-    fn is_destructuring_pattern(&self, kind: &str) -> bool {
-        is_js_destructuring_pattern(kind)
-    }
-
-    fn is_pair_pattern(&self, kind: &str) -> bool {
-        is_js_pair_pattern(kind)
-    }
-
-    fn is_pair_entry(&self, kind: &str) -> bool {
-        is_js_pair_entry(kind)
-    }
-
-    fn is_ternary_straight_line(&self, kind: &str) -> bool {
-        is_js_ternary_straight_line(kind)
-    }
-
-    fn implicit_return_node<'a>(&self, fn_node: Node<'a>, body: Node<'a>) -> Option<Node<'a>> {
-        TypeScriptSpec.implicit_return_node(fn_node, body)
-    }
-
-    fn wrap_region(&self, code: &str) -> String {
-        TypeScriptSpec.wrap_region(code)
-    }
-
-    fn import_node_kinds(&self) -> &'static [&'static str] {
-        TypeScriptSpec.import_node_kinds()
-    }
-
-    fn extract_imports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Import> {
-        extract_js_imports(root, source)
-    }
-
-    fn extract_exports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Export> {
-        extract_js_exports(root, source)
-    }
-
-    fn extract_module_items<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<ModuleItem> {
-        extract_js_module_items(root, source)
-    }
-
-    fn symbol_query(&self) -> Option<&'static str> {
-        TypeScriptSpec.symbol_query()
-    }
-
-    fn call_query(&self) -> Option<&'static str> {
-        TypeScriptSpec.call_query()
-    }
-
-    fn package_category(&self, pkg: &str) -> Option<PackageCategory> {
-        js_package_category(pkg)
-    }
-
-    fn classify_param_taint(
-        &self,
-        name: Option<&str>,
-        type_annotation: Option<&str>,
-    ) -> Option<TaintOrigin> {
-        classify_js_param(name, type_annotation)
-    }
-
-    fn is_http_route_decorator(&self, decorator_name: &str) -> bool {
-        TypeScriptSpec.is_http_route_decorator(decorator_name)
     }
 }
 
@@ -252,6 +144,7 @@ fn blank(bytes: &[u8], keep: &[bool]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spec::LanguageSpec;
 
     const SFC: &str = "<template>\n  <div>{{ msg }}</div>\n</template>\n\n<script setup lang=\"ts\">\nconst msg = 'hello'\nfunction handler() {\n  return msg\n}\n</script>\n\n<style scoped>\n.x { color: red; }\n</style>\n";
 

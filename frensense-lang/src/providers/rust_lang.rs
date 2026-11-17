@@ -6,8 +6,8 @@
 use tree_sitter::Node;
 
 use crate::spec::{
-    node_text, Export, Import, ItemKind, LanguageSpec, ModuleItem, NodeRole, PackageCategory,
-    TaintOrigin, Visibility,
+    node_text, walk_preorder, Export, Import, ItemKind, LanguageSpec, ModuleItem, NodeRole,
+    PackageCategory, TaintOrigin, Visibility,
 };
 
 // ── AST classification ────────────────────────────────────────────────────────
@@ -103,14 +103,8 @@ fn classify_rust(kind: &str) -> NodeRole {
 // ── Import extraction ─────────────────────────────────────────────────────────
 
 fn extract_rust_imports(root: Node<'_>, source: &str) -> Vec<Import> {
-    use crate::spec::node_text;
-
     let mut imports = Vec::new();
-    let mut cursor = root.walk();
-
-    'outer: loop {
-        let node = cursor.node();
-
+    walk_preorder(root, |node| {
         if node.kind() == "use_declaration" {
             // `use axum::Router;`
             // `use axum::{Router, extract::Json};`
@@ -121,19 +115,7 @@ fn extract_rust_imports(root: Node<'_>, source: &str) -> Vec<Import> {
                 .trim();
             flatten_rust_use(text, &mut imports);
         }
-
-        if cursor.goto_first_child() {
-            continue;
-        }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                break 'outer;
-            }
-        }
-    }
+    });
     imports
 }
 
@@ -285,19 +267,6 @@ fn root_level_items(root: Node<'_>, source: &str) -> Vec<ModuleItem> {
         }
     }
     items
-}
-
-fn rust_export(item: ModuleItem) -> Option<Export> {
-    if item.visibility != Visibility::Public {
-        return None;
-    }
-    Some(Export {
-        exported_name: item.name.clone(),
-        local_name: item.name,
-        from_module: None,
-        visibility: item.visibility,
-        kind: item.kind,
-    })
 }
 
 // ── Package catalogue ─────────────────────────────────────────────────────────
@@ -483,10 +452,9 @@ impl LanguageSpec for RustSpec {
     }
 
     fn extract_exports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Export> {
-        root_level_items(root, source)
-            .into_iter()
-            .filter_map(rust_export)
-            .collect()
+        // Only the root surface: a `pub` item nested in a `mod` body is
+        // declared by this file but not exported by it.
+        ModuleItem::public_exports(root_level_items(root, source))
     }
 
     fn extract_module_items<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<ModuleItem> {

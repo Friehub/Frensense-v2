@@ -180,17 +180,7 @@ impl LanguageSpec for CSpec {
     fn extract_exports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Export> {
         // C's export rule is linkage: a file-scope definition without
         // `static` is visible to the linker, with `static` it is not.
-        c_module_items(root, source)
-            .into_iter()
-            .filter(|item| item.visibility == Visibility::Public)
-            .map(|item| Export {
-                exported_name: item.name.clone(),
-                local_name: item.name,
-                from_module: None,
-                visibility: item.visibility,
-                kind: item.kind,
-            })
-            .collect()
+        ModuleItem::public_exports(c_module_items(root, source))
     }
 
     fn extract_module_items<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<ModuleItem> {
@@ -400,29 +390,23 @@ fn collect_c_items(node: Node<'_>, source: &str, out: &mut Vec<ModuleItem>) {
                     }
                 }
             }
-            "struct_specifier" | "union_specifier" | "class_specifier" => {
+            "struct_specifier" | "union_specifier" | "class_specifier" | "enum_specifier" => {
+                // A forward declaration (`struct Foo;`) has no body and
+                // declares no item; the tag alone is not a definition.
                 if child.child_by_field_name("body").is_none() {
                     continue;
                 }
                 let Some(name) = child.child_by_field_name("name") else {
                     continue;
                 };
-                out.push(ModuleItem {
-                    name: node_text(name, source).to_owned(),
-                    kind: ItemKind::Struct,
-                    visibility: c_visibility(child, source),
-                });
-            }
-            "enum_specifier" => {
-                if child.child_by_field_name("body").is_none() {
-                    continue;
-                }
-                let Some(name) = child.child_by_field_name("name") else {
-                    continue;
+                let kind = if child.kind() == "enum_specifier" {
+                    ItemKind::Enum
+                } else {
+                    ItemKind::Struct
                 };
                 out.push(ModuleItem {
                     name: node_text(name, source).to_owned(),
-                    kind: ItemKind::Enum,
+                    kind,
                     visibility: c_visibility(child, source),
                 });
             }

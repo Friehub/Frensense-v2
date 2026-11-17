@@ -16,8 +16,8 @@
 use tree_sitter::Node;
 
 use crate::spec::{
-    node_text, Export, Import, ItemKind, LanguageSpec, ModuleItem, NodeRole, PackageCategory,
-    TaintOrigin, Visibility,
+    node_text, walk_preorder, Export, Import, ItemKind, LanguageSpec, ModuleItem, NodeRole,
+    PackageCategory, TaintOrigin, Visibility,
 };
 
 // ── AST classification ────────────────────────────────────────────────────────
@@ -140,11 +140,7 @@ fn go_is_error_guard(node: Node<'_>, source: &str) -> bool {
 
 fn extract_go_imports(root: Node<'_>, source: &str) -> Vec<Import> {
     let mut imports = Vec::new();
-    let mut cursor = root.walk();
-
-    'outer: loop {
-        let node = cursor.node();
-
+    walk_preorder(root, |node| {
         match node.kind() {
             // import "path" or import alias "path"
             "import_spec" => {
@@ -170,19 +166,7 @@ fn extract_go_imports(root: Node<'_>, source: &str) -> Vec<Import> {
             }
             _ => {}
         }
-
-        if cursor.goto_first_child() {
-            continue;
-        }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                break 'outer;
-            }
-        }
-    }
+    });
 
     imports
 }
@@ -373,17 +357,7 @@ impl LanguageSpec for GoSpec {
     }
 
     fn extract_exports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Export> {
-        go_module_items(root, source)
-            .into_iter()
-            .filter(|item| item.visibility == Visibility::Public)
-            .map(|item| Export {
-                exported_name: item.name.clone(),
-                local_name: item.name,
-                from_module: None,
-                visibility: item.visibility,
-                kind: item.kind,
-            })
-            .collect()
+        ModuleItem::public_exports(go_module_items(root, source))
     }
 
     fn extract_module_items<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<ModuleItem> {

@@ -17,8 +17,8 @@
 use tree_sitter::Node;
 
 use crate::spec::{
-    call_last_segment, node_text, Export, Import, ItemKind, LanguageSpec, ModuleItem, NodeRole,
-    PackageCategory, TaintOrigin, Visibility,
+    call_last_segment, node_text, walk_preorder, Export, Import, ItemKind, LanguageSpec,
+    ModuleItem, NodeRole, PackageCategory, TaintOrigin, Visibility,
 };
 
 // ── AST classification ────────────────────────────────────────────────────────
@@ -182,13 +182,27 @@ fn python_context_manager_call<'s>(node: Node<'_>, source: &'s str) -> Option<&'
 
 // ── Import extraction ─────────────────────────────────────────────────────────
 
+/// The `name`/`alias` pair of an `aliased_import` (`import x as y`,
+/// `from m import x as y`).
+///
+/// Returns `(bound, imported)`: the local name is the written alias, or the
+/// imported name itself when no alias is given. Python spells the same node in
+/// both import forms, so the pair is read in one place.
+fn python_aliased_names<'s>(child: Node<'_>, source: &'s str) -> (&'s str, &'s str) {
+    let name = child
+        .child_by_field_name("name")
+        .map(|n| node_text(n, source))
+        .unwrap_or("");
+    let alias = child
+        .child_by_field_name("alias")
+        .map(|n| node_text(n, source))
+        .unwrap_or(name);
+    (alias, name)
+}
+
 fn extract_python_imports(root: Node<'_>, source: &str) -> Vec<Import> {
     let mut imports = Vec::new();
-    let mut cursor = root.walk();
-
-    'outer: loop {
-        let node = cursor.node();
-
+    walk_preorder(root, |node| {
         match node.kind() {
             // `import flask`
             // `import sqlalchemy as sa`
@@ -207,17 +221,10 @@ fn extract_python_imports(root: Node<'_>, source: &str) -> Vec<Import> {
                             }
                             "aliased_import" => {
                                 // `import sqlalchemy as sa`
-                                let name = child
-                                    .child_by_field_name("name")
-                                    .map(|n| node_text(n, source))
-                                    .unwrap_or("");
-                                let alias = child
-                                    .child_by_field_name("alias")
-                                    .map(|n| node_text(n, source))
-                                    .unwrap_or(name);
+                                let (bound, imported) = python_aliased_names(child, source);
                                 imports.push(Import {
-                                    local_name: alias.to_owned(),
-                                    package: name.to_owned(),
+                                    local_name: bound.to_owned(),
+                                    package: imported.to_owned(),
                                     symbol: None,
                                 });
                             }
@@ -251,18 +258,11 @@ fn extract_python_imports(root: Node<'_>, source: &str) -> Vec<Import> {
                                 }
                             }
                             "aliased_import" => {
-                                let name = child
-                                    .child_by_field_name("name")
-                                    .map(|n| node_text(n, source))
-                                    .unwrap_or("");
-                                let alias = child
-                                    .child_by_field_name("alias")
-                                    .map(|n| node_text(n, source))
-                                    .unwrap_or(name);
+                                let (bound, imported) = python_aliased_names(child, source);
                                 imports.push(Import {
-                                    local_name: alias.to_owned(),
+                                    local_name: bound.to_owned(),
                                     package: module_name.clone(),
-                                    symbol: Some(name.to_owned()),
+                                    symbol: Some(imported.to_owned()),
                                 });
                             }
                             "wildcard_import" => {
@@ -284,19 +284,7 @@ fn extract_python_imports(root: Node<'_>, source: &str) -> Vec<Import> {
             }
             _ => {}
         }
-
-        if cursor.goto_first_child() {
-            continue;
-        }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                break 'outer;
-            }
-        }
-    }
+    });
 
     imports
 }
@@ -484,17 +472,7 @@ impl LanguageSpec for PythonSpec {
     }
 
     fn extract_exports<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<Export> {
-        python_module_items(root, source)
-            .into_iter()
-            .filter(|item| item.visibility == Visibility::Public)
-            .map(|item| Export {
-                exported_name: item.name.clone(),
-                local_name: item.name,
-                from_module: None,
-                visibility: item.visibility,
-                kind: item.kind,
-            })
-            .collect()
+        ModuleItem::public_exports(python_module_items(root, source))
     }
 
     fn extract_module_items<'tree>(&self, root: Node<'tree>, source: &str) -> Vec<ModuleItem> {

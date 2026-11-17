@@ -268,6 +268,34 @@ pub struct ModuleItem {
     pub visibility: Visibility,
 }
 
+impl ModuleItem {
+    /// Project the `public` items of `items` onto their [`Export`] view.
+    ///
+    /// A language without re-export syntax (C, Go, Python, and Rust's root
+    /// surface) exports exactly its publicly visible declarations, so this
+    /// projection belongs to the shared types rather than to each provider:
+    /// every field of [`Export`] is already on [`ModuleItem`]. Languages that
+    /// *do* have re-export statements (JS/TS `export { x as y } from "…"`)
+    /// still derive exports from the AST, because a `ModuleItem` cannot say
+    /// which module an export came from.
+    ///
+    /// A provider whose language has no re-export syntax returns exactly this
+    /// projection from [`LanguageSpec::extract_exports`].
+    pub(crate) fn public_exports(items: impl IntoIterator<Item = Self>) -> Vec<Export> {
+        items
+            .into_iter()
+            .filter(|item| item.visibility == Visibility::Public)
+            .map(|item| Export {
+                exported_name: item.name.clone(),
+                local_name: item.name,
+                from_module: None,
+                visibility: item.visibility,
+                kind: item.kind,
+            })
+            .collect()
+    }
+}
+
 // ── The trait ─────────────────────────────────────────────────────────────────
 
 /// Everything the frensense engine needs to know about one source language.
@@ -612,6 +640,38 @@ pub fn call_last_segment(call: &str) -> &str {
 #[inline]
 pub fn node_text<'s>(node: Node<'_>, source: &'s str) -> &'s str {
     source.get(node.start_byte()..node.end_byte()).unwrap_or("")
+}
+
+// ── Helper: tree walk ─────────────────────────────────────────────────────────
+
+/// Visit every node of `root`, depth-first and in pre-order (a node before its
+/// children).
+///
+/// Every provider's import/export extractor wants the same thing — "look at
+/// each node, match on its kind" — and the cursor dance to do it
+/// (`goto_first_child` / `goto_next_sibling` / `goto_parent` with a labelled
+/// outer loop) is identical in all of them. Open-coding it once per grammar is
+/// pure repetition and easy to get subtly wrong (a missing `break 'outer`
+/// revisits the root forever).
+///
+/// It is `pub(crate)`, not `pub`: a provider implementation detail, not part of
+/// the contract downstream crates consume.
+pub(crate) fn walk_preorder<'tree>(root: Node<'tree>, mut visit: impl FnMut(Node<'tree>)) {
+    let mut cursor = root.walk();
+    'outer: loop {
+        visit(cursor.node());
+        if cursor.goto_first_child() {
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                break 'outer;
+            }
+        }
+    }
 }
 
 /// Does a node's text look like a decorator or attribute definition
