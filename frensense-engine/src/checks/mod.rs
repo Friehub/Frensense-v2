@@ -32,6 +32,18 @@ pub mod schema_policy;
 pub mod uaf;
 pub mod weak_hash;
 
+/// Text of a caught panic payload (`&str` and `String` payloads; anything else
+/// is reported as `unknown panic`).
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
+}
+
 #[cfg(test)]
 mod divergence_tests;
 #[cfg(test)]
@@ -287,13 +299,7 @@ pub fn check_all_with_registry_and_telemetry<'a>(
                 crate::telemetry::CheckOutcome::Ok
             }
             Err(payload) => {
-                let msg = if let Some(s) = payload.downcast_ref::<&str>() {
-                    s.to_string()
-                } else if let Some(s) = payload.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "unknown panic".to_string()
-                };
+                let msg = panic_message(payload.as_ref());
                 eprintln!("frensense: check `{id}` panicked: {msg}");
                 crate::telemetry::CheckOutcome::Panicked(msg)
             }
@@ -334,13 +340,7 @@ pub fn check_all_with_registry_and_telemetry<'a>(
                     }
                 }
                 Err(payload) => {
-                    let msg = if let Some(s) = payload.downcast_ref::<&str>() {
-                        s.to_string()
-                    } else if let Some(s) = payload.downcast_ref::<String>() {
-                        s.clone()
-                    } else {
-                        "unknown panic".to_string()
-                    };
+                    let msg = panic_message(payload.as_ref());
                     eprintln!(
                         "frensense: check `{id}` panicked on function `{}`: {msg}",
                         ir.name
@@ -517,5 +517,21 @@ pub(crate) mod learned {
             }
         }
         findings
+    }
+}
+
+#[cfg(test)]
+mod panic_message_tests {
+    use super::panic_message;
+    use std::panic::{catch_unwind, panic_any};
+
+    #[test]
+    fn extracts_str_string_and_unknown_payloads() {
+        let str_payload = catch_unwind(|| panic!("plain")).unwrap_err();
+        assert_eq!(panic_message(str_payload.as_ref()), "plain");
+        let string_payload = catch_unwind(|| panic!("n={}", 3)).unwrap_err();
+        assert_eq!(panic_message(string_payload.as_ref()), "n=3");
+        let other = catch_unwind(|| panic_any(7_u8)).unwrap_err();
+        assert_eq!(panic_message(other.as_ref()), "unknown panic");
     }
 }
