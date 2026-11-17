@@ -765,14 +765,6 @@ fn push_var(work: &mut Vec<VarId>, op: &Operand) {
     }
 }
 
-/// The instruction defining `v`, if any (first match - IR is SSA-shaped).
-fn def_of(ir: &FunctionIR, v: VarId) -> Option<&Instruction> {
-    ir.blocks
-        .values()
-        .flat_map(|b| b.instructions.iter())
-        .find(|instr| instr.dest() == Some(v))
-}
-
 /// True when `path` names an auth call per the spec/bundle vocabulary
 /// (`facts.auth_guard_hints`, seeded by the default pack).
 fn auth_path_matches(path: &str, facts: &FactTable) -> bool {
@@ -792,7 +784,7 @@ fn cond_derives_from_auth_call(ir: &FunctionIR, cond: &Operand, facts: &FactTabl
         if !seen.insert(v) || seen.len() > 64 {
             continue;
         }
-        let Some(instr) = def_of(ir, v) else {
+        let Some(instr) = ir.def_instruction(v) else {
             continue;
         };
         match instr {

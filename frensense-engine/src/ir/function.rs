@@ -590,6 +590,15 @@ impl FunctionIR {
         self.var_metadata.get(&var).and_then(|m| m.byte_range)
     }
 
+    /// The instruction that defines `var`, if any. The IR is SSA, so there is
+    /// at most one.
+    pub(crate) fn def_instruction(&self, var: VarId) -> Option<&Instruction> {
+        self.blocks
+            .values()
+            .flat_map(|b| b.instructions.iter())
+            .find(|instr| instr.dest() == Some(var))
+    }
+
     /// Byte range of a call instruction: the call result variable carries the
     /// call expression's range. `None` for non-calls and calls with no result.
     pub(crate) fn instr_span(&self, instr: &Instruction) -> Option<(usize, usize)> {

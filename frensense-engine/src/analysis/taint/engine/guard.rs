@@ -44,17 +44,6 @@ impl GuardMap {
         // Walk: cond var → def instruction, up to 3 hops, collecting
         // guard-call vars along the way (handles `!ALLOWED.has(x)`,
         // `x != null && SAFE.test(x)` shape fragments).
-        fn def_site_of(ir: &FunctionIR, v: VarId) -> Option<&Instruction> {
-            for b in ir.blocks.values() {
-                for i in &b.instructions {
-                    if i.dest() == Some(v) {
-                        return Some(i);
-                    }
-                }
-            }
-            None
-        }
-
         // Find guard calls and the vars they check.
         // A guard call is a CallVirtual/CallStatic whose method has a
         // guard-style SanitizerFact. The checked var is the first Var arg
@@ -105,7 +94,7 @@ impl GuardMap {
                     out.push(*v);
                     let mut cur_v = *v;
                     for _ in 0..3 {
-                        if let Some(def) = def_site_of(ir, cur_v) {
+                        if let Some(def) = ir.def_instruction(cur_v) {
                             match def {
                                 Instruction::AddressOf { src, .. } => {
                                     out.push(*src);
@@ -182,7 +171,7 @@ impl GuardMap {
             for _hop in 0..3 {
                 let mut next = Vec::new();
                 for (v, sense) in &frontier {
-                    let Some(instr) = def_site_of(ir, *v) else {
+                    let Some(instr) = ir.def_instruction(*v) else {
                         continue;
                     };
                     match instr {
@@ -263,7 +252,7 @@ impl GuardMap {
                                             op: uop,
                                             src: Operand::Var(inner),
                                             ..
-                                        }) = def_site_of(ir, *u)
+                                        }) = ir.def_instruction(*u)
                                             && uop == "typeof"
                                         {
                                             guards.entry(*inner).or_default().push(safe_block);

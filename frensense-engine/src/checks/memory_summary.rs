@@ -229,30 +229,6 @@ impl MemorySummaryRegistry {
             None
         }
 
-        // Trace a variable back to its defining instruction.
-        fn find_definition(ir: &FunctionIR, var: VarId) -> Option<&Instruction> {
-            for blk in ir.blocks.values() {
-                for instr in &blk.instructions {
-                    match instr {
-                        Instruction::Assign { dest, .. }
-                        | Instruction::Cast { dest, .. }
-                        | Instruction::CallStatic {
-                            dest: Some(dest), ..
-                        }
-                        | Instruction::Allocate { dest, .. }
-                        | Instruction::BinaryOp { dest, .. }
-                        | Instruction::UnaryOp { dest, .. }
-                            if *dest == var =>
-                        {
-                            return Some(instr);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            None
-        }
-
         // `realloc`-family call that resizes an object this function did not
         // allocate: its first argument does not trace back to an allocation
         // in the same body (a load through a parameter, a global, a phi of
@@ -271,7 +247,7 @@ impl MemorySummaryRegistry {
             let mut cur = *v;
             let mut seen = FxHashSet::default();
             while seen.insert(cur) {
-                match find_definition(ir, cur) {
+                match ir.def_instruction(cur) {
                     Some(Instruction::CallStatic { .. } | Instruction::Allocate { .. }) => {
                         return false;
                     }
@@ -343,7 +319,7 @@ impl MemorySummaryRegistry {
                             if !seen.insert(cur) {
                                 break;
                             }
-                            match find_definition(ir, cur) {
+                            match ir.def_instruction(cur) {
                                 Some(
                                     instr @ Instruction::CallStatic { .. }
                                     | instr @ Instruction::Allocate { .. },
@@ -455,7 +431,7 @@ impl MemorySummaryRegistry {
                                     let mut is_fresh = false;
                                     let mut seen = FxHashSet::default();
                                     while seen.insert(cur) {
-                                        match find_definition(ir, cur) {
+                                        match ir.def_instruction(cur) {
                                             Some(Instruction::CallStatic { func, .. }) => {
                                                 if self.returns_fresh(func) {
                                                     is_fresh = true;
@@ -488,7 +464,7 @@ impl MemorySummaryRegistry {
                                 let callee_out = self.out_params_fresh(func);
                                 for &slot in &callee_out {
                                     if let Some(Operand::Var(arg_var)) = args.get(slot) {
-                                        let target = match find_definition(ir, *arg_var) {
+                                        let target = match ir.def_instruction(*arg_var) {
                                             Some(Instruction::AddressOf { src, .. }) => *src,
                                             _ => *arg_var,
                                         };

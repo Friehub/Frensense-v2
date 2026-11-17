@@ -97,17 +97,7 @@ pub fn must_out(ir: &FunctionIR, sources: &[BlockId]) -> FxHashMap<BlockId, bool
 /// assert!(must_reach(&ir, entry, then_b));
 /// ```
 pub fn must_reach(ir: &FunctionIR, from: BlockId, to: BlockId) -> bool {
-    let outs = must_out(ir, &[from]);
-    let mut preds: FxHashMap<BlockId, Vec<BlockId>> = FxHashMap::default();
-    for (&b, blk) in &ir.blocks {
-        for s in &blk.successors {
-            preds.entry(*s).or_default().push(b);
-        }
-    }
-    match preds.get(&to) {
-        Some(ps) if !ps.is_empty() => ps.iter().all(|p| outs.get(p).copied().unwrap_or(false)),
-        _ => false,
-    }
+    must_reach_any(ir, to, &[from])
 }
 
 /// Collective domination: true when every execution path to `to` passes
