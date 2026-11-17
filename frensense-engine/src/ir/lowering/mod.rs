@@ -18,16 +18,17 @@ mod const_eval;
 /// The per-function lowering state.
 pub mod context;
 /// Lowering of loops, branches, conditionals, `match`, returns and jumps.
-pub mod control_flow;
+pub(crate) mod control_flow;
 /// Lowering of declarations.
 pub mod decl;
 /// Lowering of expressions: operators, member access, composite literals, literals and casts.
 pub mod expr;
 /// Classification of assignment targets.
-pub mod lvalue;
+pub(crate) mod lvalue;
 
-pub use context::{LoopTarget, LoweringContext};
-pub use lvalue::LValue;
+pub(crate) use context::LoopTarget;
+pub use context::LoweringContext;
+pub(crate) use lvalue::LValue;
 
 use crate::ir::function::Operand;
 use frensense_lang::NodeRole;

@@ -49,36 +49,7 @@ pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
 }
 
 /// Scans one function for weak primitives: built-in and learned weak-crypto rules (including selector literals resolved through constant assignments) and suspicious hash wrappers. [`check`] is the entry point the check registry calls.
-///
-/// ```
-/// use frensense_engine::analysis::taint::facts::{FactTable, KeySizeRule};
-/// use frensense_engine::checks::weak_hash::check_function;
-/// use frensense_engine::harness::lower_source;
-///
-/// let mut facts = FactTable::default();
-/// facts.key_size_rules.push(KeySizeRule {
-///     rule_id: "weak_key_size".into(),
-///     call: "generateKey".into(),
-///     slot: 1,
-///     min_bits: 2048,
-///     kind: "rsa".into(),
-///     severity: "high".into(),
-///     message: String::new(),
-/// });
-/// let rules = |src: &str| -> Vec<String> {
-///     let fns = lower_source("t.ts", src, "ts").unwrap();
-///     check_function(&fns["f"], &facts).into_iter().map(|f| f.rule).collect()
-/// };
-///
-/// // A constant below the floor is reported ...
-/// assert_eq!(rules("declare function generateKey(k: string, bits: number): void\nfunction f() { generateKey('rsa', 1024) }"), ["weak_key_size"]);
-/// // ... also when it reaches the call through a constant assignment.
-/// assert_eq!(rules("declare function generateKey(k: string, bits: number): void\nfunction f() { const bits = 512; generateKey('rsa', bits) }"), ["weak_key_size"]);
-/// // At or above the floor, or not a provable constant: nothing.
-/// assert!(rules("declare function generateKey(k: string, bits: number): void\nfunction f() { generateKey('rsa', 2048) }").is_empty());
-/// assert!(rules("declare function generateKey(k: string, bits: number): void\nfunction f(n: number) { generateKey('rsa', n) }").is_empty());
-/// ```
-pub fn check_function(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
+pub(crate) fn check_function(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     // The value lattice lets selector rules see through constant
     // assignments: `const alg = 'none'; jwt.sign(payload, secret, alg)`
     // must fire even though the selector operand is a var, not a literal.
@@ -453,4 +424,52 @@ fn in_credential_context(ir: &FunctionIR, facts: &FactTable) -> bool {
             .and_then(|m| m.source_name.as_deref())
             .is_some_and(hint_match)
     })
+}
+
+#[cfg(test)]
+/// Assertions lifted from the doc examples of items that are now
+/// crate-private; a doctest cannot see them.
+mod doc_examples {
+    #[test]
+    fn doc_example_check_function() {
+        use crate::analysis::taint::facts::{FactTable, KeySizeRule};
+        use crate::checks::weak_hash::check_function;
+        use crate::harness::lower_source;
+
+        let mut facts = FactTable::default();
+        facts.key_size_rules.push(KeySizeRule {
+            rule_id: "weak_key_size".into(),
+            call: "generateKey".into(),
+            slot: 1,
+            min_bits: 2048,
+            kind: "rsa".into(),
+            severity: "high".into(),
+            message: String::new(),
+        });
+        let rules = |src: &str| -> Vec<String> {
+            let fns = lower_source("t.ts", src, "ts").unwrap();
+            check_function(&fns["f"], &facts)
+                .into_iter()
+                .map(|f| f.rule)
+                .collect()
+        };
+
+        // A constant below the floor is reported ...
+        assert_eq!(
+            rules(
+                "declare function generateKey(k: string, bits: number): void\nfunction f() { generateKey('rsa', 1024) }"
+            ),
+            ["weak_key_size"]
+        );
+        // ... also when it reaches the call through a constant assignment.
+        assert_eq!(
+            rules(
+                "declare function generateKey(k: string, bits: number): void\nfunction f() { const bits = 512; generateKey('rsa', bits) }"
+            ),
+            ["weak_key_size"]
+        );
+        // At or above the floor, or not a provable constant: nothing.
+        assert!(rules("declare function generateKey(k: string, bits: number): void\nfunction f() { generateKey('rsa', 2048) }").is_empty());
+        assert!(rules("declare function generateKey(k: string, bits: number): void\nfunction f(n: number) { generateKey('rsa', n) }").is_empty());
+    }
 }

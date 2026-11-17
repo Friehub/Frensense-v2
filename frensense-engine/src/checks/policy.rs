@@ -66,7 +66,7 @@ fn callee_matches(taught: &str, written: &str) -> bool {
 /// carrying `package: Some(pkg)` only fire in functions whose file
 /// imports `pkg` (mirrors the sink/source package-scoping model).
 #[derive(Debug)]
-pub struct PackageScope<'a> {
+pub(crate) struct PackageScope<'a> {
     /// Function name -> source file path.
     pub fn_file: &'a FxHashMap<String, String>,
     /// File path -> (local import name -> import record).
@@ -86,7 +86,7 @@ impl<'a> PackageScope<'a> {
     ///
     /// Uses the taint engine's single-file fallback
     /// ([`imports_for_function`](crate::graph::module::imports_for_function)).
-    pub fn fn_imports_package(&self, fn_name: &str, pkg: &str) -> bool {
+    pub(crate) fn fn_imports_package(&self, fn_name: &str, pkg: &str) -> bool {
         self.imports_for(fn_name)
             .is_some_and(|m| m.values().any(|i| i.package == pkg))
     }
@@ -141,7 +141,7 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
 /// [`check_program`] with package-scope filtering: policies carrying
 /// `package: Some(pkg)` only fire in functions whose file imports `pkg`.
 /// `scope = None` disables filtering (backward-compatible default).
-pub fn check_program_scoped(
+pub(crate) fn check_program_scoped(
     irs: &[&FunctionIR],
     facts: &FactTable,
     scope: Option<&PackageScope<'_>>,

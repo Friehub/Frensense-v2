@@ -24,11 +24,11 @@ const MAX_PASSES: u64 = 10_000;
 
 /// A unique identifier for an abstract memory allocation in the heap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct LocId(pub usize);
+pub(crate) struct LocId(pub usize);
 
 /// Computes and stores the Points-To graph for the function.
 #[derive(Debug)]
-pub struct PointsToAnalysis {
+pub(crate) struct PointsToAnalysis {
     /// Maps a variable to the set of memory locations it could point to.
     /// Example: `v1 -> {Loc_1, Loc_2}`
     pub pts: FxHashMap<VarId, FxHashSet<LocId>>,
@@ -59,7 +59,7 @@ impl Default for PointsToAnalysis {
 
 impl PointsToAnalysis {
     /// Creates an empty analysis; location ids start at 1 because `LocId(0)` is reserved for the global frame.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             pts: FxHashMap::default(),
             fields: FxHashMap::default(),
@@ -85,7 +85,7 @@ impl PointsToAnalysis {
     /// alias queries on relevant variables see the same sets; queries on
     /// irrelevant variables fall back to the conservative parameter-root
     /// answer at the call sites that consume this graph.
-    pub fn analyze_two_phase(&mut self, ir: &FunctionIR) {
+    pub(crate) fn analyze_two_phase(&mut self, ir: &FunctionIR) {
         // Phase 1: unify.
         let st = Steensgaard::analyze(ir);
 
@@ -213,14 +213,14 @@ impl PointsToAnalysis {
     }
 
     /// Allocates a new abstract memory location.
-    pub fn alloc(&mut self) -> LocId {
+    pub(crate) fn alloc(&mut self) -> LocId {
         let id = LocId(self.next_loc_id);
         self.next_loc_id += 1;
         id
     }
 
     /// Iteratively computes the Points-To constraints until a fixed-point is reached.
-    pub fn analyze(&mut self, ir: &FunctionIR) {
+    pub(crate) fn analyze(&mut self, ir: &FunctionIR) {
         self.analyze_inner(ir, None);
     }
 

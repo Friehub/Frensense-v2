@@ -167,14 +167,14 @@ pub struct SvfgNode {
 
 impl SvfgNode {
     /// Successor keys in deterministic (sorted) order.
-    pub fn successors(&self) -> Vec<NodeKey> {
+    pub(crate) fn successors(&self) -> Vec<NodeKey> {
         let mut v: Vec<NodeKey> = self.successors.iter().copied().collect();
         v.sort_by_key(|k| (k.block.0, k.instr_idx, k.var.0));
         v
     }
 
     /// Predecessor keys in deterministic (sorted) order.
-    pub fn predecessors(&self) -> Vec<NodeKey> {
+    pub(crate) fn predecessors(&self) -> Vec<NodeKey> {
         let mut v: Vec<NodeKey> = self.predecessors.iter().copied().collect();
         v.sort_by_key(|k| (k.block.0, k.instr_idx, k.var.0));
         v
@@ -187,7 +187,7 @@ impl SvfgNode {
 
 /// The Sparse Value-Flow Graph for a single function.
 ///
-/// Build it with [`SvfgBuilder::build`], then query it with the helper
+/// Build it with `SvfgBuilder::build`, then query it with the helper
 /// methods.
 #[derive(Debug, Default, Clone)]
 pub struct Svfg {
@@ -226,13 +226,13 @@ impl Svfg {
     }
 
     /// All nodes whose `kind` matches a predicate.
-    pub fn nodes_where<F: Fn(&SvfgNode) -> bool>(&self, pred: F) -> Vec<&SvfgNode> {
+    pub(crate) fn nodes_where<F: Fn(&SvfgNode) -> bool>(&self, pred: F) -> Vec<&SvfgNode> {
         self.nodes.values().filter(|n| pred(n)).collect()
     }
 
     /// Every node that is a `FormalParam`, convenient as BFS seeds for
     /// parameter-taint analysis.
-    pub fn param_nodes(&self) -> Vec<&SvfgNode> {
+    pub(crate) fn param_nodes(&self) -> Vec<&SvfgNode> {
         self.nodes_where(|n| n.kind == NodeKind::FormalParam)
     }
 
@@ -285,7 +285,7 @@ impl Svfg {
 /// Step 3 is O(1) per use because SSA guarantees exactly one definition for
 /// every variable, we just look up the pre-built `def_site` table.
 #[derive(Debug)]
-pub struct SvfgBuilder<'a> {
+pub(crate) struct SvfgBuilder<'a> {
     ir: &'a FunctionIR,
     graph: Svfg,
     buffer_builtins: Vec<crate::analysis::taint::facts::BufferBuiltinSpec>,
@@ -299,7 +299,7 @@ pub struct SvfgBuilder<'a> {
 
 impl<'a> SvfgBuilder<'a> {
     /// Creates a builder for the function `ir`.
-    pub fn new(ir: &'a FunctionIR) -> Self {
+    pub(crate) fn new(ir: &'a FunctionIR) -> Self {
         Self {
             ir,
             graph: Svfg::default(),
@@ -310,12 +310,12 @@ impl<'a> SvfgBuilder<'a> {
     }
 
     /// Consume the builder and return the finished graph plus the def-site table.
-    pub fn build(self) -> (Svfg, FxHashMap<VarId, NodeKey>) {
+    pub(crate) fn build(self) -> (Svfg, FxHashMap<VarId, NodeKey>) {
         self.build_inner()
     }
 
     /// Like [`SvfgBuilder::build`], but also models the given buffer-manipulation builtins, so that a call whose name matches a spec adds an edge from its source argument to later reads of its destination object (the base variable, with pointer arithmetic stripped). The edges are added only when the function's language is `c` or `cpp` and `specs` is non-empty; otherwise this behaves like [`SvfgBuilder::build`].
-    pub fn build_with_buffer_builtins(
+    pub(crate) fn build_with_buffer_builtins(
         mut self,
         specs: &[crate::analysis::taint::facts::BufferBuiltinSpec],
     ) -> (Svfg, FxHashMap<VarId, NodeKey>) {

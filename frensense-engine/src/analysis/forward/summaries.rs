@@ -24,7 +24,7 @@ pub struct TaintSummary {
 
 impl TaintSummary {
     /// True if taint at parameter slot `slot` flows to the return value.
-    pub fn taints_return(&self, slot: usize) -> bool {
+    pub(crate) fn taints_return(&self, slot: usize) -> bool {
         self.param_taints_return.get(slot).copied().unwrap_or(false)
     }
 }

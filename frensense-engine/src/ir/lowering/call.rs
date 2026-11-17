@@ -18,7 +18,7 @@ impl<'a> LoweringContext<'a> {
     /// # Panics
     ///
     /// Does not panic in practice: the one `unwrap` on a keyword argument's value is guarded by an `is_some` check on the same node.
-    pub fn visit_call(
+    pub(crate) fn visit_call(
         &mut self,
         node: Node,
         callee_field: &str,

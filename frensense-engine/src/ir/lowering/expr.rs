@@ -15,7 +15,7 @@ impl<'a> LoweringContext<'a> {
     /// # Panics
     ///
     /// Does not panic in practice: the one `unwrap` pops the only operand and is guarded by a length check.
-    pub fn visit_binary_op(&mut self, node: Node) -> Option<Operand> {
+    pub(crate) fn visit_binary_op(&mut self, node: Node) -> Option<Operand> {
         let mut operands: Vec<Operand> = Vec::new();
         let mut operator: Option<String> = None;
         let mut cursor = node.walk();
@@ -262,7 +262,7 @@ impl<'a> LoweringContext<'a> {
     /// Lowers `object.property` or `object[index]`.
     ///
     /// The result is a fresh variable carrying the access's byte range, defined by a `LoadField` when the language classifies the property node as a property name, a `LoadElement` when the property evaluates to a variable, and a `LoadField` on the property text otherwise. Returns `None` when the object does not evaluate to a variable.
-    pub fn visit_member_access(
+    pub(crate) fn visit_member_access(
         &mut self,
         node: Node,
         object_field: &str,
@@ -328,7 +328,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// Lowers a composite literal (object, array). Uniformly keyed objects and arrays become an allocation with one store per property or element, so reads stay field-sensitive; objects with unkeyed children (such as spreads) are not allocated: the result is the child variable when there is exactly one, and a fresh variable merging the child variables otherwise.
-    pub fn visit_composite(&mut self, node: Node) -> Option<Operand> {
+    pub(crate) fn visit_composite(&mut self, node: Node) -> Option<Operand> {
         // Evaluate every named child once; keyed pairs are remembered so the
         // composite can be lowered field-sensitively (allocation + stores)
         // instead of collapsing all children into one union variable.
@@ -493,7 +493,7 @@ impl<'a> LoweringContext<'a> {
     /// Lowers a literal.
     ///
     /// A string that mixes literal text with at least one interpolated or concatenated part is folded into a left-associative `concat` chain, so checks can see a fixed prefix before a tainted part. A string with no such mix yields its last non-fragment child's value, or its source text as a string literal. Any other literal is an integer literal when its text parses as `i64` and its source text as a string literal otherwise.
-    pub fn visit_literal(&mut self, node: Node) -> Option<Operand> {
+    pub(crate) fn visit_literal(&mut self, node: Node) -> Option<Operand> {
         if self.is_template_string(node.kind())
             || node.kind() == "string"
             || node.kind() == "binary_expression"
@@ -601,7 +601,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// Lowers a cast or type assertion as the value of its first value-producing child: the cast does not change the value.
-    pub fn visit_cast(&mut self, node: Node) -> Option<Operand> {
+    pub(crate) fn visit_cast(&mut self, node: Node) -> Option<Operand> {
         let mut cursor = node.walk();
         let mut first = None;
         for child in node.children(&mut cursor) {

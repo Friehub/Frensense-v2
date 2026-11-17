@@ -28,7 +28,7 @@ use crate::analysis::taint::engine::BackwardStats;
 /// hides its own caveats is not reviewable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum Cap {
+pub(crate) enum Cap {
     /// The value lattice stopped iterating after
     /// `MAX_ITERATIONS * (blocks + 1)` worklist rounds; branch sharpening for
     /// the affected function is whatever the truncated state held.
@@ -89,7 +89,7 @@ impl Cap {
 
     /// Stable identifier used in the JSON report.
     #[must_use]
-    pub const fn id(self) -> &'static str {
+    pub(crate) const fn id(self) -> &'static str {
         match self {
             Cap::ValueIterations => "value_iterations",
             Cap::CallContextDepth => "call_context_depth",
@@ -107,7 +107,7 @@ impl Cap {
     /// What the truncation cost, in analysis terms. Advisory prose only: the
     /// engine never branches on it.
     #[must_use]
-    pub const fn effect(self) -> &'static str {
+    pub(crate) const fn effect(self) -> &'static str {
         match self {
             Cap::ValueIterations => {
                 "value lattice stopped early; branch constants may be less precise"
@@ -143,7 +143,7 @@ impl Cap {
     /// Set `FRENSdbg_CAPS` to announce each cap once per report window on
     /// stderr. The counter is always updated; only the announcement is
     /// debug-gated.
-    pub fn record(self) {
+    pub(crate) fn record(self) {
         CAP_COUNTS.with(|counts| {
             let mut counts = counts.borrow_mut();
             counts[self.slot()] = counts[self.slot()].saturating_add(1);
@@ -172,7 +172,7 @@ impl Cap {
     /// How many times this cap has fired on the current thread since its
     /// counters were last drained.
     #[must_use]
-    pub fn recorded(self) -> u64 {
+    pub(crate) fn recorded(self) -> u64 {
         CAP_COUNTS.with(|counts| counts.borrow()[self.slot()])
     }
 }
@@ -183,7 +183,7 @@ impl Cap {
 /// accumulating across a long-lived process (MCP/LSP servers scan
 /// repeatedly).
 #[must_use]
-pub fn drain_caps() -> Vec<CapHit> {
+pub(crate) fn drain_caps() -> Vec<CapHit> {
     let all = [
         Cap::ValueIterations,
         Cap::CallContextDepth,
@@ -253,11 +253,11 @@ pub struct FunctionTiming {
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapHit {
-    /// [`Cap::id`] of the valve.
+    /// `Cap::id` of the valve.
     pub cap: String,
     /// How many times it fired in this scan.
     pub hits: usize,
-    /// [`Cap::effect`] of the valve, in prose.
+    /// `Cap::effect` of the valve, in prose.
     pub effect: String,
 }
 
@@ -366,7 +366,7 @@ pub struct ScanTelemetry {
 }
 
 /// How many entries the slow-file and slow-function lists keep.
-pub const SLOW_SAMPLE: usize = 10;
+pub(crate) const SLOW_SAMPLE: usize = 10;
 
 impl ScanTelemetry {
     /// Fold another scan's telemetry in (the CLI scans one group per
@@ -400,7 +400,7 @@ impl ScanTelemetry {
 
     /// Collapse per-group rows into one per-phase row, cap hits summed by
     /// name, suppressions summed by reason, and the slow lists trimmed to
-    /// [`SLOW_SAMPLE`]. Call once, after every group has been merged.
+    /// `SLOW_SAMPLE`. Call once, after every group has been merged.
     pub fn finalize(&mut self) {
         let mut phases: Vec<PhaseTiming> = Vec::new();
         for p in &self.phases {
@@ -505,7 +505,7 @@ impl ScanTelemetry {
 
 /// Milliseconds elapsed since `start`, as a reportable number.
 #[must_use]
-pub fn millis_since(start: std::time::Instant) -> u128 {
+pub(crate) fn millis_since(start: std::time::Instant) -> u128 {
     start.elapsed().as_millis()
 }
 

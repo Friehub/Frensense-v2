@@ -9,7 +9,7 @@ use tree_sitter::Node;
 
 /// Helper to differentiate Assigning to a Variable vs Mutating an Object
 #[derive(Debug, Clone, PartialEq)]
-pub enum LValue {
+pub(crate) enum LValue {
     /// Assigning to a plain variable.
     Variable(VarId),
     /// Mutating a field of an object.
@@ -32,7 +32,7 @@ impl<'a> LoweringContext<'a> {
     /// Classifies the target of an assignment as a variable, field or element.
     ///
     /// An identifier is a variable and `*ptr` is an element at index 0. A member access is an element when its property evaluates to a variable and the language does not classify that node kind as a property name (`obj[i]`), and a field otherwise (`obj.name`). Returns `None` for any other shape, or when the object does not evaluate to a variable.
-    pub fn visit_lvalue(&mut self, node: Node) -> Option<LValue> {
+    pub(crate) fn visit_lvalue(&mut self, node: Node) -> Option<LValue> {
         let role = self.classify_node(node.kind());
         match role {
             NodeRole::Identifier => {

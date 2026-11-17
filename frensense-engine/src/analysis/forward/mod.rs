@@ -46,7 +46,7 @@
 //! * [`ProgramSvfg::cross_edges`], the explicit interprocedural edge list
 //!   (deterministic, serialisable, feeds task 4.5's corpus graph store).
 //! * [`ProgramSvfg`]'s per-function [`TaintSummary`]s, computed bottom-up.
-//! * [`InterproceduralTaintEngine`], BFS over local + cross edges; alerts are
+//! * `InterproceduralTaintEngine`, BFS over local + cross edges; alerts are
 //!   reported with the function in which the sink lives.
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -67,10 +67,10 @@ pub mod predicates;
 /// Per-function summaries used to cut or pass taint across calls.
 pub mod summaries;
 
-pub use bindings::*;
+pub(crate) use bindings::*;
 pub use predicates::SinkAlert;
 pub(crate) use predicates::*;
-pub use summaries::*;
+pub(crate) use summaries::*;
 
 // ---------------------------------------------------------------------------
 // Per-function entry
@@ -128,7 +128,7 @@ impl<'a> ProgramSvfg<'a> {
 
     /// Like [`ProgramSvfg::new`] but consults an explicit [`FactTable`] for
     /// learned sink signatures and sanitizers during summary computation.
-    pub fn new_with_facts(
+    pub(crate) fn new_with_facts(
         irs: &FxHashMap<String, &'a FunctionIR>,
         config: &TaintConfig,
         facts: &FactTable,
@@ -137,7 +137,7 @@ impl<'a> ProgramSvfg<'a> {
     }
 
     /// Build a [`ProgramSvfg`] with explicit module aliases and function-to-file mappings.
-    pub fn new_with_module_aliases(
+    pub(crate) fn new_with_module_aliases(
         irs: &FxHashMap<String, &'a FunctionIR>,
         config: &TaintConfig,
         facts: &FactTable,
@@ -252,7 +252,7 @@ impl<'a> ProgramSvfg<'a> {
     }
 
     /// Look up a function's index by name.
-    pub fn function_index(&self, name: &str) -> Option<usize> {
+    pub(crate) fn function_index(&self, name: &str) -> Option<usize> {
         self.func_index.get(name).copied()
     }
 
@@ -269,7 +269,7 @@ impl<'a> ProgramSvfg<'a> {
     }
 
     /// Local successors of a node, minus suppressed pass-through edges.
-    pub fn local_successors(&self, fi: usize, key: &NodeKey) -> Vec<NodeKey> {
+    pub(crate) fn local_successors(&self, fi: usize, key: &NodeKey) -> Vec<NodeKey> {
         match self.functions[fi].svfg.node(key) {
             Some(n) => n
                 .successors()
@@ -282,7 +282,7 @@ impl<'a> ProgramSvfg<'a> {
 
     /// Local predecessors of a node, minus suppressed pass-through edges
     /// (mirror of [`ProgramSvfg::local_successors`] for backward traversal).
-    pub fn local_predecessors(&self, fi: usize, key: &NodeKey) -> Vec<NodeKey> {
+    pub(crate) fn local_predecessors(&self, fi: usize, key: &NodeKey) -> Vec<NodeKey> {
         match self.functions[fi].svfg.node(key) {
             Some(n) => n
                 .predecessors()
@@ -294,7 +294,7 @@ impl<'a> ProgramSvfg<'a> {
     }
 
     /// Interprocedural successors of a node (cross edges out).
-    pub fn inter_successors(&self, fi: usize, key: &NodeKey) -> Vec<(usize, NodeKey)> {
+    pub(crate) fn inter_successors(&self, fi: usize, key: &NodeKey) -> Vec<(usize, NodeKey)> {
         self.cross_edges
             .get(&(fi, *key))
             .cloned()
@@ -312,7 +312,7 @@ impl<'a> ProgramSvfg<'a> {
 /// plus explicit cross edges, no fixed-point loop, no visit to functions or
 /// variables off every taint path.
 #[derive(Debug)]
-pub struct InterproceduralTaintEngine<'a> {
+pub(crate) struct InterproceduralTaintEngine<'a> {
     prog: &'a ProgramSvfg<'a>,
     config: &'a TaintConfig,
     facts: FactTable,
@@ -323,7 +323,7 @@ pub struct InterproceduralTaintEngine<'a> {
 
 impl<'a> InterproceduralTaintEngine<'a> {
     /// Creates an engine over `prog` using `config`, with the fact table derived from the config.
-    pub fn new(prog: &'a ProgramSvfg<'a>, config: &'a TaintConfig) -> Self {
+    pub(crate) fn new(prog: &'a ProgramSvfg<'a>, config: &'a TaintConfig) -> Self {
         Self {
             prog,
             config,
@@ -334,43 +334,13 @@ impl<'a> InterproceduralTaintEngine<'a> {
     }
 
     /// Merge additional (e.g. bundle-learned) facts over the default table.
-    pub fn with_fact_table(mut self, facts: &FactTable) -> Self {
+    pub(crate) fn with_fact_table(mut self, facts: &FactTable) -> Self {
         self.facts.merge(facts);
         self
     }
 
     /// Run the BFS from all source nodes across all functions.
-    ///
-    /// ```
-    /// use frensense_engine::analysis::forward::{InterproceduralTaintEngine, ProgramSvfg};
-    /// use frensense_engine::analysis::taint::config::TaintConfig;
-    /// use frensense_engine::harness::lower_source;
-    /// use frensense_engine::ir::function::FunctionIR;
-    ///
-    /// let cfg = TaintConfig {
-    ///     sources: ["req.body".to_string()].into_iter().collect(),
-    ///     sinks: ["query".to_string()].into_iter().collect(),
-    ///     sanitizers: Default::default(),
-    /// };
-    /// let src = "declare const db: any\n\
-    ///            function run(q: any) { db.query(q) }\n\
-    ///            export function h(req: any) { run(req.body.id) }";
-    /// let owned = lower_source("u.ts", src, "ts").unwrap();
-    /// let irs: rustc_hash::FxHashMap<String, &FunctionIR> =
-    ///     owned.iter().map(|(k, v)| (k.clone(), v)).collect();
-    /// let prog = ProgramSvfg::new(&irs, &cfg);
-    ///
-    /// let mut engine = InterproceduralTaintEngine::new(&prog, &cfg);
-    /// engine.run();
-    /// // The source is in `h`; taint crosses the call and reaches the sink in `run`.
-    /// let alert = &engine.alerts[0];
-    /// assert_eq!((alert.function.as_str(), alert.sink.as_str(), alert.slot), ("run", "query", 0));
-    /// // Running again does not duplicate alerts.
-    /// let before = engine.alerts.len();
-    /// engine.run();
-    /// assert_eq!(engine.alerts.len(), before);
-    /// ```
-    pub fn run(&mut self) {
+    pub(crate) fn run(&mut self) {
         let mut queue: VecDeque<(usize, NodeKey)> = VecDeque::new();
 
         // Seeds: source definitions in every function (deterministic order).
@@ -433,7 +403,46 @@ impl<'a> InterproceduralTaintEngine<'a> {
     }
 
     /// The set of tainted `(function, node)` pairs, for debugging/tests.
-    pub fn tainted_nodes(&self) -> &FxHashSet<(usize, NodeKey)> {
+    pub(crate) fn tainted_nodes(&self) -> &FxHashSet<(usize, NodeKey)> {
         &self.tainted
+    }
+}
+
+#[cfg(test)]
+/// Assertions lifted from the doc examples of items that are now
+/// crate-private; a doctest cannot see them.
+mod doc_examples {
+    #[test]
+    fn doc_example_run() {
+        use crate::analysis::forward::{InterproceduralTaintEngine, ProgramSvfg};
+        use crate::analysis::taint::config::TaintConfig;
+        use crate::harness::lower_source;
+        use crate::ir::function::FunctionIR;
+
+        let cfg = TaintConfig {
+            sources: ["req.body".to_string()].into_iter().collect(),
+            sinks: ["query".to_string()].into_iter().collect(),
+            sanitizers: Default::default(),
+        };
+        let src = "declare const db: any\n\
+               function run(q: any) { db.query(q) }\n\
+               export function h(req: any) { run(req.body.id) }";
+        let owned = lower_source("u.ts", src, "ts").unwrap();
+        let irs: rustc_hash::FxHashMap<String, &FunctionIR> =
+            owned.iter().map(|(k, v)| (k.clone(), v)).collect();
+        let prog = ProgramSvfg::new(&irs, &cfg);
+
+        let mut engine = InterproceduralTaintEngine::new(&prog, &cfg);
+        engine.run();
+        // The source is in `h`; taint crosses the call and reaches the sink in `run`.
+        let alert = &engine.alerts[0];
+        assert_eq!(
+            (alert.function.as_str(), alert.sink.as_str(), alert.slot),
+            ("run", "query", 0)
+        );
+        // Running again does not duplicate alerts.
+        let before = engine.alerts.len();
+        engine.run();
+        assert_eq!(engine.alerts.len(), before);
     }
 }

@@ -167,11 +167,11 @@ pub struct PreparedProgram {
     /// Per file, the local names that an import binds to a program function.
     pub file_aliases: FxHashMap<String, FxHashMap<String, String>>,
     /// Per file, the local names that an import binds to an external package.
-    pub file_package_imports:
+    pub(crate) file_package_imports:
         FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
-    /// Import declarations per file (see [`ModuleResolution`]).
+    /// Import declarations per file (see `ModuleResolution`).
     ///
-    /// [`ModuleResolution`]: crate::graph::module::ModuleResolution
+    /// `ModuleResolution`: crate::graph::module::ModuleResolution
     pub file_imports: FxHashMap<String, Vec<Import>>,
     /// Export/re-export declarations per file, with visibility and kind.
     pub file_exports: FxHashMap<String, Vec<Export>>,
@@ -186,11 +186,11 @@ pub struct PreparedProgram {
     /// Number of source inputs attempted by this prepared program.
     pub submitted: usize,
     /// Safety cap events that happened during per-file lowering.
-    pub lower_caps: Vec<CapHit>,
+    pub(crate) lower_caps: Vec<CapHit>,
     /// Paths that failed lowering, independent of error message formatting.
     pub lower_failed_files: Vec<String>,
     /// Lowering cost per file, feeding the slowest-file report.
-    pub file_timings: Vec<FileTiming>,
+    pub(crate) file_timings: Vec<FileTiming>,
 }
 
 impl std::fmt::Debug for PreparedProgram {
@@ -530,19 +530,19 @@ impl PreparedProgram {
     /// The export surface of one file; empty when the file declares none or
     /// its language has no export syntax the spec models.
     #[must_use]
-    pub fn exports_of(&self, file: &str) -> &[Export] {
+    pub(crate) fn exports_of(&self, file: &str) -> &[Export] {
         self.file_exports.get(file).map_or(&[], Vec::as_slice)
     }
 
     /// Every top-level declaration of one file, exported or not.
     #[must_use]
-    pub fn module_items_of(&self, file: &str) -> &[ModuleItem] {
+    pub(crate) fn module_items_of(&self, file: &str) -> &[ModuleItem] {
         self.file_module_items.get(file).map_or(&[], Vec::as_slice)
     }
 
     /// The import declarations of one file.
     #[must_use]
-    pub fn imports_of(&self, file: &str) -> &[Import] {
+    pub(crate) fn imports_of(&self, file: &str) -> &[Import] {
         self.file_imports.get(file).map_or(&[], Vec::as_slice)
     }
 }
@@ -930,10 +930,10 @@ pub struct LocatedChecker {
     pub end_line: u32,
 }
 
-/// A [`crate::analysis::taint::engine::CutSite`] pinned to its file and line.
+/// A `crate::analysis::taint::engine::CutSite` pinned to its file and line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocatedCutSite {
-    /// Reason class of the stop site, as in [`crate::analysis::taint::engine::CutSite::kind`].
+    /// Reason class of the stop site, as in `crate::analysis::taint::engine::CutSite::kind`.
     pub kind: &'static str,
     /// Function whose body contains the stop site.
     pub function: String,
@@ -956,7 +956,7 @@ pub struct LocatedFinding {
     pub line: u32,
     /// 1-based column of the sink call (0 when no span recorded).
     pub column: u32,
-    /// Where the walk met a value it could not resolve (see [`SinkFinding::cut_sites`]).
+    /// Where the walk met a value it could not resolve (see `SinkFinding::cut_sites`).
     pub cut_sites: Vec<LocatedCutSite>,
 }
 

@@ -33,7 +33,7 @@
 //! Backward analysis is *unsound* by nature when pass-through edges are
 //! suppressed (a sanitizing callee makes the local arg→dest edge vanish), so
 //! this engine honours the summary-driven suppression by default; use
-//! [`BackwardTaintEngine::without_suppression`] only when an over-approximating
+//! `BackwardTaintEngine::without_suppression` only when an over-approximating
 //! upper bound is needed.
 //!
 //! ## Verdicts
@@ -199,7 +199,7 @@ pub struct SinkFinding {
     /// The concrete unresolvable values behind the `"unresolvable"` cut
     /// reason (deduplicated, capped), so a blind spot names *what* the
     /// engine could not see. Empty when the walk was never cut that way.
-    pub cut_sites: Vec<CutSite>,
+    pub(crate) cut_sites: Vec<CutSite>,
 }
 
 impl SinkFinding {
@@ -409,7 +409,7 @@ const MAX_CTX_CHAINS: usize = 4096;
 /// Type alias for the route-registration predicate used in the engine's
 /// per-call-site framing (schema §5.1 of the framework-scope doc): the
 /// exact signature of the harness's `is_route_registration`.
-pub type RouteRegistration = fn(
+pub(crate) type RouteRegistration = fn(
     callee_text: &str,
     spec: &dyn frensense_lang::spec::LanguageSpec,
     facts: Option<&FactTable>,
@@ -435,7 +435,7 @@ pub struct BackwardTaintEngine<'a> {
     /// Every explored sink argument with its verdict.
     pub findings: Vec<SinkFinding>,
     /// Exploration statistics.
-    pub stats: BackwardStats,
+    pub(crate) stats: BackwardStats,
     /// Per-function guard maps, built lazily on first entry into the fn.
     guard_maps: FxHashMap<usize, GuardMap>,
     /// Per-function value lattices, built lazily on first walk into the fn.
@@ -455,7 +455,7 @@ pub struct BackwardTaintEngine<'a> {
     pub(crate) file_package_imports:
         FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
     /// Route-registration predicate for per-call-site framing, wired from
-    /// the harness via [`BackwardTaintEngine::with_route_registration`]
+    /// the harness via `BackwardTaintEngine::with_route_registration`
     /// (schema §5.1 of the framework-scope doc). Consulted before a
     /// framework-stemmable receiver is treated as a source; `None` keeps
     /// the pre-wiring behaviour (spec verbs only, no pack route patterns).
@@ -639,7 +639,7 @@ impl<'a> BackwardTaintEngine<'a> {
     /// Provide the function-name → source-file mapping so captured taint
     /// paths carry real file locations per step (cross-function and
     /// cross-file flows otherwise report the function name as the file).
-    pub fn with_fn_file(mut self, fn_file: &FxHashMap<String, String>) -> Self {
+    pub(crate) fn with_fn_file(mut self, fn_file: &FxHashMap<String, String>) -> Self {
         self.fn_file = fn_file.clone();
         self
     }
@@ -647,13 +647,13 @@ impl<'a> BackwardTaintEngine<'a> {
     /// Wire the harness's `is_route_registration` predicate into the engine
     /// so the backward analysis consults it before arming a framework
     /// origin (schema §5.1 of the framework-scope doc).
-    pub fn with_route_registration(mut self, predicate: RouteRegistration) -> Self {
+    pub(crate) fn with_route_registration(mut self, predicate: RouteRegistration) -> Self {
         self.route_registration = Some(predicate);
         self
     }
 
     /// Provides, per file, the packages that file imports, so package-scoped sources, sinks and sanitizers only apply in files that import their package.
-    pub fn with_file_package_imports(
+    pub(crate) fn with_file_package_imports(
         mut self,
         imports: &FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
     ) -> Self {
@@ -665,14 +665,14 @@ impl<'a> BackwardTaintEngine<'a> {
     /// mode: any caller-side arg→dest edge leaks the walk past sanitizing
     /// callees, so verdicts may be `Vulnerable` where the precise mode says
     /// `Sanitized`). Useful as a sound upper bound.
-    pub fn without_suppression(mut self) -> Self {
+    pub(crate) fn without_suppression(mut self) -> Self {
         self.honour_suppression = false;
         self
     }
 
     /// Toggle taint-path capture (on by default). Turning it off saves the
     /// per-root parent map when path reporting is not needed.
-    pub fn capture_paths(mut self, yes: bool) -> Self {
+    pub(crate) fn capture_paths(mut self, yes: bool) -> Self {
         self.capture_paths = yes;
         self
     }

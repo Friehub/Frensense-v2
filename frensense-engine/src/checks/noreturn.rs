@@ -30,22 +30,28 @@ const NORETURN: &[&str] = &[
 ];
 
 /// True if `func` (last path segment) is a noreturn library call.
-///
-/// ```
-/// use frensense_engine::checks::noreturn::is_noreturn;
-///
-/// assert!(is_noreturn("exit"));
-/// assert!(is_noreturn("libc::_exit")); // only the last path segment is compared
-/// assert!(!is_noreturn("printf"));
-/// ```
-pub fn is_noreturn(func: &str) -> bool {
+pub(crate) fn is_noreturn(func: &str) -> bool {
     NORETURN.contains(&last_segment(func))
 }
 
 /// True if the block contains a call that never returns.
-pub fn block_diverges(block: &BasicBlock) -> bool {
+pub(crate) fn block_diverges(block: &BasicBlock) -> bool {
     block.instructions.iter().any(|i| match i {
         Instruction::CallStatic { func, .. } => is_noreturn(func),
         _ => false,
     })
+}
+
+#[cfg(test)]
+/// Assertions lifted from the doc examples of items that are now
+/// crate-private; a doctest cannot see them.
+mod doc_examples {
+    #[test]
+    fn doc_example_is_noreturn() {
+        use crate::checks::noreturn::is_noreturn;
+
+        assert!(is_noreturn("exit"));
+        assert!(is_noreturn("libc::_exit")); // only the last path segment is compared
+        assert!(!is_noreturn("printf"));
+    }
 }

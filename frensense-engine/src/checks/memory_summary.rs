@@ -141,12 +141,12 @@ impl MemorySummaryRegistry {
     }
 
     /// Insert or update a summary contract for a function name.
-    pub fn insert(&mut self, name: String, summary: MemorySummary) {
+    pub(crate) fn insert(&mut self, name: String, summary: MemorySummary) {
         self.summaries.insert(name, summary);
     }
 
     /// Retrieve summary for a function by exact or short segment name.
-    pub fn get(&self, name: &str) -> Option<&MemorySummary> {
+    pub(crate) fn get(&self, name: &str) -> Option<&MemorySummary> {
         self.summaries
             .get(name)
             .or_else(|| self.summaries.get(last_segment(name)))
@@ -178,7 +178,7 @@ impl MemorySummaryRegistry {
     }
 
     /// Returns the indices of parameters through which fresh allocations are written by `name`.
-    pub fn out_params_fresh(&self, name: &str) -> Vec<usize> {
+    pub(crate) fn out_params_fresh(&self, name: &str) -> Vec<usize> {
         self.get(name)
             .map(|s| s.out_params_fresh.clone())
             .unwrap_or_default()

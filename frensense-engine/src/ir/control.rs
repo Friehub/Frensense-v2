@@ -17,7 +17,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Reflexive dominance sets: node -> the node itself plus everything that
 /// must precede it on every path.
-pub type DomSets = FxHashMap<BlockId, FxHashSet<BlockId>>;
+pub(crate) type DomSets = FxHashMap<BlockId, FxHashSet<BlockId>>;
 
 /// Blocks in deterministic id order (fixpoints iterate in this order so
 /// results are reproducible across runs).
@@ -31,37 +31,7 @@ fn sorted_blocks(ir: &FunctionIR) -> Vec<BlockId> {
 /// every path from the entry to `b` (including `b` itself). A non-entry block
 /// with no predecessors (an unreachable block) is assigned the set of all
 /// blocks, so callers should only ask about reachable ones.
-///
-/// ```
-/// use frensense_engine::ir::control::dominators;
-/// use frensense_engine::ir::function::FunctionIR;
-///
-/// // entry -> {then, else} -> merge
-/// let mut ir = FunctionIR::new("f".into());
-/// let entry = ir.entry_block;
-/// let (then_b, else_b, merge) = (ir.new_block(), ir.new_block(), ir.new_block());
-/// ir.add_edge(entry, then_b);
-/// ir.add_edge(entry, else_b);
-/// ir.add_edge(then_b, merge);
-/// ir.add_edge(else_b, merge);
-///
-/// let doms = dominators(&ir);
-/// // Dominance is reflexive.
-/// assert!(doms[&merge].contains(&merge));
-/// // The entry dominates everything it reaches.
-/// assert!(doms[&merge].contains(&entry));
-/// // Neither arm is on every path to the merge block.
-/// assert!(!doms[&merge].contains(&then_b));
-/// assert!(!doms[&merge].contains(&else_b));
-/// // The entry is dominated only by itself.
-/// assert_eq!(doms[&entry].len(), 1);
-///
-/// // An unreachable block is assigned every block.
-/// let orphan = ir.new_block();
-/// let doms = dominators(&ir);
-/// assert_eq!(doms[&orphan].len(), ir.blocks.len());
-/// ```
-pub fn dominators(ir: &FunctionIR) -> DomSets {
+pub(crate) fn dominators(ir: &FunctionIR) -> DomSets {
     let blocks = sorted_blocks(ir);
     let all: FxHashSet<BlockId> = blocks.iter().copied().collect();
     let mut preds: FxHashMap<BlockId, Vec<BlockId>> = FxHashMap::default();
@@ -190,5 +160,41 @@ mod tests {
         assert_eq!(d[&BlockId(1)], set(&[0, 1]));
         assert_eq!(d[&BlockId(2)], set(&[0, 1, 2]));
         assert_eq!(d[&BlockId(3)], set(&[0, 1, 3]));
+    }
+}
+
+#[cfg(test)]
+/// Assertions lifted from the doc examples of items that are now
+/// crate-private; a doctest cannot see them.
+mod doc_examples {
+    #[test]
+    fn doc_example_dominators() {
+        use crate::ir::control::dominators;
+        use crate::ir::function::FunctionIR;
+
+        // entry -> {then, else} -> merge
+        let mut ir = FunctionIR::new("f".into());
+        let entry = ir.entry_block;
+        let (then_b, else_b, merge) = (ir.new_block(), ir.new_block(), ir.new_block());
+        ir.add_edge(entry, then_b);
+        ir.add_edge(entry, else_b);
+        ir.add_edge(then_b, merge);
+        ir.add_edge(else_b, merge);
+
+        let doms = dominators(&ir);
+        // Dominance is reflexive.
+        assert!(doms[&merge].contains(&merge));
+        // The entry dominates everything it reaches.
+        assert!(doms[&merge].contains(&entry));
+        // Neither arm is on every path to the merge block.
+        assert!(!doms[&merge].contains(&then_b));
+        assert!(!doms[&merge].contains(&else_b));
+        // The entry is dominated only by itself.
+        assert_eq!(doms[&entry].len(), 1);
+
+        // An unreachable block is assigned every block.
+        let orphan = ir.new_block();
+        let doms = dominators(&ir);
+        assert_eq!(doms[&orphan].len(), ir.blocks.len());
     }
 }

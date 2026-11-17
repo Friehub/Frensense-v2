@@ -70,7 +70,7 @@ pub fn lower_source_with_facts(
 /// file that is a third unparseable used to be analyzed as if it were intact
 /// and reported as clean. The second element carries that fact so the scan
 /// can say "partially analyzed" instead.
-pub fn lower_source_detailed(
+pub(crate) fn lower_source_detailed(
     path: &str,
     source: &str,
     ext: &str,

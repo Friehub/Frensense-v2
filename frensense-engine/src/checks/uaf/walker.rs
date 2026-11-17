@@ -17,14 +17,14 @@ use super::types::{CrossCtx, Pair, PairCheck, Violation};
 /// and drops it, so it is recorded as [`Cap::UafWalkNodes`].
 ///
 /// [`Cap::UafWalkNodes`]: crate::telemetry::Cap::UafWalkNodes
-pub const MAX_WALK_NODES: usize = 512;
+pub(crate) const MAX_WALK_NODES: usize = 512;
 
 /// Forward-scan budget inside a callee when looking for parameter frees.
-pub const MAX_SCAN_NODES: usize = 256;
+pub(crate) const MAX_SCAN_NODES: usize = 256;
 
 /// Backward walker over SVFG value-flow edges that discovers free sites and the provenance of the freed object for one start function.
 #[derive(Debug)]
-pub struct Walker<'a> {
+pub(crate) struct Walker<'a> {
     /// Index of the function being checked in the program's function list.
     pub start_fi: usize,
     /// IR of the function being checked.
@@ -58,7 +58,7 @@ impl<'a> Walker<'a> {
     /// # Panics
     ///
     /// Panics when `fi` is not the start function and the walker has no program graph.
-    pub fn ir_of(&self, fi: usize) -> &'a FunctionIR {
+    pub(crate) fn ir_of(&self, fi: usize) -> &'a FunctionIR {
         if fi == self.start_fi {
             self.start_ir
         } else {
@@ -74,7 +74,7 @@ impl<'a> Walker<'a> {
     /// # Panics
     ///
     /// Panics when `fi` is not the start function and the walker has no program graph, as for [`Walker::ir_of`].
-    pub fn svfg_of(&self, fi: usize) -> &'a Svfg {
+    pub(crate) fn svfg_of(&self, fi: usize) -> &'a Svfg {
         if fi == self.start_fi {
             self.start_svfg
         } else {
@@ -87,7 +87,7 @@ impl<'a> Walker<'a> {
     }
 
     /// Whether `var` receives fresh memory through an out-parameter: its address is passed, via an address-of, at a slot the summary registry marks as returning fresh memory.
-    pub fn is_out_param_fresh(&self, ir: &FunctionIR, var: VarId) -> bool {
+    pub(crate) fn is_out_param_fresh(&self, ir: &FunctionIR, var: VarId) -> bool {
         for blk in ir.blocks.values() {
             for instr in &blk.instructions {
                 if let Instruction::CallStatic { func, args, .. } = instr {
@@ -114,7 +114,13 @@ impl<'a> Walker<'a> {
 
     /// Visit one node: memoised provenance ("every reachable root is a
     /// provable allocation") with candidate collection on first visit.
-    pub fn visit_walker(&mut self, fi: usize, key: NodeKey, depth: u8, ctx: CrossCtx) -> bool {
+    pub(crate) fn visit_walker(
+        &mut self,
+        fi: usize,
+        key: NodeKey,
+        depth: u8,
+        ctx: CrossCtx,
+    ) -> bool {
         self.nodes += 1;
         if self.nodes > MAX_WALK_NODES {
             crate::telemetry::Cap::UafWalkNodes.record();
@@ -287,7 +293,7 @@ impl<'a> Walker<'a> {
     /// Provenance = AND over backward edges (every feeding value must be
     /// provably allocated); a dead end (no preds, unresolvable root) is
     /// unprovable.
-    pub fn and_preds(
+    pub(crate) fn and_preds(
         &mut self,
         fi: usize,
         svfg: &Svfg,
@@ -310,7 +316,7 @@ impl<'a> Walker<'a> {
     }
 
     /// The callee at the call whose actual-argument node is `arg_node`, or `None` when the call has no resolved callee or more than one.
-    pub fn single_callee(&self, fi: usize, arg_node: &NodeKey) -> Option<usize> {
+    pub(crate) fn single_callee(&self, fi: usize, arg_node: &NodeKey) -> Option<usize> {
         let fe = &self.prog?.functions[fi];
         let (bi, _) = fe.arg_slots.get(arg_node)?;
         let callees = &fe.bindings[*bi].callees;
@@ -325,7 +331,7 @@ impl<'a> Walker<'a> {
     /// that release the parameter. External / unresolved callees yield
     /// `None` (covered at the call site by the summary registry's
     /// deallocator vocabulary when known).
-    pub fn scan_callee_frees(
+    pub(crate) fn scan_callee_frees(
         &self,
         callee_fi: usize,
         param_idx: usize,
@@ -367,7 +373,7 @@ impl<'a> Walker<'a> {
     }
 
     /// Records a free at `(block, idx)` found in context `ctx` as a pair to validate. Frees found inside a callee are also remembered for the all-returns exit check.
-    pub fn record_free(&mut self, block: BlockId, idx: usize, ctx: CrossCtx) {
+    pub(crate) fn record_free(&mut self, block: BlockId, idx: usize, ctx: CrossCtx) {
         let violation = self.violation;
         match ctx {
             CrossCtx::None => self.pairs.push(Pair {

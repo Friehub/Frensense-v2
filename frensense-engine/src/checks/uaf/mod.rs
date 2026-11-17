@@ -15,11 +15,11 @@
 /// Candidate collection and alias checks.
 pub mod discovery;
 /// Greatest-fixpoint must-reach dataflow used to validate discovered pairs.
-pub mod must_exec;
+pub(crate) mod must_exec;
 /// Core data structures: violations, free sites, pairs and cross-function context.
 pub mod types;
 /// Uninitialized pointer deallocation detection on error paths.
-pub mod uninit;
+pub(crate) mod uninit;
 /// Backward SVFG traversal for provenance and free-site discovery.
 pub mod walker;
 
@@ -32,51 +32,19 @@ use crate::graph::heap::PointsToAnalysis;
 use crate::graph::svfg::{NodeKey, Svfg, SvfgBuilder};
 use crate::ir::function::{BlockId, FunctionIR, VarId};
 
-pub use discovery::{
+pub(crate) use discovery::{
     TWO_PHASE_MIN_INSTRS, collect_frees, collect_start_sites, free_of, free_slot, instr_at,
     may_alias, reverse_cross,
 };
-pub use must_exec::{callee_always_frees, must_out, must_reach, must_reach_any};
-pub use types::{CrossCtx, FreeSite, Pair, PairCheck, Violation, finding};
-pub use uninit::check_uninitialized_frees;
-pub use walker::{MAX_SCAN_NODES, MAX_WALK_NODES, Walker};
+pub(crate) use must_exec::{callee_always_frees, must_out, must_reach, must_reach_any};
+pub(crate) use types::{CrossCtx, FreeSite, Pair, PairCheck, Violation, finding};
+pub(crate) use uninit::check_uninitialized_frees;
+pub(crate) use walker::{MAX_SCAN_NODES, MAX_WALK_NODES, Walker};
 
 /// Run the UAF / double-free check over one function with an
 /// interprocedural memory summary registry (intraprocedural graph mode: frees of parameters
 /// are recognised at consuming call sites via `summaries.consumes_params`).
-///
-/// ```
-/// use frensense_engine::checks::memory_summary::{CapacitySpec, MemorySummary, MemorySummaryRegistry};
-/// use frensense_engine::harness::lower_source;
-///
-/// // `malloc` returns fresh memory, `free` consumes parameter 0.
-/// let mut summaries = MemorySummaryRegistry::default();
-/// summaries.summaries.insert("malloc".into(), MemorySummary {
-///     returns_fresh: true,
-///     return_capacity: CapacitySpec::Unknown,
-///     consumes_params: vec![],
-///     out_params_fresh: vec![],
-/// });
-/// summaries.summaries.insert("free".into(), MemorySummary {
-///     returns_fresh: false,
-///     return_capacity: CapacitySpec::Unknown,
-///     consumes_params: vec![0],
-///     out_params_fresh: vec![],
-/// });
-/// let rules = |src: &str| -> Vec<String> {
-///     let fns = lower_source("t.c", src, "c").unwrap();
-///     frensense_engine::checks::uaf::check_with_summaries(&fns["f"], &summaries)
-///         .into_iter()
-///         .map(|f| f.rule)
-///         .collect()
-/// };
-///
-/// assert_eq!(rules("void f(void) { char *p = malloc(8); free(p); free(p); }"), ["double_free"]);
-/// assert_eq!(rules("void f(void) { char *p = malloc(8); free(p); p[0] = 1; }"), ["use_after_free"]);
-/// // Freed once and not used again: nothing to report.
-/// assert!(rules("void f(void) { char *p = malloc(8); free(p); }").is_empty());
-/// ```
-pub fn check_with_summaries(
+pub(crate) fn check_with_summaries(
     ir: &FunctionIR,
     summaries: &MemorySummaryRegistry,
 ) -> Vec<CheckerFinding> {
@@ -89,7 +57,7 @@ pub fn check_with_summaries(
 /// provenance) through the program's interprocedural edges.
 ///
 /// `fi` must be `prog.function_index(&ir.name)` for the same function.
-pub fn check_with_prog(
+pub(crate) fn check_with_prog(
     fi: usize,
     prog: &ProgramSvfg<'_>,
     summaries: &MemorySummaryRegistry,
@@ -296,4 +264,54 @@ fn validate_pair(
             Violation::DoubleFree | Violation::UninitializedFree => None,
         },
     ))
+}
+
+#[cfg(test)]
+/// Assertions lifted from the doc examples of items that are now
+/// crate-private; a doctest cannot see them.
+mod doc_examples {
+    #[test]
+    fn doc_example_check_with_summaries() {
+        use crate::checks::memory_summary::{CapacitySpec, MemorySummary, MemorySummaryRegistry};
+        use crate::harness::lower_source;
+
+        // `malloc` returns fresh memory, `free` consumes parameter 0.
+        let mut summaries = MemorySummaryRegistry::default();
+        summaries.summaries.insert(
+            "malloc".into(),
+            MemorySummary {
+                returns_fresh: true,
+                return_capacity: CapacitySpec::Unknown,
+                consumes_params: vec![],
+                out_params_fresh: vec![],
+            },
+        );
+        summaries.summaries.insert(
+            "free".into(),
+            MemorySummary {
+                returns_fresh: false,
+                return_capacity: CapacitySpec::Unknown,
+                consumes_params: vec![0],
+                out_params_fresh: vec![],
+            },
+        );
+        let rules = |src: &str| -> Vec<String> {
+            let fns = lower_source("t.c", src, "c").unwrap();
+            crate::checks::uaf::check_with_summaries(&fns["f"], &summaries)
+                .into_iter()
+                .map(|f| f.rule)
+                .collect()
+        };
+
+        assert_eq!(
+            rules("void f(void) { char *p = malloc(8); free(p); free(p); }"),
+            ["double_free"]
+        );
+        assert_eq!(
+            rules("void f(void) { char *p = malloc(8); free(p); p[0] = 1; }"),
+            ["use_after_free"]
+        );
+        // Freed once and not used again: nothing to report.
+        assert!(rules("void f(void) { char *p = malloc(8); free(p); }").is_empty());
+    }
 }

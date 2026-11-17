@@ -14,7 +14,7 @@ impl<'a> LoweringContext<'a> {
     /// Handles `name = value`, multi-target forms (`body, err := f(x)`), destructuring (`const { a, b } = obj` becomes one `LoadField` per property), declaration-position member or element stores (`m["k"] = v`) and value-less declarations (`char *p;`). A container statement lowers each of its declarators. Declared names are flagged `declared`, except under `static` or `extern` storage.
     ///
     /// Returns `None`: a declaration produces no value.
-    pub fn visit_declaration(
+    pub(crate) fn visit_declaration(
         &mut self,
         node: Node,
         name_field: &str,

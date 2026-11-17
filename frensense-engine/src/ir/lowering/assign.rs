@@ -125,7 +125,7 @@ impl<'a> LoweringContext<'a> {
     /// A variable target becomes an `Assign`, a field target a `StoreField` and an element target a `StoreElement`. A compound operator (`+=`, `*=`) lowers as a read-modify-write: a `BinaryOp` of the target and the right side, then the store. A multi-target left side (`a, b = f()`) binds the right side to every plain-variable target.
     ///
     /// Returns the assigned variable when the target is a plain variable (so `a = b = c` and `if (!(p = malloc(n)))` see the variable), the right-hand operand for a multi-target assignment, and `None` for a field or element target.
-    pub fn visit_assignment(
+    pub(crate) fn visit_assignment(
         &mut self,
         node: Node,
         lhs_field: &str,

@@ -21,11 +21,11 @@
 
 pub mod guard_bypass;
 pub mod health;
-pub mod int_overflow;
+pub(crate) mod int_overflow;
 pub mod leak;
 pub mod memory_summary;
-pub mod noreturn;
-pub mod oob;
+pub(crate) mod noreturn;
+pub(crate) mod oob;
 pub mod policy;
 pub mod registry;
 pub mod schema_policy;
@@ -71,7 +71,9 @@ use crate::ir::function::FunctionIR;
 use rustc_hash::FxHashSet;
 
 pub use crate::analysis::taint::facts::Provenance;
-pub use registry::{CheckContext, CheckRegistry, CheckScope, NonDataflowCheck, default_registry};
+pub(crate) use registry::{
+    CheckContext, CheckRegistry, CheckScope, NonDataflowCheck, default_registry,
+};
 
 /// Last segment of a call reference: everything after the last `.`, then
 /// after the last `::` (Rust/C++ paths), so `security.hash`, `sha2::digest`
@@ -208,7 +210,7 @@ fn push_unique(
 ///
 /// `facts` carries the bundle-learned checks; pass `&FactTable::default()`
 /// when scanning without a bundle.
-pub fn check_all<'a>(
+pub(crate) fn check_all<'a>(
     irs: impl IntoIterator<Item = &'a FunctionIR>,
     facts: &FactTable,
 ) -> Vec<CheckerFinding> {
@@ -223,7 +225,7 @@ pub fn check_all<'a>(
 /// parameter frees, caller-side frees, factory provenance) that intraprocedural
 /// IR alone cannot see. `pkg_scope`: policies carrying `package: Some(pkg)`
 /// only fire in functions whose file imports `pkg`; `None` disables filtering.
-pub fn check_all_with_telemetry<'a>(
+pub(crate) fn check_all_with_telemetry<'a>(
     irs: impl IntoIterator<Item = &'a FunctionIR>,
     facts: &FactTable,
     prog: Option<&ProgramSvfg<'_>>,
@@ -234,7 +236,7 @@ pub fn check_all_with_telemetry<'a>(
 }
 
 /// [`check_all_with_telemetry`] with an explicit [`registry::CheckRegistry`].
-pub fn check_all_with_registry_and_telemetry<'a>(
+pub(crate) fn check_all_with_registry_and_telemetry<'a>(
     registry: &registry::CheckRegistry,
     irs: impl IntoIterator<Item = &'a FunctionIR>,
     facts: &FactTable,

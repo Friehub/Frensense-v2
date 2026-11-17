@@ -112,7 +112,7 @@ impl SinkSignature {
     /// sink), so it must never outrank a fact that knows the call's slots,
     /// exactly like the merge rule that keeps an all-args entry from
     /// widening a slot-restricted one.
-    pub fn is_blanket(&self) -> bool {
+    pub(crate) fn is_blanket(&self) -> bool {
         self.dangerous_args.is_empty()
             && !self.binding_args_safe
             && self.idor_keys.is_empty()
@@ -373,7 +373,7 @@ impl PolicyFact {
     /// Convert a legacy [`LearnedCheckFact`] into the generalized form.
     /// `unless_guard` and `unless_range_check` become requirements; scope is
     /// always [`PolicyScope::Function`], matching the legacy semantics.
-    pub fn from_legacy(f: &LearnedCheckFact) -> Self {
+    pub(crate) fn from_legacy(f: &LearnedCheckFact) -> Self {
         let mut require = Vec::new();
         if let Some(g) = &f.unless_guard {
             require.push(PolicyRequirement::GuardCall { call: g.clone() });
@@ -692,7 +692,7 @@ impl TeachableNodeRole {
     /// Convert this owned teachable role into the engine's standard [`frensense_lang::NodeRole`].
     /// Bundle field names become `Cow::Owned` (allocated per fact, never
     /// leaked); spec-provided roles stay `Cow::Borrowed` upstream.
-    pub fn to_node_role(&self) -> frensense_lang::NodeRole {
+    pub(crate) fn to_node_role(&self) -> frensense_lang::NodeRole {
         match self {
             TeachableNodeRole::Function {
                 is_method,
@@ -968,7 +968,7 @@ impl WeakPrimitiveRule {
     /// identity replace each other; two with different calls are distinct
     /// rules and both fire.
     #[must_use]
-    pub fn same_identity(&self, other: &Self) -> bool {
+    pub(crate) fn same_identity(&self, other: &Self) -> bool {
         self.rule_id == other.rule_id
             && self.selector_calls == other.selector_calls
             && self.bare_calls == other.bare_calls
@@ -979,7 +979,7 @@ impl InsecureConfigRule {
     /// Whether `other` names the same rule: same rule id and callee prefix.
     /// Selectors, severity, and message are overridable conclusion fields.
     #[must_use]
-    pub fn same_identity(&self, other: &Self) -> bool {
+    pub(crate) fn same_identity(&self, other: &Self) -> bool {
         self.rule_id == other.rule_id && self.prefix == other.prefix
     }
 }
@@ -988,14 +988,14 @@ impl KeySizeRule {
     /// Whether `other` names the same rule: same rule id, call, and bit-length
     /// slot. Severity, message, and `kind` are overridable conclusion fields.
     #[must_use]
-    pub fn same_identity(&self, other: &Self) -> bool {
+    pub(crate) fn same_identity(&self, other: &Self) -> bool {
         self.rule_id == other.rule_id && self.call == other.call && self.slot == other.slot
     }
 
     /// Replace this rule with a newer fact of the same identity, keeping the
     /// security floor monotone: a later seed may raise `min_bits`, never
     /// lower it.
-    pub fn override_with(&mut self, newer: &Self) {
+    pub(crate) fn override_with(&mut self, newer: &Self) {
         let min_bits = self.min_bits.max(newer.min_bits);
         *self = newer.clone();
         self.min_bits = min_bits;

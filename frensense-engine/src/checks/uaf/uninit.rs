@@ -12,7 +12,10 @@ use super::types::{FreeSite, Violation, finding};
 /// Check for deallocations where the freed pointer has a feasible path
 /// with no reaching definition (e.g. uninitialized stack slot freed on
 /// an unchecked error/EOF path).
-pub fn check_uninitialized_frees(ir: &FunctionIR, frees: &[FreeSite]) -> Vec<CheckerFinding> {
+pub(crate) fn check_uninitialized_frees(
+    ir: &FunctionIR,
+    frees: &[FreeSite],
+) -> Vec<CheckerFinding> {
     let mut findings = Vec::new();
 
     for f in frees {

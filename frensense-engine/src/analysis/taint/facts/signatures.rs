@@ -48,7 +48,7 @@ impl FactTable {
     /// Session stores are usually namespaced (`security.authenticatedUsers`),
     /// so ANY dotted segment matching a declared root qualifies:
     /// `security.authenticatedUsers.get(t)` hits root `authenticatedUsers`.
-    pub fn is_session_path(&self, last: &str, receiver_path: Option<&str>) -> bool {
+    pub(crate) fn is_session_path(&self, last: &str, receiver_path: Option<&str>) -> bool {
         if !self.is_session_accessor(last) {
             return false;
         }
@@ -65,7 +65,7 @@ impl FactTable {
     ///
     /// Mirrors [`FactTable::receiver_root`] but keeps every named hop, so
     /// namespaced session stores match their declared root segment.
-    pub fn receiver_access_path(
+    pub(crate) fn receiver_access_path(
         ir: &crate::ir::function::FunctionIR,
         var: crate::ir::function::VarId,
     ) -> Option<String> {
@@ -108,7 +108,7 @@ impl FactTable {
     /// `KVNamespace` for `kv.put(t)`), that entry's role wins over the bare
     /// last-segment entry's. Falls back to [`Self::sink_signature`] when no
     /// receiver-specific role exists.
-    pub fn role_for_call(
+    pub(crate) fn role_for_call(
         &self,
         last: &str,
         receiver_root: Option<&str>,
@@ -117,7 +117,7 @@ impl FactTable {
     }
 
     /// Semantic label slug for a sink call, receiver-aware.
-    pub fn label_for_call(&self, last: &str, receiver_root: Option<&str>) -> Option<String> {
+    pub(crate) fn label_for_call(&self, last: &str, receiver_root: Option<&str>) -> Option<String> {
         self.label_for_call_scoped(last, receiver_root, None, None)
     }
 
@@ -131,27 +131,7 @@ impl FactTable {
     /// receiver root). This is what keeps a bundle fact like
     /// `(@prisma/client).$queryRawUnsafe` from firing on a local object
     /// whose method happens to share the name.
-    ///
-    /// ```
-    /// use frensense_engine::analysis::taint::facts::{FactTable, SinkSignature};
-    ///
-    /// let mut t = FactTable::default();
-    /// // Only a package-scoped fact: `(@prisma/client, $queryRawUnsafe)`.
-    /// t.scoped_sink_signatures.insert(
-    ///     ("@prisma/client".into(), "$queryRawUnsafe".into()),
-    ///     SinkSignature::all_args("$queryRawUnsafe"),
-    /// );
-    /// // Confirmed origin: the scoped fact applies.
-    /// assert!(t.sink_signature_scoped("$queryRawUnsafe", Some("@prisma/client"), None).is_some());
-    /// // Unknown origin, or another package: it does not.
-    /// assert!(t.sink_signature_scoped("$queryRawUnsafe", None, None).is_none());
-    /// assert!(t.sink_signature_scoped("$queryRawUnsafe", Some("my-orm"), None).is_none());
-    ///
-    /// // A universal fact still applies under any origin.
-    /// t.sink_signatures.insert("eval".into(), SinkSignature::all_args("eval"));
-    /// assert!(t.sink_signature_scoped("eval", Some("my-orm"), None).is_some());
-    /// ```
-    pub fn sink_signature_scoped(
+    pub(crate) fn sink_signature_scoped(
         &self,
         call: &str,
         origin_package: Option<&str>,
@@ -194,7 +174,7 @@ impl FactTable {
     /// Consults (in order): the (receiver-root, method) pair from dotted
     /// entries, the (origin-package, method) scoped entry set, then the
     /// universal signature map.
-    pub fn role_for_call_scoped(
+    pub(crate) fn role_for_call_scoped(
         &self,
         last: &str,
         receiver_root: Option<&str>,
@@ -218,7 +198,7 @@ impl FactTable {
     }
 
     /// Semantic label slug for a sink call, receiver- and package-aware.
-    pub fn label_for_call_scoped(
+    pub(crate) fn label_for_call_scoped(
         &self,
         last: &str,
         receiver_root: Option<&str>,
@@ -259,31 +239,7 @@ impl FactTable {
     /// Universal facts were proven for the bare call name regardless of
     /// receiver, so they remain safe under any origin; a scoped fact
     /// suppresses only once import resolution confirms its package.
-    ///
-    /// ```
-    /// use frensense_engine::analysis::taint::facts::{FactTable, SanitizerFact};
-    ///
-    /// let fact = |pkg: Option<&str>| SanitizerFact {
-    ///     call: "scrub".into(),
-    ///     package: pkg.map(String::from),
-    ///     kind: "html".into(),
-    ///     sanitizes_args: Default::default(),
-    ///     guard_style: false,
-    /// };
-    /// let mut t = FactTable::default();
-    /// t.scoped_sanitizer_facts.insert(("sanitize-pkg".into(), "scrub".into()), fact(Some("sanitize-pkg")));
-    ///
-    /// // Cuts only under its confirmed package.
-    /// assert!(t.sanitizer_fact_scoped("scrub", Some("sanitize-pkg")).is_some());
-    /// assert!(t.sanitizer_fact_scoped("scrub", None).is_none());
-    /// assert!(t.sanitizer_fact_scoped("scrub", Some("other-pkg")).is_none());
-    ///
-    /// // A universal fact applies under any origin.
-    /// t.sanitizer_facts.insert("scrub".into(), fact(None));
-    /// assert!(t.sanitizer_fact_scoped("scrub", None).is_some());
-    /// assert!(t.sanitizer_fact_scoped("scrub", Some("other-pkg")).is_some());
-    /// ```
-    pub fn sanitizer_fact_scoped(
+    pub(crate) fn sanitizer_fact_scoped(
         &self,
         call: &str,
         origin_package: Option<&str>,
@@ -307,7 +263,7 @@ impl FactTable {
     /// No import origin is available at this call site, so package-
     /// scoped facts are inert here (recall-safe: they only ever suppress
     /// under a confirmed origin). Pass `Some(origin)` via
-    /// [`Self::sanitizer_fact_scoped`] where import context exists.
+    /// `Self::sanitizer_fact_scoped` where import context exists.
     pub fn sanitizer_fact(&self, call: &str) -> Option<&SanitizerFact> {
         self.sanitizer_fact_scoped(call, None)
     }
@@ -384,7 +340,7 @@ impl FactTable {
     /// A name declared bare (the language builtin's own name) is not
     /// receiver-gated; a name that only ever appeared in a dotted
     /// declaration is.
-    pub fn is_receiver_qualified_only(&self, last: &str) -> bool {
+    pub(crate) fn is_receiver_qualified_only(&self, last: &str) -> bool {
         !self.bare_sink_names.contains(last) && self.receiver_qualified_sinks.contains_key(last)
     }
 
@@ -394,7 +350,7 @@ impl FactTable {
     /// A receiver root matches when it IS a declared root. An import
     /// origin matches when it IS a declared root or lives under it
     /// (`urllib.request` under the declared root `urllib`).
-    pub fn qualified_receiver_matches(
+    pub(crate) fn qualified_receiver_matches(
         &self,
         last: &str,
         receiver_root: Option<&str>,
@@ -424,7 +380,7 @@ impl FactTable {
     /// a gated verb must not match by name alone: only an import origin
     /// that names a client package arms it. A bare call (`exec(code)`,
     /// no receiver) keeps the unqualified semantics.
-    pub fn is_recv_sink_call_scoped(
+    pub(crate) fn is_recv_sink_call_scoped(
         &self,
         last: &str,
         receiver_root: Option<&str>,
@@ -442,21 +398,7 @@ impl FactTable {
     /// every sink's last segment, including the ambiguous verbs and the
     /// receiver-qualified shadows that receiver gating exists for, so a
     /// bare `contains` must not arm either on its own.
-    ///
-    /// ```
-    /// use frensense_engine::analysis::taint::facts::{FactTable, SinkSignature};
-    ///
-    /// let mut t = FactTable::default();
-    /// t.sink_signatures.insert("get".into(), SinkSignature::all_args("get"));
-    /// t.verb_sinks.insert("get".into());
-    /// let flat: rustc_hash::FxHashSet<String> = ["get".to_string(), "eval".to_string()].into_iter().collect();
-    ///
-    /// // A bare `contains` in the flat set does not arm an ambiguous verb ...
-    /// assert!(!t.sink_name_armed(&flat, "get", Some("m"), None, None, true));
-    /// // ... but arms an ordinary name.
-    /// assert!(t.sink_name_armed(&flat, "eval", None, None, None, false));
-    /// ```
-    pub fn sink_name_armed(
+    pub(crate) fn sink_name_armed(
         &self,
         flat_sinks: &rustc_hash::FxHashSet<String>,
         name: &str,
@@ -486,27 +428,7 @@ impl FactTable {
     ///   from dotted client entries AND the receiver root is a known
     ///   client, `m.get(t)` on an arbitrary Map is never a sink, while
     ///   `got.get(taint)` is.
-    ///
-    /// ```
-    /// use frensense_engine::analysis::taint::facts::{FactTable, SinkSignature};
-    /// use frensense_engine::analysis::taint::role::SinkRole;
-    ///
-    /// let mut t = FactTable::default();
-    /// // An ordinary sink: the name alone decides.
-    /// t.sink_signatures.insert("eval".into(), SinkSignature::all_args("eval"));
-    /// assert!(t.is_sink_call("eval", None));
-    /// assert!(t.is_sink_call("eval", Some("anything")));
-    /// assert!(!t.is_sink_call("print", None));
-    ///
-    /// // An ambiguous verb that only came from a dotted client entry (`got.get`).
-    /// t.sink_signatures.insert("get".into(), SinkSignature::all_args("get"));
-    /// t.verb_sinks.insert("get".into());
-    /// t.client_roots.insert("got".into());
-    /// t.receiver_roles.insert(("got".into(), "get".into()), SinkRole::Other);
-    /// assert!(t.is_sink_call("get", Some("got")));   // `got.get(url)`
-    /// assert!(!t.is_sink_call("get", Some("m")));    // `m.get(key)` on some map
-    /// ```
-    pub fn is_sink_call(&self, last: &str, receiver_root: Option<&str>) -> bool {
+    pub(crate) fn is_sink_call(&self, last: &str, receiver_root: Option<&str>) -> bool {
         self.is_sink_call_scoped(last, receiver_root, None, None)
     }
 
@@ -514,7 +436,7 @@ impl FactTable {
     /// IR: `const c = got; got.get(x)` and direct `got.get(x)` both
     /// resolve to root `got`. Returns `None` when the def is not a
     /// LoadField chain grounded in a named var.
-    pub fn receiver_root(
+    pub(crate) fn receiver_root(
         ir: &crate::ir::function::FunctionIR,
         var: crate::ir::function::VarId,
     ) -> Option<String> {
@@ -538,7 +460,7 @@ impl FactTable {
     /// for `security.hash` also fires on bare `hash`, same over-approximate
     /// semantics as built-in seed checks. Each match carries the entry's
     /// provenance so findings report where the rule came from.
-    pub fn learned_checks_for(&self, call: &str) -> Vec<(&LearnedCheckFact, Provenance)> {
+    pub(crate) fn learned_checks_for(&self, call: &str) -> Vec<(&LearnedCheckFact, Provenance)> {
         let seg = call.rsplit('.').next().unwrap_or(call);
         let mirror = super::mirror_call_base(seg);
         self.learned_checks
@@ -549,5 +471,120 @@ impl FactTable {
             })
             .map(|(c, p)| (c, *p))
             .collect()
+    }
+}
+
+#[cfg(test)]
+/// Assertions lifted from the doc examples of items that are now
+/// crate-private; a doctest cannot see them.
+mod doc_examples {
+    #[test]
+    fn doc_example_is_sink_call() {
+        use crate::analysis::taint::facts::{FactTable, SinkSignature};
+        use crate::analysis::taint::role::SinkRole;
+
+        let mut t = FactTable::default();
+        // An ordinary sink: the name alone decides.
+        t.sink_signatures
+            .insert("eval".into(), SinkSignature::all_args("eval"));
+        assert!(t.is_sink_call("eval", None));
+        assert!(t.is_sink_call("eval", Some("anything")));
+        assert!(!t.is_sink_call("print", None));
+
+        // An ambiguous verb that only came from a dotted client entry (`got.get`).
+        t.sink_signatures
+            .insert("get".into(), SinkSignature::all_args("get"));
+        t.verb_sinks.insert("get".into());
+        t.client_roots.insert("got".into());
+        t.receiver_roles
+            .insert(("got".into(), "get".into()), SinkRole::Other);
+        assert!(t.is_sink_call("get", Some("got"))); // `got.get(url)`
+        assert!(!t.is_sink_call("get", Some("m"))); // `m.get(key)` on some map
+    }
+    #[test]
+    fn doc_example_sink_name_armed() {
+        use crate::analysis::taint::facts::{FactTable, SinkSignature};
+
+        let mut t = FactTable::default();
+        t.sink_signatures
+            .insert("get".into(), SinkSignature::all_args("get"));
+        t.verb_sinks.insert("get".into());
+        let flat: rustc_hash::FxHashSet<String> = ["get".to_string(), "eval".to_string()]
+            .into_iter()
+            .collect();
+
+        // A bare `contains` in the flat set does not arm an ambiguous verb ...
+        assert!(!t.sink_name_armed(&flat, "get", Some("m"), None, None, true));
+        // ... but arms an ordinary name.
+        assert!(t.sink_name_armed(&flat, "eval", None, None, None, false));
+    }
+    #[test]
+    fn doc_example_sanitizer_fact_scoped() {
+        use crate::analysis::taint::facts::{FactTable, SanitizerFact};
+
+        let fact = |pkg: Option<&str>| SanitizerFact {
+            call: "scrub".into(),
+            package: pkg.map(String::from),
+            kind: "html".into(),
+            sanitizes_args: Default::default(),
+            guard_style: false,
+        };
+        let mut t = FactTable::default();
+        t.scoped_sanitizer_facts.insert(
+            ("sanitize-pkg".into(), "scrub".into()),
+            fact(Some("sanitize-pkg")),
+        );
+
+        // Cuts only under its confirmed package.
+        assert!(
+            t.sanitizer_fact_scoped("scrub", Some("sanitize-pkg"))
+                .is_some()
+        );
+        assert!(t.sanitizer_fact_scoped("scrub", None).is_none());
+        assert!(
+            t.sanitizer_fact_scoped("scrub", Some("other-pkg"))
+                .is_none()
+        );
+
+        // A universal fact applies under any origin.
+        t.sanitizer_facts.insert("scrub".into(), fact(None));
+        assert!(t.sanitizer_fact_scoped("scrub", None).is_some());
+        assert!(
+            t.sanitizer_fact_scoped("scrub", Some("other-pkg"))
+                .is_some()
+        );
+    }
+    #[test]
+    fn doc_example_sink_signature_scoped() {
+        use crate::analysis::taint::facts::{FactTable, SinkSignature};
+
+        let mut t = FactTable::default();
+        // Only a package-scoped fact: `(@prisma/client, $queryRawUnsafe)`.
+        t.scoped_sink_signatures.insert(
+            ("@prisma/client".into(), "$queryRawUnsafe".into()),
+            SinkSignature::all_args("$queryRawUnsafe"),
+        );
+        // Confirmed origin: the scoped fact applies.
+        assert!(
+            t.sink_signature_scoped("$queryRawUnsafe", Some("@prisma/client"), None)
+                .is_some()
+        );
+        // Unknown origin, or another package: it does not.
+        assert!(
+            t.sink_signature_scoped("$queryRawUnsafe", None, None)
+                .is_none()
+        );
+        assert!(
+            t.sink_signature_scoped("$queryRawUnsafe", Some("my-orm"), None)
+                .is_none()
+        );
+
+        // A universal fact still applies under any origin.
+        t.sink_signatures
+            .insert("eval".into(), SinkSignature::all_args("eval"));
+        assert!(
+            t.sink_signature_scoped("eval", Some("my-orm"), None)
+                .is_some()
+        );
     }
 }

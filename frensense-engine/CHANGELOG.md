@@ -31,6 +31,29 @@ what this crate does.
   sibling-caller test (`call_site_context_separates_sibling_callers`).
 - `check_all_with_graph` and `check_all_with_graph_scoped`, which had no caller;
   use `check_all_with_telemetry`.
+- **Breaking:** the public surface now matches its consumers. 265 declarations
+  that no crate outside `frensense-engine` names are `pub(crate)`, and
+  `cargo public-api -p frensense-engine` drops from **4,481 to 3,264 lines
+  (-27%)**, or 3,149 to 2,310 with `--omit auto-trait-impls`. Eight modules are
+  crate-private (`ir::lowering::{control_flow,lvalue}`, `graph::steensgaard`,
+  `checks::{int_overflow,noreturn,oob}`, `checks::uaf::{must_exec,uninit}`), and
+  with them their internals: `InterproceduralTaintEngine` (the forward engine
+  only tests ever constructed, the follow-up to the context-engine removal),
+  `CheckRegistry`, `CheckContext`, `CheckScope`, `PackageScope`,
+  `NonDataflowCheck`, `DiagnosticSink`/`NoopDiagnosticSink`, `Walker`,
+  `CallGraph`/`CallGraphBuilder`/`CallTarget`, `Pair`/`PairCheck`/`FreeSite`/
+  `Violation`/`CrossCtx`, `BufferInfo` and `LocId`.
+  What stays public is what another crate actually reaches: `ProgramSvfg` and
+  its fields, `FactTable`, `SinkFinding`/`SinkAlert`/`SinkFindingBuilder`, the
+  check entry points and `scan`. The set was derived mechanically (name absent
+  from every `.rs` outside the crate) and then confirmed by the compiler: each
+  demotion a consumer needed returned as `private_interfaces`, `E0616`,
+  `E0603` or `E0624` and was reverted. `cargo check --workspace --all-features
+  --all-targets`, `cargo test --workspace --all-features`, the rustdoc
+  `broken_intra_doc_links`/`private_intra_doc_links` gate and the clippy
+  ratchet are green.
+- 24 intra-doc links that pointed at now-private items became code spans, and
+  one pre-existing unresolved link (`scan::ModuleResolution`) was fixed.
 
 ### Changed
 

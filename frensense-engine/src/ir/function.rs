@@ -22,7 +22,7 @@ pub struct VarId(pub usize);
 /// Source name of the hidden memory-state parameter every [`FunctionIR`]
 /// allocates as its `VarId(0)`. Shared by the IR builder (which names the
 /// variable) and path reconstruction (which strips the artifact).
-pub const INITIAL_HEAP_STATE: &str = "InitialHeapState";
+pub(crate) const INITIAL_HEAP_STATE: &str = "InitialHeapState";
 
 /// A unique identifier for a Basic Block in the CFG.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -95,7 +95,7 @@ pub struct Phi {
     /// Variable defined by the phi (the merged value).
     pub dest: VarId,
     /// One `(predecessor block, variable)` pair per incoming control-flow edge: the phi takes the variable that arrives along that edge.
-    pub incoming: Vec<(BlockId, VarId)>,
+    pub(crate) incoming: Vec<(BlockId, VarId)>,
 }
 
 /// A single linear instruction in 3-Address Code form.
@@ -347,7 +347,7 @@ impl Instruction {
     /// loads, calls (when the result is used), allocations, address-of,
     /// dereference, casts, aggregate extraction, unary/binary operations,
     /// `await` and `yield`. Memory-state outputs are not included; see
-    /// [`Instruction::mem_out`]. This is the one definition of "what does this
+    /// `Instruction::mem_out`. This is the one definition of "what does this
     /// instruction define"; do not re-match the variants elsewhere, because
     /// a copy that forgets a variant silently drops findings on it.
     #[must_use]
@@ -377,7 +377,7 @@ impl Instruction {
 
     /// The memory-state variable this instruction produces, if any.
     #[must_use]
-    pub fn mem_out(&self) -> Option<VarId> {
+    pub(crate) fn mem_out(&self) -> Option<VarId> {
         match self {
             Self::StoreField { mem_out, .. }
             | Self::StoreElement { mem_out, .. }
@@ -404,7 +404,7 @@ impl Instruction {
     /// Every variable this instruction defines: the value result first, then
     /// the memory-state output.
     #[must_use]
-    pub fn defs(&self) -> Vec<VarId> {
+    pub(crate) fn defs(&self) -> Vec<VarId> {
         self.dest().into_iter().chain(self.mem_out()).collect()
     }
 }
@@ -443,7 +443,7 @@ pub enum Terminator {
         /// Value being thrown.
         src: Operand,
     },
-    /// No terminator yet: the block is still under construction (the state of every block created by [`BasicBlock::new`]).
+    /// No terminator yet: the block is still under construction (the state of every block created by `BasicBlock::new`).
     None,
 }
 
@@ -467,7 +467,7 @@ pub struct BasicBlock {
 
 impl BasicBlock {
     /// Creates an empty block with the given id: no phis, no instructions, [`Terminator::None`] and no edges.
-    pub fn new(id: BlockId) -> Self {
+    pub(crate) fn new(id: BlockId) -> Self {
         Self {
             id,
             phis: Vec::new(),
@@ -494,7 +494,7 @@ pub struct FunctionIR {
     /// All basic blocks, keyed by their [`BlockId`].
     pub blocks: FxHashMap<BlockId, BasicBlock>,
     /// The block execution starts in.
-    pub entry_block: BlockId,
+    pub(crate) entry_block: BlockId,
     /// Source-level metadata for every variable, including memory states.
     pub var_metadata: FxHashMap<VarId, VarMetadata>,
     /// Language key this IR was lowered from (`spec.fact_language()`:
@@ -620,7 +620,7 @@ impl FunctionIR {
     }
 
     /// Allocates a fresh, empty, unconnected block and returns its id.
-    pub fn new_block(&mut self) -> BlockId {
+    pub(crate) fn new_block(&mut self) -> BlockId {
         let id = BlockId(self.next_block_id);
         self.next_block_id += 1;
         self.blocks.insert(id, BasicBlock::new(id));
@@ -628,28 +628,28 @@ impl FunctionIR {
     }
 
     /// Appends a phi node to `block`. Does nothing if the block does not exist.
-    pub fn push_phi(&mut self, block: BlockId, phi: Phi) {
+    pub(crate) fn push_phi(&mut self, block: BlockId, phi: Phi) {
         if let Some(b) = self.blocks.get_mut(&block) {
             b.phis.push(phi);
         }
     }
 
     /// Appends an instruction to the end of `block`. Does nothing if the block does not exist.
-    pub fn push_instruction(&mut self, block: BlockId, instr: Instruction) {
+    pub(crate) fn push_instruction(&mut self, block: BlockId, instr: Instruction) {
         if let Some(b) = self.blocks.get_mut(&block) {
             b.instructions.push(instr);
         }
     }
 
     /// Sets how `block` exits. Does nothing if the block does not exist; the CFG edges are recorded separately by [`FunctionIR::add_edge`].
-    pub fn set_terminator(&mut self, block: BlockId, terminator: Terminator) {
+    pub(crate) fn set_terminator(&mut self, block: BlockId, terminator: Terminator) {
         if let Some(b) = self.blocks.get_mut(&block) {
             b.terminator = terminator;
         }
     }
 
     /// Records a control-flow edge `from -> to` in both blocks' successor and predecessor lists. Idempotent: an edge that is already present is not added twice.
-    pub fn add_edge(&mut self, from: BlockId, to: BlockId) {
+    pub(crate) fn add_edge(&mut self, from: BlockId, to: BlockId) {
         if let Some(f) = self.blocks.get_mut(&from)
             && !f.successors.contains(&to)
         {

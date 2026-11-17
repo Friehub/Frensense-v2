@@ -29,7 +29,7 @@ use crate::ir::function::{BasicBlock, BlockId, FunctionIR, Instruction, Operand,
 
 /// A spatial memory safety violation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Violation {
+pub(crate) enum Violation {
     /// Memory write past allocated capacity.
     BufferOverflow,
     /// Memory read past allocated capacity.
@@ -40,7 +40,7 @@ pub enum Violation {
 
 /// Buffer capacity metadata tracked per points-to class.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BufferInfo {
+pub(crate) struct BufferInfo {
     /// Guaranteed minimum capacity in bytes/elements.
     pub capacity_lo: i64,
     /// Maximum capacity in bytes/elements.
@@ -165,7 +165,7 @@ fn finding(
 /// Run spatial memory safety checks over one function with an
 /// interprocedural memory summary registry and the spec/bundle vocabulary
 /// (memory contracts, buffer builtins) resolved from `facts`.
-pub fn check_with_summaries(
+pub(crate) fn check_with_summaries(
     ir: &FunctionIR,
     summaries: &MemorySummaryRegistry,
     facts: &FactTable,

@@ -82,7 +82,7 @@ impl Value {
     }
 
     /// Is this a definite constant (the precise strata)?
-    pub fn is_const(&self) -> bool {
+    pub(crate) fn is_const(&self) -> bool {
         matches!(
             self,
             Value::IntConst(_) | Value::StrConst(_) | Value::BoolConst(_)
@@ -90,7 +90,7 @@ impl Value {
     }
 
     /// Intersect an integer value/range with an inclusive interval `[min_lo, max_hi]`.
-    pub fn intersect_interval(&self, min_lo: Option<i64>, max_hi: Option<i64>) -> Value {
+    pub(crate) fn intersect_interval(&self, min_lo: Option<i64>, max_hi: Option<i64>) -> Value {
         match self {
             Value::IntConst(n) => {
                 if min_lo.is_none_or(|lo| *n >= lo) && max_hi.is_none_or(|hi| *n <= hi) {
@@ -123,7 +123,7 @@ impl Value {
 }
 
 /// Abstract state: one entry per var that has a non-`Top` value.
-pub type AbsState = FxHashMap<VarId, Value>;
+pub(crate) type AbsState = FxHashMap<VarId, Value>;
 
 /// Merge state `b` into `a` using the lattice join operation.
 fn merge_states(a: &mut AbsState, b: &AbsState) {
@@ -592,12 +592,12 @@ impl ValueInfo {
     }
 
     /// The interval of `var`, if an integer with a known range.
-    pub fn range(&self, var: VarId) -> Option<(i64, i64)> {
+    pub(crate) fn range(&self, var: VarId) -> Option<(i64, i64)> {
         self.values.get(&var).and_then(Value::interval)
     }
 
     /// The constant integer value of `var` at the entry of `block`.
-    pub fn const_int_at(&self, block: BlockId, var: VarId) -> Option<i64> {
+    pub(crate) fn const_int_at(&self, block: BlockId, var: VarId) -> Option<i64> {
         match self.block_entry_states.get(&block)?.get(&var)? {
             Value::IntConst(n) => Some(*n),
             Value::Range(lo, hi) if lo == hi => Some(*lo),
@@ -606,7 +606,7 @@ impl ValueInfo {
     }
 
     /// The interval of `var` at the entry of `block`.
-    pub fn range_at(&self, block: BlockId, var: VarId) -> Option<(i64, i64)> {
+    pub(crate) fn range_at(&self, block: BlockId, var: VarId) -> Option<(i64, i64)> {
         self.block_entry_states
             .get(&block)?
             .get(&var)

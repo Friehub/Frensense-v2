@@ -80,7 +80,7 @@ name = "frensense"
 path = "src/bin/frensense.rs"
 
 [dependencies]
-frensense-engine = { path = "frensense-engine", version = "0.8.2", features = ["serialize"] }
+frensense-engine = { path = "frensense-engine", version = "0.9.0", features = ["serialize"] }
 frensense-lang = { path = "frensense-lang", version = "0.8.1" }
 thiserror = "1.0"
 tracing = { version = "0.1", features = ["attributes"] }

@@ -80,14 +80,14 @@ impl DebugFlags {
     /// Kept separate from [`DebugFlags::get`] so the public struct keeps its
     /// shape; like the other flags, the first [`Self::install_from`] wins.
     #[must_use]
-    pub fn caps_enabled() -> bool {
+    pub(crate) fn caps_enabled() -> bool {
         *CAPS.get_or_init(|| false)
     }
 
     /// `FRENSdbg_CHECKS`: report findings that only one of the two
     /// learned-check evaluation paths produced.
     #[must_use]
-    pub fn checks_enabled() -> bool {
+    pub(crate) fn checks_enabled() -> bool {
         *CHECKS.get_or_init(|| false)
     }
 

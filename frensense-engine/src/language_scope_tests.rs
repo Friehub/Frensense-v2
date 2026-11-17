@@ -46,7 +46,7 @@ export async function handler(req: any, prisma: any) {
     const RUST_SINK_FLOW: &str = r#"
 use std::fs::File;
 
-pub fn open_target() {
+pub(crate) fn open_target() {
     let path = std::env::var("TARGET").unwrap();
     let _f = File::create(path);
 }
@@ -57,7 +57,7 @@ pub fn open_target() {
     const RUST_NAMED_INPUT: &str = r#"
 use std::fs::File;
 
-pub fn open_target(input: String) {
+pub(crate) fn open_target(input: String) {
     let _f = File::create(input);
 }
 "#;

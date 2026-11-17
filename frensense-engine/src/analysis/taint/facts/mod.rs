@@ -91,7 +91,7 @@ pub use vocabulary::*;
 /// bytes: bundler-typed or engine-typed values returned through the
 /// bundler would resolve to a duplicate `frensense-engine` crate unit.
 #[cfg(test)]
-pub fn default_pack_table() -> FactTable {
+pub(crate) fn default_pack_table() -> FactTable {
     fact_table_from_entries_with(&default_pack_entries(), Provenance::Spec)
 }
 
@@ -106,7 +106,7 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
 /// Production tables for a set of extensions (spec seed -> default pack ->
 /// pack language sections), exactly as `build_spec_tables` assembles them.
 #[cfg(test)]
-pub fn seeded_tables<'a>(
+pub(crate) fn seeded_tables<'a>(
     exts: impl IntoIterator<Item = &'a str>,
 ) -> (crate::analysis::taint::config::TaintConfig, FactTable) {
     config::tables_from_exts_with_pack(exts, &default_pack_entries())
@@ -117,7 +117,7 @@ pub fn seeded_tables<'a>(
 /// per-spec merge uses (extensions are disjoint across fact languages;
 /// a container spec like Vue shares its code language's facts).
 #[cfg(test)]
-pub fn seeded_tables_all() -> (crate::analysis::taint::config::TaintConfig, FactTable) {
+pub(crate) fn seeded_tables_all() -> (crate::analysis::taint::config::TaintConfig, FactTable) {
     let exts: Vec<&str> = frensense_lang::all_specs()
         .flat_map(|s| s.extensions().iter().copied())
         .collect();
