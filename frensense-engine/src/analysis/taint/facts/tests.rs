@@ -919,8 +919,9 @@ mod conclusion_override_tests {
 
 #[test]
 fn upsert_by_provenance_higher_tier_wins_and_ties_keep_existing() {
-    let key = |a: &(&str, u8), b: &(&str, u8)| a.0 == b.0;
-    let mut items: Vec<((&str, u8), Provenance)> = Vec::new();
+    type Fact = (&'static str, u8);
+    let key = |a: &Fact, b: &Fact| a.0 == b.0;
+    let mut items: Vec<(Fact, Provenance)> = Vec::new();
     upsert_by_provenance(&mut items, ("r", 1), Provenance::Authored, key);
     // Lower tier does not replace.
     upsert_by_provenance(&mut items, ("r", 2), Provenance::Spec, key);

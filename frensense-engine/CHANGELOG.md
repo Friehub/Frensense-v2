@@ -23,6 +23,16 @@ what this crate does.
 
 ### Changed
 
+- Duplicate logic collapsed into one definition each (no behaviour change
+  intended; engine tests unchanged and green):
+  `FunctionIR::def_instruction` (3 copies, one of which only knew 6 instruction
+  kinds), `graph::module::imports_for_function` (4 copies of the single-file
+  import fallback), `NodeKey::instruction` (4 inline lookups),
+  `facts::upsert_by_provenance` (7 inserts), lowering `jump_if_open` (11
+  inline blocks), `read_modify` (compound assignment and `++`/`--` on fields
+  and elements), `new_temp` (7 inline copies), and the doubled `CallPointer`
+  fallback in call lowering.
+
 - String-literal unquoting is one function (`ir::function::strip_quotes`,
   crate-private). The `policy` and `weak_hash` checks previously stripped the
   first and last byte of any literal that began with a quote character; they
