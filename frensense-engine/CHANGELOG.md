@@ -38,12 +38,37 @@ what this crate does.
 - `Instruction::dest`, `Instruction::mem_out` and `Instruction::defs`: the single
   definition of which variables an instruction defines. Both matches are
   exhaustive, so a new instruction kind has to be classified.
+- `Instruction::StoreField::span`: the byte range of the expression that
+  performs a property write, so a sink reported on a store points at the
+  statement the user fixes instead of the stored value's definition.
 - `Debug` for the language spec structs, `LanguageRegistry`, `CheckContext`,
   `CheckRegistry`, `LoweringContext`, `GuardMap` and `CtxLink`, required by
   the `missing_debug_implementations` lint.
 
 ### Fixed
 
+- **A property assignment is a sink.** `el.innerHTML = user`, `el.outerHTML`
+  and `document.getElementById("x")!.innerHTML` reached no sink: the sink
+  matcher only looked at calls, so a DOM sink written as a field store was
+  dropped without a word. A `StoreField` whose field names an armed sink now
+  matches with the stored value in slot 0 and is explored through the same
+  argument walk a call uses. Measured on the reported shapes: `innerHTML`
+  **0 → 1** finding (XSS), `outerHTML` **0 → 1**, while
+  `el.innerHTML = "<b>static</b>"` stays clean.
+- **A property-sink finding points at the write.** A store recorded no byte
+  range, so such a finding could only be pinned to the stored value's
+  definition. `Instruction::StoreField` now carries the write's span - the
+  assignment, its member target, or the JSX attribute - and the finding
+  reports there: `el.innerHTML = user` is reported on its own line instead of
+  the line that bound `user`.
+- **JSX attribute values reach sink matching.** JSX had no lowering, so
+  `<div dangerouslySetInnerHTML={{ __html: html }} />` lowered to an opaque
+  node and no finding. A JSX element now lowers to a props object with one
+  spanned store per attribute (`<div title={t} />` is `props.title = t`), so
+  `dangerouslySetInnerHTML` fires on the attribute. Measured: **0 → 1**
+  (XSS), while `__html: "<b>static</b>"` stays clean. Attribute names with no
+  sink entry (`href`, `src`) still report nothing: the vocabulary, not the
+  lowering, is what they are missing.
 - **An assignment to a destructuring pattern binds its names.** `({ a } = rhs)`
   and `[a, b] = rhs` are the declaration form with the names already bound,
   but `visit_assignment` read the pattern as an lvalue, found none, and

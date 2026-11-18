@@ -249,6 +249,21 @@ fn phi_infeasible_incoming(
     out
 }
 
+/// What the engine knows about one sink site before exploring its arguments.
+#[derive(Clone, Copy)]
+struct SinkSite<'a> {
+    /// Sink name as configured or declared (`innerHTML`, `send`, `write`).
+    name: &'a str,
+    /// Role the finding is ranked under.
+    role: crate::analysis::taint::role::SinkRole,
+    /// Human-readable label from the vocabulary, when one is declared.
+    label: Option<&'a str>,
+    /// Package the sink signature was scoped to, when known.
+    origin_package: Option<&'a str>,
+    /// Language of the site, for language-keyed sink facts.
+    language: Option<&'a str>,
+}
+
 impl<'a> BackwardTaintEngine<'a> {
     /// Package an imported symbol name resolves to, when `armed` accepts it.
     /// The first dotted segment is the binding: `unzipper.Open` is written on
@@ -536,6 +551,26 @@ impl<'a> BackwardTaintEngine<'a> {
         idx: usize,
         instr: &Instruction,
     ) {
+        // A property assignment is a write, not a call: `el.innerHTML = x`
+        // reaches no call sink, so dispatch it to the store path.
+        if let Instruction::StoreField {
+            base,
+            field,
+            src: Operand::Var(value),
+            span,
+            ..
+        } = instr
+        {
+            self.explore_store_sink(
+                fi,
+                *base,
+                field,
+                *value,
+                *span,
+                NodeKey::instr(block, idx, *value),
+            );
+            return;
+        }
         let (name, receiver, args, call_dest): (
             &str,
             Option<&Operand>,
@@ -873,7 +908,115 @@ impl<'a> BackwardTaintEngine<'a> {
         if triplets.is_empty() {
             return;
         }
+        self.explore_sink_args(
+            fi,
+            SinkSite {
+                name,
+                role,
+                label: label.as_deref(),
+                origin_package,
+                language,
+            },
+            triplets,
+            call_dest.and_then(|d| ir.var_span(d)),
+        );
+    }
 
+    /// Explore a property-assignment sink if its field is armed.
+    ///
+    /// `el.innerHTML = user` names the DOM sink in the field and carries the
+    /// untrusted data in the stored value; the write's own byte range places
+    /// the finding on the vulnerable statement.
+    fn explore_store_sink(
+        &mut self,
+        fi: usize,
+        base: VarId,
+        field: &str,
+        value: VarId,
+        span: Option<(usize, usize)>,
+        node_key: NodeKey,
+    ) {
+        let Some(ir) = self.prog.functions.get(fi).map(|f| f.ir) else {
+            return;
+        };
+        let language = (!ir.language.is_empty()).then_some(ir.language.as_str());
+        let root = FactTable::receiver_root(ir, base);
+        if !self.facts.sink_name_armed(
+            &self.config.sinks,
+            field,
+            root.as_deref(),
+            None,
+            language,
+            true,
+        ) {
+            return;
+        }
+        let role = self
+            .facts
+            .role_for_call_scoped(field, root.as_deref(), None, language)
+            .unwrap_or_default();
+        let label = self
+            .facts
+            .label_for_call_scoped(field, root.as_deref(), None, language);
+        let slot_triplet = (0usize, value, node_key);
+        self.explore_sink_args(
+            fi,
+            SinkSite {
+                name: field,
+                role,
+                label: label.as_deref(),
+                origin_package: None,
+                language,
+            },
+            vec![slot_triplet],
+            span,
+        );
+    }
+
+    /// Dump one sink walk's shape and memory cost under `--debug-mem`.
+    fn log_sink_mem(
+        &self,
+        fi: usize,
+        name: &str,
+        state: &ExploreState,
+        rss_pre: u64,
+        rss_walk: u64,
+    ) {
+        let mut fns: FxHashSet<usize> = FxHashSet::default();
+        for (f, _) in state.seen_nodes.iter() {
+            fns.insert(*f);
+        }
+        let mut ctxs: FxHashSet<u32> = FxHashSet::default();
+        for (_, _, _, _, c) in state.visited.iter() {
+            ctxs.insert(*c);
+        }
+        eprintln!(
+            "[mem]     walk sink={} fn={} visited={} seen_nodes={} fns={} ctxs={} chains={} cuts={} rss_pre={} rss_after_explore={}",
+            name,
+            self.prog.functions[fi].name,
+            state.visited.len(),
+            state.seen_nodes.len(),
+            fns.len(),
+            ctxs.len(),
+            self.ctx_chains.len(),
+            state.cuts.len(),
+            rss_pre,
+            rss_walk
+        );
+    }
+
+    /// Explore one configured sink's arguments. A call passes its argument
+    /// triplets; a property store passes the single value it writes.
+    fn explore_sink_args(
+        &mut self,
+        fi: usize,
+        site: SinkSite<'_>,
+        triplets: Vec<(usize, VarId, NodeKey)>,
+        explicit_span: Option<(usize, usize)>,
+    ) {
+        let Some(ir) = self.prog.functions.get(fi).map(|f| f.ir) else {
+            return;
+        };
         self.stats.sink_args_explored += triplets.len();
         let mem_probe = crate::debug_flags::DebugFlags::get().mem;
         let mem_entry = if mem_probe {
@@ -888,15 +1031,15 @@ impl<'a> BackwardTaintEngine<'a> {
                 self.config,
                 &self.facts,
                 &arg_node,
-                origin_package,
-                language,
+                site.origin_package,
+                site.language,
             ) else {
                 continue;
             };
             let finding_class = alert_info.class;
             let mut state = ExploreState {
-                sink_role: role,
-                sink_label: label.clone(),
+                sink_role: site.role,
+                sink_label: site.label.map(str::to_string),
                 ..Default::default()
             };
             state.seen_nodes.insert((fi, arg_node));
@@ -914,30 +1057,10 @@ impl<'a> BackwardTaintEngine<'a> {
                 0
             };
 
-            if crate::debug_flags::DebugFlags::get().mem
+            if mem_probe
                 && (state.visited.len() > 50_000 || rss_walk.saturating_sub(rss_pre) > 1_000)
             {
-                let mut fns: FxHashSet<usize> = FxHashSet::default();
-                for (f, _) in state.seen_nodes.iter() {
-                    fns.insert(*f);
-                }
-                let mut ctxs: FxHashSet<u32> = FxHashSet::default();
-                for (_, _, _, _, c) in state.visited.iter() {
-                    ctxs.insert(*c);
-                }
-                eprintln!(
-                    "[mem]     walk sink={} fn={} visited={} seen_nodes={} fns={} ctxs={} chains={} cuts={} rss_pre={} rss_after_explore={}",
-                    name,
-                    self.prog.functions[fi].name,
-                    state.visited.len(),
-                    state.seen_nodes.len(),
-                    fns.len(),
-                    ctxs.len(),
-                    self.ctx_chains.len(),
-                    state.cuts.len(),
-                    rss_pre,
-                    rss_walk
-                );
+                self.log_sink_mem(fi, site.name, &state, rss_pre, rss_walk);
             }
 
             let verdict = if state.saw_source {
@@ -980,13 +1103,13 @@ impl<'a> BackwardTaintEngine<'a> {
 
             self.findings.push(SinkFinding {
                 function: ir.name.clone(),
-                sink: name.to_string(),
+                sink: site.name.to_string(),
                 arg_slot,
                 alert,
                 verdict,
                 finding_class,
-                role,
-                label: label.clone(),
+                role: site.role,
+                label: site.label.map(str::to_string),
                 source_desc: state.source_desc.clone(),
                 path,
                 cut_reasons: state.cuts.clone(),
@@ -995,9 +1118,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 // definition: reports must point at the line the user fixes.
                 // (Reporting the operand's def site put `search.ts` SQLi at
                 // line 18 instead of the vulnerable `query(...)` on line 21.)
-                sink_span: call_dest
-                    .and_then(|d| ir.var_metadata.get(&d))
-                    .and_then(|m| m.byte_range)
+                sink_span: explicit_span
                     .or_else(|| ir.var_metadata.get(&var).and_then(|m| m.byte_range)),
             });
             let _ = var;
@@ -1008,7 +1129,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 eprintln!(
                     "[mem]     site_total fn={} sink={} nroots={} findings={} rss_delta_kb={}",
                     self.prog.functions[fi].name,
-                    name,
+                    site.name,
                     self.stats.sink_args_explored,
                     self.findings.len(),
                     now - mem_entry

@@ -73,6 +73,17 @@ impl<'a> LoweringContext<'a> {
             // conditions) instead of the coarse branch-with-sequential-body.
             _ if node.kind() == "switch_statement" => self.visit_switch(node),
 
+            // JSX element attributes are writes to a props object. Lowering
+            // them as spanned field stores lets `<div dangerouslySetInnerHTML={…} />`
+            // reach property-sink matching exactly like `el.innerHTML = …`.
+            _ if matches!(
+                node.kind(),
+                "jsx_element" | "jsx_self_closing_element" | "jsx_fragment"
+            ) =>
+            {
+                self.visit_jsx_element(node)
+            }
+
             // C preprocessor chains: alternatives are exclusive configs.
             _ if matches!(
                 node.kind(),

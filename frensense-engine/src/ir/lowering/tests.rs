@@ -307,3 +307,28 @@ exit:
         return_block.predecessors
     );
 }
+
+/// #123: a JSX attribute lowers to a spanned store on the element's props, so
+/// the attribute's own range - not the value's - is where a sink reports.
+#[test]
+fn jsx_attribute_lowers_to_a_spanned_store() {
+    use crate::ir::function::Instruction;
+
+    let src = r#"const el = <div dangerouslySetInnerHTML={{ __html: html }} />;"#;
+    let fns = lower_source_with_facts("test.tsx", src, "tsx", None).expect("lower test.tsx");
+    let span = fns
+        .values()
+        .flat_map(|f| f.blocks.values().flat_map(|b| b.instructions.iter()))
+        .find_map(|i| match i {
+            Instruction::StoreField { field, span, .. } if field == "dangerouslySetInnerHTML" => {
+                Some(*span)
+            }
+            _ => None,
+        })
+        .expect("jsx attribute store");
+    let (start, end) = span.expect("store span");
+    assert_eq!(
+        src.get(start..end),
+        Some("dangerouslySetInnerHTML={{ __html: html }}")
+    );
+}

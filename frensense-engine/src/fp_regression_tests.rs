@@ -365,3 +365,65 @@ func Register(email, password string) error {
         res.checker
     );
 }
+
+/// #124: a property assignment is a DOM sink in its own right, and the
+/// finding points at the write, not at where the value was defined.
+#[test]
+fn property_assignment_sink_reports_the_write() {
+    let src = r#"
+import express from "express";
+const app = express();
+app.get("/x", (req, res) => {
+  const user = req.query.name;
+  const el = document.getElementById("out") as any;
+  el.innerHTML = user;
+});
+"#;
+    let res = run("ts", "a.ts", src);
+    assert!(vulnerable(&res, "innerHTML"), "innerHTML store is a sink");
+    let located = res
+        .located
+        .iter()
+        .find(|l| l.finding.sink.contains("innerHTML"))
+        .expect("located innerHTML finding");
+    assert_eq!(
+        located.line, 7,
+        "the store line, not the value's definition"
+    );
+}
+
+#[test]
+fn property_assignment_of_a_literal_is_clean() {
+    let src = r#"
+const el = document.getElementById("out") as any;
+el.innerHTML = "<b>static</b>";
+"#;
+    let res = run("ts", "b.ts", src);
+    assert!(!vulnerable(&res, "innerHTML"));
+}
+
+/// #123: JSX attributes are writes too. `dangerouslySetInnerHTML` carries
+/// attacker-supplied markup exactly like `el.innerHTML = …` does.
+#[test]
+fn jsx_dangerously_set_inner_html_is_a_sink() {
+    let src = r#"
+import express from "express";
+const app = express();
+app.get("/x", (req, res) => {
+  const user = req.query.name;
+  const el = <div dangerouslySetInnerHTML={{ __html: user }} />;
+  return el;
+});
+"#;
+    let res = run("tsx", "c.tsx", src);
+    assert!(vulnerable(&res, "dangerouslySetInnerHTML"), "JSX sink");
+}
+
+#[test]
+fn jsx_static_attribute_value_is_clean() {
+    let src = r#"
+const el = <div dangerouslySetInnerHTML={{ __html: "<b>static</b>" }} />;
+"#;
+    let res = run("tsx", "d.tsx", src);
+    assert!(!vulnerable(&res, "dangerouslySetInnerHTML"));
+}

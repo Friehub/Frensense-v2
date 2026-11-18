@@ -113,18 +113,12 @@ impl<'a> LoweringContext<'a> {
                             );
                             self.record_const(dest, value_node, &rhs_op);
                         }
-                        LValue::Field { base, field } => {
-                            self.ir.push_instruction(
-                                self.current_block,
-                                Instruction::StoreField {
-                                    mem_out: self.memory_var,
-                                    mem_in: self.memory_var,
-                                    base,
-                                    field,
-                                    src: rhs_op,
-                                },
-                            );
-                        }
+                        LValue::Field { base, field } => self.store_field(
+                            base,
+                            field,
+                            rhs_op,
+                            Some((node.start_byte(), node.end_byte())),
+                        ),
                         LValue::Element { base, index } => {
                             self.ir.push_instruction(
                                 self.current_block,

@@ -213,15 +213,11 @@ impl<'a> LoweringContext<'a> {
                         field: load_field,
                     }
                 });
-                self.ir.push_instruction(
-                    self.current_block,
-                    Instruction::StoreField {
-                        mem_out: self.memory_var,
-                        mem_in: self.memory_var,
-                        base,
-                        field,
-                        src: Operand::Var(step),
-                    },
+                self.store_field(
+                    base,
+                    field,
+                    Operand::Var(step),
+                    Some((node.start_byte(), node.end_byte())),
                 );
                 if is_postfix {
                     Operand::Var(cur)
@@ -341,19 +337,15 @@ impl<'a> LoweringContext<'a> {
 
     /// Lowers a composite literal (object, array). Uniformly keyed objects and arrays become an allocation with one store per property or element, so reads stay field-sensitive; objects with unkeyed children (such as spreads) are not allocated: the result is the child variable when there is exactly one, and a fresh variable merging the child variables otherwise.
     pub(crate) fn visit_composite(&mut self, node: Node) -> Option<Operand> {
-        // Evaluate every named child once; keyed pairs are remembered so the
-        // composite can be lowered field-sensitively (allocation + stores)
-        // instead of collapsing all children into one union variable.
+        // Keyed pairs are remembered so the composite lowers field-sensitively.
         let mut cursor = node.walk();
         let children: Vec<Node> = node
             .children(&mut cursor)
             .filter(|c| c.is_named() && c.kind() != "comment")
             .collect();
-
         let mut child_ops: Vec<Operand> = Vec::new();
         let mut pair_keys: Vec<String> = Vec::new();
-        // (field, value) entries for structural literals; field is `None`
-        // for spread elements and other unkeyed children.
+        // Field is `None` for spreads and other unkeyed children.
         let mut entries: Vec<(Option<String>, Operand)> = Vec::new();
         let mut all_keyed = true;
 
@@ -423,16 +415,7 @@ impl<'a> LoweringContext<'a> {
             if kind_is_object {
                 for (field, src) in entries {
                     if let Some(field) = field {
-                        self.ir.push_instruction(
-                            self.current_block,
-                            Instruction::StoreField {
-                                mem_out: self.memory_var,
-                                mem_in: self.memory_var,
-                                base: dest,
-                                field,
-                                src,
-                            },
-                        );
+                        self.store_field(dest, field, src, None);
                     }
                 }
             } else {
@@ -615,4 +598,94 @@ impl<'a> LoweringContext<'a> {
         }
         first
     }
+
+    /// Lowers a JSX element into a props object and returns it.
+    ///
+    /// Attributes become spanned [`Instruction::StoreField`]s on a temporary
+    /// standing for the props, so a sink name written as an attribute
+    /// (`<div dangerouslySetInnerHTML={{ __html: html }} />`) travels the same
+    /// property-sink path as `el.innerHTML = html`. Children are lowered in
+    /// place so nested elements keep their own attribute stores.
+    pub(crate) fn visit_jsx_element(&mut self, node: Node) -> Option<Operand> {
+        let props = self.new_temp(node);
+        self.ir.push_instruction(
+            self.current_block,
+            Instruction::Allocate {
+                dest: props,
+                mem_out: self.memory_var,
+                mem_in: self.memory_var,
+                kind: AllocationKind::Object,
+            },
+        );
+        match node.kind() {
+            "jsx_self_closing_element" => self.store_jsx_attributes(node, props),
+            "jsx_fragment" => self.lower_jsx_children(node),
+            _ => {
+                let mut cursor = node.walk();
+                for child in node.named_children(&mut cursor) {
+                    match child.kind() {
+                        "jsx_opening_element" => self.store_jsx_attributes(child, props),
+                        "jsx_children" => self.lower_jsx_children(child),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        Some(Operand::Var(props))
+    }
+
+    /// Lowers every child node in place, so nested elements and expressions
+    /// keep the stores and calls they lower into.
+    fn lower_jsx_children(&mut self, node: Node) {
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            self.visit_node(child);
+        }
+    }
+
+    /// Stores each attributed value of a JSX tag under the attribute's own
+    /// name on `props`.
+    ///
+    /// An attribute node is `name={value}`: the first part that is not the
+    /// value expression names the field, the rest produces the stored value.
+    /// Valueless (`disabled`) and spread (`{...rest}`) attributes carry no
+    /// name-value pair and only have their expression lowered.
+    fn store_jsx_attributes(&mut self, tag: Node, props: VarId) {
+        let mut cursor = tag.walk();
+        for attr in tag.named_children(&mut cursor) {
+            if attr.kind() != "jsx_attribute" {
+                self.visit_node(attr);
+                continue;
+            }
+            let mut parts = attr.walk();
+            let mut name: Option<String> = None;
+            let mut value: Option<Operand> = None;
+            for part in attr.named_children(&mut parts) {
+                if name.is_none() && !is_jsx_value(part.kind()) {
+                    name = self
+                        .source
+                        .get(part.start_byte()..part.end_byte())
+                        .map(str::to_string);
+                } else if let Some(op) = self.visit_node(part) {
+                    value = Some(op);
+                }
+            }
+            if let (Some(field), Some(src)) = (name, value) {
+                self.store_field(
+                    props,
+                    field,
+                    src,
+                    Some((attr.start_byte(), attr.end_byte())),
+                );
+            }
+        }
+    }
+}
+
+/// Node kinds that make up a JSX attribute's value rather than its name.
+fn is_jsx_value(kind: &str) -> bool {
+    matches!(
+        kind,
+        "jsx_expression" | "string" | "jsx_element" | "jsx_self_closing_element" | "jsx_fragment"
+    )
 }

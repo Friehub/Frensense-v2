@@ -95,6 +95,7 @@ pub(super) mod heap_flow_tests {
                 base: obj,
                 field: "data".into(),
                 src: Operand::Var(v1),
+                span: None,
             },
         );
 
@@ -190,6 +191,7 @@ pub(super) mod heap_flow_tests {
                 base: obj,
                 field: "a".into(),
                 src: Operand::Var(v1),
+                span: None,
             },
         );
 
@@ -203,6 +205,7 @@ pub(super) mod heap_flow_tests {
                 base: obj,
                 field: "b".into(),
                 src: Operand::StringLiteral("clean".into()),
+                span: None,
             },
         );
 
@@ -334,6 +337,7 @@ pub(super) mod heap_flow_tests {
                     base: obj,
                     field: "data".into(),
                     src: Operand::Var(v1),
+                    span: None,
                 },
             );
 
@@ -415,6 +419,7 @@ pub(super) mod heap_flow_tests {
                     base: p,
                     field: "data".into(),
                     src: Operand::Var(v1),
+                    span: None,
                 },
             );
         }
@@ -579,6 +584,7 @@ pub(super) mod heap_flow_tests {
                     base: obj,
                     field: "data".into(),
                     src: Operand::Var(v1),
+                    span: None,
                 },
             );
 
@@ -706,6 +712,7 @@ pub(super) mod points_to_convergence_tests {
                 base: obj,
                 field: "loader".into(),
                 src: Operand::Unknown,
+                span: None,
             },
         );
 
@@ -719,6 +726,7 @@ pub(super) mod points_to_convergence_tests {
                 base: obj,
                 field: "loader".into(),
                 src: Operand::Var(v),
+                span: None,
             },
         );
 

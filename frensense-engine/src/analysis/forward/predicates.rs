@@ -472,6 +472,63 @@ pub struct SinkAlert {
     pub class: crate::analysis::taint::engine::FindingClass,
 }
 
+/// Slot a tainted value occupies when a property store names an armed sink.
+///
+/// `el.innerHTML = v` and a JSX attribute write taint into a field rather than
+/// into a call: the field name is the sink and the stored value is argument 0.
+fn store_field_sink<'a>(
+    ir: &FunctionIR,
+    config: &TaintConfig,
+    facts: &FactTable,
+    base: VarId,
+    field: &'a String,
+    origin_package: Option<&str>,
+    language: Option<&str>,
+) -> Option<(usize, &'a String)> {
+    let root = FactTable::receiver_root(ir, base);
+    facts
+        .sink_name_armed(
+            &config.sinks,
+            field,
+            root.as_deref(),
+            origin_package,
+            language,
+            true,
+        )
+        .then_some((0usize, field))
+}
+
+/// Whether a receiver-slot alert is really a source read rather than a sink.
+///
+/// A tainted receiver whose method name ends a configured source pattern
+/// (Go's `r.URL.Query().Get("id")`) reads taint instead of consuming it.
+fn receiver_reads_a_source(
+    ir: &FunctionIR,
+    config: &TaintConfig,
+    facts: &FactTable,
+    key: &NodeKey,
+    name: &str,
+) -> bool {
+    if is_source(ir, config, facts, key) {
+        return true;
+    }
+    SourceScope::for_ir(config, facts, ir)
+        .iter()
+        .any(|s| s.rsplit('.').next() == Some(name))
+}
+
+/// Whether a call binds parameters of a prepared statement handle.
+fn binds_prepared_parameters(ir: &FunctionIR, instr: &Instruction, facts: &FactTable) -> bool {
+    let Instruction::CallVirtual {
+        receiver: Operand::Var(r),
+        ..
+    } = instr
+    else {
+        return false;
+    };
+    receiver_is_prepared_handle(ir, *r, facts)
+}
+
 /// Alert if the node is a tainted use inside a configured sink call.
 /// Honours [`FactTable`] sink signatures when one matches: a tainted arg in a
 /// *non-dangerous* slot (e.g. a parameterized query's binding array) does not
@@ -541,6 +598,16 @@ pub(crate) fn sink_alert_with_facts(
                     .map(|pos| (pos, method))
             }
         }
+        // A property assignment (`el.innerHTML = x`, a JSX attribute) is a
+        // sink the program writes to, not a call it makes.
+        Instruction::StoreField {
+            base,
+            field,
+            src: Operand::Var(sv),
+            ..
+        } if *sv == var => {
+            store_field_sink(ir, config, facts, *base, field, origin_package, language)
+        }
         _ => None,
     };
     let (slot, name) = slot_and_name?;
@@ -548,13 +615,7 @@ pub(crate) fn sink_alert_with_facts(
     // statement text was fixed when the handle was created, so `stmt.Exec(a,
     // b)` carries values, not SQL. The creating call (`db.Prepare(query)`)
     // is judged on its own.
-    if slot != usize::MAX
-        && let Instruction::CallVirtual {
-            receiver: Operand::Var(r),
-            ..
-        } = &b.instructions[idx]
-        && receiver_is_prepared_handle(ir, *r, facts)
-    {
+    if slot != usize::MAX && binds_prepared_parameters(ir, &b.instructions[idx], facts) {
         return None;
     }
     // Source-accessor precedence (RECEIVER-TAINT ALERTS ONLY): when the
@@ -567,18 +628,8 @@ pub(crate) fn sink_alert_with_facts(
     // This must NOT apply to argument-slot alerts: `req.query` is a source
     // pattern, so a blanket rule would suppress `pool.query(sql)`, a real
     // sink, because the sink name matches a source-pattern segment.
-    if slot == usize::MAX {
-        if is_source(ir, config, facts, key) {
-            return None;
-        }
-        {
-            let is_source_accessor = SourceScope::for_ir(config, facts, ir)
-                .iter()
-                .any(|s| s.rsplit('.').next() == Some(name));
-            if is_source_accessor {
-                return None;
-            }
-        }
+    if slot == usize::MAX && receiver_reads_a_source(ir, config, facts, key, name) {
+        return None;
     }
     // Slot layout is a property of the CALLED API, not of the shared
     // method name. A package-scoped fact (declared for the call's import

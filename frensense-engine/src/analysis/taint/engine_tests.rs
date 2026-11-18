@@ -1706,6 +1706,7 @@ export const redirect = ({ query }: any, res: any) => {
                     base: obj,
                     field: "data".into(),
                     src: Operand::Var(bar),
+                    span: None,
                 },
             );
 

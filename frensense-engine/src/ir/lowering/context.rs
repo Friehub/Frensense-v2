@@ -277,6 +277,30 @@ impl<'a> LoweringContext<'a> {
         })
     }
 
+    /// Emits a field write on `base`, threading the current memory state.
+    ///
+    /// `span` is the source range of the expression that performs the write;
+    /// property sinks report there rather than at the stored value's definition.
+    pub(crate) fn store_field(
+        &mut self,
+        base: VarId,
+        field: String,
+        src: Operand,
+        span: Option<(usize, usize)>,
+    ) {
+        self.ir.push_instruction(
+            self.current_block,
+            Instruction::StoreField {
+                mem_out: self.memory_var,
+                mem_in: self.memory_var,
+                base,
+                field,
+                src,
+                span,
+            },
+        );
+    }
+
     /// Fresh temporary that also records the name the source program gives the
     /// value it stands for, so name-based vocabulary can see it.
     pub(crate) fn new_named_temp(&mut self, node: Node, name: Option<String>) -> VarId {

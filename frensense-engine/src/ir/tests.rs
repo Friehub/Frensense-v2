@@ -175,6 +175,7 @@ pub(super) mod tests {
                 base: obj,
                 field: "data".into(),
                 src: Operand::Var(malicious),
+                span: None,
             },
         );
 
@@ -188,6 +189,7 @@ pub(super) mod tests {
                 base: obj,
                 field: "data".into(),
                 src: Operand::StringLiteral("safe".into()),
+                span: None,
             },
         );
 
@@ -795,6 +797,7 @@ pub(super) mod tests {
             base: v(3),
             field: "f".into(),
             src: Operand::IntLiteral(0),
+            span: None,
         };
         assert_eq!(addr.dest(), Some(v(1)));
         assert_eq!(deref.dest(), Some(v(2)));

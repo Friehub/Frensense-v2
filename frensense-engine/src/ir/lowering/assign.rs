@@ -226,16 +226,7 @@ impl<'a> LoweringContext<'a> {
                         field: field.clone(),
                     }
                 });
-                self.ir.push_instruction(
-                    self.current_block,
-                    Instruction::StoreField {
-                        mem_out: self.memory_var,
-                        mem_in: self.memory_var,
-                        base,
-                        field,
-                        src,
-                    },
-                );
+                self.store_field(base, field, src, Some((node.start_byte(), node.end_byte())));
             }
             Some(LValue::Element { base, index }) => {
                 let mem_in = self.memory_var;

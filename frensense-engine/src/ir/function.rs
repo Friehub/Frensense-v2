@@ -137,6 +137,13 @@ pub enum Instruction {
         field: String,
         /// Value stored into the field.
         src: Operand,
+        /// Byte range of the expression that performs the write (the
+        /// assignment, its member target, or the JSX attribute). The write is
+        /// the statement a property-sink finding must point at: the stored
+        /// value's variable is defined somewhere else. `None` for stores a
+        /// lowering synthesised without one source expression (object-literal
+        /// fields, test fixtures).
+        span: Option<(usize, usize)>,
     },
 
     /// `v_dest = base[index]  @ mem_in`
