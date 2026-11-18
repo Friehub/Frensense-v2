@@ -3,7 +3,7 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use crate::engine::files::UnsupportedSourceFile;
-use crate::explain::ExplainRecord;
+use crate::explain::{ExplainRecord, slot_label};
 use crate::policy::Coverage;
 use crate::reporter::Reporter;
 use crate::{Advisory, FrensenseError, Result};
@@ -259,6 +259,16 @@ pub fn print_scan_summary_detailed_with_coverage(
                 c.unresolved_sites
             );
         }
+    }
+    if telem.input.submitted > 0 {
+        // Not `print!`: the stage ledger is one block, written in one go so it
+        // cannot interleave with the progress output on the same stream.
+        use std::io::Write as _;
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            render_stages(telem, advisories.len())
+        );
     }
     println!("Findings Breakdown:");
     println!("  - Critical:       {critical}");
@@ -752,6 +762,60 @@ pub fn format_hidden_summary(tier: crate::RuleTier, count: usize) -> String {
     )
 }
 
+/// The stage ledger shown in every human-format scan summary: one line per
+/// stage a scan went through, so a slow or empty stage is visible without a
+/// flag. Pure over the telemetry, which `--json` consumers also receive.
+fn render_stages(telem: &frensense_engine::telemetry::ScanTelemetry, reported: usize) -> String {
+    use std::fmt::Write as _;
+    let ms = |name: &str| {
+        telem
+            .phases
+            .iter()
+            .find(|p| p.phase == name)
+            .map_or(0, |p| p.ms)
+    };
+    let (i, t) = (&telem.input, &telem.taint);
+    let dropped: usize = telem.suppressed.iter().map(|s| s.count).sum();
+    let mut out = String::from("Stages:\n");
+    let _ = writeln!(
+        out,
+        "  parse+lower  {:>6} ms  {} file(s) given, {} lowered, {} failed -> {} function(s)",
+        ms("lower"),
+        i.submitted,
+        i.scanned,
+        i.failed,
+        i.functions
+    );
+    let _ = writeln!(
+        out,
+        "  graph        {:>6} ms  {} function(s)",
+        ms("graph"),
+        i.functions
+    );
+    let _ = writeln!(
+        out,
+        "  checks       {:>6} ms  {} check(s), {} finding(s)",
+        ms("checks"),
+        telem.checks.len(),
+        telem.checks.iter().map(|c| c.findings).sum::<usize>()
+    );
+    let _ = writeln!(
+        out,
+        "  taint        {:>6} ms  {} sink argument(s) explored -> {} vulnerable, {} sanitized, {} unknown, {} clean",
+        ms("taint"),
+        t.sink_args_explored,
+        t.vulnerable,
+        t.sanitized,
+        t.unknown,
+        t.clean
+    );
+    let _ = writeln!(
+        out,
+        "  report                  {reported} reported, {dropped} dropped at the reporting gate"
+    );
+    out
+}
+
 /// Print the `--explain` section: every explored sink argument that did
 /// NOT become an advisory, with the reason the engine stayed silent, as well
 /// as counts of findings hidden by profile tiers.
@@ -781,18 +845,28 @@ pub fn print_explain(
     });
     for r in sorted {
         eprintln!(
-            "  {:<14} {}:{}  {}(arg {})",
-            r.verdict, r.file, r.line, r.sink, r.arg_slot
+            "  {:<14} {}:{}  {}({})",
+            r.verdict,
+            r.file,
+            r.line,
+            r.sink,
+            slot_label(r.arg_slot)
         );
         eprintln!("      why: {}", r.reason);
         for c in &r.cut_sites {
-            let what = if c.detail.is_empty() {
-                c.kind.to_string()
+            let passed = c.kind == "passed-through";
+            let what = match (passed, c.detail.is_empty()) {
+                (true, _) => format!("`{}`", c.detail),
+                (false, true) => c.kind.to_string(),
+                (false, false) => format!("{} `{}`", c.kind, c.detail),
+            };
+            let verb = if passed {
+                "flowed through"
             } else {
-                format!("{} `{}`", c.kind, c.detail)
+                "stopped at"
             };
             eprintln!(
-                "      stopped at: {what} in {} ({}:{})",
+                "      {verb}: {what} in {} ({}:{})",
                 c.function, c.file, c.line
             );
         }
@@ -1878,5 +1952,69 @@ mod explain_learned_rule_tests {
         b.patterns.clear();
         b.learned_facts.clear();
         assert!(bundle_rule_index(&b).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod stage_report_tests {
+    use super::render_stages;
+    use frensense_engine::analysis::taint::engine::BackwardStats;
+    use frensense_engine::telemetry::{InputAccounting, PhaseTiming, ScanTelemetry};
+
+    /// Collapse runs of whitespace so column alignment is not asserted.
+    fn squash(s: &str) -> String {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    fn telemetry() -> ScanTelemetry {
+        let phase = |name: &str, ms| PhaseTiming {
+            phase: name.to_string(),
+            ms,
+        };
+        ScanTelemetry {
+            phases: vec![
+                phase("lower", 12),
+                phase("graph", 4),
+                phase("checks", 2),
+                phase("taint", 7),
+            ],
+            ..ScanTelemetry::default()
+        }
+        .with_counts()
+    }
+
+    trait WithCounts {
+        fn with_counts(self) -> ScanTelemetry;
+    }
+
+    impl WithCounts for ScanTelemetry {
+        fn with_counts(mut self) -> ScanTelemetry {
+            self.input.submitted = 14;
+            self.input.scanned = 13;
+            self.input.failed = 1;
+            self.input.functions = 25;
+            self.taint.sink_args_explored = 30;
+            self.taint.vulnerable = 1;
+            self.taint.sanitized = 2;
+            self.taint.unknown = 3;
+            self.taint.clean = 24;
+            self
+        }
+    }
+
+    #[test]
+    fn the_stage_ledger_has_one_line_per_stage() {
+        let text = render_stages(&telemetry(), 3);
+        for needle in [
+            "parse+lower 12 ms 14 file(s) given, 13 lowered, 1 failed -> 25 function(s)",
+            "graph 4 ms 25 function(s)",
+            "taint 7 ms 30 sink argument(s) explored -> 1 vulnerable, 2 sanitized, 3 unknown, 24 clean",
+            "report 3 reported, 0 dropped at the reporting gate",
+        ] {
+            assert!(
+                squash(&text).contains(&squash(needle)),
+                "missing `{needle}` in:\n{text}"
+            );
+        }
     }
 }

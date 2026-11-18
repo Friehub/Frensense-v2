@@ -21,6 +21,23 @@ harness and keeps no changelog.
 
 ## [Unreleased]
 
+### Added
+
+- **The scan summary lists every stage the scan went through** (parse and
+  lower, graph, checks, taint, report) with what each consumed and produced, so
+  an empty or slow stage is visible without a flag. The same figures are in the
+  JSON report under `analysis`.
+- **`--explain` names the library calls the walk flowed through.** A flow that
+  ends without a source may have crossed a call the engine has no model for;
+  the backward walk follows such a call into its arguments on the assumption
+  that its result carries them. The report now prints those as
+  `flowed through: \`callee\`` instead of folding them into the stop sites, and
+  the reason names them, so silence caused by a missing source or propagation
+  entry is traceable to the call that hid it.
+- A method call's receiver reads as `receiver` rather than a 20-digit slot
+  number, in the `--explain` text and as the new `arg` field of
+  `--explain-json`.
+
 ### Removed
 
 Code in the consumer library with no caller anywhere (verified by search over
