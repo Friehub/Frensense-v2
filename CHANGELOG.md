@@ -63,7 +63,9 @@ harness and keeps no changelog.
   `frensense-engine::clippy::too_many_lines` from 25 to 20 sites and
   `indexing_slicing` from 177 to 168. `clippy-ratchet.py --update` rewrote
   `.github/scripts/clippy-baseline.json` with the measured counts (973 sites in
-  62 pairs), so the removed debt cannot creep back in unnoticed.
+  62 pairs), so the removed debt cannot creep back in unnoticed. Deleting the
+  forward engine's 1,343 test lines (#147) then took the total to 969
+  (`indexing_slicing` 168 → 164).
 
 ### Removed
 

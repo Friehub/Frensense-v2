@@ -23,7 +23,7 @@
   "frensense-engine::clippy::float_arithmetic": 2,
   "frensense-engine::clippy::float_cmp": 2,
   "frensense-engine::clippy::implicit_clone": 13,
-  "frensense-engine::clippy::indexing_slicing": 168,
+  "frensense-engine::clippy::indexing_slicing": 164,
   "frensense-engine::clippy::missing_errors_doc": 2,
   "frensense-engine::clippy::missing_panics_doc": 1,
   "frensense-engine::clippy::needless_pass_by_value": 3,
