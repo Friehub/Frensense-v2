@@ -17,6 +17,18 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     ("write", crate::role_map::SinkLabel::XssDom),
     ("writeln", crate::role_map::SinkLabel::XssDom),
     ("srcdoc", crate::role_map::SinkLabel::XssDom),
+    // URL-bearing attributes. A JSX attribute lowers to a property store on
+    // the props object, and `href`/`src` take a URL the browser resolves as
+    // code when it carries a `javascript:` scheme, so a tainted
+    // `<a href={u}>` / `<iframe src={u}>` (or `el.href = u`) is reflected
+    // XSS. They are declared bare because an attribute write has no receiver
+    // root to qualify: the field name alone is the sink, exactly as `srcdoc`
+    // above. Declared here, ahead of the dotted `location.href` entry, so the
+    // bare name's role wins the shadow that entry would otherwise publish
+    // first (`location.href` keeps OpenRedirect on its own full key and
+    // receiver pair).
+    ("href", crate::role_map::SinkLabel::XssReflected),
+    ("src", crate::role_map::SinkLabel::XssReflected),
     ("setAttribute", crate::role_map::SinkLabel::XssDom),
     ("setAttributeNS", crate::role_map::SinkLabel::XssDom),
     ("setHeader", crate::role_map::SinkLabel::HeaderInjection),

@@ -18,6 +18,21 @@ There is no semver contract here (nothing is published, and
 
 ## [0.8.1]
 
+### Added
+
+- **`href` and `src` are sinks.** A JSX attribute lowers to a property store
+  on the props object, so `<a href={target}>` is a `StoreField` named `href`
+  and `<iframe src={user} />` one named `src`; the pack declared neither name,
+  which is why #123's second repro found no sink site at all. Both are now
+  declared bare in the JavaScript/TypeScript XSS vocabulary, the same shape
+  `innerHTML` and `dangerouslySetInnerHTML` already use: the store path arms
+  on the field name when the write has no receiver root to qualify it, and a
+  URL attribute the browser resolves as code (`javascript:...`) is reflected
+  XSS. The taint rule is unchanged - `<a href="/static">` stays clean and
+  `<a href={req.body.target}>` alerts. `location.href` keeps its
+  OpenRedirect role through its own receiver pair; the bare name only adds
+  the attribute and element shapes that pair never matched.
+
 ### Changed
 
 - **Built-in weak-hash, insecure-config and key-size rules carry no
