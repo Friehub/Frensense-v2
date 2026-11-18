@@ -46,7 +46,10 @@ harness and keeps no changelog.
   fact, how many armed a sink, and how many findings each reporting-gate reason
   dropped. Standard-library adapters (`iter`, `collect`, `map_err`, ...) are no
   longer named as flowed-through calls, so that list is the library calls the
-  engine really has no model for.
+  engine really has no model for. The pipeline block also prints the busiest
+  callees that matched no sink fact with their call counts, so `not_a_sink`
+  points at the vocabulary to teach rather than only a number; the same list is
+  under `analysis.funnel.unmatched_callees` in the JSON report.
 
 ### Removed
 

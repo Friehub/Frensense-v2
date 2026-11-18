@@ -390,6 +390,34 @@ pub fn json_report_with_skips(
     json_report_with_coverage(advisories, incomplete, telemetry, skipped, None)
 }
 
+/// The `analysis.graph` block: the sizes of the program the taint phase
+/// actually walked.
+fn graph_json(graph: &frensense_engine::telemetry::GraphSize) -> serde_json::Value {
+    serde_json::json!({
+        "functions": graph.functions,
+        "nodes": graph.nodes,
+        "edges": graph.edges,
+        "cross_edges": graph.cross_edges,
+    })
+}
+
+/// The `analysis.funnel` block: where the call sites left the taint phase,
+/// including the busiest callees that matched no sink fact.
+fn funnel_json(f: &frensense_engine::telemetry::TaintFunnel) -> serde_json::Value {
+    serde_json::json!({
+        "calls_examined": f.calls_examined,
+        "skipped_local_callable": f.skipped_local_callable,
+        "skipped_program_local": f.skipped_program_local,
+        "skipped_receiver_only_verb": f.skipped_receiver_only_verb,
+        "not_a_sink": f.not_a_sink,
+        "sink_calls": f.sink_calls,
+        "unmatched_callees": f.top_unmatched().iter().map(|entry| serde_json::json!({
+            "callee": entry.callee,
+            "calls": entry.calls,
+        })).collect::<Vec<_>>(),
+    })
+}
+
 /// [`json_report_with_skips`] plus what the scan actually covered.
 ///
 /// Adds `analysis.clean` and the recognition/denominator fields under
@@ -468,20 +496,8 @@ pub fn json_report_with_coverage(
         },
         // The sizes and call-site accounting behind the summary's graph and
         // taint lines, so a JSON consumer sees the same numbers.
-        "graph": {
-            "functions": telem.graph.functions,
-            "nodes": telem.graph.nodes,
-            "edges": telem.graph.edges,
-            "cross_edges": telem.graph.cross_edges,
-        },
-        "funnel": {
-            "calls_examined": telem.funnel.calls_examined,
-            "skipped_local_callable": telem.funnel.skipped_local_callable,
-            "skipped_program_local": telem.funnel.skipped_program_local,
-            "skipped_receiver_only_verb": telem.funnel.skipped_receiver_only_verb,
-            "not_a_sink": telem.funnel.not_a_sink,
-            "sink_calls": telem.funnel.sink_calls,
-        },
+        "graph": graph_json(&telem.graph),
+        "funnel": funnel_json(&telem.funnel),
         "truncations": telem.caps.iter().map(|c| serde_json::json!({
             "cap": c.cap,
             "hits": c.hits,
@@ -858,6 +874,17 @@ fn render_funnel(telem: &frensense_engine::telemetry::ScanTelemetry) -> String {
         "  matched no sink fact      {:>6}   <- vocabulary the engine never walks",
         f.not_a_sink
     );
+    let top = f.top_unmatched();
+    if !top.is_empty() {
+        let _ = writeln!(
+            out,
+            "  most-called callees with no sink fact   ({} name(s) tracked, busiest first):",
+            f.unmatched_callees.len()
+        );
+        for entry in top {
+            let _ = writeln!(out, "    {:<26}{:>5}", entry.callee, entry.calls);
+        }
+    }
     let _ = writeln!(out, "  matched a sink fact       {:>6}", f.sink_calls);
     for s in &telem.suppressed {
         let _ = writeln!(out, "  reporting gate: {:<24}{:>6}", s.reason, s.count);
@@ -1620,8 +1647,14 @@ mod json_report_schema_tests {
     use super::json_report_with_coverage;
     use crate::Advisory;
     use crate::engine::files::UnsupportedSourceFile;
-    use frensense_engine::telemetry::ScanTelemetry;
+    use frensense_engine::telemetry::{GraphSize, ScanTelemetry, TaintFunnel};
     use std::path::Path;
+
+    fn sorted_keys(obj: &serde_json::Map<String, serde_json::Value>) -> Vec<&str> {
+        let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        keys
+    }
 
     fn adv() -> Advisory {
         Advisory::bare(
@@ -1688,6 +1721,66 @@ mod json_report_schema_tests {
             analysis["slowest_functions"].is_array(),
             "analysis.slowest_functions missing"
         );
+        assert!(analysis["graph"].is_object(), "analysis.graph missing");
+        assert!(analysis["funnel"].is_object(), "analysis.funnel missing");
+    }
+
+    /// Every key a consumer reads the measured graph and taint numbers from,
+    /// pinned with its value: a rename, a drop or a type change fails here.
+    #[test]
+    fn analysis_graph_and_funnel_keys_are_pinned() {
+        // 1 + 2 + 0 skipped + 6 unmatched + 2 sinks = 11 examined. Four
+        // unmatched came from the constructor, two from `record_unmatched`.
+        let mut funnel = TaintFunnel::new(11, (1, 2, 0), 4, 2);
+        funnel.record_unmatched("read");
+        funnel.record_unmatched("read");
+        let telem = ScanTelemetry {
+            graph: GraphSize::new(3, 10, 12, 2),
+            funnel,
+            ..ScanTelemetry::default()
+        };
+
+        let report = json_report_with_coverage(&[], &[], Some(&telem), &[], None);
+        let analysis = &report["analysis"];
+
+        let graph = analysis["graph"].as_object().expect("analysis.graph");
+        assert_eq!(
+            sorted_keys(graph),
+            ["cross_edges", "edges", "functions", "nodes"]
+        );
+        assert_eq!(graph["functions"], 3);
+        assert_eq!(graph["nodes"], 10);
+        assert_eq!(graph["edges"], 12);
+        assert_eq!(graph["cross_edges"], 2);
+
+        let funnel = analysis["funnel"].as_object().expect("analysis.funnel");
+        assert_eq!(
+            sorted_keys(funnel),
+            [
+                "calls_examined",
+                "not_a_sink",
+                "sink_calls",
+                "skipped_local_callable",
+                "skipped_program_local",
+                "skipped_receiver_only_verb",
+                "unmatched_callees",
+            ]
+        );
+        assert_eq!(funnel["calls_examined"], 11);
+        assert_eq!(funnel["skipped_local_callable"], 1);
+        assert_eq!(funnel["skipped_program_local"], 2);
+        assert_eq!(funnel["skipped_receiver_only_verb"], 0);
+        assert_eq!(funnel["not_a_sink"], 6);
+        assert_eq!(funnel["sink_calls"], 2);
+
+        let callees = funnel["unmatched_callees"]
+            .as_array()
+            .expect("analysis.funnel.unmatched_callees");
+        assert_eq!(callees.len(), 1, "{report}");
+        let entry = callees[0].as_object().expect("unmatched callee entry");
+        assert_eq!(sorted_keys(entry), ["callee", "calls"]);
+        assert_eq!(entry["callee"], "read");
+        assert_eq!(entry["calls"], 2);
     }
 
     #[test]
@@ -2041,9 +2134,13 @@ mod stage_report_tests {
         t.input.failed = 1;
         t.input.functions = 25;
         t.graph = GraphSize::new(25, 760, 865, 4);
-        // 3 local callable + 2 program-local + 2 receiver-only + 37 matched
-        // no sink + 25 armed a sink = 69 examined.
-        t.funnel = TaintFunnel::new(69, (3, 2, 2), 37, 25);
+        // 3 local callable + 2 program-local + 2 receiver-only + 40 matched
+        // no sink + 25 armed a sink = 72 examined. Three of the 40 were
+        // recorded by name (`read` twice, `noop` once).
+        t.funnel = TaintFunnel::new(72, (3, 2, 2), 37, 25);
+        t.funnel.record_unmatched("read");
+        t.funnel.record_unmatched("read");
+        t.funnel.record_unmatched("noop");
         t.taint.sink_args_explored = 30;
         t.taint.vulnerable = 1;
         t.suppressed = vec![SuppressionCount {
@@ -2059,7 +2156,7 @@ mod stage_report_tests {
         for needle in [
             "parse+lower 12 ms 14 file(s) given, 13 lowered, 1 failed -> 25 function(s)",
             "graph 4 ms 25 function(s), 760 value-flow node(s), 865 edge(s), 4 cross-function edge(s)",
-            "taint 7 ms 69 call(s) -> 25 sink call(s) -> 30 argument(s) walked (1 vulnerable)",
+            "taint 7 ms 72 call(s) -> 25 sink call(s) -> 30 argument(s) walked (1 vulnerable)",
             "report 3 reported, 15 dropped at the reporting gate",
         ] {
             assert!(
@@ -2079,9 +2176,10 @@ mod stage_report_tests {
             "the counters must partition the call sites"
         );
         for needle in [
-            "Pipeline: where 69 call(s) left the engine",
+            "Pipeline: where 72 call(s) left the engine",
             "skipped before matching 7 (local callable 3, program-local callee 2, receiver-only verb 2)",
-            "matched no sink fact 37",
+            "matched no sink fact 40",
+            "most-called callees with no sink fact (2 name(s) tracked, busiest first): read 2 noop 1",
             "matched a sink fact 25",
             "reporting gate: not-reportable 15",
         ] {
