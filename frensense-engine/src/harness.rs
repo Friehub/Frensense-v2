@@ -549,7 +549,6 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             ctx.env.last_mut().unwrap().insert(name, v);
             continue;
         }
-        let ids = param_bindings(p);
         // Parameter TYPE annotation (`Query<P>`, `web::Query<P>`,
         // `*http.Request`), normalized to its path. Source vocabulary that
         // names a type (the axum/actix extractor family, Go's `*gin.Context`)
@@ -560,8 +559,8 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             .child_by_field_name("type")
             .map(|t| normalize_type_path(&source[t.start_byte()..t.end_byte()]))
             .filter(|t| !t.is_empty());
-        for id in ids {
-            let name = source[id.start_byte()..id.end_byte()].to_string();
+        for binding in param_bindings(p) {
+            let name = source[binding.start_byte()..binding.end_byte()].to_string();
             let v = ctx.ir.new_var(VarMetadata {
                 source_name: Some(name.clone()),
                 type_name: type_name.clone(),
@@ -571,6 +570,16 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
                 declared: true,
             });
             ctx.ir.parameters.push(v);
+            // A destructured parameter (`function run({ h }: Opts)`) names no
+            // variable of its own: the pattern's names read the parts of the
+            // parameter value, exactly like `const { h } = opts` inside the
+            // body. The slot still occupies the parameter position (so the
+            // call's argument maps to it), but the pattern text is not a name
+            // the body can resolve, so it is not entered into the scope.
+            if ctx.is_destructuring_pattern(binding.kind()) {
+                ctx.bind_pattern(binding, v);
+                continue;
+            }
             ctx.env.last_mut().unwrap().insert(name, v);
         }
     }
@@ -626,6 +635,12 @@ fn param_bindings(p: tree_sitter::Node<'_>) -> Vec<tree_sitter::Node<'_>> {
 /// identifier of a wrapper-shaped pattern (`Query(p)`, `{ body }`, `&mut x`).
 fn param_binding<'t>(p: tree_sitter::Node<'t>) -> Option<tree_sitter::Node<'t>> {
     let pattern = p.child_by_field_name("pattern").or_else(|| p.child(0))?;
+    // `...parts` wraps the name: the rest marker is not part of it. Binding
+    // the parameter under the text `...parts` left the body's `parts` an
+    // undeclared name, so a rest parameter's value never reached its uses.
+    if pattern.kind() == "rest_pattern" {
+        return pattern.named_child(0);
+    }
     Some(extractor_binding(pattern).unwrap_or(pattern))
 }
 
@@ -755,6 +770,51 @@ func handle(request *http.Request, a, b string, rest ...int) {}
             ],
             "every Go parameter must bind with its type: {bound:?}"
         );
+    }
+
+    /// A destructured parameter owns no name of its own, so the slot holds one
+    /// load per bound name - and a nested pattern recurses through the load it
+    /// just emitted. A rest parameter binds its inner name, not `...name`.
+    #[test]
+    fn destructured_parameters_bind_the_names_inside_them() {
+        use crate::ir::function::Instruction;
+
+        let src = r#"
+function run({ body: { name } }: any, [first]: string[], ...rest: string[]) {}
+"#;
+        let fns = lower_source("a.ts", src, "ts").unwrap();
+        let ir = &fns["run"];
+        assert_eq!(ir.parameters.len(), 3, "one slot per parameter");
+        let rest = &ir.var_metadata[&ir.parameters[2]];
+        assert_eq!(rest.source_name.as_deref(), Some("rest"));
+
+        let mut loads: Vec<(String, String)> = Vec::new();
+        let mut elements = 0;
+        for block in ir.blocks.values() {
+            for instr in &block.instructions {
+                match instr {
+                    Instruction::LoadField { dest, field, .. } => loads.push((
+                        field.clone(),
+                        ir.var_metadata[dest]
+                            .source_name
+                            .clone()
+                            .unwrap_or_default(),
+                    )),
+                    Instruction::LoadElement { .. } => elements += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(
+            loads,
+            vec![
+                // The intermediate part has no source name; the inner name does.
+                ("body".to_string(), String::new()),
+                ("name".to_string(), "name".to_string()),
+            ],
+            "nested pattern must load each part: {loads:?}"
+        );
+        assert_eq!(elements, 1, "the array pattern loads its element");
     }
 
     fn keys(src: &str) -> Vec<String> {

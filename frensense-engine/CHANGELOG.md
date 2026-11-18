@@ -44,6 +44,25 @@ what this crate does.
 
 ### Fixed
 
+- **Destructured and rest parameters bind the names inside them.** `bind_params`
+  bound one variable per parameter node and named it after the node's text, so
+  `function run({ h }: Opts)` produced a single parameter named `{ h }` while
+  the body's `h` was an undeclared variable: the caller's object never reached
+  the sink. `...parts` bound as `...parts`, so `parts` itself did not resolve.
+  A pattern now keeps its parameter slot (the call's argument still maps to it)
+  and binds through the same `LoweringContext::bind_pattern` a destructured
+  declaration uses: one `LoadField` per object member, one `LoadElement` per
+  array position, and a rest element takes the whole value. The helper recurses
+  through the load it just emitted, so nested patterns (`{ a: { b } }`,
+  `{ body: { name } }`) - and the declaration form `const { a: { b } } = obj`,
+  which used to bind a variable literally named `{ b }` - keep their flow.
+  Measured on the reported reproductions: destructured parameter **0 → 1**
+  finding (OS command injection), rest parameter **0 → 1** (code injection via
+  `parts.join`), nested declaration **0 → 1**, while a literal argument
+  (`run({ h: "localhost" })`) and an untainted rest call stay clean.
+  A bare `export function t({ body: { name } }: any)` with no caller is still
+  `Undecided`: an exported parameter is not a source by itself, which is a
+  source-classification question and not a binding one.
 - **Go parameters are bound, with their declared types.** `bind_params` read
   the C `declarator` field for every `parameter_declaration`, and a Go
   declaration has no such field - its shape is one `name` field per binding

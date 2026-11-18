@@ -114,6 +114,85 @@ func handle(literal string) {
     assert!(!vulnerable(&run("go", "app/s.go", src), "Command"));
 }
 
+/// A destructured parameter names no variable of its own: `run({ h })` used to
+/// push one parameter slot named `{ h }`, so the body's `h` was an undeclared
+/// name and the caller's object never reached the sink (0 findings).
+#[test]
+fn destructured_parameter_carries_caller_taint() {
+    let src = r#"
+import { exec } from "child_process";
+import express from "express";
+const app = express();
+function run({ h }: { h: string }) { exec("ping " + h); }
+app.get("/a", async (req, res) => {
+  const host = req.query.host as string;
+  run({ h: host });
+  res.send("ok");
+});
+"#;
+    assert!(vulnerable(&run("ts", "app/d.ts", src), "exec"));
+}
+
+/// The nested shape recurses through the load of the outer part, so the inner
+/// name reads that part instead of the whole parameter value.
+#[test]
+fn nested_destructured_parameter_carries_caller_taint() {
+    let src = r#"
+import { exec } from "child_process";
+import express from "express";
+const app = express();
+function run({ body: { h } }: any) { exec("ping " + h); }
+app.post("/a", async (req, res) => {
+  run(req);
+  res.send("ok");
+});
+"#;
+    assert!(vulnerable(&run("ts", "app/n.ts", src), "exec"));
+}
+
+/// `...parts` wraps the name. Binding the parameter under the text `...parts`
+/// left the body's `parts` an undeclared name, so a rest parameter's argument
+/// never reached its uses (0 findings).
+#[test]
+fn rest_parameter_carries_caller_taint() {
+    let src = r#"
+import { exec } from "child_process";
+import express from "express";
+const app = express();
+function run(...parts: string[]) { exec(parts.join(" ")); }
+app.get("/a", async (req, res) => {
+  const host = req.query.host as string;
+  run(host);
+  res.send("ok");
+});
+"#;
+    assert!(vulnerable(&run("ts", "app/r.ts", src), "exec"));
+}
+
+/// The declaration form of the same pattern: `const { a: { b } } = ...` used to
+/// bind a variable literally named `{ b }`, leaving `b` undefined.
+#[test]
+fn nested_destructuring_declaration_keeps_taint() {
+    let src = r#"
+export function test(req: any) {
+    const { a: { b } } = { a: { b: req.body.payload } };
+    eval(b);
+}
+"#;
+    assert!(vulnerable(&run("ts", "app/n.ts", src), "eval"));
+}
+
+/// Binding a pattern must not invent a flow: a literal argument stays clean.
+#[test]
+fn destructured_parameter_of_a_literal_stays_silent() {
+    let src = r#"
+import { exec } from "child_process";
+function run({ h }: { h: string }) { exec("ping " + h); }
+export function main() { run({ h: "localhost" }); }
+"#;
+    assert!(!vulnerable(&run("ts", "app/s.ts", src), "exec"));
+}
+
 #[test]
 fn prepared_statement_arguments_are_bindings() {
     let src = r#"

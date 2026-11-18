@@ -89,39 +89,8 @@ impl<'a> LoweringContext<'a> {
             (Some(pattern), Some(value_node)) if self.is_destructuring_pattern(pattern.kind()) => {
                 // Destructuring: `const { a: x, b } = obj`.
                 // Lower the RHS first (it defines the base value).
-                let base_op = self.visit_node(value_node);
-                if let Some(Operand::Var(base)) = base_op {
-                    let mut pc = pattern.walk();
-                    for sub in pattern.named_children(&mut pc) {
-                        // `key: sub_name` or shorthand `name`.
-                        let (prop, target) = if self.is_pair_pattern(sub.kind()) {
-                            let k = sub.child_by_field_name("key");
-                            let v = sub.child_by_field_name("value");
-                            match (k, v) {
-                                (Some(k), Some(v)) => (Some(k), Some(v)),
-                                _ => (None, None),
-                            }
-                        } else {
-                            (Some(sub), Some(sub))
-                        };
-                        if let (Some(k), Some(v)) = (prop, target) {
-                            let field = self.source[k.start_byte()..k.end_byte()].to_string();
-                            if let Operand::Var(dest) = self.resolve_identifier(v) {
-                                self.mark_declared(dest);
-                                self.ir.push_instruction(
-                                    self.current_block,
-                                    Instruction::LoadField {
-                                        dest,
-                                        mem_in: self.memory_var,
-                                        base,
-                                        field,
-                                    },
-                                );
-                                // A destructured element is not the whole RHS.
-                                self.forget_const(dest);
-                            }
-                        }
-                    }
+                if let Some(Operand::Var(base)) = self.visit_node(value_node) {
+                    self.bind_pattern(pattern, base);
                 }
                 None
             }
@@ -213,6 +182,91 @@ impl<'a> LoweringContext<'a> {
                     }
                 }
                 None
+            }
+        }
+    }
+
+    /// Binds the names inside a destructuring pattern to the parts of `base`.
+    ///
+    /// `const { a: x, b } = obj` and a destructured parameter
+    /// (`function run({ h }: Opts)`) bind the same way: one load per name,
+    /// `LoadField` for an object member and `LoadElement` for an array
+    /// position. A nested pattern (`{ a: { b } }`) recurses through the load
+    /// it just emitted, so the inner name reads that part instead of the whole
+    /// value - which is why `const { a: { b } } = obj; eval(b)` used to leave
+    /// `b` undefined. A rest element (`{ a, ...rest }`, `[head, ...tail]`)
+    /// takes whatever is left, so it binds the whole `base`.
+    pub(crate) fn bind_pattern(&mut self, pattern: Node, base: VarId) {
+        if !self.is_destructuring_pattern(pattern.kind()) {
+            // A plain identifier target binds the whole value.
+            if let Operand::Var(dest) = self.resolve_identifier(pattern) {
+                self.mark_declared(dest);
+                self.ir.push_instruction(
+                    self.current_block,
+                    Instruction::Assign {
+                        dest,
+                        src: Operand::Var(base),
+                    },
+                );
+                self.forget_const(dest);
+            }
+            return;
+        }
+        let array = pattern.kind() == "array_pattern";
+        let mut cursor = pattern.walk();
+        let parts: Vec<Node> = pattern.named_children(&mut cursor).collect();
+        for part in parts {
+            let (key, target) = match part.kind() {
+                // `key: target`.
+                kind if self.is_pair_pattern(kind) => (
+                    part.child_by_field_name("key"),
+                    part.child_by_field_name("value"),
+                ),
+                // `{ a = fallback }` binds `a` from the member `a`.
+                "object_assignment_pattern" => (
+                    part.child_by_field_name("left"),
+                    part.child_by_field_name("left"),
+                ),
+                // `...rest` is not a name: it takes the remaining value.
+                "rest_pattern" => (None, part.named_child(0)),
+                // Shorthand `{ a }` / positional `[a]`: the name is the key.
+                _ => (Some(part), Some(part)),
+            };
+            let Some(target) = target else { continue };
+            let nested = self.is_destructuring_pattern(target.kind());
+            let dest = if nested {
+                self.new_temp(target)
+            } else {
+                let Operand::Var(dest) = self.resolve_identifier(target) else {
+                    continue;
+                };
+                dest
+            };
+            self.mark_declared(dest);
+            let load = match key {
+                None => Instruction::Assign {
+                    dest,
+                    src: Operand::Var(base),
+                },
+                // An array position is not a key: any element may be read.
+                Some(_) if array => Instruction::LoadElement {
+                    dest,
+                    mem_in: self.memory_var,
+                    base,
+                    index: Operand::Unknown,
+                },
+                Some(k) => Instruction::LoadField {
+                    dest,
+                    mem_in: self.memory_var,
+                    base,
+                    field: self.source[k.start_byte()..k.end_byte()].to_string(),
+                },
+            };
+            self.ir.push_instruction(self.current_block, load);
+            // A destructured element is not the whole RHS.
+            self.forget_const(dest);
+            if nested {
+                self.bind_pattern(target, dest);
             }
         }
     }
