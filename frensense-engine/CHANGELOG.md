@@ -97,6 +97,20 @@ what this crate does.
 
 ### Removed
 
+- **The forward taint engine is gone; the demand-driven one is the only
+  detector.** `InterproceduralTaintEngine` (BFS from every source over local
+  and cross edges) produced `SinkAlert`s in the same shape as the backward
+  engine, but nothing outside its own tests ever constructed it: `scan` builds
+  a `BackwardTaintEngine` over the same `ProgramSvfg`, and that engine adds the
+  per-sink verdicts, guards and call-site context the BFS never had. Removed
+  with it: the BFS, `local_successors`/`inter_successors`/`tainted_nodes`, its
+  doc example, the "backward agrees with forward" oracle test, and
+  `analysis/forward_tests.rs` (1,343 lines, 17 tests) — 19 tests in total, the
+  engine suite going 581 → 562 with no change to any finding.
+  `ProgramSvfg`, the call bindings, the cross edges and the bottom-up
+  `TaintSummary` pass stay: `local_predecessors` reads the suppressed
+  pass-through set, which is what keeps a sanitizing callee from leaking taint
+  into the backward walk through its local pass-through edge.
 - **Breaking:** `analysis::taint::context` (`ContextSensitiveTaintEngine`,
   `ContextualAlert`, `ContextStats`, `ROOT_CTX`, `CtxId`,
   `MAX_CONTEXTS_PER_FN`), 356 lines plus 483 lines of tests. It layered k=1

@@ -628,65 +628,6 @@ pub(super) mod demand_tests {
     }
 
     // -----------------------------------------------------------------------
-    // Test 8: backward agrees with forward on a plain vulnerable chain.
-    // -----------------------------------------------------------------------
-    #[test]
-    fn test_backward_agrees_with_forward() {
-        use crate::analysis::forward::{InterproceduralTaintEngine, SinkAlert};
-
-        let mut main = FunctionIR::new("main".into());
-        {
-            let b = main.entry_block;
-            let mem0 = main.initial_memory_state;
-            let v = main.new_var(dummy_meta("v"));
-            let m1 = main.new_var(mem_meta("m1"));
-            main.push_instruction(
-                b,
-                Instruction::CallStatic {
-                    dest: Some(v),
-                    mem_out: m1,
-                    mem_in: mem0,
-                    func: "getSource".into(),
-                    args: vec![],
-                    arg_names: Vec::new(),
-                },
-            );
-            let m2 = main.new_var(mem_meta("m2"));
-            main.push_instruction(
-                b,
-                Instruction::CallStatic {
-                    dest: None,
-                    mem_out: m2,
-                    mem_in: m1,
-                    func: "db.execute".into(),
-                    args: vec![Operand::Var(v)],
-                    arg_names: Vec::new(),
-                },
-            );
-            main.set_terminator(b, Terminator::Return { src: None });
-        }
-
-        let prog = build_program(vec![main]);
-
-        // Forward.
-        let cfg = config();
-        let mut fwd = InterproceduralTaintEngine::new(&prog, &cfg);
-        fwd.run();
-
-        // Backward.
-        let cfg = config();
-        let (bwd, _stats) = run_backward(&cfg, &prog);
-        let bwd_alerts: Vec<SinkAlert> = bwd.iter().filter_map(|f| f.alert.clone()).collect();
-
-        assert_eq!(fwd.alerts.len(), 1);
-        assert_eq!(bwd_alerts.len(), 1);
-        // Same alert (sink, slot, function, class) from both directions.
-        assert!(fwd.alerts[0].sink == "db.execute");
-        assert!(bwd_alerts[0].sink == "db.execute");
-        assert_eq!(fwd.alerts[0], bwd_alerts[0]);
-    }
-
-    // -----------------------------------------------------------------------
     // Learned dotted source fact on a module-qualified CallVirtual.
     //
     //   fn main() { v = random.randint(0, 10); eval(v); }

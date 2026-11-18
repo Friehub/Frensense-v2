@@ -3,6 +3,7 @@
 // Commercial use requires a separate license: https://friehub.com/licensing
 
 use super::*;
+use std::collections::VecDeque;
 
 // ---------------------------------------------------------------------------
 // Relational taint summary

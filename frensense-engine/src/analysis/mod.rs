@@ -6,15 +6,14 @@
 //!
 //! * [`taint`], the demand-driven backward taint engine, its fact table,
 //!   and context sensitivity.
-//! * [`forward`], the interprocedural forward engine (BFS over the whole
-//!   program value-flow structure; its bottom-up compositional `TaintSummary`s
-//!   replace the old standalone summary module).
+//! * [`forward`], the whole-program value-flow structure: per-function SVFGs
+//!   linked by explicit interprocedural edges, with the bottom-up
+//!   compositional `TaintSummary`s that suppress the conservative
+//!   pass-through edge a known callee replaces.
 
 pub mod forward;
 pub mod taint;
 pub mod value;
 
-#[cfg(test)]
-mod forward_tests;
 #[cfg(test)]
 mod value_tests;

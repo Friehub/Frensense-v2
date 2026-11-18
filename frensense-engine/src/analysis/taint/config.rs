@@ -6,8 +6,9 @@
 //!
 //! [`TaintConfig`] declares the name sets that define a scan: source
 //! functions, sink functions, and sanitizer functions. It is consumed by the
-//! demand-driven engines (`BackwardTaintEngine`, `InterproceduralTaintEngine`)
-//! and serialized alongside scan policies.
+//! demand-driven engine (`BackwardTaintEngine`), by the summary pass that
+//! suppresses the pass-through edges a known callee replaces, and is
+//! serialized alongside scan policies.
 
 use rustc_hash::FxHashSet;
 
