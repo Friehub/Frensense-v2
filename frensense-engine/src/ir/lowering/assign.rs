@@ -149,6 +149,19 @@ impl<'a> LoweringContext<'a> {
         let rhs_op = self.visit_node(right_node).unwrap_or(Operand::Unknown);
         let compound = self.compound_operator(node);
 
+        // A pattern target (`({ a } = rhs)`, `[a, b] = rhs`) is not a
+        // variable, field or element: each name binds to a load off the
+        // value, exactly as the declaration form (`const { a } = rhs`) does.
+        // Without this the target had no lvalue, so no store was emitted and
+        // every name read an undefined variable afterwards.
+        if compound.is_none()
+            && self.is_destructuring_pattern(left_node.kind())
+            && let Operand::Var(base) = rhs_op.clone()
+        {
+            self.bind_pattern(left_node, base);
+            return Some(rhs_op);
+        }
+
         // Multi-target form (`body, err := f(x)`, `a, b = g()`): the call's
         // result is a tuple, and any element of it can carry the taint. The
         // single-target path below saw an `expression_list` lvalue and

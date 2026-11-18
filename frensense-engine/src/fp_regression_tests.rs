@@ -150,6 +150,46 @@ app.post("/a", async (req, res) => {
     assert!(vulnerable(&run("ts", "app/n.ts", src), "exec"));
 }
 
+/// An assignment to a pattern is the declaration form with the names already
+/// bound: lowering read the pattern as an lvalue, found none, and dropped the
+/// store, so the name stayed undefined and the value never reached the sink.
+#[test]
+fn destructuring_assignment_keeps_taint() {
+    let src = r#"
+export function test(req: any) {
+  let a: any;
+  ({ a } = req.body);
+  eval(a);
+}
+"#;
+    assert!(vulnerable(&run("ts", "app/o.ts", src), "eval"));
+}
+
+#[test]
+fn array_destructuring_assignment_keeps_taint() {
+    let src = r#"
+export function test(req: any) {
+  let h: any;
+  [h] = req.body.parts;
+  eval(h);
+}
+"#;
+    assert!(vulnerable(&run("ts", "app/a.ts", src), "eval"));
+}
+
+/// Binding a pattern target must not invent a flow.
+#[test]
+fn destructuring_assignment_of_a_literal_stays_silent() {
+    let src = r#"
+export function test() {
+  let a: any;
+  ({ a } = { a: "safe" });
+  eval(a);
+}
+"#;
+    assert!(!vulnerable(&run("ts", "app/l.ts", src), "eval"));
+}
+
 /// A nested pattern is the flat form written twice, so the intermediate part
 /// is the variable that form would have named: `{ body: { name } }` means
 /// `const { body } = x; const { name } = body`. Leaving the intermediate

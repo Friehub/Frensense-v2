@@ -44,6 +44,14 @@ what this crate does.
 
 ### Fixed
 
+- **An assignment to a destructuring pattern binds its names.** `({ a } = rhs)`
+  and `[a, b] = rhs` are the declaration form with the names already bound,
+  but `visit_assignment` read the pattern as an lvalue, found none, and
+  dropped the store, so the name stayed an undefined variable and the value
+  never reached the sink. A pattern target now lowers through the same
+  `LoweringContext::bind_pattern` the declaration form uses. Measured on the
+  reported shapes: object pattern **0 → 1** finding (code injection), array
+  pattern **0 → 1**, while `({ a } = { a: "safe" })` stays clean.
 - **A nested destructuring pattern keeps the name of each part.** `{ body: {
   name } }` is the flat form written twice (`const { body } = x; const { name }
   = body`), but the intermediate part was an anonymous temporary, so name
