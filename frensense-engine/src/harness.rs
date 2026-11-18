@@ -535,12 +535,6 @@ fn lower_static(
 fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &str) {
     let mut pc = params.walk();
     for p in params.children(&mut pc) {
-        // Language-dependent parameter shapes:
-        // - JS/TS: `required_parameter`/`optional_parameter` with `pattern` field
-        // - Python: plain `identifier` children of `parameters`, plus the
-        //   annotated/defaulted wrappers (`x: T`, `x=v`, `x: T = v`, `*x`)
-        // - Rust: `parameter` node wrapping the name identifier as first child
-        // - Go: `parameter_declaration` with the name as first child
         if p.kind() == "self_parameter" {
             let name = "self".to_string();
             let v = ctx.ir.new_var(VarMetadata {
@@ -555,52 +549,22 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             ctx.env.last_mut().unwrap().insert(name, v);
             continue;
         }
-        let id = match p.kind() {
-            "required_parameter" | "optional_parameter" => param_binding(p),
-            "identifier" => Some(p),
-            // C `parameter_declaration`: shape is `type declarator`, where the
-            // declarator may be pointer_declarator → identifier (e.g. `char *p`).
-            // child(0) returns the type specifier, not the name - use the
-            // `declarator` field and walk it to find the leaf identifier.
-            "parameter_declaration" => p
-                .child_by_field_name("declarator")
-                .and_then(|d| find_param_identifier(d)),
-            // Rust `parameter`, Go `parameter_declaration` (handled above),
-            // variadic_parameter: first child is the identifier or pattern.
-            // A pattern that destructures a wrapper (`Query(p): Query<P>`,
-            // `State(db): State<Pool>`) binds the INNER identifier: naming
-            // the parameter after the whole pattern text ("Query(p)") left
-            // the body reference `p` unbound, so the extractor parameter
-            // could never be a source nor feed one.
-            "parameter" | "variadic_parameter" => param_binding(p),
-            // Python annotated/defaulted parameters. `typed_parameter` has no
-            // `name` field (the binding is its first child, possibly wrapped
-            // in a `*`/`**` splat pattern), while the default forms expose
-            // `name`. Without these arms every annotated handler parameter
-            // stayed unbound: `def h(x: Request)` never recorded `x` as a
-            // parameter at all, so neither the type annotation nor the
-            // language's parameter classification could ever see it.
-            "typed_parameter"
-            | "default_parameter"
-            | "typed_default_parameter"
-            | "list_splat_pattern"
-            | "dictionary_splat_pattern" => python_param_binding(p),
-            _ => None,
-        };
-        if let Some(id) = id {
+        let ids = param_bindings(p);
+        // Parameter TYPE annotation (`Query<P>`, `web::Query<P>`,
+        // `*http.Request`), normalized to its path. Source vocabulary that
+        // names a type (the axum/actix extractor family, Go's `*gin.Context`)
+        // matches this: the parameter's type - not the author's variable name -
+        // decides whether the argument is attacker-controlled. One Go
+        // declaration shares its type across every grouped name.
+        let type_name = p
+            .child_by_field_name("type")
+            .map(|t| normalize_type_path(&source[t.start_byte()..t.end_byte()]))
+            .filter(|t| !t.is_empty());
+        for id in ids {
             let name = source[id.start_byte()..id.end_byte()].to_string();
-            // Parameter TYPE annotation (`Query<P>`, `web::Query<P>`,
-            // `*http.Request`), normalized to its path. Source vocabulary
-            // that names a type (the axum/actix extractor family) matches
-            // this: the parameter's type - not the author's variable name -
-            // decides whether the argument is attacker-controlled.
-            let type_name = p
-                .child_by_field_name("type")
-                .map(|t| normalize_type_path(&source[t.start_byte()..t.end_byte()]))
-                .filter(|t| !t.is_empty());
             let v = ctx.ir.new_var(VarMetadata {
                 source_name: Some(name.clone()),
-                type_name,
+                type_name: type_name.clone(),
                 byte_range: Some((p.start_byte(), p.end_byte())),
                 is_memory_state: false,
                 object_keys: Vec::new(),
@@ -609,6 +573,44 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             ctx.ir.parameters.push(v);
             ctx.env.last_mut().unwrap().insert(name, v);
         }
+    }
+}
+
+/// The binding identifiers of one parameter node, in declaration order.
+///
+/// - JS/TS: `required_parameter`/`optional_parameter` with a `pattern` field
+/// - Python: plain `identifier` children of `parameters`, plus the
+///   annotated/defaulted wrappers (`x: T`, `x=v`, `x: T = v`, `*x`)
+/// - Rust: `parameter` node wrapping the name identifier as first child
+/// - C: `parameter_declaration` shaped `type declarator`, where the declarator
+///   may be `pointer_declarator` → `identifier` (`char *p`). `child(0)` is the
+///   type specifier, so the `declarator` field is walked to its leaf.
+/// - Go: `parameter_declaration`/`variadic_parameter_declaration` shaped
+///   `name ... type`, with ONE `name` field per grouped name (`a, b string` is
+///   a single declaration). Go has no `declarator` field, so a Go parameter
+///   used to match the C arm and bind nothing: every handler parameter was an
+///   undeclared body name with no type, and the language's parameter
+///   classifier - which keys on `*gin.Context`, `*http.Request` - never saw
+///   one.
+fn param_bindings(p: tree_sitter::Node<'_>) -> Vec<tree_sitter::Node<'_>> {
+    match p.kind() {
+        "required_parameter" | "optional_parameter" | "parameter" | "variadic_parameter" => {
+            param_binding(p).into_iter().collect()
+        }
+        "identifier" => vec![p],
+        "parameter_declaration" | "variadic_parameter_declaration" => {
+            if let Some(decl) = p.child_by_field_name("declarator") {
+                return find_param_identifier(decl).into_iter().collect();
+            }
+            let mut cursor = p.walk();
+            p.children_by_field_name("name", &mut cursor).collect()
+        }
+        "typed_parameter"
+        | "default_parameter"
+        | "typed_default_parameter"
+        | "list_splat_pattern"
+        | "dictionary_splat_pattern" => python_param_binding(p).into_iter().collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -714,6 +716,46 @@ fn find_param_identifier(node: tree_sitter::Node<'_>) -> Option<tree_sitter::Nod
 mod tests {
     use super::{lower_source, lower_source_with_facts};
     use crate::analysis::taint::facts::seeded_tables;
+
+    /// Go parameters used to bind nothing at all: the C `declarator` field
+    /// the old arm read does not exist on a Go `parameter_declaration`, so
+    /// every body reference was an undeclared name and the parameter's type -
+    /// the thing `classify_param_taint` keys on for `*http.Request` and
+    /// `*gin.Context` - was never recorded. Grouped (`a, b string`) and
+    /// variadic names share one declaration, so each name has to bind.
+    #[test]
+    fn go_parameters_are_bound_with_their_declared_types() {
+        let src = r#"
+package main
+
+import "net/http"
+
+func handle(request *http.Request, a, b string, rest ...int) {}
+"#;
+        let fns = lower_source("a.go", src, "go").unwrap();
+        let ir = &fns["handle"];
+        let bound: Vec<(&str, Option<&str>)> = ir
+            .parameters
+            .iter()
+            .map(|&v| {
+                let meta = &ir.var_metadata[&v];
+                (
+                    meta.source_name.as_deref().unwrap_or(""),
+                    meta.type_name.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            bound,
+            vec![
+                ("request", Some("*http.Request")),
+                ("a", Some("string")),
+                ("b", Some("string")),
+                ("rest", Some("int")),
+            ],
+            "every Go parameter must bind with its type: {bound:?}"
+        );
+    }
 
     fn keys(src: &str) -> Vec<String> {
         let fns = lower_source("t.ts", src, "ts").unwrap();

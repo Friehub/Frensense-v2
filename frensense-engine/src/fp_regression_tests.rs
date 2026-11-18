@@ -75,6 +75,45 @@ def h():
     assert!(vulnerable(&run("py", "app/t.py", src), "execute"));
 }
 
+/// A Go handler parameter is a source by its declared type, not its name:
+/// the binding here is `request`, which the pack's name vocabulary (`r`,
+/// `req`, `c`, `ctx`, `w`) does not cover. Lowering bound no Go parameter at
+/// all before (it read the C `declarator` field), so the body reference was
+/// an undeclared name and the flow never started: 0 findings.
+#[test]
+fn go_parameter_is_a_source_by_its_type() {
+    let src = r#"
+package main
+
+import (
+	"net/http"
+	"os/exec"
+)
+
+func handle(request *http.Request) {
+	cmd := request.URL.Query().Get("cmd")
+	exec.Command("sh", "-c", cmd)
+}
+"#;
+    assert!(vulnerable(&run("go", "app/h.go", src), "Command"));
+}
+
+/// Binding a parameter must not make it a source: a scalar has no type the
+/// classifier accepts, so `literal` stays clean even though it now binds.
+#[test]
+fn go_scalar_parameter_is_not_a_source() {
+    let src = r#"
+package main
+
+import "os/exec"
+
+func handle(literal string) {
+	exec.Command("sh", "-c", literal)
+}
+"#;
+    assert!(!vulnerable(&run("go", "app/s.go", src), "Command"));
+}
+
 #[test]
 fn prepared_statement_arguments_are_bindings() {
     let src = r#"

@@ -42,6 +42,22 @@ what this crate does.
   `CheckRegistry`, `LoweringContext`, `GuardMap` and `CtxLink`, required by
   the `missing_debug_implementations` lint.
 
+### Fixed
+
+- **Go parameters are bound, with their declared types.** `bind_params` read
+  the C `declarator` field for every `parameter_declaration`, and a Go
+  declaration has no such field - its shape is one `name` field per binding
+  plus `type`. No Go parameter was recorded at all, so a handler body's
+  `request.URL.Query()` referenced an undeclared name and
+  `classify_param_taint` never received the `*http.Request` / `*gin.Context`
+  type it classifies on. Grouped (`a, b string`) and variadic (`rest ...int`)
+  names are one declaration each, sharing its type; the C and Go shapes are now
+  resolved by which field the grammar emits. Measured on
+  `func handle(request *http.Request)` reading
+  `request.URL.Query().Get("cmd")` into `exec.Command`: **0 findings before, 1
+  (OS command injection) after**, while a scalar parameter (`literal string`)
+  stays a non-source.
+
 ### Removed
 
 - **Breaking:** `analysis::taint::context` (`ContextSensitiveTaintEngine`,
