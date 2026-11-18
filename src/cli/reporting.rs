@@ -466,6 +466,22 @@ pub fn json_report_with_coverage(
             "unknown": telem.taint.unknown,
             "clean": telem.taint.clean,
         },
+        // The sizes and call-site accounting behind the summary's graph and
+        // taint lines, so a JSON consumer sees the same numbers.
+        "graph": {
+            "functions": telem.graph.functions,
+            "nodes": telem.graph.nodes,
+            "edges": telem.graph.edges,
+            "cross_edges": telem.graph.cross_edges,
+        },
+        "funnel": {
+            "calls_examined": telem.funnel.calls_examined,
+            "skipped_local_callable": telem.funnel.skipped_local_callable,
+            "skipped_program_local": telem.funnel.skipped_program_local,
+            "skipped_receiver_only_verb": telem.funnel.skipped_receiver_only_verb,
+            "not_a_sink": telem.funnel.not_a_sink,
+            "sink_calls": telem.funnel.sink_calls,
+        },
         "truncations": telem.caps.iter().map(|c| serde_json::json!({
             "cap": c.cap,
             "hits": c.hits,
@@ -774,7 +790,7 @@ fn render_stages(telem: &frensense_engine::telemetry::ScanTelemetry, reported: u
             .find(|p| p.phase == name)
             .map_or(0, |p| p.ms)
     };
-    let (i, t) = (&telem.input, &telem.taint);
+    let (i, g, f, t) = (&telem.input, &telem.graph, &telem.funnel, &telem.taint);
     let dropped: usize = telem.suppressed.iter().map(|s| s.count).sum();
     let mut out = String::from("Stages:\n");
     let _ = writeln!(
@@ -788,9 +804,12 @@ fn render_stages(telem: &frensense_engine::telemetry::ScanTelemetry, reported: u
     );
     let _ = writeln!(
         out,
-        "  graph        {:>6} ms  {} function(s)",
+        "  graph        {:>6} ms  {} function(s), {} value-flow node(s), {} edge(s), {} cross-function edge(s)",
         ms("graph"),
-        i.functions
+        g.functions,
+        g.nodes,
+        g.edges,
+        g.cross_edges
     );
     let _ = writeln!(
         out,
@@ -801,18 +820,48 @@ fn render_stages(telem: &frensense_engine::telemetry::ScanTelemetry, reported: u
     );
     let _ = writeln!(
         out,
-        "  taint        {:>6} ms  {} sink argument(s) explored -> {} vulnerable, {} sanitized, {} unknown, {} clean",
+        "  taint        {:>6} ms  {} call(s) -> {} sink call(s) -> {} argument(s) walked ({} vulnerable)",
         ms("taint"),
+        f.calls_examined,
+        f.sink_calls,
         t.sink_args_explored,
-        t.vulnerable,
-        t.sanitized,
-        t.unknown,
-        t.clean
+        t.vulnerable
     );
     let _ = writeln!(
         out,
         "  report                  {reported} reported, {dropped} dropped at the reporting gate"
     );
+    out
+}
+
+/// Where the taint phase's call sites left the pipeline: the numbers behind
+/// the summary's taint line, printed by `--explain`.
+fn render_funnel(telem: &frensense_engine::telemetry::ScanTelemetry) -> String {
+    use std::fmt::Write as _;
+    let f = &telem.funnel;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "Pipeline: where {} call(s) left the engine",
+        f.calls_examined
+    );
+    let _ = writeln!(
+        out,
+        "  skipped before matching   {:>6}   (local callable {}, program-local callee {}, receiver-only verb {})",
+        f.skipped(),
+        f.skipped_local_callable,
+        f.skipped_program_local,
+        f.skipped_receiver_only_verb
+    );
+    let _ = writeln!(
+        out,
+        "  matched no sink fact      {:>6}   <- vocabulary the engine never walks",
+        f.not_a_sink
+    );
+    let _ = writeln!(out, "  matched a sink fact       {:>6}", f.sink_calls);
+    for s in &telem.suppressed {
+        let _ = writeln!(out, "  reporting gate: {:<24}{:>6}", s.reason, s.count);
+    }
     out
 }
 
@@ -952,6 +1001,12 @@ pub fn print_explain_coverage(
                 coverage.unresolved_sites - coverage.unresolved_sample.len()
             );
         }
+    }
+    if let Some(telem) = telemetry {
+        // One block, written in one go so it cannot interleave with the
+        // rest of the explain output on the same stream.
+        use std::io::Write as _;
+        let _ = write!(std::io::stderr(), "\n{}", render_funnel(telem));
     }
 }
 
@@ -1957,9 +2012,10 @@ mod explain_learned_rule_tests {
 
 #[cfg(test)]
 mod stage_report_tests {
-    use super::render_stages;
-    use frensense_engine::analysis::taint::engine::BackwardStats;
-    use frensense_engine::telemetry::{InputAccounting, PhaseTiming, ScanTelemetry};
+    use super::{render_funnel, render_stages};
+    use frensense_engine::telemetry::{
+        GraphSize, PhaseTiming, ScanTelemetry, SuppressionCount, TaintFunnel,
+    };
 
     /// Collapse runs of whitespace so column alignment is not asserted.
     fn squash(s: &str) -> String {
@@ -1971,7 +2027,7 @@ mod stage_report_tests {
             phase: name.to_string(),
             ms,
         };
-        ScanTelemetry {
+        let mut t = ScanTelemetry {
             phases: vec![
                 phase("lower", 12),
                 phase("graph", 4),
@@ -1979,27 +2035,22 @@ mod stage_report_tests {
                 phase("taint", 7),
             ],
             ..ScanTelemetry::default()
-        }
-        .with_counts()
-    }
-
-    trait WithCounts {
-        fn with_counts(self) -> ScanTelemetry;
-    }
-
-    impl WithCounts for ScanTelemetry {
-        fn with_counts(mut self) -> ScanTelemetry {
-            self.input.submitted = 14;
-            self.input.scanned = 13;
-            self.input.failed = 1;
-            self.input.functions = 25;
-            self.taint.sink_args_explored = 30;
-            self.taint.vulnerable = 1;
-            self.taint.sanitized = 2;
-            self.taint.unknown = 3;
-            self.taint.clean = 24;
-            self
-        }
+        };
+        t.input.submitted = 14;
+        t.input.scanned = 13;
+        t.input.failed = 1;
+        t.input.functions = 25;
+        t.graph = GraphSize::new(25, 760, 865, 4);
+        // 3 local callable + 2 program-local + 2 receiver-only + 37 matched
+        // no sink + 25 armed a sink = 69 examined.
+        t.funnel = TaintFunnel::new(69, (3, 2, 2), 37, 25);
+        t.taint.sink_args_explored = 30;
+        t.taint.vulnerable = 1;
+        t.suppressed = vec![SuppressionCount {
+            reason: "not-reportable".to_string(),
+            count: 15,
+        }];
+        t
     }
 
     #[test]
@@ -2007,9 +2058,32 @@ mod stage_report_tests {
         let text = render_stages(&telemetry(), 3);
         for needle in [
             "parse+lower 12 ms 14 file(s) given, 13 lowered, 1 failed -> 25 function(s)",
-            "graph 4 ms 25 function(s)",
-            "taint 7 ms 30 sink argument(s) explored -> 1 vulnerable, 2 sanitized, 3 unknown, 24 clean",
-            "report 3 reported, 0 dropped at the reporting gate",
+            "graph 4 ms 25 function(s), 760 value-flow node(s), 865 edge(s), 4 cross-function edge(s)",
+            "taint 7 ms 69 call(s) -> 25 sink call(s) -> 30 argument(s) walked (1 vulnerable)",
+            "report 3 reported, 15 dropped at the reporting gate",
+        ] {
+            assert!(
+                squash(&text).contains(&squash(needle)),
+                "missing `{needle}` in:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_funnel_partitions_the_call_sites() {
+        let telem = telemetry();
+        let text = render_funnel(&telem);
+        assert_eq!(
+            telem.funnel.calls_examined,
+            telem.funnel.skipped() + telem.funnel.not_a_sink + telem.funnel.sink_calls,
+            "the counters must partition the call sites"
+        );
+        for needle in [
+            "Pipeline: where 69 call(s) left the engine",
+            "skipped before matching 7 (local callable 3, program-local callee 2, receiver-only verb 2)",
+            "matched no sink fact 37",
+            "matched a sink fact 25",
+            "reporting gate: not-reportable 15",
         ] {
             assert!(
                 squash(&text).contains(&squash(needle)),

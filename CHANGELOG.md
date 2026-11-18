@@ -25,8 +25,12 @@ harness and keeps no changelog.
 
 - **The scan summary lists every stage the scan went through** (parse and
   lower, graph, checks, taint, report) with what each consumed and produced, so
-  an empty or slow stage is visible without a flag. The same figures are in the
-  JSON report under `analysis`.
+  an empty or slow stage is visible without a flag. Each figure is measured:
+  the graph line counts the value-flow nodes, edges and cross-function edges the
+  taint phase walked, and the taint line follows the call sites
+  (`1,889 call(s) -> 17 sink call(s) -> 23 argument(s) walked`). The same
+  numbers are in the JSON report under `analysis.graph` and
+  `analysis.funnel`.
 - **`--explain` names the library calls the walk flowed through.** A flow that
   ends without a source may have crossed a call the engine has no model for;
   the backward walk follows such a call into its arguments on the assumption
@@ -37,6 +41,12 @@ harness and keeps no changelog.
 - A method call's receiver reads as `receiver` rather than a 20-digit slot
   number, in the `--explain` text and as the new `arg` field of
   `--explain-json`.
+- `--explain` prints the pipeline behind the summary's taint line: how many
+  call sites were skipped before matching (and why), how many matched no sink
+  fact, how many armed a sink, and how many findings each reporting-gate reason
+  dropped. Standard-library adapters (`iter`, `collect`, `map_err`, ...) are no
+  longer named as flowed-through calls, so that list is the library calls the
+  engine really has no model for.
 
 ### Removed
 
