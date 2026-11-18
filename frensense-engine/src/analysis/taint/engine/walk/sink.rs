@@ -3,9 +3,13 @@
 //! Sink dispatch: which call is a sink, which slots carry data, and the
 //! per-slot backward walk it starts.
 //!
-//! Split out of `walk.rs` unchanged.
+//! Split out of `walk.rs`. Resolving one call site is the composition of
+//! `skip_unanchored_static`, `receiver_root_for`, `sink_origin`, `arms_sink`
+//! and `sink_role_label` rather than one 386-line body.
 
 use super::*;
+
+use crate::analysis::taint::role::SinkRole;
 
 impl<'a> BackwardTaintEngine<'a> {
     /// Explore one call site if it is a configured sink.
@@ -16,24 +20,7 @@ impl<'a> BackwardTaintEngine<'a> {
         idx: usize,
         instr: &Instruction,
     ) {
-        // A property assignment is a write, not a call: `el.innerHTML = x`
-        // reaches no call sink, so dispatch it to the store path.
-        if let Instruction::StoreField {
-            base,
-            field,
-            src: Operand::Var(value),
-            span,
-            ..
-        } = instr
-        {
-            self.explore_store_sink(
-                fi,
-                *base,
-                field,
-                *value,
-                *span,
-                NodeKey::instr(block, idx, *value),
-            );
+        if self.explore_store_field(fi, block, idx, instr) {
             return;
         }
         let (name, receiver, args, call_dest): (
@@ -57,53 +44,15 @@ impl<'a> BackwardTaintEngine<'a> {
         self.funnel.calls_examined += 1;
         let ir = self.prog.functions[fi].ir;
         let pkg_import = if receiver.is_none() {
-            self.fn_file
-                .get(&self.prog.functions[fi].name)
-                .and_then(|file| self.file_package_imports.get(file))
-                .and_then(|imports| imports.get(name))
-                .or_else(|| {
-                    if self.file_package_imports.len() == 1 {
-                        self.file_package_imports
-                            .values()
-                            .next()
-                            .and_then(|m| m.get(name))
-                    } else {
-                        None
-                    }
-                })
+            self.import_of(fi, name)
         } else {
             None
         };
 
-        if receiver.is_none() && pkg_import.is_none() {
-            // A static call to a local variable/closure defined in this function
-            // is not an external sink.
-            if ir
-                .var_metadata
-                .values()
-                .any(|m| m.source_name.as_deref() == Some(name))
-            {
-                self.funnel.skipped_local_callable += 1;
-                return;
-            }
-            // A static call resolving to a function defined in this program is
-            // not an external sink either, even when the name matches a library
-            // sink (a user helper named `run` is not `subprocess.run`; a package
-            // import of that name short-circuits this guard above via
-            // `pkg_import`). The callee's own configured sinks report once with
-            // the full caller→callee path; arming the call site itself would
-            // emit the same bug twice - once as a shorter path prefix (WI-41).
-            if self.is_program_local(name) {
-                self.funnel.skipped_program_local += 1;
-                return;
-            }
-            // Verb sinks that strictly require a receiver object (get, post, render, etc.);
-            // a bare static call without package import is not a client method invocation.
-            if is_receiver_only_verb(name) {
-                self.funnel.skipped_receiver_only_verb += 1;
-                return;
-            }
+        if self.skip_unanchored_static(ir, name, receiver.is_none(), pkg_import.is_some()) {
+            return;
         }
+
         // Receiver-aware sink match: verb-named sinks (get/post/...) from
         // dotted client entries only fire when the receiver root is a known
         // client, `map.get(t)` is a Map accessor, `got.get(t)` is SSRF.
@@ -111,268 +60,51 @@ impl<'a> BackwardTaintEngine<'a> {
             Some(Operand::Var(r)) => Some(*r),
             _ => None,
         };
-        // Factory-resolved receiver roots must clear the same bar the
-        // sink matcher applies: the root is a declared client (client_roots),
-        // it carries a dotted entry for THIS method (receiver_roles), or it
-        // names a package carrying package-scoped sink facts
-        // (scoped_sink_signatures - the `axios.get` family lives here and
-        // populates neither of the other two sets). Gating factories on
-        // client_roots alone rejected `const client = axios.create(...)` ->
-        // `client.get(...)` even though `axios.get` is a declared sink
-        // (mre01 instance-alias false negative): the receiver resolved to
-        // its own source name ("client") and the sink stayed suppressed.
-        let factory_root_arms = |root: &str| {
-            self.facts.client_roots.contains(root)
-                || self
-                    .facts
-                    .receiver_roles
-                    .contains_key(&(root.to_string(), name.to_string()))
-                || self
-                    .facts
-                    .scoped_sink_signatures
-                    .keys()
-                    .any(|(pkg, _)| pkg == root)
-        };
-        let receiver_root = match receiver {
-            Some(Operand::Var(r)) => {
-                let direct = FactTable::receiver_root(ir, *r);
-                if let Some(ref d) = direct {
-                    // Name-collision guard: a variable merely *named* like a
-                    // declared client root (a factory instance called
-                    // `client`) must not short-circuit before the factory
-                    // fallback - for a verb sink whose (root, method) pair is
-                    // not declared, the direct name cannot arm the call, so
-                    // fall through to import/factory resolution (which may
-                    // recover the real root, e.g. `axios` from
-                    // `axios.create(...)`) and only then default to `direct`
-                    // (`resolved.or(direct)` below keeps the old result when
-                    // nothing resolves). mre01 instance-alias false negative.
-                    if self.facts.client_roots.contains(d)
-                        && (!self.facts.verb_sinks.contains(name)
-                            || self
-                                .facts
-                                .receiver_roles
-                                .contains_key(&(d.clone(), name.to_string())))
-                    {
-                        direct
-                    } else {
-                        // Check if d was imported as a package namespace (e.g. import cp from "child_process")
-                        let pkg_root = self
-                            .fn_file
-                            .get(&self.prog.functions[fi].name)
-                            .and_then(|file| self.file_package_imports.get(file))
-                            .and_then(|imports| imports.get(d))
-                            .or_else(|| {
-                                if self.file_package_imports.len() == 1 {
-                                    self.file_package_imports
-                                        .values()
-                                        .next()
-                                        .and_then(|m| m.get(d))
-                                } else {
-                                    None
-                                }
-                            })
-                            .and_then(|pkg| {
-                                if self.facts.client_roots.contains(&pkg.package) {
-                                    Some(pkg.package.clone())
-                                } else {
-                                    None
-                                }
-                            });
-                        if pkg_root.is_some() {
-                            pkg_root
-                        } else {
-                            // Check if r is defined locally by a factory call
-                            let mut resolved = None;
-                            for b in ir.blocks.values() {
-                                for instr in &b.instructions {
-                                    match instr {
-                                        Instruction::CallVirtual {
-                                            dest: Some(d_var),
-                                            method,
-                                            receiver: Operand::Var(cr),
-                                            ..
-                                        } if *d_var == *r
-                                            && (method == "create" || method == "extend") =>
-                                        {
-                                            if let Some(cr_root) = FactTable::receiver_root(ir, *cr)
-                                                && factory_root_arms(&cr_root)
-                                            {
-                                                resolved = Some(cr_root);
-                                            }
-                                        }
-                                        Instruction::CallStatic {
-                                            dest: Some(d_var),
-                                            func,
-                                            ..
-                                        } if *d_var == *r
-                                            && (func.ends_with(".create")
-                                                || func.ends_with(".extend")) =>
-                                        {
-                                            if let Some(prefix) = func.split('.').next()
-                                                && factory_root_arms(prefix)
-                                            {
-                                                resolved = Some(prefix.to_string());
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                            if resolved.is_none() {
-                                // Check if d matches a module-level function / binding in prog
-                                for f in &self.prog.functions {
-                                    if f.name == *d
-                                        || f.name
-                                            .strip_suffix(d.as_str())
-                                            .is_some_and(|p| p.ends_with(':'))
-                                    {
-                                        for b in f.ir.blocks.values() {
-                                            for instr in &b.instructions {
-                                                if let Instruction::CallVirtual {
-                                                    method,
-                                                    receiver: Operand::Var(cr),
-                                                    ..
-                                                } = instr
-                                                    && (method == "create" || method == "extend")
-                                                    && let Some(cr_root) =
-                                                        FactTable::receiver_root(f.ir, *cr)
-                                                    && factory_root_arms(&cr_root)
-                                                {
-                                                    resolved = Some(cr_root);
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            resolved.or(direct)
-                        }
-                    }
-                } else {
-                    None
-                }
-            }
-            _ => pkg_import.map(|pkg| pkg.package.clone()),
-        };
-        let effective_name = pkg_import.and_then(|p| p.symbol.as_deref()).unwrap_or(name);
-        // Factory-call package origin (owned): the receiver var was
-        // produced by a call to a symbol imported from a package with
-        // scoped sink facts (`const prisma = new PrismaClient()` with
-        // `import { PrismaClient } from '@prisma/client'`). Computed as an
-        // owned value before the origin chain so no borrow of `self`
-        // outlives it into the exploration loop.
+        let pkg_name = pkg_import.as_ref().map(|(pkg, _)| pkg.as_str());
+        let receiver_root = self.receiver_root_for(fi, ir, name, receiver, pkg_name);
+        let effective_name = pkg_import
+            .as_ref()
+            .and_then(|(_, symbol)| symbol.as_deref())
+            .unwrap_or(name);
+        // Factory-call package origin (owned): the receiver var was produced by
+        // a call to a symbol imported from a package with scoped sink facts
+        // (`const prisma = new PrismaClient()` with `import { PrismaClient }
+        // from '@prisma/client'`). Computed as an owned value before the origin
+        // chain so no borrow of `self` outlives it into the exploration loop.
         let factory_origin = recv_var.and_then(|rv| {
             let file = self.fn_file.get(&self.prog.functions[fi].name)?;
             self.factory_call_package(ir, rv, file)
         });
-        // Origin chain, resolved to an OWNED string: the borrows of
-        // `self` (import table, scoped-fact keys) end here, so the value
-        // can be consulted inside the per-slot exploration loop where
-        // `&mut self` borrows (guard state, stats) are live.
-        let origin_owned: Option<String> = pkg_import
-            .map(|pkg| pkg.package.clone())
-            .or_else(|| {
-                receiver_root.as_deref().and_then(|root| {
-                    self.fn_file
-                        .get(&self.prog.functions[fi].name)
-                        .and_then(|file| self.file_package_imports.get(file))
-                        .and_then(|imports| imports.get(root))
-                        .map(|pkg| pkg.package.clone())
-                })
-            })
-            .or_else(|| {
-                receiver_root
-                    .as_deref()
-                    .filter(|root| {
-                        self.facts
-                            .scoped_sink_signatures
-                            .keys()
-                            .any(|(pkg, _)| pkg == *root)
-                    })
-                    .map(|root| root.to_string())
-            })
-            .or_else(|| factory_origin.clone());
-        let origin_package = origin_owned.as_deref();
         // The call site's own language: sink facts are language-keyed, so a
-        // Rust `File::create` signature must not arm a TypeScript `create`
-        // call in the same mixed-language scan.
+        // Rust `File::create` signature must not arm a TypeScript `create` call
+        // in the same mixed-language scan.
         let language = (!ir.language.is_empty()).then_some(ir.language.as_str());
-        let has_receiver = recv_var.is_some();
-        if !self.facts.is_recv_sink_call_scoped(
-            effective_name,
-            receiver_root.as_deref(),
-            origin_package,
-            language,
-            has_receiver,
-        ) && !self.facts.is_recv_sink_call_scoped(
+        let origin = self.sink_origin(fi, pkg_name, receiver_root.as_deref(), factory_origin);
+        let call = SinkCall {
             name,
-            receiver_root.as_deref(),
-            origin_package,
+            effective_name,
+            receiver_root,
+            origin,
             language,
-            has_receiver,
-        ) {
+            has_receiver: recv_var.is_some(),
+        };
+        if !self.arms_sink(&call) {
             self.funnel.record_unmatched(effective_name);
             return;
         }
         self.funnel.sink_calls += 1;
         // Receiver-aware role: `kv.put(t)` resolves Storage (dotted
-        // KVNamespace.put) while `axios.put(t)` stays Ssrf, the
-        // receiver root is the disambiguator, mirroring verb-sink
-        // matching above.
-        let role = self
-            .facts
-            .role_for_call_scoped(
-                effective_name,
-                receiver_root.as_deref(),
-                origin_package,
-                language,
-            )
-            .or_else(|| {
-                self.facts.role_for_call_scoped(
-                    name,
-                    receiver_root.as_deref(),
-                    origin_package,
-                    language,
-                )
-            })
-            .unwrap_or_default();
-        let label = self.facts.label_for_call_scoped(
-            effective_name,
-            receiver_root.as_deref(),
-            origin_package,
-            language,
-        );
-        let label = label.or_else(|| {
-            self.facts.label_for_call_scoped(
-                name,
-                receiver_root.as_deref(),
-                origin_package,
-                language,
-            )
-        });
-        // Engine purity: every fact-declared sink is explored and reported
-        // when tainted data reaches it, regardless of role. Severity policy
-        // (Response/Validation rank at `info`) is lang-declared ranking
-        // applied when findings become advisories - it must never gate the
-        // analysis itself, or no bundle knowledge can ever unblock a sink
-        // the built-in tables happen to rank low.
-
-        // Collect (slot, var, arg-node) triplets. For virtual calls the
-        // receiver is slot usize::MAX (matching the forward engine's arg_slots
-        // convention). It is still walked - a `new Package(taint)` object
-        // carries its constructor's data into every method that acts on it -
-        // but only a tainted receiver becomes a finding (#100, #133).
-        let mut triplets: Vec<(usize, VarId, NodeKey)> = Vec::new();
-        if let Some(Operand::Var(r)) = receiver {
-            triplets.push((usize::MAX, *r, NodeKey::instr(block, idx, *r)));
-        }
-        for (slot, a) in args.iter().enumerate() {
-            if let Operand::Var(v) = a {
-                triplets.push((slot, *v, NodeKey::instr(block, idx, *v)));
-            }
-        }
+        // KVNamespace.put) while `axios.put(t)` stays Ssrf, the receiver root is
+        // the disambiguator, mirroring verb-sink matching above.
+        let (role, label) = self.sink_role_label(&call);
+        // Engine purity: every fact-declared sink is explored and reported when
+        // tainted data reaches it, regardless of role. Severity policy
+        // (Response/Validation rank at `info`) is lang-declared ranking applied
+        // when findings become advisories - it must never gate the analysis
+        // itself, or no bundle knowledge can ever unblock a sink the built-in
+        // tables happen to rank low.
+        let origin_package = call.origin.as_deref();
+        let triplets = sink_triplets(block, idx, receiver, args);
         if triplets.is_empty() {
             return;
         }
@@ -390,6 +122,376 @@ impl<'a> BackwardTaintEngine<'a> {
         );
     }
 
+    /// A property assignment is a write, not a call: `el.innerHTML = x` reaches
+    /// no call sink, so dispatch it to the store path. Returns whether `instr`
+    /// was such a write.
+    fn explore_store_field(
+        &mut self,
+        fi: usize,
+        block: BlockId,
+        idx: usize,
+        instr: &Instruction,
+    ) -> bool {
+        let Instruction::StoreField {
+            base,
+            field,
+            src: Operand::Var(value),
+            span,
+            ..
+        } = instr
+        else {
+            return false;
+        };
+        self.explore_store_sink(
+            fi,
+            *base,
+            field,
+            *value,
+            *span,
+            NodeKey::instr(block, idx, *value),
+        );
+        true
+    }
+
+    /// The package (and imported symbol) a local name is bound to by an import
+    /// in this function's file, owned so the caller can keep mutating `self`.
+    ///
+    /// Falls back to the only import table when the file map has a single
+    /// entry: synthetic modules do not always carry a resolvable path key.
+    fn import_of(&self, fi: usize, symbol: &str) -> Option<(String, Option<String>)> {
+        self.fn_file
+            .get(&self.prog.functions[fi].name)
+            .and_then(|file| self.file_package_imports.get(file))
+            .and_then(|imports| imports.get(symbol))
+            .or_else(|| {
+                if self.file_package_imports.len() == 1 {
+                    self.file_package_imports
+                        .values()
+                        .next()
+                        .and_then(|m| m.get(symbol))
+                } else {
+                    None
+                }
+            })
+            .map(|pkg| (pkg.package.clone(), pkg.symbol.clone()))
+    }
+
+    /// Whether a receiver root can arm a sink for `name`: a declared client, a
+    /// dotted entry for THIS method, or a package carrying package-scoped sink
+    /// facts.
+    ///
+    /// Factories must clear the same bar the sink matcher applies.
+    /// `scoped_sink_signatures` is where the `axios.get` family lives: it
+    /// populates neither `client_roots` nor `receiver_roles`, so gating
+    /// factories on `client_roots` alone rejected `const client =
+    /// axios.create(...)` -> `client.get(...)` even though `axios.get` is a
+    /// declared sink (mre01 instance-alias false negative).
+    fn root_arms(&self, name: &str, root: &str) -> bool {
+        self.facts.client_roots.contains(root)
+            || self
+                .facts
+                .receiver_roles
+                .contains_key(&(root.to_string(), name.to_string()))
+            || self
+                .facts
+                .scoped_sink_signatures
+                .keys()
+                .any(|(pkg, _)| pkg == root)
+    }
+
+    /// Whether a bare static call can match no configured sink: a local
+    /// callable, a function defined in this program, or a verb that requires a
+    /// receiver object.
+    fn skip_unanchored_static(
+        &mut self,
+        ir: &FunctionIR,
+        name: &str,
+        is_static: bool,
+        has_package_import: bool,
+    ) -> bool {
+        if !is_static || has_package_import {
+            return false;
+        }
+        // A static call to a local variable/closure defined in this function is
+        // not an external sink.
+        if ir
+            .var_metadata
+            .values()
+            .any(|m| m.source_name.as_deref() == Some(name))
+        {
+            self.funnel.skipped_local_callable += 1;
+            return true;
+        }
+        // A static call resolving to a function defined in this program is not
+        // an external sink either, even when the name matches a library sink (a
+        // user helper named `run` is not `subprocess.run`; a package import of
+        // that name short-circuits this guard above via `pkg_import`). The
+        // callee's own configured sinks report once with the full
+        // caller→callee path; arming the call site itself would emit the same
+        // bug twice - once as a shorter path prefix (WI-41).
+        if self.is_program_local(name) {
+            self.funnel.skipped_program_local += 1;
+            return true;
+        }
+        // Verb sinks that strictly require a receiver object (get, post,
+        // render, etc.); a bare static call without package import is not a
+        // client method invocation.
+        if is_receiver_only_verb(name) {
+            self.funnel.skipped_receiver_only_verb += 1;
+            return true;
+        }
+        false
+    }
+
+    /// Resolve the receiver root of a call: the variable's own root, the
+    /// package it was imported from, the factory that built it, or the import
+    /// of a bare callee name.
+    fn receiver_root_for(
+        &self,
+        fi: usize,
+        ir: &FunctionIR,
+        name: &str,
+        receiver: Option<&Operand>,
+        pkg_name: Option<&str>,
+    ) -> Option<String> {
+        match receiver {
+            Some(Operand::Var(r)) => {
+                let direct = FactTable::receiver_root(ir, *r)?;
+                self.direct_receiver_root(fi, ir, name, *r, &direct)
+            }
+            _ => pkg_name.map(str::to_string),
+        }
+    }
+
+    /// Root for a receiver variable that already resolved to a name `d`.
+    fn direct_receiver_root(
+        &self,
+        fi: usize,
+        ir: &FunctionIR,
+        name: &str,
+        r: VarId,
+        d: &str,
+    ) -> Option<String> {
+        // Name-collision guard: a variable merely *named* like a declared
+        // client root (a factory instance called `client`) must not
+        // short-circuit before the factory fallback - for a verb sink whose
+        // (root, method) pair is not declared, the direct name cannot arm the
+        // call, so fall through to import/factory resolution (which may recover
+        // the real root, e.g. `axios` from `axios.create(...)`) and only then
+        // default to `d` (`resolved.or(direct)` below keeps the old result when
+        // nothing resolves). mre01 instance-alias false negative.
+        if self.facts.client_roots.contains(d)
+            && (!self.facts.verb_sinks.contains(name)
+                || self
+                    .facts
+                    .receiver_roles
+                    .contains_key(&(d.to_string(), name.to_string())))
+        {
+            return Some(d.to_string());
+        }
+        // `d` as an imported package namespace (e.g. `import cp from
+        // "child_process"`); an import only rebinds to a declared client.
+        let pkg_root = self
+            .import_of(fi, d)
+            .and_then(|(pkg, _)| self.facts.client_roots.contains(&pkg).then_some(pkg));
+        if pkg_root.is_some() {
+            return pkg_root;
+        }
+        self.factory_root_of(ir, r, d, name)
+            .or_else(|| Some(d.to_string()))
+    }
+
+    /// Root of the factory call that produced `target`: `<root>.create(..)` /
+    /// `.extend(..)` in this function, then a module-level binding of the same
+    /// name (the factory that builds a shared client).
+    fn factory_root_of(
+        &self,
+        ir: &FunctionIR,
+        target: VarId,
+        root_name: &str,
+        name: &str,
+    ) -> Option<String> {
+        for b in ir.blocks.values() {
+            for instr in &b.instructions {
+                match instr {
+                    Instruction::CallVirtual {
+                        dest: Some(d_var),
+                        method,
+                        receiver: Operand::Var(cr),
+                        ..
+                    } if *d_var == target && (method == "create" || method == "extend") => {
+                        if let Some(cr_root) = FactTable::receiver_root(ir, *cr)
+                            && self.root_arms(name, &cr_root)
+                        {
+                            return Some(cr_root);
+                        }
+                    }
+                    Instruction::CallStatic {
+                        dest: Some(d_var),
+                        func,
+                        ..
+                    } if *d_var == target
+                        && (func.ends_with(".create") || func.ends_with(".extend")) =>
+                    {
+                        if let Some(prefix) = func.split('.').next()
+                            && self.root_arms(name, prefix)
+                        {
+                            return Some(prefix.to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        for f in &self.prog.functions {
+            let is_binding = f.name == root_name
+                || f.name
+                    .strip_suffix(root_name)
+                    .is_some_and(|p| p.ends_with(':'));
+            if !is_binding {
+                continue;
+            }
+            for b in f.ir.blocks.values() {
+                for instr in &b.instructions {
+                    if let Instruction::CallVirtual {
+                        method,
+                        receiver: Operand::Var(cr),
+                        ..
+                    } = instr
+                        && (method == "create" || method == "extend")
+                        && let Some(cr_root) = FactTable::receiver_root(f.ir, *cr)
+                        && self.root_arms(name, &cr_root)
+                    {
+                        return Some(cr_root);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Origin chain of a sink call, resolved to an OWNED string: the borrows of
+    /// `self` (import table, scoped-fact keys) end here, so the value can be
+    /// consulted inside the per-slot exploration loop where `&mut self` borrows
+    /// (guard state, stats) are live.
+    fn sink_origin(
+        &self,
+        fi: usize,
+        pkg_name: Option<&str>,
+        receiver_root: Option<&str>,
+        factory_origin: Option<String>,
+    ) -> Option<String> {
+        if let Some(pkg) = pkg_name {
+            return Some(pkg.to_string());
+        }
+        if let Some(root) = receiver_root {
+            if let Some((pkg, _)) = self.import_of(fi, root) {
+                return Some(pkg);
+            }
+            if self
+                .facts
+                .scoped_sink_signatures
+                .keys()
+                .any(|(pkg, _)| pkg == root)
+            {
+                return Some(root.to_string());
+            }
+        }
+        factory_origin
+    }
+
+    /// Whether the configured sink facts arm this call at all.
+    fn arms_sink(&self, call: &SinkCall<'_>) -> bool {
+        self.arms_sink_named(call.effective_name, call)
+            || (call.effective_name != call.name && self.arms_sink_named(call.name, call))
+    }
+
+    /// [`Self::arms_sink`] for one candidate name (the imported symbol first,
+    /// then the source-level call name).
+    fn arms_sink_named(&self, last: &str, call: &SinkCall<'_>) -> bool {
+        self.facts.is_recv_sink_call_scoped(
+            last,
+            call.receiver_root.as_deref(),
+            call.origin.as_deref(),
+            call.language,
+            call.has_receiver,
+        )
+    }
+
+    /// Receiver-scoped role and label of the armed sink, resolved under the
+    /// imported symbol first and the source-level call name second.
+    fn sink_role_label(&self, call: &SinkCall<'_>) -> (SinkRole, Option<String>) {
+        let scoped = |last: &str| {
+            (
+                self.facts.role_for_call_scoped(
+                    last,
+                    call.receiver_root.as_deref(),
+                    call.origin.as_deref(),
+                    call.language,
+                ),
+                self.facts.label_for_call_scoped(
+                    last,
+                    call.receiver_root.as_deref(),
+                    call.origin.as_deref(),
+                    call.language,
+                ),
+            )
+        };
+        let (role, label) = scoped(call.effective_name);
+        let (fallback_role, fallback_label) = if call.effective_name == call.name {
+            (None, None)
+        } else {
+            scoped(call.name)
+        };
+        (
+            role.or(fallback_role).unwrap_or_default(),
+            label.or(fallback_label),
+        )
+    }
+}
+
+/// A resolved sink call: the names, origins and language the matcher and the
+/// per-slot walk consult.
+struct SinkCall<'a> {
+    /// Call name as written at the site.
+    name: &'a str,
+    /// Imported symbol when the call goes through a package import.
+    effective_name: &'a str,
+    /// Resolved receiver root, if the call had a receiver.
+    receiver_root: Option<String>,
+    /// Resolved package origin of the call.
+    origin: Option<String>,
+    /// Source language of the call site.
+    language: Option<&'a str>,
+    /// Whether the call had a receiver operand.
+    has_receiver: bool,
+}
+
+/// The (slot, var, arg-node) triplets a call site contributes to the walk.
+///
+/// For virtual calls the receiver is slot `usize::MAX` (matching the forward
+/// engine's arg_slots convention). It is still walked - a `new Package(taint)`
+/// object carries its constructor's data into every method that acts on it -
+/// but only a tainted receiver becomes a finding (#100, #133).
+fn sink_triplets(
+    block: BlockId,
+    idx: usize,
+    receiver: Option<&Operand>,
+    args: &[Operand],
+) -> Vec<(usize, VarId, NodeKey)> {
+    let mut triplets: Vec<(usize, VarId, NodeKey)> = Vec::new();
+    if let Some(Operand::Var(r)) = receiver {
+        triplets.push((usize::MAX, *r, NodeKey::instr(block, idx, *r)));
+    }
+    for (slot, a) in args.iter().enumerate() {
+        if let Operand::Var(v) = a {
+            triplets.push((slot, *v, NodeKey::instr(block, idx, *v)));
+        }
+    }
+    triplets
+}
+
+impl<'a> BackwardTaintEngine<'a> {
     /// Explore a property-assignment sink if its field is armed.
     ///
     /// `el.innerHTML = user` names the DOM sink in the field and carries the
