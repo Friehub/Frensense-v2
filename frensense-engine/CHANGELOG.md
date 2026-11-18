@@ -10,7 +10,7 @@ Built-in vocabulary tables live in `frensense-packgen`; the `.frc` envelope
 lives in `frensense-bundler`. Their changes appear here only when they alter
 what this crate does.
 
-## [Unreleased]
+## [0.9.0]
 
 ### Added
 
