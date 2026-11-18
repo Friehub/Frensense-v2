@@ -38,6 +38,81 @@ fn vulnerable(res: &ScanResult, sink: &str) -> bool {
         .any(|l| l.finding.sink.contains(sink) && l.finding.verdict == BackwardVerdict::Vulnerable)
 }
 
+/// #133: a sink explored as "all args" must report the same slots as the same
+/// sink with explicit slots. The receiver of a method call is not an argument,
+/// so a clean `db` must not add a finding for slot `usize::MAX` per call (two
+/// extra `Clean` findings in the issue's three-call repro).
+#[test]
+fn all_args_sink_does_not_report_a_clean_receiver() {
+    use crate::analysis::taint::config::TaintConfig;
+    use crate::analysis::taint::facts::{FactTable, SinkSignature};
+
+    let src = r#"
+declare const db: any
+export function h(req: any) {
+  const id = req.body.id
+  db.query('SELECT ' + id)
+}
+export function lit() { db.query('SELECT 1') }
+"#;
+    let config = TaintConfig {
+        sources: ["req.body".to_string()].into_iter().collect(),
+        sinks: ["query".to_string()].into_iter().collect(),
+        sanitizers: Default::default(),
+    };
+    let slots = |sig: SinkSignature| {
+        let mut facts = FactTable::from_config(&config);
+        facts.sink_signatures.insert("query".into(), sig);
+        let mut s: Vec<usize> = scan(
+            &[("a.ts".to_string(), src.to_string(), "ts".to_string())],
+            &config,
+            &facts,
+        )
+        .findings
+        .iter()
+        .map(|f| f.arg_slot)
+        .collect();
+        s.sort();
+        s
+    };
+
+    let all = slots(SinkSignature::all_args("query"));
+    let explicit = slots(SinkSignature::with_args("query", &[0]));
+    assert_eq!(
+        all, explicit,
+        "an all-args sink must report exactly what an explicit one does"
+    );
+    assert!(
+        !all.contains(&usize::MAX),
+        "a clean receiver is not a finding: {all:?}"
+    );
+}
+
+/// #100: a handler's own response object is not data. `res.write("hello")`
+/// writes a constant, and walking `res` as an argument made the site
+/// undecided because the handler parameter has no caller.
+#[test]
+fn method_sink_receiver_is_not_walked_as_an_argument() {
+    let src = r#"
+import express from "express";
+const app = express();
+app.get("/", (req, res) => { res.write("hello"); });
+"#;
+    let res = run("ts", "t.ts", src);
+
+    assert!(!vulnerable(&res, "write"));
+    assert!(
+        res.findings
+            .iter()
+            .all(|f| f.verdict != BackwardVerdict::Unknown),
+        "the receiver is not an argument, so nothing is undecided: {:?}",
+        res.findings
+            .iter()
+            .map(|f| (f.sink.clone(), f.arg_slot, f.verdict.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn go_tuple_assignment_keeps_taint() {
     let src = r#"

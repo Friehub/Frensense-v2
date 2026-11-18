@@ -868,11 +868,12 @@ pub struct ScanResult {
     /// All sink findings (every verdict); retain only findings whose verdict
     /// is `Vulnerable` to obtain the alert set.
     ///
-    /// A sink signature with no explicit dangerous slots (what
+    /// A method call's receiver is walked, because an object constructed from
+    /// tainted data (`new Package(taint)`) hands that data to every method
+    /// acting on it, but only a *tainted* receiver is reported: a clean or
+    /// undecided receiver adds no finding, so an all-args signature (what
     /// [`FactTable::from_config`](crate::analysis::taint::facts::FactTable::from_config)
-    /// builds) also explores the receiver of a method call, which adds a
-    /// finding for slot `usize::MAX` per call. A signature with explicit slots
-    /// does not.
+    /// builds) reports the same slots as one with explicit arguments.
     ///
     /// ```
     /// use frensense_engine::analysis::taint::config::TaintConfig;
@@ -894,7 +895,9 @@ pub struct ScanResult {
     ///     s
     /// };
     /// assert_eq!(slots(SinkSignature::with_args("query", &[0])), vec![0]);
-    /// assert_eq!(slots(SinkSignature::all_args("query")), vec![0, usize::MAX]);
+    /// // The receiver `db` is not an argument, and an all-args signature
+    /// // arms arguments only, so both signatures report the same slot.
+    /// assert_eq!(slots(SinkSignature::all_args("query")), vec![0]);
     /// ```
     pub findings: Vec<SinkFinding>,
     /// The same findings resolved to source locations (file/line/column).

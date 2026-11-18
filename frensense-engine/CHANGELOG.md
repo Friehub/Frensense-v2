@@ -47,6 +47,22 @@ what this crate does.
 
 ### Fixed
 
+- **A method sink's receiver is no longer reported as an argument.** The
+  backward walk explores a virtual call's receiver as slot `usize::MAX` and
+  reported it whatever the verdict, so every all-args sink over-counted
+  `findings`/`located` by one `Clean` entry per call, and an Express
+  handler's `res.write("hello")` reported `No findings (1 site(s) undecided)`
+  because `res` is a parameter with no caller. A tainted receiver still
+  reports - `new AdmZip(req.files.importData)` hands its data to
+  `zip.extractAllTo(..)`, whose own arguments are literals, and
+  `constructor_arguments_taint_the_result` pins that flow - but a clean or
+  undecided receiver is no longer a finding. Measured on the issue repros:
+  the handler goes **1 undecided → 0 findings**, `res.write(req.query.q)`
+  stays **1 finding**, and `SinkSignature::all_args` reports the same slots as
+  `with_args`. The backward walk also moves into `walk/explore.rs`,
+  `walk/origin.rs` and `walk/sink.rs` (1,612 lines → 324 + 412 + 290 + 624);
+  clippy's `too_many_lines` count is unchanged by a file split (it is per
+  function), so the two remaining long bodies are the next cut.
 - **A property assignment is a sink.** `el.innerHTML = user`, `el.outerHTML`
   and `document.getElementById("x")!.innerHTML` reached no sink: the sink
   matcher only looked at calls, so a DOM sink written as a field store was
