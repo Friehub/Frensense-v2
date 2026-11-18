@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795008890301,
+  "lastUpdate": 1795012569396,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -2672,6 +2672,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/8310729959c90fc2b15cf51f46b62171f8f80eb3"
         },
         "date": 1795008888140,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 33.9,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 38.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 4.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 172,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 32,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "09cbfc303d05ec4a4ba0299c1ab9e71186cf0111",
+          "message": "Merge pull request #154 from Friehub/engine/silent-cap-telemetry\n\nEngine/silent cap telemetry",
+          "timestamp": "2026-11-18T15:35:10+01:00",
+          "tree_id": "6d63d94baf6816a6a82770692580ba14113ae6e8",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/09cbfc303d05ec4a4ba0299c1ab9e71186cf0111"
+        },
+        "date": 1795012568036,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
