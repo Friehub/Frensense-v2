@@ -123,6 +123,49 @@ const MAX_CUT_SITES: usize = 4;
 /// *through* (its arguments were followed, assuming the result carries them).
 const PASSED_THROUGH: &str = "passed-through";
 
+/// Standard-library adapters, sorted: they are defined to forward their
+/// operands into the result, so naming one as a pass-through tells a reader
+/// nothing. Keeping them out leaves the list to calls the engine genuinely
+/// has no model for (`mystery.read(req.params)`), which is the point of it.
+/// Detection never consults this: it only filters the explanation.
+const STD_FORWARDERS: &[&str] = &[
+    "and_then",
+    "any",
+    "as_deref",
+    "as_mut",
+    "as_ref",
+    "as_str",
+    "clone",
+    "collect",
+    "filter",
+    "filter_map",
+    "flat_map",
+    "fold",
+    "into",
+    "into_iter",
+    "iter",
+    "iter_mut",
+    "keys",
+    "map",
+    "map_err",
+    "ok_or",
+    "ok_or_else",
+    "or",
+    "or_else",
+    "take",
+    "then",
+    "then_some",
+    "unwrap_or",
+    "unwrap_or_default",
+    "unwrap_or_else",
+    "values",
+];
+
+/// Whether `callee` is a standard-library adapter (see [`STD_FORWARDERS`]).
+fn is_std_forwarder(callee: &str) -> bool {
+    STD_FORWARDERS.binary_search(&callee).is_ok()
+}
+
 /// Keep stop sites distinct and bounded.
 fn record_cut_site(sites: &mut Vec<CutSite>, site: CutSite) {
     // Pass-throughs are context, not stops: they get their own budget so a
@@ -511,6 +554,7 @@ impl<'a> BackwardTaintEngine<'a> {
             } => (method, Some(receiver), args, dest.as_ref().copied()),
             _ => return,
         };
+        self.funnel.calls_examined += 1;
         let ir = self.prog.functions[fi].ir;
         let pkg_import = if receiver.is_none() {
             self.fn_file
@@ -539,6 +583,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 .values()
                 .any(|m| m.source_name.as_deref() == Some(name))
             {
+                self.funnel.skipped_local_callable += 1;
                 return;
             }
             // A static call resolving to a function defined in this program is
@@ -549,11 +594,13 @@ impl<'a> BackwardTaintEngine<'a> {
             // the full caller→callee path; arming the call site itself would
             // emit the same bug twice - once as a shorter path prefix (WI-41).
             if self.is_program_local(name) {
+                self.funnel.skipped_program_local += 1;
                 return;
             }
             // Verb sinks that strictly require a receiver object (get, post, render, etc.);
             // a bare static call without package import is not a client method invocation.
             if is_receiver_only_verb(name) {
+                self.funnel.skipped_receiver_only_verb += 1;
                 return;
             }
         }
@@ -766,8 +813,10 @@ impl<'a> BackwardTaintEngine<'a> {
             language,
             has_receiver,
         ) {
+            self.funnel.not_a_sink += 1;
             return;
         }
+        self.funnel.sink_calls += 1;
         // Receiver-aware role: `kv.put(t)` resolves Storage (dotted
         // KVNamespace.put) while `axios.put(t)` stays Ssrf, the
         // receiver root is the disambiguator, mirroring verb-sink
@@ -1209,6 +1258,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 && !local_preds.is_empty()
                 && let Some(mut site) = self.cut_site(cf, &cur)
                 && site.kind == "external-call"
+                && !is_std_forwarder(&site.detail)
             {
                 site.kind = PASSED_THROUGH;
                 record_cut_site(&mut state.cut_sites, site);

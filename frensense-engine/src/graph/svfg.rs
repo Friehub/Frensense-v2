@@ -225,6 +225,12 @@ impl Svfg {
         self.nodes.get(key)
     }
 
+    /// Number of value-flow edges leaving every node in this function's
+    /// graph, for the scan telemetry's graph size.
+    pub(crate) fn edge_count(&self) -> usize {
+        self.nodes.values().map(|n| n.successors.len()).sum()
+    }
+
     /// All nodes whose `kind` matches a predicate.
     pub(crate) fn nodes_where<F: Fn(&SvfgNode) -> bool>(&self, pred: F) -> Vec<&SvfgNode> {
         self.nodes.values().filter(|n| pred(n)).collect()

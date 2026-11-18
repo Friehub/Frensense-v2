@@ -14,6 +14,15 @@ what this crate does.
 
 ### Added
 
+- `TaintFunnel` (`ScanTelemetry::funnel`): measured call-site accounting for the
+  taint phase — `calls_examined`, the three skip reasons, `not_a_sink` and
+  `sink_calls`. The counters partition every call the analysis looked at
+  (`calls_examined = skipped + not_a_sink + sink_calls`), so a scan can say how
+  much of its input never reached the sink matcher: a large `not_a_sink` is
+  vocabulary the engine never walks.
+- `GraphSize` (`ScanTelemetry::graph`): functions, value-flow nodes, edges and
+  cross-function edges of the program the taint phase walked, counted from the
+  graph it actually built rather than inferred from the input.
 - `CutSite::kind` `"passed-through"`: an external call with no analysed callee
   whose result the backward walk still followed into its arguments. It records
   an assumption rather than a stop (the library might sanitise, or might not
@@ -62,6 +71,11 @@ what this crate does.
   one pre-existing unresolved link (`scan::ModuleResolution`) was fixed.
 
 ### Changed
+
+- `CutSite` `"passed-through"` sites skip standard-library adapters (`iter`,
+  `collect`, `map`, `map_err`, ...): they forward their operands by definition,
+  so naming them buried the calls the engine genuinely has no model for.
+  Detection never consults the filter; only the explanation is narrowed.
 
 - Duplicate logic collapsed into one definition each (no behaviour change
   intended; engine tests unchanged and green):

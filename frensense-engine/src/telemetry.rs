@@ -308,6 +308,99 @@ pub struct InputAccounting {
 /// How many `parse_partial_files` paths the report keeps per scan.
 pub const PARTIAL_SAMPLE: usize = 25;
 
+/// What the program graph contained when the taint phase started walking.
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct GraphSize {
+    /// Functions in the analysed program.
+    pub functions: usize,
+    /// Value-flow nodes across every function.
+    pub nodes: usize,
+    /// Value-flow edges within functions.
+    pub edges: usize,
+    /// Call and parameter edges between functions.
+    pub cross_edges: usize,
+}
+
+/// Where call sites left the taint phase: examined, skipped before matching,
+/// matched no sink fact, or armed a sink whose arguments were then walked.
+///
+/// The counters partition the call sites, so
+/// `calls_examined = skipped_* + not_a_sink + sink_calls` for every scan, and
+/// a scan whose `not_a_sink` is large is a scan whose vocabulary the engine
+/// never walks.
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TaintFunnel {
+    /// Call instructions the analysis looked at.
+    pub calls_examined: usize,
+    /// Skipped: the callee names a local variable or closure in this function.
+    pub skipped_local_callable: usize,
+    /// Skipped: the callee is a function defined in the analysed program.
+    pub skipped_program_local: usize,
+    /// Skipped: a receiver-only verb (`get`, `post`, ...) called without a
+    /// receiver, so it cannot be a client method invocation.
+    pub skipped_receiver_only_verb: usize,
+    /// Ran the sink matcher and matched no sink fact.
+    pub not_a_sink: usize,
+    /// Matched a sink fact; its arguments were the walk's seeds.
+    pub sink_calls: usize,
+}
+
+impl GraphSize {
+    /// A measured graph size; the scan builds it, frontends read it.
+    #[must_use]
+    pub fn new(functions: usize, nodes: usize, edges: usize, cross_edges: usize) -> Self {
+        Self {
+            functions,
+            nodes,
+            edges,
+            cross_edges,
+        }
+    }
+}
+
+impl TaintFunnel {
+    /// A funnel whose counters partition `calls_examined`: the skip reasons as
+    /// `(local callable, program-local callee, receiver-only verb)`, then the
+    /// calls that matched no sink fact and the calls that armed one.
+    #[must_use]
+    pub fn new(
+        calls_examined: usize,
+        skipped: (usize, usize, usize),
+        not_a_sink: usize,
+        sink_calls: usize,
+    ) -> Self {
+        let (skipped_local_callable, skipped_program_local, skipped_receiver_only_verb) = skipped;
+        Self {
+            calls_examined,
+            skipped_local_callable,
+            skipped_program_local,
+            skipped_receiver_only_verb,
+            not_a_sink,
+            sink_calls,
+        }
+    }
+
+    /// Fold another group's funnel in: every counter adds.
+    pub fn merge(&mut self, other: &Self) {
+        self.calls_examined += other.calls_examined;
+        self.skipped_local_callable += other.skipped_local_callable;
+        self.skipped_program_local += other.skipped_program_local;
+        self.skipped_receiver_only_verb += other.skipped_receiver_only_verb;
+        self.not_a_sink += other.not_a_sink;
+        self.sink_calls += other.sink_calls;
+    }
+
+    /// Calls skipped before the matcher ran, for any of the three reasons.
+    #[must_use]
+    pub fn skipped(&self) -> usize {
+        self.skipped_local_callable + self.skipped_program_local + self.skipped_receiver_only_verb
+    }
+}
+
 /// The outcome of executing one check.
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -359,6 +452,10 @@ pub struct ScanTelemetry {
     pub input: InputAccounting,
     /// Backward-taint traversal counters (the demand-driven cost model).
     pub taint: BackwardStats,
+    /// Size of the program graph the taint phase walked.
+    pub graph: GraphSize,
+    /// Where the taint phase's call sites left the analysis.
+    pub funnel: TaintFunnel,
     /// Check-by-check execution timings, findings count, and outcomes.
     pub checks: Vec<CheckTelemetry>,
     /// Non-fatal scan errors (failed files, worker failures, unsupported input).
@@ -395,6 +492,11 @@ impl ScanTelemetry {
         self.taint.sanitized += other.taint.sanitized;
         self.taint.unknown += other.taint.unknown;
         self.taint.clean += other.taint.clean;
+        self.graph.functions += other.graph.functions;
+        self.graph.nodes += other.graph.nodes;
+        self.graph.edges += other.graph.edges;
+        self.graph.cross_edges += other.graph.cross_edges;
+        self.funnel.merge(&other.funnel);
         self.checks.extend(other.checks);
     }
 

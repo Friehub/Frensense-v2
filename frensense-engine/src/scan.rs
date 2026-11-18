@@ -781,6 +781,15 @@ pub fn scan_prepared(
     let failed_files = prepared.lower_failed_files.clone();
     let mut caps = prepared.lower_caps.clone();
     caps.extend(crate::telemetry::drain_caps());
+    // Real sizes of what the taint phase walked, and where its call sites left
+    // the analysis: measured here, never derived from another counter.
+    let graph = crate::telemetry::GraphSize::new(
+        prog.functions.len(),
+        prog.functions.iter().map(|f| f.svfg.nodes.len()).sum(),
+        prog.functions.iter().map(|f| f.svfg.edge_count()).sum(),
+        prog.cross_edges.values().map(Vec::len).sum(),
+    );
+    let funnel = engine.funnel.clone();
     let mut telemetry = ScanTelemetry {
         phases,
         slowest_files: prepared.file_timings.clone(),
@@ -800,6 +809,8 @@ pub fn scan_prepared(
             functions: prepared.irs.len(),
         },
         taint: engine.stats,
+        graph,
+        funnel,
     };
     telemetry
         .slowest_files
@@ -995,6 +1006,22 @@ app.get("/x", (req, res) => {
             passed.iter().any(|d| d.contains("read")),
             "expected the unmodelled call to be named, got {passed:?}"
         );
+        // Standard-library adapters are defined to forward; naming them says
+        // nothing and buries the call the engine actually has no model for.
+        for adapter in ["iter", "map", "collect", "any", "find", "skip"] {
+            assert!(
+                !passed.contains(&adapter),
+                "`{adapter}` is a std adapter, not a blind spot: {passed:?}"
+            );
+        }
+        // The counters partition the call sites, and `exec` is a sink.
+        let f = &result.telemetry.funnel;
+        assert_eq!(
+            f.calls_examined,
+            f.skipped() + f.not_a_sink + f.sink_calls,
+            "the funnel counters must partition the call sites: {f:?}"
+        );
+        assert!(f.sink_calls >= 1, "exec is a sink fact: {f:?}");
     }
 }
 

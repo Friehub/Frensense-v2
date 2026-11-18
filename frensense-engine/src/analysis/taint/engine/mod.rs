@@ -438,6 +438,9 @@ pub struct BackwardTaintEngine<'a> {
     pub findings: Vec<SinkFinding>,
     /// Exploration statistics.
     pub(crate) stats: BackwardStats,
+    /// Where call sites left the analysis, counted as they are examined (see
+    /// [`crate::telemetry::TaintFunnel`]).
+    pub(crate) funnel: crate::telemetry::TaintFunnel,
     /// Per-function guard maps, built lazily on first entry into the fn.
     guard_maps: FxHashMap<usize, GuardMap>,
     /// Per-function value lattices, built lazily on first walk into the fn.
@@ -626,6 +629,7 @@ impl<'a> BackwardTaintEngine<'a> {
             file_package_imports: FxHashMap::default(),
             findings: Vec::new(),
             stats: BackwardStats::default(),
+            funnel: crate::telemetry::TaintFunnel::default(),
         }
     }
 
