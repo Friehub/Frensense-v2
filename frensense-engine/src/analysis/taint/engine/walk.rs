@@ -119,9 +119,16 @@ fn record_cut(cuts: &mut Vec<&'static str>, reason: &'static str) {
 /// bounded so a wide fan-in cannot bloat every finding.
 const MAX_CUT_SITES: usize = 4;
 
+/// [`CutSite::kind`] for a call with no analysed callee that the walk flowed
+/// *through* (its arguments were followed, assuming the result carries them).
+const PASSED_THROUGH: &str = "passed-through";
+
 /// Keep stop sites distinct and bounded.
 fn record_cut_site(sites: &mut Vec<CutSite>, site: CutSite) {
-    if sites.len() < MAX_CUT_SITES
+    // Pass-throughs are context, not stops: they get their own budget so a
+    // long chain of them cannot crowd out the stop that made the verdict.
+    let same_class = |s: &&CutSite| (s.kind == PASSED_THROUGH) == (site.kind == PASSED_THROUGH);
+    if sites.iter().filter(same_class).count() < MAX_CUT_SITES
         && !sites
             .iter()
             .any(|s| s.kind == site.kind && s.function == site.function && s.detail == site.detail)
@@ -1192,6 +1199,19 @@ impl<'a> BackwardTaintEngine<'a> {
                 }
                 // Otherwise: clean root, stop.
                 continue;
+            }
+
+            // An external call whose result the walk follows into its
+            // arguments: sound only as an assumption (the library might
+            // sanitise or might not propagate), so name it.
+            if enter_call.is_some()
+                && cross_preds.is_empty()
+                && !local_preds.is_empty()
+                && let Some(mut site) = self.cut_site(cf, &cur)
+                && site.kind == "external-call"
+            {
+                site.kind = PASSED_THROUGH;
+                record_cut_site(&mut state.cut_sites, site);
             }
 
             for (pf, pk) in cross_preds {

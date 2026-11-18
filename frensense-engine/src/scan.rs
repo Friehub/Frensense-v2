@@ -703,11 +703,7 @@ pub fn scan_prepared(
                     let cfile = fn_file.get(&c.function).cloned().unwrap_or_default();
                     let cline = c
                         .span
-                        .and_then(|(start, _)| {
-                            let src = file_source.get(&cfile)?;
-                            let before = &src[..start.min(src.len())];
-                            Some(before.matches('\n').count() as u32 + 1)
-                        })
+                        .and_then(|(start, _)| Some(line_at(file_source.get(&cfile)?, start)))
                         .unwrap_or(0);
                     LocatedCutSite {
                         kind: c.kind,
@@ -744,9 +740,7 @@ pub fn scan_prepared(
                         .map_or(before.len(), |i| before.len() - i - 1)
                         as u32
                         + 1;
-                    let end_before = &source[..end.min(source.len())];
-                    let end_line = end_before.matches('\n').count() as u32 + 1;
-                    (line, col, end_line)
+                    (line, col, line_at(source, end))
                 })
                 .unwrap_or((0, 0, 0));
             Some(LocatedChecker {
@@ -930,6 +924,11 @@ pub struct LocatedChecker {
     pub end_line: u32,
 }
 
+/// 1-based line of byte `offset` in `source` (clamped to its end).
+fn line_at(source: &str, offset: usize) -> u32 {
+    source[..offset.min(source.len())].matches('\n').count() as u32 + 1
+}
+
 /// A `crate::analysis::taint::engine::CutSite` pinned to its file and line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocatedCutSite {
@@ -958,6 +957,45 @@ pub struct LocatedFinding {
     pub column: u32,
     /// Where the walk met a value it could not resolve (see `SinkFinding::cut_sites`).
     pub cut_sites: Vec<LocatedCutSite>,
+}
+
+#[cfg(test)]
+mod passed_through_tests {
+    use super::scan;
+
+    /// A clean verdict reached through a library call the engine has no model
+    /// for names that call, so silence is traceable to the missing entry.
+    #[test]
+    fn a_clean_verdict_names_the_unmodelled_call_it_flowed_through() {
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables(["ts"]);
+        let src = r#"
+app.get("/x", (req, res) => {
+  const v = mystery.read(req.params);
+  child_process.exec(v);
+});
+"#;
+        let result = scan(
+            &[(
+                "app/handler.ts".to_string(),
+                src.to_string(),
+                "ts".to_string(),
+            )],
+            &config,
+            &facts,
+        );
+        assert!(result.errors.is_empty(), "scan errors: {:?}", result.errors);
+        let passed: Vec<&str> = result
+            .located
+            .iter()
+            .flat_map(|l| l.cut_sites.iter())
+            .filter(|c| c.kind == "passed-through")
+            .map(|c| c.detail.as_str())
+            .collect();
+        assert!(
+            passed.iter().any(|d| d.contains("read")),
+            "expected the unmodelled call to be named, got {passed:?}"
+        );
+    }
 }
 
 #[cfg(test)]

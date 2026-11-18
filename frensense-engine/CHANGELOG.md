@@ -14,6 +14,12 @@ what this crate does.
 
 ### Added
 
+- `CutSite::kind` `"passed-through"`: an external call with no analysed callee
+  whose result the backward walk still followed into its arguments. It records
+  an assumption rather than a stop (the library might sanitise, or might not
+  carry them), so a silent verdict can name the call that hid the missing
+  source. Pass-throughs keep their own budget, so a long chain of them can
+  never displace the stop site that decided the verdict.
 - `Instruction::dest`, `Instruction::mem_out` and `Instruction::defs`: the single
   definition of which variables an instruction defines. Both matches are
   exhaustive, so a new instruction kind has to be classified.

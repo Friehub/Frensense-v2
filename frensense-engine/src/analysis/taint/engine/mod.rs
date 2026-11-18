@@ -92,7 +92,9 @@ pub enum FindingClass {
 /// resolve: the concrete, actionable half of the `"unresolvable"` cut reason.
 ///
 /// `kind` is one of `"external-call"` (result of a call with no analysed
-/// callee: `detail` is the callee), `"param-no-caller"` (formal parameter no
+/// callee: `detail` is the callee), `"passed-through"` (an `external-call` the walk
+/// followed into its arguments rather than stopping at: not a stop, but an
+/// assumption that the result carries them), `"param-no-caller"` (formal parameter no
 /// analysed call site feeds: `detail` is the parameter name), `"global"`
 /// (`LoadGlobal`), `"pointer-deref"` or `"indirect-call"`.
 ///
