@@ -150,6 +150,29 @@ app.post("/a", async (req, res) => {
     assert!(vulnerable(&run("ts", "app/n.ts", src), "exec"));
 }
 
+/// A nested pattern is the flat form written twice, so the intermediate part
+/// is the variable that form would have named: `{ body: { name } }` means
+/// `const { body } = x; const { name } = body`. Leaving the intermediate
+/// anonymous hid a name the vocabulary knows (a variable named `body` is a
+/// request body), so the reported shape stayed `Unknown`.
+#[test]
+fn nested_destructured_parameter_keeps_the_part_name() {
+    let src = r#"
+export function t({ body: { name } }: any) { eval(name); }
+"#;
+    assert!(vulnerable(&run("ts", "app/b.ts", src), "eval"));
+}
+
+/// Keeping the part name must not manufacture a source: a part whose name is
+/// not vocabulary, with nothing tainted above it, stays silent.
+#[test]
+fn nested_destructured_parameter_of_an_unknown_object_stays_silent() {
+    let src = r#"
+export function t({ opts: { cmd } }: any) { eval(cmd); }
+"#;
+    assert!(!vulnerable(&run("ts", "app/u.ts", src), "eval"));
+}
+
 /// `...parts` wraps the name. Binding the parameter under the text `...parts`
 /// left the body's `parts` an undeclared name, so a rest parameter's argument
 /// never reached its uses (0 findings).

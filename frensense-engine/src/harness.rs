@@ -808,8 +808,8 @@ function run({ body: { name } }: any, [first]: string[], ...rest: string[]) {}
         assert_eq!(
             loads,
             vec![
-                // The intermediate part has no source name; the inner name does.
-                ("body".to_string(), String::new()),
+                // The intermediate is the flat form's `body` binding.
+                ("body".to_string(), "body".to_string()),
                 ("name".to_string(), "name".to_string()),
             ],
             "nested pattern must load each part: {loads:?}"

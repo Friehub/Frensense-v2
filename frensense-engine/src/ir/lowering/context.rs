@@ -277,6 +277,18 @@ impl<'a> LoweringContext<'a> {
         })
     }
 
+    /// Fresh temporary that also records the name the source program gives the
+    /// value it stands for, so name-based vocabulary can see it.
+    pub(crate) fn new_named_temp(&mut self, node: Node, name: Option<String>) -> VarId {
+        let temp = self.new_temp(node);
+        if let Some(name) = name
+            && let Some(meta) = self.ir.var_metadata.get_mut(&temp)
+        {
+            meta.source_name = Some(name);
+        }
+        temp
+    }
+
     /// Generic child walk shared by degenerate shapes (returns the last
     /// child operand, same semantics as the catch-all arm).
     pub(crate) fn visit_children_generic(&mut self, node: Node) -> Option<Operand> {

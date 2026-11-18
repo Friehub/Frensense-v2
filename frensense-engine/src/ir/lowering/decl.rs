@@ -233,9 +233,15 @@ impl<'a> LoweringContext<'a> {
                 _ => (Some(part), Some(part)),
             };
             let Some(target) = target else { continue };
+            let part_name = key.map(|k| self.source[k.start_byte()..k.end_byte()].to_string());
             let nested = self.is_destructuring_pattern(target.kind());
             let dest = if nested {
-                self.new_temp(target)
+                // A nested pattern is the flat form written twice:
+                // `{ body: { name } }` means `const { body } = x; const {
+                // name } = body`. The intermediate carries the part's name so
+                // name vocabulary (a variable named `body` is a request body)
+                // sees the variable the flat form would have created.
+                self.new_named_temp(target, part_name.clone())
             } else {
                 let Operand::Var(dest) = self.resolve_identifier(target) else {
                     continue;
@@ -243,7 +249,7 @@ impl<'a> LoweringContext<'a> {
                 dest
             };
             self.mark_declared(dest);
-            let load = match key {
+            let load = match part_name {
                 None => Instruction::Assign {
                     dest,
                     src: Operand::Var(base),
@@ -255,11 +261,11 @@ impl<'a> LoweringContext<'a> {
                     base,
                     index: Operand::Unknown,
                 },
-                Some(k) => Instruction::LoadField {
+                Some(field) => Instruction::LoadField {
                     dest,
                     mem_in: self.memory_var,
                     base,
-                    field: self.source[k.start_byte()..k.end_byte()].to_string(),
+                    field,
                 },
             };
             self.ir.push_instruction(self.current_block, load);

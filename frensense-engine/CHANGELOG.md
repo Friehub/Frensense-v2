@@ -44,6 +44,16 @@ what this crate does.
 
 ### Fixed
 
+- **A nested destructuring pattern keeps the name of each part.** `{ body: {
+  name } }` is the flat form written twice (`const { body } = x; const { name }
+  = body`), but the intermediate part was an anonymous temporary, so name
+  vocabulary never saw it: a variable named `body` is the request body, and
+  hiding that name left a bare `export function t({ body: { name } }: any)`
+  `Undecided` while `const { body } = x; const { name } = body` was reported.
+  The intermediate now records its part's name, so the two spellings agree;
+  a part whose name is not vocabulary (`{ opts: { cmd } }`) still stays silent.
+  Measured on the reported shape: **0 findings before, 1 (code injection)
+  after**.
 - **Destructured and rest parameters bind the names inside them.** `bind_params`
   bound one variable per parameter node and named it after the node's text, so
   `function run({ h }: Opts)` produced a single parameter named `{ h }` while
