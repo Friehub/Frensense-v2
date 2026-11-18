@@ -323,6 +323,30 @@ pub struct GraphSize {
     pub cross_edges: usize,
 }
 
+/// One callee the sink matcher ran on and rejected, with how often it was
+/// called.
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct UnmatchedCallee {
+    /// Callee name as the matcher saw it (a package symbol when the call is
+    /// an import).
+    pub callee: String,
+    /// Call sites that named it and matched no sink fact.
+    pub calls: usize,
+}
+
+impl UnmatchedCallee {
+    /// A callee name and how often the matcher rejected it.
+    #[must_use]
+    pub fn new(callee: impl Into<String>, calls: usize) -> Self {
+        Self {
+            callee: callee.into(),
+            calls,
+        }
+    }
+}
+
 /// Where call sites left the taint phase: examined, skipped before matching,
 /// matched no sink fact, or armed a sink whose arguments were then walked.
 ///
@@ -347,6 +371,26 @@ pub struct TaintFunnel {
     pub not_a_sink: usize,
     /// Matched a sink fact; its arguments were the walk's seeds.
     pub sink_calls: usize,
+    /// The callees behind `not_a_sink`, with their call counts. Bounded at 32
+    /// distinct names while scanning; see [`TaintFunnel::top_unmatched`] for
+    /// the busiest few.
+    pub unmatched_callees: Vec<UnmatchedCallee>,
+}
+
+/// Distinct unmatched callees one funnel keeps while scanning. Bounded
+/// because [`TaintFunnel::record_unmatched`] runs per call site: a lookup over
+/// a few dozen names stays cheap, and names past the bound are still counted
+/// in `not_a_sink`.
+const MISSED_CALLEE_TRACKED: usize = 32;
+
+/// Unmatched callees [`TaintFunnel::top_unmatched`] reports: the busiest
+/// handful, so a wide vocabulary does not print a page of one-call names.
+const MISSED_CALLEE_SAMPLE: usize = 8;
+
+/// Busiest first; the name breaks ties so two reports of the same scan print
+/// the same order.
+fn busiest_first(a: &UnmatchedCallee, b: &UnmatchedCallee) -> std::cmp::Ordering {
+    b.calls.cmp(&a.calls).then_with(|| a.callee.cmp(&b.callee))
 }
 
 impl GraphSize {
@@ -389,7 +433,37 @@ impl TaintFunnel {
             skipped_receiver_only_verb,
             not_a_sink,
             sink_calls,
+            unmatched_callees: Vec::new(),
         }
+    }
+
+    /// Record one call site that ran the sink matcher and matched no sink
+    /// fact, keeping a running count per callee name.
+    ///
+    /// The tracked list holds the first 32 distinct names seen; a call to a
+    /// name past that bound is still counted in [`Self::not_a_sink`], because
+    /// the total is what the funnel partitions on.
+    pub fn record_unmatched(&mut self, callee: &str) {
+        self.not_a_sink += 1;
+        if let Some(entry) = self
+            .unmatched_callees
+            .iter_mut()
+            .find(|entry| entry.callee == callee)
+        {
+            entry.calls += 1;
+        } else if self.unmatched_callees.len() < MISSED_CALLEE_TRACKED {
+            self.unmatched_callees.push(UnmatchedCallee::new(callee, 1));
+        }
+    }
+
+    /// The busiest callees that matched no sink fact, most calls first and
+    /// the name as the tie-break, at most eight of them.
+    #[must_use]
+    pub fn top_unmatched(&self) -> Vec<&UnmatchedCallee> {
+        let mut top: Vec<&UnmatchedCallee> = self.unmatched_callees.iter().collect();
+        top.sort_by(|a, b| busiest_first(a, b));
+        top.truncate(MISSED_CALLEE_SAMPLE);
+        top
     }
 
     /// Fold another group's funnel in: every counter adds.
@@ -399,6 +473,19 @@ impl TaintFunnel {
         self.skipped_program_local += other.skipped_program_local;
         self.skipped_receiver_only_verb += other.skipped_receiver_only_verb;
         self.not_a_sink += other.not_a_sink;
+        for entry in &other.unmatched_callees {
+            match self
+                .unmatched_callees
+                .iter_mut()
+                .find(|seen| seen.callee == entry.callee)
+            {
+                Some(seen) => seen.calls += entry.calls,
+                None => self.unmatched_callees.push(entry.clone()),
+            }
+        }
+        // Two wide groups can exceed the bound together; keep the busiest.
+        self.unmatched_callees.sort_by(busiest_first);
+        self.unmatched_callees.truncate(MISSED_CALLEE_TRACKED);
         self.sink_calls += other.sink_calls;
     }
 
@@ -618,7 +705,10 @@ pub(crate) fn millis_since(start: std::time::Instant) -> u128 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cap, GraphSize, ScanTelemetry, TaintFunnel, drain_caps};
+    use super::{
+        Cap, GraphSize, MISSED_CALLEE_SAMPLE, MISSED_CALLEE_TRACKED, ScanTelemetry, TaintFunnel,
+        drain_caps,
+    };
 
     /// The CLI scans one group per language family and merges the results: a
     /// group that walked no calls must not erase another group's counters, and
@@ -658,6 +748,68 @@ mod tests {
         a.merge(ScanTelemetry::default());
         assert_eq!(a.graph.nodes, 30);
         assert_eq!(a.funnel.calls_examined, 20);
+    }
+
+    /// The funnel names the callees it rejected, and a per-group fold sums
+    /// the same name instead of duplicating it.
+    #[test]
+    fn the_funnel_names_and_merges_the_callees_it_rejected() {
+        let mut a = TaintFunnel::default();
+        a.record_unmatched("read");
+        a.record_unmatched("read");
+        a.record_unmatched("noop");
+
+        let mut b = TaintFunnel::default();
+        b.record_unmatched("read");
+        b.record_unmatched("deserialize");
+
+        a.merge(&b);
+
+        assert_eq!(a.not_a_sink, 5);
+        let top: Vec<(&str, usize)> = a
+            .top_unmatched()
+            .into_iter()
+            .map(|entry| (entry.callee.as_str(), entry.calls))
+            .collect();
+        assert_eq!(
+            top,
+            vec![("read", 3), ("deserialize", 1), ("noop", 1)],
+            "busiest first, then by name: {top:?}"
+        );
+    }
+
+    /// The tracked list is bounded so a wide vocabulary cannot turn every
+    /// report into a name dump; the count it explains is not.
+    #[test]
+    fn the_tracked_callee_list_is_bounded_and_the_count_is_not() {
+        let mut wide = TaintFunnel::default();
+        for i in 0..(MISSED_CALLEE_TRACKED + 5) {
+            wide.record_unmatched(&format!("callee_{i}"));
+        }
+        assert_eq!(
+            wide.not_a_sink,
+            MISSED_CALLEE_TRACKED + 5,
+            "every rejected call is counted, even when its name is not kept"
+        );
+        assert_eq!(wide.unmatched_callees.len(), MISSED_CALLEE_TRACKED);
+        assert_eq!(
+            wide.top_unmatched().len(),
+            MISSED_CALLEE_SAMPLE,
+            "the report keeps only the busiest handful"
+        );
+
+        // Folding a second wide group in cannot grow the list past the bound.
+        let mut other = TaintFunnel::default();
+        for i in 0..MISSED_CALLEE_TRACKED {
+            other.record_unmatched(&format!("other_{i}"));
+        }
+        wide.merge(&other);
+        assert_eq!(wide.unmatched_callees.len(), MISSED_CALLEE_TRACKED);
+        assert_eq!(
+            wide.top_unmatched()[0].callee,
+            "callee_0",
+            "every count is tied, so the name decides the order"
+        );
     }
 
     /// The caps that used to truncate silently must reach the report with

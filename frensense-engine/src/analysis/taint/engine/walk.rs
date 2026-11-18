@@ -813,7 +813,7 @@ impl<'a> BackwardTaintEngine<'a> {
             language,
             has_receiver,
         ) {
-            self.funnel.not_a_sink += 1;
+            self.funnel.record_unmatched(effective_name);
             return;
         }
         self.funnel.sink_calls += 1;

@@ -20,6 +20,12 @@ what this crate does.
   (`calls_examined = skipped + not_a_sink + sink_calls`), so a scan can say how
   much of its input never reached the sink matcher: a large `not_a_sink` is
   vocabulary the engine never walks.
+- `TaintFunnel::unmatched_callees` / `record_unmatched`: the callees the sink
+  matcher ran on and rejected, with how often each was called, so a large
+  `not_a_sink` can name the vocabulary behind it instead of only counting it.
+  `top_unmatched` returns the busiest eight in a stable order; the tracked list
+  is bounded at 32 distinct names, and calls past that bound still land in
+  `not_a_sink`, so the partition is unaffected.
 - `GraphSize` (`ScanTelemetry::graph`): functions, value-flow nodes, edges and
   cross-function edges of the program the taint phase walked, counted from the
   graph it actually built rather than inferred from the input.

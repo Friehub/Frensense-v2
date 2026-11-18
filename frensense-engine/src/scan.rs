@@ -1022,6 +1022,12 @@ app.get("/x", (req, res) => {
             "the funnel counters must partition the call sites: {f:?}"
         );
         assert!(f.sink_calls >= 1, "exec is a sink fact: {f:?}");
+        // The rejected calls are named, not only counted, so the pipeline
+        // block can point at the vocabulary to teach.
+        assert!(
+            f.unmatched_callees.iter().any(|u| u.callee == "read"),
+            "the unmodelled callee must be named in the funnel: {f:?}"
+        );
     }
 }
 
