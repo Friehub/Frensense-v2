@@ -58,7 +58,7 @@ needless_pass_by_value = "warn"
 
 [package]
 name = "frensense"
-version = "0.8.3"
+version = "0.9.0"
 authors = ["Friehub Developers"]
 edition = "2024"
 description = "Frensense: deterministic dataflow security scanner."

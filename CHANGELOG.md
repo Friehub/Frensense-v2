@@ -19,7 +19,7 @@ Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
 
-## [0.8.3]
+## [0.9.0]
 
 ### Added
 
