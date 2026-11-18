@@ -78,12 +78,15 @@ impl SinkSignature {
     /// ```
     /// use frensense_engine::analysis::taint::facts::SinkSignature;
     ///
-    /// // No explicit slots: every slot is dangerous.
+    /// // No explicit slots: every *argument* is dangerous.
     /// assert!(SinkSignature::all_args("eval").is_dangerous(3));
     /// // Explicit slots: only those.
     /// let sig = SinkSignature::with_args("query", &[0]);
     /// assert!(sig.is_dangerous(0));
     /// assert!(!sig.is_dangerous(1));
+    /// // The receiver (`usize::MAX`) is a slot like any other here; the walk
+    /// // reports it only when it is actually tainted (see `explore_sink_args`).
+    /// assert!(SinkSignature::all_args("write").is_dangerous(usize::MAX));
     /// ```
     pub fn is_dangerous(&self, slot: usize) -> bool {
         self.dangerous_args.is_empty() || self.dangerous_args.contains(&slot)
