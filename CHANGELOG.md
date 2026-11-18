@@ -19,9 +19,66 @@ Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
 
-## [0.8.3]
+## [0.9.0]
+
+### Added
+
+- **The scan summary lists every stage the scan went through** (parse and
+  lower, graph, checks, taint, report) with what each consumed and produced, so
+  an empty or slow stage is visible without a flag. Each figure is measured:
+  the graph line counts the value-flow nodes, edges and cross-function edges the
+  taint phase walked, and the taint line follows the call sites
+  (`1,889 call(s) -> 17 sink call(s) -> 23 argument(s) walked`). The same
+  numbers are in the JSON report under `analysis.graph` and
+  `analysis.funnel`.
+- **`--explain` names the library calls the walk flowed through.** A flow that
+  ends without a source may have crossed a call the engine has no model for;
+  the backward walk follows such a call into its arguments on the assumption
+  that its result carries them. The report now prints those as
+  `flowed through: \`callee\`` instead of folding them into the stop sites, and
+  the reason names them, so silence caused by a missing source or propagation
+  entry is traceable to the call that hid it.
+- A method call's receiver reads as `receiver` rather than a 20-digit slot
+  number, in the `--explain` text and as the new `arg` field of
+  `--explain-json`.
+- `--explain` prints the pipeline behind the summary's taint line: how many
+  call sites were skipped before matching (and why), how many matched no sink
+  fact, how many armed a sink, and how many findings each reporting-gate reason
+  dropped. Standard-library adapters (`iter`, `collect`, `map_err`, ...) are no
+  longer named as flowed-through calls, so that list is the library calls the
+  engine really has no model for. The pipeline block also prints the busiest
+  callees that matched no sink fact with their call counts, so `not_a_sink`
+  points at the vocabulary to teach rather than only a number; the same list is
+  under `analysis.funnel.unmatched_callees` in the JSON report.
+
+### Changed
+
+#### Repository & Release Tooling
+
+- **The clippy debt baseline records what the refactor removed.** Four
+  functions the `too_many_lines` lint flagged were split along the seams they
+  already had (`Steensgaard::analyze`'s field-representative synthesis,
+  `Svfg`'s formal-parameter registration, `ProgramSvfg`'s object-root cache,
+  `LoweringContext::visit_composite`'s child lowering), which took
+  `frensense-engine::clippy::too_many_lines` from 25 to 20 sites and
+  `indexing_slicing` from 177 to 168. `clippy-ratchet.py --update` rewrote
+  `.github/scripts/clippy-baseline.json` with the measured counts (973 sites in
+  62 pairs), so the removed debt cannot creep back in unnoticed. Deleting the
+  forward engine's 1,343 test lines (#147) then took the total to 969
+  (`indexing_slicing` 168 → 164).
 
 ### Fixed
+
+- **Sinks the binder and the sink matcher used to drop now report.** A scan
+  reaches values it could not bind before - a destructured or rest parameter
+  (`function run({ h }: Opts)`), a destructuring assignment (`({ a } = rhs)`),
+  a nested pattern, and a Go parameter, which was never bound at all, so
+  `*http.Request` never reached the source classifier - and matches a sink
+  written as a property assignment (`el.innerHTML = user`) or a JSX attribute
+  (`<div dangerouslySetInnerHTML={{ __html: user }} />`), which the sink matcher
+  did not look at. Each shape is **0 -> 1** finding on its reported
+  reproduction, with its static counterpart staying clean; the mechanism and
+  the per-shape measurements are recorded in `frensense-engine/CHANGELOG.md`.
 
 - **`--severity` and the MCP `severity_threshold` accept the same six labels,
   and reject anything else.** The two surfaces previously had different
@@ -40,6 +97,26 @@ harness and keeps no changelog.
   `info` instead of `warning`. A matched bundle pattern still overlays both.
   The mechanism is recorded in `frensense-engine/CHANGELOG.md` and the shared
   vocabulary in `frensense-lang/CHANGELOG.md`.
+
+### Removed
+
+Code in the consumer library with no caller anywhere (verified by search over
+every crate and the binary), plus thin wrappers that only tests reached, so
+that tests now exercise the function production calls:
+
+- `Reporter::to_markdown` and `to_markdown_detailed` (no output format used them).
+- `Reporter::to_sarif`, `to_sarif_detailed` and `describe_path_step`: use
+  `to_sarif_with_coverage` and `describe_step`.
+- `cli::reporting::{print_results, print_results_detailed, print_results_with_skips,
+  print_scan_summary, print_scan_summary_detailed, json_report,
+  json_report_with_telemetry}` and the empty stub `apply_filters`: use
+  `print_results_with_coverage`, `print_scan_summary_detailed_with_coverage`
+  and `json_report_with_coverage`.
+- `cli::options::get_input_path` (use `get_input_paths`).
+- The orphaned `frensense-providers` crate (1,558 lines, not a workspace member
+  and importing engine modules that no longer exist, so it could not compile).
+  It is recoverable from git history; a replacement should be designed against
+  the current engine rather than revived from that tree.
 
 ## [0.8.2]
 

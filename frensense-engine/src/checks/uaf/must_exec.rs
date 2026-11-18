@@ -12,27 +12,7 @@ use crate::ir::function::{BlockId, FunctionIR};
 /// at least one source block. Optimistic init (`in = true` for non-entry
 /// blocks) converges downward; `do { free } while` fires, `while (c) free`
 /// after the loop stays silent (0-iteration path).
-///
-/// ```
-/// use frensense_engine::checks::uaf::must_exec::must_out;
-/// use frensense_engine::ir::function::FunctionIR;
-///
-/// let mut ir = FunctionIR::new("f".into());
-/// let entry = ir.entry_block;
-/// let (then_b, else_b, merge) = (ir.new_block(), ir.new_block(), ir.new_block());
-/// ir.add_edge(entry, then_b);
-/// ir.add_edge(entry, else_b);
-/// ir.add_edge(then_b, merge);
-/// ir.add_edge(else_b, merge);
-///
-/// let out = must_out(&ir, &[then_b, else_b]);
-/// assert!(out[&then_b] && out[&else_b]);
-/// // Every path into `merge` went through a source, so its end does too.
-/// assert!(out[&merge]);
-/// // The entry has not passed a source yet.
-/// assert!(!out[&entry]);
-/// ```
-pub fn must_out(ir: &FunctionIR, sources: &[BlockId]) -> FxHashMap<BlockId, bool> {
+pub(crate) fn must_out(ir: &FunctionIR, sources: &[BlockId]) -> FxHashMap<BlockId, bool> {
     let mut preds: FxHashMap<BlockId, Vec<BlockId>> = FxHashMap::default();
     for (&b, blk) in &ir.blocks {
         for s in &blk.successors {
@@ -77,60 +57,13 @@ pub fn must_out(ir: &FunctionIR, sources: &[BlockId]) -> FxHashMap<BlockId, bool
 
 /// True when every execution path to `to` passes through `from` (strict
 /// must-reach; if `from` is unreachable this returns `false`).
-///
-/// ```
-/// use frensense_engine::checks::uaf::must_exec::must_reach;
-/// use frensense_engine::ir::function::FunctionIR;
-///
-/// // entry -> {then, else} -> merge
-/// let mut ir = FunctionIR::new("f".into());
-/// let entry = ir.entry_block;
-/// let (then_b, else_b, merge) = (ir.new_block(), ir.new_block(), ir.new_block());
-/// ir.add_edge(entry, then_b);
-/// ir.add_edge(entry, else_b);
-/// ir.add_edge(then_b, merge);
-/// ir.add_edge(else_b, merge);
-///
-/// // One arm alone is not on every path to the merge block.
-/// assert!(!must_reach(&ir, then_b, merge));
-/// // The entry block is.
-/// assert!(must_reach(&ir, entry, then_b));
-/// ```
-pub fn must_reach(ir: &FunctionIR, from: BlockId, to: BlockId) -> bool {
-    let outs = must_out(ir, &[from]);
-    let mut preds: FxHashMap<BlockId, Vec<BlockId>> = FxHashMap::default();
-    for (&b, blk) in &ir.blocks {
-        for s in &blk.successors {
-            preds.entry(*s).or_default().push(b);
-        }
-    }
-    match preds.get(&to) {
-        Some(ps) if !ps.is_empty() => ps.iter().all(|p| outs.get(p).copied().unwrap_or(false)),
-        _ => false,
-    }
+pub(crate) fn must_reach(ir: &FunctionIR, from: BlockId, to: BlockId) -> bool {
+    must_reach_any(ir, to, &[from])
 }
 
 /// Collective domination: true when every execution path to `to` passes
 /// through at least one block in `sources` (e.g. free on every branch of a diamond).
-///
-/// ```
-/// use frensense_engine::checks::uaf::must_exec::must_reach_any;
-/// use frensense_engine::ir::function::FunctionIR;
-///
-/// let mut ir = FunctionIR::new("f".into());
-/// let entry = ir.entry_block;
-/// let (then_b, else_b, merge) = (ir.new_block(), ir.new_block(), ir.new_block());
-/// ir.add_edge(entry, then_b);
-/// ir.add_edge(entry, else_b);
-/// ir.add_edge(then_b, merge);
-/// ir.add_edge(else_b, merge);
-///
-/// // Both arms together cover every path to the merge block ...
-/// assert!(must_reach_any(&ir, merge, &[then_b, else_b]));
-/// // ... one arm does not.
-/// assert!(!must_reach_any(&ir, merge, &[then_b]));
-/// ```
-pub fn must_reach_any(ir: &FunctionIR, to: BlockId, sources: &[BlockId]) -> bool {
+pub(crate) fn must_reach_any(ir: &FunctionIR, to: BlockId, sources: &[BlockId]) -> bool {
     let outs = must_out(ir, sources);
     let mut preds: FxHashMap<BlockId, Vec<BlockId>> = FxHashMap::default();
     for (&b, blk) in &ir.blocks {
@@ -147,7 +80,7 @@ pub fn must_reach_any(ir: &FunctionIR, to: BlockId, sources: &[BlockId]) -> bool
 /// True when every normal exit of the callee passes at least one of the
 /// collected free blocks (the callee definitely frees the parameter before
 /// returning to the caller).
-pub fn callee_always_frees(
+pub(crate) fn callee_always_frees(
     prog: &ProgramSvfg<'_>,
     callee_fi: usize,
     free_blocks: &FxHashSet<BlockId>,
@@ -168,4 +101,67 @@ pub fn callee_always_frees(
         }
     }
     exits > 0
+}
+
+#[cfg(test)]
+/// Assertions lifted from the doc examples of items that are now
+/// crate-private; a doctest cannot see them.
+mod doc_examples {
+    #[test]
+    fn doc_example_must_reach_any() {
+        use crate::checks::uaf::must_exec::must_reach_any;
+        use crate::ir::function::FunctionIR;
+
+        let mut ir = FunctionIR::new("f".into());
+        let entry = ir.entry_block;
+        let (then_b, else_b, merge) = (ir.new_block(), ir.new_block(), ir.new_block());
+        ir.add_edge(entry, then_b);
+        ir.add_edge(entry, else_b);
+        ir.add_edge(then_b, merge);
+        ir.add_edge(else_b, merge);
+
+        // Both arms together cover every path to the merge block ...
+        assert!(must_reach_any(&ir, merge, &[then_b, else_b]));
+        // ... one arm does not.
+        assert!(!must_reach_any(&ir, merge, &[then_b]));
+    }
+    #[test]
+    fn doc_example_must_reach() {
+        use crate::checks::uaf::must_exec::must_reach;
+        use crate::ir::function::FunctionIR;
+
+        // entry -> {then, else} -> merge
+        let mut ir = FunctionIR::new("f".into());
+        let entry = ir.entry_block;
+        let (then_b, else_b, merge) = (ir.new_block(), ir.new_block(), ir.new_block());
+        ir.add_edge(entry, then_b);
+        ir.add_edge(entry, else_b);
+        ir.add_edge(then_b, merge);
+        ir.add_edge(else_b, merge);
+
+        // One arm alone is not on every path to the merge block.
+        assert!(!must_reach(&ir, then_b, merge));
+        // The entry block is.
+        assert!(must_reach(&ir, entry, then_b));
+    }
+    #[test]
+    fn doc_example_must_out() {
+        use crate::checks::uaf::must_exec::must_out;
+        use crate::ir::function::FunctionIR;
+
+        let mut ir = FunctionIR::new("f".into());
+        let entry = ir.entry_block;
+        let (then_b, else_b, merge) = (ir.new_block(), ir.new_block(), ir.new_block());
+        ir.add_edge(entry, then_b);
+        ir.add_edge(entry, else_b);
+        ir.add_edge(then_b, merge);
+        ir.add_edge(else_b, merge);
+
+        let out = must_out(&ir, &[then_b, else_b]);
+        assert!(out[&then_b] && out[&else_b]);
+        // Every path into `merge` went through a source, so its end does too.
+        assert!(out[&merge]);
+        // The entry has not passed a source yet.
+        assert!(!out[&entry]);
+    }
 }

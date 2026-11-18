@@ -12,6 +12,17 @@ use crate::policy::reports_finding;
 use frensense_engine::analysis::taint::engine::BackwardVerdict;
 use frensense_engine::scan::{LocatedCutSite, LocatedFinding};
 
+/// How a sink argument slot reads to a person: the receiver of a method call
+/// is stored as `usize::MAX`, which must never reach the screen as a number.
+#[must_use]
+pub(crate) fn slot_label(slot: usize) -> String {
+    if slot == frensense_engine::graph::svfg::RECEIVER_ARG_INDEX {
+        "receiver".to_string()
+    } else {
+        format!("arg {slot}")
+    }
+}
+
 /// One explored sink argument that did NOT become an advisory, with the
 /// reason the engine stayed silent. Collected under `--explain` so users
 /// can see *where* analysis stopped - the "engine limitation" map.
@@ -55,6 +66,7 @@ impl ExplainRecord {
             "function": self.function,
             "sink": self.sink,
             "arg_slot": self.arg_slot,
+            "arg": slot_label(self.arg_slot),
             "verdict": self.verdict,
             "cut_reasons": self.cut_reasons,
             "reason": self.reason,
@@ -121,14 +133,32 @@ pub fn explain_silent(loc: &LocatedFinding) -> Option<ExplainRecord> {
         (
             "safe-channel".to_string(),
             format!(
-                "taint reaches `{}` but argument {} is a safe (non-injection) channel",
-                f.sink, f.arg_slot
+                "taint reaches `{}` but its {} is a safe (non-injection) channel",
+                f.sink,
+                slot_label(f.arg_slot)
             ),
         )
     } else {
         (
             verdict_label(&f.verdict).to_string(),
             cut_summary(&f.cut_reasons),
+        )
+    };
+    // A flow that ended without a source may have crossed library calls the
+    // engine has no model for: name them, since a missing source or
+    // propagation entry for one of them is the usual reason for silence.
+    let passed: Vec<String> = loc
+        .cut_sites
+        .iter()
+        .filter(|c| c.kind == "passed-through")
+        .map(|c| format!("`{}`", c.detail))
+        .collect();
+    let reason = if passed.is_empty() || f.verdict == BackwardVerdict::Vulnerable {
+        reason
+    } else {
+        format!(
+            "{reason}; the walk assumed {} carries its arguments into the result - if one of them is where request data enters, no source is modelled for it",
+            passed.join(", ")
         )
     };
     Some(ExplainRecord {
@@ -178,6 +208,20 @@ mod explain_tests {
             column: 1,
             cut_sites: Vec::new(),
         }
+    }
+
+    #[test]
+    fn the_receiver_slot_reads_as_receiver() {
+        assert_eq!(slot_label(0), "arg 0");
+        assert_eq!(
+            slot_label(frensense_engine::graph::svfg::RECEIVER_ARG_INDEX),
+            "receiver"
+        );
+        // The JSON carries both the raw slot and the label.
+        let record = explain_silent(&loc(BackwardVerdict::Clean, None, vec!["value-const"]))
+            .expect("a silent finding is explained");
+        let json = record.to_json();
+        assert_eq!(json["arg"], "arg 0");
     }
 
     #[test]

@@ -102,12 +102,12 @@ export function handler (cmd: string) {
     }
 
     const RUST_QUALIFIED_POSITIVE: &str = r#"
-pub fn wipe(vol: &Volume) {
+pub(crate) fn wipe(vol: &Volume) {
     storage::ops::wipe_volume(vol);
 }
 "#;
     const RUST_QUALIFIED_NEGATIVE: &str = r#"
-pub fn wipe(vol: &Volume) {
+pub(crate) fn wipe(vol: &Volume) {
     ensure_owner(&vol);
     storage::ops::wipe_volume(vol);
 }

@@ -23,7 +23,7 @@ use crate::ir::function::{FunctionIR, Instruction, Operand, VarId};
 
 /// A pointer-equivalence class produced by unification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ClassId(pub usize);
+pub(crate) struct ClassId(pub usize);
 
 /// Union-find over variable ids with path compression + union by size.
 #[derive(Debug, Default)]
@@ -70,7 +70,7 @@ impl UnionFind {
 /// The result of Steensgaard unification over one function: variable →
 /// equivalence class, plus the class membership lists.
 #[derive(Debug, Default)]
-pub struct Steensgaard {
+pub(crate) struct Steensgaard {
     /// Class of each participating variable.
     pub class_of: FxHashMap<VarId, ClassId>,
     /// Members per class (for phase-2 restricted Andersen).
@@ -88,27 +88,7 @@ impl Steensgaard {
     ///   field structure survives: two loads of the same base.field land in
     ///   the same class, loads of different fields stay separate at this
     ///   stage (phase 2 refines).
-    ///
-    /// ```
-    /// use frensense_engine::graph::steensgaard::Steensgaard;
-    /// use frensense_engine::harness::lower_source;
-    ///
-    /// let fns = lower_source("t.ts", "function g(a: any) { const b = a; const c = 5; return b }", "ts").unwrap();
-    /// let g = &fns["g"];
-    /// let var = |name: &str| {
-    ///     *g.var_metadata
-    ///         .iter()
-    ///         .find(|(_, m)| m.source_name.as_deref() == Some(name))
-    ///         .map(|(v, _)| v)
-    ///         .unwrap()
-    /// };
-    /// let classes = Steensgaard::analyze(g);
-    /// // `const b = a` unifies `b` with `a`.
-    /// assert_eq!(classes.class_of[&var("a")], classes.class_of[&var("b")]);
-    /// // `c` is assigned a literal, so it is not unified with them.
-    /// assert_ne!(classes.class_of.get(&var("c")), classes.class_of.get(&var("a")));
-    /// ```
-    pub fn analyze(ir: &FunctionIR) -> Self {
+    pub(crate) fn analyze(ir: &FunctionIR) -> Self {
         let mut uf = UnionFind::default();
         let mut field_var: FxHashMap<(VarId, String), VarId> = FxHashMap::default();
         let mut next_synthetic = ir
@@ -119,27 +99,6 @@ impl Steensgaard {
             .max()
             .unwrap_or(0)
             + 1000;
-
-        // Represent a (base, field) access by a synthetic variable so
-        // equality constraints on field reads/writes unify correctly.
-        let field_rep = |uf: &mut UnionFind,
-                         field_var: &mut FxHashMap<(VarId, String), VarId>,
-                         next: &mut usize,
-                         base: VarId,
-                         field: &str|
-         -> VarId {
-            let key = (base, field.to_string());
-            if let Some(&v) = field_var.get(&key) {
-                return v;
-            }
-            let v = VarId(*next);
-            *next += 1;
-            field_var.insert(key, v);
-            uf.find(v.0);
-            // The field access points into the base's class neighborhood:
-            // unify with nothing by default; constraints drive merging.
-            v
-        };
 
         // Seed: every parameter and allocated var is its own class root.
         for &p in &ir.parameters {
@@ -246,13 +205,69 @@ impl Steensgaard {
     }
 
     /// Equivalence class of `v`, if it participates in any constraint.
-    pub fn class_of(&self, v: VarId) -> Option<ClassId> {
+    pub(crate) fn class_of(&self, v: VarId) -> Option<ClassId> {
         self.class_of.get(&v).copied()
     }
+}
+
+/// The synthetic variable representing a `(base, field)` access, created on
+/// first use so equality constraints on field reads and writes unify.
+fn field_rep(
+    uf: &mut UnionFind,
+    field_var: &mut FxHashMap<(VarId, String), VarId>,
+    next: &mut usize,
+    base: VarId,
+    field: &str,
+) -> VarId {
+    let key = (base, field.to_string());
+    if let Some(&v) = field_var.get(&key) {
+        return v;
+    }
+    let v = VarId(*next);
+    *next += 1;
+    field_var.insert(key, v);
+    uf.find(v.0);
+    // The field access points into the base's class neighborhood: unify with
+    // nothing by default; constraints drive merging.
+    v
 }
 
 /// Synthetic field-representation vars live above the real var-id space;
 /// they never appear in the emitted classes.
 fn is_synthetic(v: usize, synthetic_base: usize) -> bool {
     v >= synthetic_base
+}
+
+#[cfg(test)]
+/// Assertions lifted from the doc examples of items that are now
+/// crate-private; a doctest cannot see them.
+mod doc_examples {
+    #[test]
+    fn doc_example_analyze() {
+        use crate::graph::steensgaard::Steensgaard;
+        use crate::harness::lower_source;
+
+        let fns = lower_source(
+            "t.ts",
+            "function g(a: any) { const b = a; const c = 5; return b }",
+            "ts",
+        )
+        .unwrap();
+        let g = &fns["g"];
+        let var = |name: &str| {
+            *g.var_metadata
+                .iter()
+                .find(|(_, m)| m.source_name.as_deref() == Some(name))
+                .map(|(v, _)| v)
+                .unwrap()
+        };
+        let classes = Steensgaard::analyze(g);
+        // `const b = a` unifies `b` with `a`.
+        assert_eq!(classes.class_of[&var("a")], classes.class_of[&var("b")]);
+        // `c` is assigned a literal, so it is not unified with them.
+        assert_ne!(
+            classes.class_of.get(&var("c")),
+            classes.class_of.get(&var("a"))
+        );
+    }
 }

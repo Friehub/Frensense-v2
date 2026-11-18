@@ -131,29 +131,6 @@ pub fn collect_calls(
     calls
 }
 
-fn defs_of(instr: &Instruction) -> Vec<VarId> {
-    let mut v = Vec::with_capacity(2);
-    match instr {
-        Instruction::Assign { dest, .. }
-        | Instruction::LoadField { dest, .. }
-        | Instruction::LoadElement { dest, .. }
-        | Instruction::LoadGlobal { dest, .. }
-        | Instruction::Cast { dest, .. }
-        | Instruction::ExtractValue { dest, .. }
-        | Instruction::BinaryOp { dest, .. }
-        | Instruction::UnaryOp { dest, .. } => v.push(*dest),
-        Instruction::CallStatic { dest, .. }
-        | Instruction::CallVirtual { dest, .. }
-        | Instruction::CallPointer { dest, .. } => {
-            if let Some(d) = dest {
-                v.push(*d);
-            }
-        }
-        _ => {}
-    }
-    v
-}
-
 /// Cross-function enforcement helper: a function DEFINED in the negatives
 /// that positives neither define nor call. The negatives are safe because
 /// their module provides the enforcement helper (the definition site is

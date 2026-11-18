@@ -75,6 +75,187 @@ def h():
     assert!(vulnerable(&run("py", "app/t.py", src), "execute"));
 }
 
+/// A Go handler parameter is a source by its declared type, not its name:
+/// the binding here is `request`, which the pack's name vocabulary (`r`,
+/// `req`, `c`, `ctx`, `w`) does not cover. Lowering bound no Go parameter at
+/// all before (it read the C `declarator` field), so the body reference was
+/// an undeclared name and the flow never started: 0 findings.
+#[test]
+fn go_parameter_is_a_source_by_its_type() {
+    let src = r#"
+package main
+
+import (
+	"net/http"
+	"os/exec"
+)
+
+func handle(request *http.Request) {
+	cmd := request.URL.Query().Get("cmd")
+	exec.Command("sh", "-c", cmd)
+}
+"#;
+    assert!(vulnerable(&run("go", "app/h.go", src), "Command"));
+}
+
+/// Binding a parameter must not make it a source: a scalar has no type the
+/// classifier accepts, so `literal` stays clean even though it now binds.
+#[test]
+fn go_scalar_parameter_is_not_a_source() {
+    let src = r#"
+package main
+
+import "os/exec"
+
+func handle(literal string) {
+	exec.Command("sh", "-c", literal)
+}
+"#;
+    assert!(!vulnerable(&run("go", "app/s.go", src), "Command"));
+}
+
+/// A destructured parameter names no variable of its own: `run({ h })` used to
+/// push one parameter slot named `{ h }`, so the body's `h` was an undeclared
+/// name and the caller's object never reached the sink (0 findings).
+#[test]
+fn destructured_parameter_carries_caller_taint() {
+    let src = r#"
+import { exec } from "child_process";
+import express from "express";
+const app = express();
+function run({ h }: { h: string }) { exec("ping " + h); }
+app.get("/a", async (req, res) => {
+  const host = req.query.host as string;
+  run({ h: host });
+  res.send("ok");
+});
+"#;
+    assert!(vulnerable(&run("ts", "app/d.ts", src), "exec"));
+}
+
+/// The nested shape recurses through the load of the outer part, so the inner
+/// name reads that part instead of the whole parameter value.
+#[test]
+fn nested_destructured_parameter_carries_caller_taint() {
+    let src = r#"
+import { exec } from "child_process";
+import express from "express";
+const app = express();
+function run({ body: { h } }: any) { exec("ping " + h); }
+app.post("/a", async (req, res) => {
+  run(req);
+  res.send("ok");
+});
+"#;
+    assert!(vulnerable(&run("ts", "app/n.ts", src), "exec"));
+}
+
+/// An assignment to a pattern is the declaration form with the names already
+/// bound: lowering read the pattern as an lvalue, found none, and dropped the
+/// store, so the name stayed undefined and the value never reached the sink.
+#[test]
+fn destructuring_assignment_keeps_taint() {
+    let src = r#"
+export function test(req: any) {
+  let a: any;
+  ({ a } = req.body);
+  eval(a);
+}
+"#;
+    assert!(vulnerable(&run("ts", "app/o.ts", src), "eval"));
+}
+
+#[test]
+fn array_destructuring_assignment_keeps_taint() {
+    let src = r#"
+export function test(req: any) {
+  let h: any;
+  [h] = req.body.parts;
+  eval(h);
+}
+"#;
+    assert!(vulnerable(&run("ts", "app/a.ts", src), "eval"));
+}
+
+/// Binding a pattern target must not invent a flow.
+#[test]
+fn destructuring_assignment_of_a_literal_stays_silent() {
+    let src = r#"
+export function test() {
+  let a: any;
+  ({ a } = { a: "safe" });
+  eval(a);
+}
+"#;
+    assert!(!vulnerable(&run("ts", "app/l.ts", src), "eval"));
+}
+
+/// A nested pattern is the flat form written twice, so the intermediate part
+/// is the variable that form would have named: `{ body: { name } }` means
+/// `const { body } = x; const { name } = body`. Leaving the intermediate
+/// anonymous hid a name the vocabulary knows (a variable named `body` is a
+/// request body), so the reported shape stayed `Unknown`.
+#[test]
+fn nested_destructured_parameter_keeps_the_part_name() {
+    let src = r#"
+export function t({ body: { name } }: any) { eval(name); }
+"#;
+    assert!(vulnerable(&run("ts", "app/b.ts", src), "eval"));
+}
+
+/// Keeping the part name must not manufacture a source: a part whose name is
+/// not vocabulary, with nothing tainted above it, stays silent.
+#[test]
+fn nested_destructured_parameter_of_an_unknown_object_stays_silent() {
+    let src = r#"
+export function t({ opts: { cmd } }: any) { eval(cmd); }
+"#;
+    assert!(!vulnerable(&run("ts", "app/u.ts", src), "eval"));
+}
+
+/// `...parts` wraps the name. Binding the parameter under the text `...parts`
+/// left the body's `parts` an undeclared name, so a rest parameter's argument
+/// never reached its uses (0 findings).
+#[test]
+fn rest_parameter_carries_caller_taint() {
+    let src = r#"
+import { exec } from "child_process";
+import express from "express";
+const app = express();
+function run(...parts: string[]) { exec(parts.join(" ")); }
+app.get("/a", async (req, res) => {
+  const host = req.query.host as string;
+  run(host);
+  res.send("ok");
+});
+"#;
+    assert!(vulnerable(&run("ts", "app/r.ts", src), "exec"));
+}
+
+/// The declaration form of the same pattern: `const { a: { b } } = ...` used to
+/// bind a variable literally named `{ b }`, leaving `b` undefined.
+#[test]
+fn nested_destructuring_declaration_keeps_taint() {
+    let src = r#"
+export function test(req: any) {
+    const { a: { b } } = { a: { b: req.body.payload } };
+    eval(b);
+}
+"#;
+    assert!(vulnerable(&run("ts", "app/n.ts", src), "eval"));
+}
+
+/// Binding a pattern must not invent a flow: a literal argument stays clean.
+#[test]
+fn destructured_parameter_of_a_literal_stays_silent() {
+    let src = r#"
+import { exec } from "child_process";
+function run({ h }: { h: string }) { exec("ping " + h); }
+export function main() { run({ h: "localhost" }); }
+"#;
+    assert!(!vulnerable(&run("ts", "app/s.ts", src), "exec"));
+}
+
 #[test]
 fn prepared_statement_arguments_are_bindings() {
     let src = r#"
@@ -183,4 +364,66 @@ func Register(email, password string) error {
         "wrapper call flagged: {:?}",
         res.checker
     );
+}
+
+/// #124: a property assignment is a DOM sink in its own right, and the
+/// finding points at the write, not at where the value was defined.
+#[test]
+fn property_assignment_sink_reports_the_write() {
+    let src = r#"
+import express from "express";
+const app = express();
+app.get("/x", (req, res) => {
+  const user = req.query.name;
+  const el = document.getElementById("out") as any;
+  el.innerHTML = user;
+});
+"#;
+    let res = run("ts", "a.ts", src);
+    assert!(vulnerable(&res, "innerHTML"), "innerHTML store is a sink");
+    let located = res
+        .located
+        .iter()
+        .find(|l| l.finding.sink.contains("innerHTML"))
+        .expect("located innerHTML finding");
+    assert_eq!(
+        located.line, 7,
+        "the store line, not the value's definition"
+    );
+}
+
+#[test]
+fn property_assignment_of_a_literal_is_clean() {
+    let src = r#"
+const el = document.getElementById("out") as any;
+el.innerHTML = "<b>static</b>";
+"#;
+    let res = run("ts", "b.ts", src);
+    assert!(!vulnerable(&res, "innerHTML"));
+}
+
+/// #123: JSX attributes are writes too. `dangerouslySetInnerHTML` carries
+/// attacker-supplied markup exactly like `el.innerHTML = …` does.
+#[test]
+fn jsx_dangerously_set_inner_html_is_a_sink() {
+    let src = r#"
+import express from "express";
+const app = express();
+app.get("/x", (req, res) => {
+  const user = req.query.name;
+  const el = <div dangerouslySetInnerHTML={{ __html: user }} />;
+  return el;
+});
+"#;
+    let res = run("tsx", "c.tsx", src);
+    assert!(vulnerable(&res, "dangerouslySetInnerHTML"), "JSX sink");
+}
+
+#[test]
+fn jsx_static_attribute_value_is_clean() {
+    let src = r#"
+const el = <div dangerouslySetInnerHTML={{ __html: "<b>static</b>" }} />;
+"#;
+    let res = run("tsx", "d.tsx", src);
+    assert!(!vulnerable(&res, "dangerouslySetInnerHTML"));
 }

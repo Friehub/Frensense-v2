@@ -20,11 +20,11 @@
 //!
 //! The ratchet is mechanical, not honour-based:
 //!
-//! * [`HintKind::index`] and [`LearnedFactEntry::wire_index`] are exhaustive
+//! * `HintKind::index` and `LearnedFactEntry::wire_index` are exhaustive
 //!   `match`es, so *adding* a variant is a compile error that lands the
 //!   developer next to the vocabulary lists.
 //! * `tests::vocabulary_lists_are_ratcheted` fails until the new variant is
-//!   appended to [`HintKind::ALL`] / [`LearnedFactEntry::VARIANT_TAGS`], and
+//!   appended to `HintKind::ALL` / `LearnedFactEntry::VARIANT_TAGS`, and
 //!   `tests::vocabulary_fingerprint_is_committed` fails until the change is
 //!   acknowledged by updating [`FACT_VOCABULARY_FINGERPRINT`] - which is also
 //!   the cue to bump `BUNDLE_VERSION` and regenerate the default pack.
@@ -42,7 +42,7 @@ use std::fmt::Write as _;
 /// Two vocabularies that can decode each other's bundles produce identical
 /// text; any append, reorder, insert or rename changes it.
 #[must_use]
-pub fn fact_vocabulary_canonical() -> String {
+pub(crate) fn fact_vocabulary_canonical() -> String {
     // `write!` into the buffer (not `format!` + `push_str`): the output is
     // byte-identical, but this is a deterministic wire-format serializer,
     // not user-facing prose, so it must not count against the engine-prose
@@ -60,7 +60,7 @@ pub fn fact_vocabulary_canonical() -> String {
     out
 }
 
-/// FNV-1a 64 over [`fact_vocabulary_canonical`].
+/// FNV-1a 64 over `fact_vocabulary_canonical`.
 ///
 /// FNV rather than a cryptographic hash: this is a compatibility token, not
 /// a security property, and it must be reproducible from source with no
@@ -95,24 +95,14 @@ pub const FACT_VOCABULARY_FINGERPRINT: u64 = 0x4994_27a8_ed94_e470;
 /// held-out pair then reports a miss even though the underlying defect is
 /// identical. The suffix is only ever stripped for lookup, never published:
 /// a fact still names exactly one call.
-pub const MIRROR_CALL_SUFFIXES: &[&str] = &["Async", "Sync", "Callback", "Promise"];
+pub(crate) const MIRROR_CALL_SUFFIXES: &[&str] = &["Async", "Sync", "Callback", "Promise"];
 
 /// The base operation a decorated call name belongs to.
 ///
 /// `extractAllToAsync` -> `extractAllTo`. Returns `None` when the name carries
 /// no known decorator, or when stripping it would leave no base at all.
-///
-/// ```
-/// use frensense_engine::analysis::taint::facts::mirror_call_base;
-///
-/// assert_eq!(mirror_call_base("extractAllToAsync"), Some("extractAllTo"));
-/// assert_eq!(mirror_call_base("readSync"), Some("read"));
-/// // No known decorator, or nothing left once it is stripped.
-/// assert_eq!(mirror_call_base("extractAllTo"), None);
-/// assert_eq!(mirror_call_base("Async"), None);
-/// ```
 #[must_use]
-pub fn mirror_call_base(call: &str) -> Option<&str> {
+pub(crate) fn mirror_call_base(call: &str) -> Option<&str> {
     MIRROR_CALL_SUFFIXES
         .iter()
         .find_map(|suffix| call.strip_suffix(suffix).filter(|base| !base.is_empty()))
@@ -195,5 +185,21 @@ mod tests {
                 "missing {kind:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+/// Assertions lifted from the doc examples of items that are now
+/// crate-private; a doctest cannot see them.
+mod doc_examples {
+    #[test]
+    fn doc_example_mirror_call_base() {
+        use crate::analysis::taint::facts::mirror_call_base;
+
+        assert_eq!(mirror_call_base("extractAllToAsync"), Some("extractAllTo"));
+        assert_eq!(mirror_call_base("readSync"), Some("read"));
+        // No known decorator, or nothing left once it is stripped.
+        assert_eq!(mirror_call_base("extractAllTo"), None);
+        assert_eq!(mirror_call_base("Async"), None);
     }
 }

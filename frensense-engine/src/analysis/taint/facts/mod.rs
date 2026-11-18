@@ -17,6 +17,28 @@
 //! with bundler-extracted learned facts via a [`FactTable`]). The engine only
 //! consumes them; updating a framework never touches engine code.
 
+/// Insert `fact` into a provenance-tagged table, or resolve a key collision.
+///
+/// `same_key` says whether an existing entry is the same fact. On a collision
+/// the higher-ranked provenance wins (`Spec < Authored < Learned`) and a tie
+/// keeps the existing entry, so merging is order-independent across tiers.
+/// This is the one implementation of that rule; every table that ranks facts
+/// by provenance goes through it.
+pub(crate) fn upsert_by_provenance<T>(
+    items: &mut Vec<(T, Provenance)>,
+    fact: T,
+    provenance: Provenance,
+    same_key: impl Fn(&T, &T) -> bool,
+) {
+    if let Some(existing) = items.iter_mut().find(|(e, _)| same_key(e, &fact)) {
+        if provenance > existing.1 {
+            *existing = (fact, provenance);
+        }
+    } else {
+        items.push((fact, provenance));
+    }
+}
+
 /// Where the knowledge behind a fact or finding came from. Stored
 /// per-entry in the [`FactTable`] so checks report the real origin of the
 /// knowledge that fired (spec seed vs bundle) instead of guessing.
@@ -69,7 +91,7 @@ pub use vocabulary::*;
 /// bytes: bundler-typed or engine-typed values returned through the
 /// bundler would resolve to a duplicate `frensense-engine` crate unit.
 #[cfg(test)]
-pub fn default_pack_table() -> FactTable {
+pub(crate) fn default_pack_table() -> FactTable {
     fact_table_from_entries_with(&default_pack_entries(), Provenance::Spec)
 }
 
@@ -84,7 +106,7 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
 /// Production tables for a set of extensions (spec seed -> default pack ->
 /// pack language sections), exactly as `build_spec_tables` assembles them.
 #[cfg(test)]
-pub fn seeded_tables<'a>(
+pub(crate) fn seeded_tables<'a>(
     exts: impl IntoIterator<Item = &'a str>,
 ) -> (crate::analysis::taint::config::TaintConfig, FactTable) {
     config::tables_from_exts_with_pack(exts, &default_pack_entries())
@@ -95,7 +117,7 @@ pub fn seeded_tables<'a>(
 /// per-spec merge uses (extensions are disjoint across fact languages;
 /// a container spec like Vue shares its code language's facts).
 #[cfg(test)]
-pub fn seeded_tables_all() -> (crate::analysis::taint::config::TaintConfig, FactTable) {
+pub(crate) fn seeded_tables_all() -> (crate::analysis::taint::config::TaintConfig, FactTable) {
     let exts: Vec<&str> = frensense_lang::all_specs()
         .flat_map(|s| s.extensions().iter().copied())
         .collect();

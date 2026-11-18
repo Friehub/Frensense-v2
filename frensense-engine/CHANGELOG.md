@@ -10,21 +10,192 @@ Built-in vocabulary tables live in `frensense-packgen`; the `.frc` envelope
 lives in `frensense-bundler`. Their changes appear here only when they alter
 what this crate does.
 
-## [Unreleased]
+## [0.9.0]
 
 ### Added
 
+- `TaintFunnel` (`ScanTelemetry::funnel`): measured call-site accounting for the
+  taint phase — `calls_examined`, the three skip reasons, `not_a_sink` and
+  `sink_calls`. The counters partition every call the analysis looked at
+  (`calls_examined = skipped + not_a_sink + sink_calls`), so a scan can say how
+  much of its input never reached the sink matcher: a large `not_a_sink` is
+  vocabulary the engine never walks.
+- `TaintFunnel::unmatched_callees` / `record_unmatched`: the callees the sink
+  matcher ran on and rejected, with how often each was called, so a large
+  `not_a_sink` can name the vocabulary behind it instead of only counting it.
+  `top_unmatched` returns the busiest eight in a stable order; the tracked list
+  is bounded at 32 distinct names, and calls past that bound still land in
+  `not_a_sink`, so the partition is unaffected.
+- `GraphSize` (`ScanTelemetry::graph`): functions, value-flow nodes, edges and
+  cross-function edges of the program the taint phase walked, counted from the
+  graph it actually built rather than inferred from the input.
+- `CutSite::kind` `"passed-through"`: an external call with no analysed callee
+  whose result the backward walk still followed into its arguments. It records
+  an assumption rather than a stop (the library might sanitise, or might not
+  carry them), so a silent verdict can name the call that hid the missing
+  source. Pass-throughs keep their own budget, so a long chain of them can
+  never displace the stop site that decided the verdict.
+- `Instruction::dest`, `Instruction::mem_out` and `Instruction::defs`: the single
+  definition of which variables an instruction defines. Both matches are
+  exhaustive, so a new instruction kind has to be classified.
+- `Instruction::StoreField::span`: the byte range of the expression that
+  performs a property write, so a sink reported on a store points at the
+  statement the user fixes instead of the stored value's definition.
 - `Debug` for the language spec structs, `LanguageRegistry`, `CheckContext`,
   `CheckRegistry`, `LoweringContext`, `GuardMap` and `CtxLink`, required by
   the `missing_debug_implementations` lint.
 
+### Fixed
+
+- **A property assignment is a sink.** `el.innerHTML = user`, `el.outerHTML`
+  and `document.getElementById("x")!.innerHTML` reached no sink: the sink
+  matcher only looked at calls, so a DOM sink written as a field store was
+  dropped without a word. A `StoreField` whose field names an armed sink now
+  matches with the stored value in slot 0 and is explored through the same
+  argument walk a call uses. Measured on the reported shapes: `innerHTML`
+  **0 → 1** finding (XSS), `outerHTML` **0 → 1**, while
+  `el.innerHTML = "<b>static</b>"` stays clean.
+- **A property-sink finding points at the write.** A store recorded no byte
+  range, so such a finding could only be pinned to the stored value's
+  definition. `Instruction::StoreField` now carries the write's span - the
+  assignment, its member target, or the JSX attribute - and the finding
+  reports there: `el.innerHTML = user` is reported on its own line instead of
+  the line that bound `user`.
+- **JSX attribute values reach sink matching.** JSX had no lowering, so
+  `<div dangerouslySetInnerHTML={{ __html: html }} />` lowered to an opaque
+  node and no finding. A JSX element now lowers to a props object with one
+  spanned store per attribute (`<div title={t} />` is `props.title = t`), so
+  `dangerouslySetInnerHTML` fires on the attribute. Measured: **0 → 1**
+  (XSS), while `__html: "<b>static</b>"` stays clean. Attribute names with no
+  sink entry (`href`, `src`) still report nothing: the vocabulary, not the
+  lowering, is what they are missing.
+- **An assignment to a destructuring pattern binds its names.** `({ a } = rhs)`
+  and `[a, b] = rhs` are the declaration form with the names already bound,
+  but `visit_assignment` read the pattern as an lvalue, found none, and
+  dropped the store, so the name stayed an undefined variable and the value
+  never reached the sink. A pattern target now lowers through the same
+  `LoweringContext::bind_pattern` the declaration form uses. Measured on the
+  reported shapes: object pattern **0 → 1** finding (code injection), array
+  pattern **0 → 1**, while `({ a } = { a: "safe" })` stays clean.
+- **A nested destructuring pattern keeps the name of each part.** `{ body: {
+  name } }` is the flat form written twice (`const { body } = x; const { name }
+  = body`), but the intermediate part was an anonymous temporary, so name
+  vocabulary never saw it: a variable named `body` is the request body, and
+  hiding that name left a bare `export function t({ body: { name } }: any)`
+  `Undecided` while `const { body } = x; const { name } = body` was reported.
+  The intermediate now records its part's name, so the two spellings agree;
+  a part whose name is not vocabulary (`{ opts: { cmd } }`) still stays silent.
+  Measured on the reported shape: **0 findings before, 1 (code injection)
+  after**.
+- **Destructured and rest parameters bind the names inside them.** `bind_params`
+  bound one variable per parameter node and named it after the node's text, so
+  `function run({ h }: Opts)` produced a single parameter named `{ h }` while
+  the body's `h` was an undeclared variable: the caller's object never reached
+  the sink. `...parts` bound as `...parts`, so `parts` itself did not resolve.
+  A pattern now keeps its parameter slot (the call's argument still maps to it)
+  and binds through the same `LoweringContext::bind_pattern` a destructured
+  declaration uses: one `LoadField` per object member, one `LoadElement` per
+  array position, and a rest element takes the whole value. The helper recurses
+  through the load it just emitted, so nested patterns (`{ a: { b } }`,
+  `{ body: { name } }`) - and the declaration form `const { a: { b } } = obj`,
+  which used to bind a variable literally named `{ b }` - keep their flow.
+  Measured on the reported reproductions: destructured parameter **0 → 1**
+  finding (OS command injection), rest parameter **0 → 1** (code injection via
+  `parts.join`), nested declaration **0 → 1**, while a literal argument
+  (`run({ h: "localhost" })`) and an untainted rest call stay clean.
+  A bare `export function t({ body: { name } }: any)` with no caller is still
+  `Undecided`: an exported parameter is not a source by itself, which is a
+  source-classification question and not a binding one.
+- **Go parameters are bound, with their declared types.** `bind_params` read
+  the C `declarator` field for every `parameter_declaration`, and a Go
+  declaration has no such field - its shape is one `name` field per binding
+  plus `type`. No Go parameter was recorded at all, so a handler body's
+  `request.URL.Query()` referenced an undeclared name and
+  `classify_param_taint` never received the `*http.Request` / `*gin.Context`
+  type it classifies on. Grouped (`a, b string`) and variadic (`rest ...int`)
+  names are one declaration each, sharing its type; the C and Go shapes are now
+  resolved by which field the grammar emits. Measured on
+  `func handle(request *http.Request)` reading
+  `request.URL.Query().Get("cmd")` into `exec.Command`: **0 findings before, 1
+  (OS command injection) after**, while a scalar parameter (`literal string`)
+  stays a non-source.
+
+### Removed
+
+- **The forward taint engine is gone; the demand-driven one is the only
+  detector.** `InterproceduralTaintEngine` (BFS from every source over local
+  and cross edges) produced `SinkAlert`s in the same shape as the backward
+  engine, but nothing outside its own tests ever constructed it: `scan` builds
+  a `BackwardTaintEngine` over the same `ProgramSvfg`, and that engine adds the
+  per-sink verdicts, guards and call-site context the BFS never had. Removed
+  with it: the BFS, `local_successors`/`inter_successors`/`tainted_nodes`, its
+  doc example, the "backward agrees with forward" oracle test, and
+  `analysis/forward_tests.rs` (1,343 lines, 17 tests) — 19 tests in total, the
+  engine suite going 581 → 562 with no change to any finding.
+  `ProgramSvfg`, the call bindings, the cross edges and the bottom-up
+  `TaintSummary` pass stay: `local_predecessors` reads the suppressed
+  pass-through set, which is what keeps a sanitizing callee from leaking taint
+  into the backward walk through its local pass-through edge.
+- **Breaking:** `analysis::taint::context` (`ContextSensitiveTaintEngine`,
+  `ContextualAlert`, `ContextStats`, `ROOT_CTX`, `CtxId`,
+  `MAX_CONTEXTS_PER_FN`), 356 lines plus 483 lines of tests. It layered k=1
+  call-site context sensitivity on the old forward engine, which production
+  never constructs; the backward engine has its own call contexts and its own
+  sibling-caller test (`call_site_context_separates_sibling_callers`).
+- `check_all_with_graph` and `check_all_with_graph_scoped`, which had no caller;
+  use `check_all_with_telemetry`.
+- **Breaking:** the public surface now matches its consumers. 265 declarations
+  that no crate outside `frensense-engine` names are `pub(crate)`, and
+  `cargo public-api -p frensense-engine` drops from **4,481 to 3,264 lines
+  (-27%)**, or 3,149 to 2,310 with `--omit auto-trait-impls`. Eight modules are
+  crate-private (`ir::lowering::{control_flow,lvalue}`, `graph::steensgaard`,
+  `checks::{int_overflow,noreturn,oob}`, `checks::uaf::{must_exec,uninit}`), and
+  with them their internals: `InterproceduralTaintEngine` (the forward engine
+  only tests ever constructed, the follow-up to the context-engine removal),
+  `CheckRegistry`, `CheckContext`, `CheckScope`, `PackageScope`,
+  `NonDataflowCheck`, `DiagnosticSink`/`NoopDiagnosticSink`, `Walker`,
+  `CallGraph`/`CallGraphBuilder`/`CallTarget`, `Pair`/`PairCheck`/`FreeSite`/
+  `Violation`/`CrossCtx`, `BufferInfo` and `LocId`.
+  What stays public is what another crate actually reaches: `ProgramSvfg` and
+  its fields, `FactTable`, `SinkFinding`/`SinkAlert`/`SinkFindingBuilder`, the
+  check entry points and `scan`. The set was derived mechanically (name absent
+  from every `.rs` outside the crate) and then confirmed by the compiler: each
+  demotion a consumer needed returned as `private_interfaces`, `E0616`,
+  `E0603` or `E0624` and was reverted. `cargo check --workspace --all-features
+  --all-targets`, `cargo test --workspace --all-features`, the rustdoc
+  `broken_intra_doc_links`/`private_intra_doc_links` gate and the clippy
+  ratchet are green.
+- 24 intra-doc links that pointed at now-private items became code spans, and
+  one pre-existing unresolved link (`scan::ModuleResolution`) was fixed.
+
 ### Changed
+
+- `CutSite` `"passed-through"` sites skip standard-library adapters (`iter`,
+  `collect`, `map`, `map_err`, ...): they forward their operands by definition,
+  so naming them buried the calls the engine genuinely has no model for.
+  Detection never consults the filter; only the explanation is narrowed.
+
+- Duplicate logic collapsed into one definition each (no behaviour change
+  intended; engine tests unchanged and green):
+  `FunctionIR::def_instruction` (3 copies, one of which only knew 6 instruction
+  kinds), `graph::module::imports_for_function` (4 copies of the single-file
+  import fallback), `NodeKey::instruction` (4 inline lookups),
+  `facts::upsert_by_provenance` (7 inserts), lowering `jump_if_open` (11
+  inline blocks), `read_modify` (compound assignment and `++`/`--` on fields
+  and elements), `new_temp` (7 inline copies), and the doubled `CallPointer`
+  fallback in call lowering.
 
 - String-literal unquoting is one function (`ir::function::strip_quotes`,
   crate-private). The `policy` and `weak_hash` checks previously stripped the
   first and last byte of any literal that began with a quote character; they
   now strip only a matching pair, so a lone `"` or a mismatched `'a"` is left
   unchanged instead of being sliced (the lone-quote case could panic).
+- Nine hand-written "what does this instruction define" matches (taint guard
+  and walk, forward predicates, `guard_bypass`, UAF `uninit`, `leak`, SSA and
+  SVFG construction) now call `Instruction::dest`/`defs`. The copies disagreed:
+  the guard map ignored `Allocate`/`Dereference`/`Await`/`Yield`, `guard_bypass`
+  ignored `Allocate`/`AddressOf`/`Dereference`, and `predicates` ignored
+  `AddressOf`. All now cover every value-producing kind.
 - Items that no external path could reach are now `pub(crate)`; no
   reachable public item changed.
 

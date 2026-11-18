@@ -296,7 +296,7 @@ impl FactTable {
     /// filed under its own language instead of the shared name space, so
     /// cross-language key collisions can no longer resolve last-merge-wins.
     /// The signature-widening rule is the same one [`Self::merge`] applies.
-    pub fn merge_language(&mut self, language: &str, other: &FactTable) {
+    pub(crate) fn merge_language(&mut self, language: &str, other: &FactTable) {
         let slot = self
             .lang_sink_signatures
             .entry(language.to_string())
@@ -325,7 +325,7 @@ impl FactTable {
     /// Precedence: the language-agnostic lane first (a consumer bundle and
     /// the `"*"` pack group are the last seeding layer, so they win over a
     /// language section), then the call site's own language - except that a
-    /// blanket all-args placeholder ([`SinkSignature::is_blanket`], what
+    /// blanket all-args placeholder (`SinkSignature::is_blanket`, what
     /// `TaintConfig::sinks` seeds for every configured name) never shadows
     /// the language's own entry, which knows the call's dangerous slots and
     /// identity-payload keys. A qualified callee
@@ -436,31 +436,15 @@ impl FactTable {
         // collision (Spec < Authored < Learned) and ties keep the existing
         // entry, so merge is order-independent across provenance tiers.
         for (c, prov) in &other.learned_checks {
-            if let Some(existing) = self
-                .learned_checks
-                .iter_mut()
-                .find(|(e, _)| e.rule == c.rule && e.call == c.call)
-            {
-                if *prov > existing.1 {
-                    *existing = (c.clone(), *prov);
-                }
-            } else {
-                self.learned_checks.push((c.clone(), *prov));
-            }
+            upsert_by_provenance(&mut self.learned_checks, c.clone(), *prov, |a, b| {
+                a.rule == b.rule && a.call == b.call
+            });
         }
         // Policy facts order the same way, dedup on (rule, when_call).
         for (p, prov) in &other.policy_facts {
-            if let Some(existing) = self
-                .policy_facts
-                .iter_mut()
-                .find(|(e, _)| e.rule == p.rule && e.when_call == p.when_call)
-            {
-                if *prov > existing.1 {
-                    *existing = (p.clone(), *prov);
-                }
-            } else {
-                self.policy_facts.push((p.clone(), *prov));
-            }
+            upsert_by_provenance(&mut self.policy_facts, p.clone(), *prov, |a, b| {
+                a.rule == b.rule && a.when_call == b.when_call
+            });
         }
         // Memory contracts accumulate, with newer/learned contracts replacing older ones on collision.
         for mc in &other.memory_contracts {
@@ -546,17 +530,9 @@ impl FactTable {
         // redefining a spec-seeded rule now overrides it (Learned >
         // Spec), ties keep the existing entry.
         for (r, p) in &other.integer_overflow_rules {
-            if let Some(existing) = self
-                .integer_overflow_rules
-                .iter_mut()
-                .find(|(e, _)| e.rule_id == r.rule_id && e.wrap_threshold == r.wrap_threshold)
-            {
-                if *p > existing.1 {
-                    *existing = (r.clone(), *p);
-                }
-            } else {
-                self.integer_overflow_rules.push((r.clone(), *p));
-            }
+            upsert_by_provenance(&mut self.integer_overflow_rules, r.clone(), *p, |a, b| {
+                a.rule_id == b.rule_id && a.wrap_threshold == b.wrap_threshold
+            });
         }
         for s in &other.insecure_config_selectors {
             if let Some(existing) = self
@@ -725,43 +701,43 @@ impl FactTable {
     /// Is `name` (bare, dotted, or `::`-qualified) a declared stack
     /// allocator? Frame-local storage is never a leak candidate; the
     /// vocabulary is default-pack-seeded (Phase 6.5).
-    pub fn is_stack_allocator(&self, name: &str) -> bool {
+    pub(crate) fn is_stack_allocator(&self, name: &str) -> bool {
         let s = name.rsplit('.').next().unwrap_or(name);
         let s = s.rsplit("::").next().unwrap_or(s);
         self.stack_allocators.iter().any(|a| a == s)
     }
 
     /// Is `name` a declared collection constructor (`Set`, `Map`)?
-    pub fn is_collection_ctor(&self, name: &str) -> bool {
+    pub(crate) fn is_collection_ctor(&self, name: &str) -> bool {
         self.collection_constructors.contains(name)
     }
 
     /// Is `name` a schema-describing method (`describe`, `description`)?
-    pub fn is_schema_describe_method(&self, name: &str) -> bool {
+    pub(crate) fn is_schema_describe_method(&self, name: &str) -> bool {
         self.schema_describe_methods.contains(name)
     }
 
     /// Does the string literal `s` compare as the language's null pointer?
-    pub fn is_null_token(&self, s: &str) -> bool {
+    pub(crate) fn is_null_token(&self, s: &str) -> bool {
         self.null_tokens.contains(s)
     }
 
     /// Is `last` a read accessor of a trusted session store
     /// (`authenticatedUsers.get(...)`)? Receiver-aware callers combine
     /// this with [`Self::session_roots`] via [`Self::is_session_path`].
-    pub fn is_session_accessor(&self, last: &str) -> bool {
+    pub(crate) fn is_session_accessor(&self, last: &str) -> bool {
         self.session_accessors.contains(last)
     }
 
     /// Is `name` a formal parameter that receives the implicit receiver
     /// (`self`, `this`)?
-    pub fn is_receiver_param(&self, name: &str) -> bool {
+    pub(crate) fn is_receiver_param(&self, name: &str) -> bool {
         self.receiver_params.contains(name)
     }
 
     /// Provenance of the containment callee matching `seg`
     /// (case-insensitive), or None when not declared.
-    pub fn containment_callee(&self, seg: &str) -> Option<Provenance> {
+    pub(crate) fn containment_callee(&self, seg: &str) -> Option<Provenance> {
         self.containment_callees
             .iter()
             .find(|(c, _)| c.eq_ignore_ascii_case(seg))
@@ -770,7 +746,7 @@ impl FactTable {
 
     /// Provenance of the credential sink matching `seg`
     /// (case-insensitive), or None when not declared.
-    pub fn credential_sink(&self, seg: &str) -> Option<Provenance> {
+    pub(crate) fn credential_sink(&self, seg: &str) -> Option<Provenance> {
         self.credential_sinks
             .iter()
             .find(|(s, _)| s.eq_ignore_ascii_case(seg))
@@ -779,7 +755,7 @@ impl FactTable {
 
     /// Provenance of the credential parameter whose lowercased name equals
     /// `lowered`, or None when not declared.
-    pub fn credential_param(&self, lowered: &str) -> Option<Provenance> {
+    pub(crate) fn credential_param(&self, lowered: &str) -> Option<Provenance> {
         self.credential_params
             .iter()
             .find(|(c, _)| lowered == c.to_ascii_lowercase())
@@ -788,7 +764,7 @@ impl FactTable {
 
     /// Provenance of the schema builder matching `seg`
     /// (case-insensitive), or None when not declared.
-    pub fn schema_builder(&self, seg: &str) -> Option<Provenance> {
+    pub(crate) fn schema_builder(&self, seg: &str) -> Option<Provenance> {
         self.schema_builders
             .iter()
             .find(|(b, _)| b.eq_ignore_ascii_case(seg))
@@ -797,7 +773,7 @@ impl FactTable {
 
     /// Provenance of a bound keyword contained in the lowercased schema
     /// description `lower`, or None when none matches.
-    pub fn schema_keyword(&self, lower: &str) -> Option<Provenance> {
+    pub(crate) fn schema_keyword(&self, lower: &str) -> Option<Provenance> {
         self.schema_keywords
             .iter()
             .find(|(k, _)| lower.contains(&k.to_ascii_lowercase()))
@@ -805,7 +781,7 @@ impl FactTable {
     }
 
     /// Look up input argument slots that propagate taint through `call`.
-    pub fn propagator_input_args(&self, call: &str) -> Option<&[usize]> {
+    pub(crate) fn propagator_input_args(&self, call: &str) -> Option<&[usize]> {
         let last = call.rsplit('.').next().unwrap_or(call);
         self.propagators
             .get(call)
@@ -834,7 +810,7 @@ impl FactTable {
     /// Patterns are pack/bundle vocabulary (the default pack's
     /// `GuardDenylistPattern` entries, extended by learned
     /// `GuardDenylistPattern` facts) - the engine ships no built-in list.
-    pub fn is_guard_denylist(&self, literal: &str) -> bool {
+    pub(crate) fn is_guard_denylist(&self, literal: &str) -> bool {
         let unquoted = strip_quotes(literal);
         self.guard_denylist_patterns
             .iter()

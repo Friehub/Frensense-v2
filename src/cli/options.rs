@@ -229,15 +229,6 @@ pub fn get_input_paths(args: &[String]) -> Vec<PathBuf> {
         .unwrap_or_else(|_| vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))])
 }
 
-/// Back-compat single-path accessor (first positional input).
-#[must_use]
-pub fn get_input_path(args: &[String]) -> PathBuf {
-    get_input_paths(args)
-        .into_iter()
-        .next()
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

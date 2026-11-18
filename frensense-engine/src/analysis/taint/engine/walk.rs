@@ -119,9 +119,59 @@ fn record_cut(cuts: &mut Vec<&'static str>, reason: &'static str) {
 /// bounded so a wide fan-in cannot bloat every finding.
 const MAX_CUT_SITES: usize = 4;
 
+/// [`CutSite::kind`] for a call with no analysed callee that the walk flowed
+/// *through* (its arguments were followed, assuming the result carries them).
+const PASSED_THROUGH: &str = "passed-through";
+
+/// Standard-library adapters, sorted: they are defined to forward their
+/// operands into the result, so naming one as a pass-through tells a reader
+/// nothing. Keeping them out leaves the list to calls the engine genuinely
+/// has no model for (`mystery.read(req.params)`), which is the point of it.
+/// Detection never consults this: it only filters the explanation.
+const STD_FORWARDERS: &[&str] = &[
+    "and_then",
+    "any",
+    "as_deref",
+    "as_mut",
+    "as_ref",
+    "as_str",
+    "clone",
+    "collect",
+    "filter",
+    "filter_map",
+    "flat_map",
+    "fold",
+    "into",
+    "into_iter",
+    "iter",
+    "iter_mut",
+    "keys",
+    "map",
+    "map_err",
+    "ok_or",
+    "ok_or_else",
+    "or",
+    "or_else",
+    "take",
+    "then",
+    "then_some",
+    "unwrap_or",
+    "unwrap_or_default",
+    "unwrap_or_else",
+    "values",
+];
+
+/// Whether `callee` is a standard-library adapter (see [`STD_FORWARDERS`]).
+fn is_std_forwarder(callee: &str) -> bool {
+    STD_FORWARDERS.binary_search(&callee).is_ok()
+}
+
 /// Keep stop sites distinct and bounded.
 fn record_cut_site(sites: &mut Vec<CutSite>, site: CutSite) {
-    if sites.len() < MAX_CUT_SITES
+    // Pass-throughs are context, not stops: they get their own budget so a
+    // long chain of them cannot crowd out the stop that made the verdict.
+    let same_class = |s: &&CutSite| (s.kind == PASSED_THROUGH) == (site.kind == PASSED_THROUGH);
+    if sites.iter().filter(same_class).count() < MAX_CUT_SITES
         && !sites
             .iter()
             .any(|s| s.kind == site.kind && s.function == site.function && s.detail == site.detail)
@@ -197,6 +247,21 @@ fn phi_infeasible_incoming(
         }
     }
     out
+}
+
+/// What the engine knows about one sink site before exploring its arguments.
+#[derive(Clone, Copy)]
+struct SinkSite<'a> {
+    /// Sink name as configured or declared (`innerHTML`, `send`, `write`).
+    name: &'a str,
+    /// Role the finding is ranked under.
+    role: crate::analysis::taint::role::SinkRole,
+    /// Human-readable label from the vocabulary, when one is declared.
+    label: Option<&'a str>,
+    /// Package the sink signature was scoped to, when known.
+    origin_package: Option<&'a str>,
+    /// Language of the site, for language-keyed sink facts.
+    language: Option<&'a str>,
 }
 
 impl<'a> BackwardTaintEngine<'a> {
@@ -420,17 +485,11 @@ impl<'a> BackwardTaintEngine<'a> {
             .instructions
             .get(key.instr_idx?)?;
         let fn_name = &self.prog.functions[cf].name;
-        let imports = self
-            .fn_file
-            .get(fn_name)
-            .and_then(|file| self.file_package_imports.get(file))
-            .or_else(|| {
-                if self.file_package_imports.len() == 1 {
-                    self.file_package_imports.values().next()
-                } else {
-                    None
-                }
-            });
+        let imports = crate::graph::module::imports_for_function(
+            &self.fn_file,
+            &self.file_package_imports,
+            fn_name,
+        );
         match ins {
             Instruction::CallStatic { func, .. } => {
                 imports.and_then(|m| m.get(func)).map(|p| p.package.clone())
@@ -492,6 +551,26 @@ impl<'a> BackwardTaintEngine<'a> {
         idx: usize,
         instr: &Instruction,
     ) {
+        // A property assignment is a write, not a call: `el.innerHTML = x`
+        // reaches no call sink, so dispatch it to the store path.
+        if let Instruction::StoreField {
+            base,
+            field,
+            src: Operand::Var(value),
+            span,
+            ..
+        } = instr
+        {
+            self.explore_store_sink(
+                fi,
+                *base,
+                field,
+                *value,
+                *span,
+                NodeKey::instr(block, idx, *value),
+            );
+            return;
+        }
         let (name, receiver, args, call_dest): (
             &str,
             Option<&Operand>,
@@ -510,6 +589,7 @@ impl<'a> BackwardTaintEngine<'a> {
             } => (method, Some(receiver), args, dest.as_ref().copied()),
             _ => return,
         };
+        self.funnel.calls_examined += 1;
         let ir = self.prog.functions[fi].ir;
         let pkg_import = if receiver.is_none() {
             self.fn_file
@@ -538,6 +618,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 .values()
                 .any(|m| m.source_name.as_deref() == Some(name))
             {
+                self.funnel.skipped_local_callable += 1;
                 return;
             }
             // A static call resolving to a function defined in this program is
@@ -548,11 +629,13 @@ impl<'a> BackwardTaintEngine<'a> {
             // the full caller→callee path; arming the call site itself would
             // emit the same bug twice - once as a shorter path prefix (WI-41).
             if self.is_program_local(name) {
+                self.funnel.skipped_program_local += 1;
                 return;
             }
             // Verb sinks that strictly require a receiver object (get, post, render, etc.);
             // a bare static call without package import is not a client method invocation.
             if is_receiver_only_verb(name) {
+                self.funnel.skipped_receiver_only_verb += 1;
                 return;
             }
         }
@@ -765,8 +848,10 @@ impl<'a> BackwardTaintEngine<'a> {
             language,
             has_receiver,
         ) {
+            self.funnel.record_unmatched(effective_name);
             return;
         }
+        self.funnel.sink_calls += 1;
         // Receiver-aware role: `kv.put(t)` resolves Storage (dotted
         // KVNamespace.put) while `axios.put(t)` stays Ssrf, the
         // receiver root is the disambiguator, mirroring verb-sink
@@ -823,7 +908,115 @@ impl<'a> BackwardTaintEngine<'a> {
         if triplets.is_empty() {
             return;
         }
+        self.explore_sink_args(
+            fi,
+            SinkSite {
+                name,
+                role,
+                label: label.as_deref(),
+                origin_package,
+                language,
+            },
+            triplets,
+            call_dest.and_then(|d| ir.var_span(d)),
+        );
+    }
 
+    /// Explore a property-assignment sink if its field is armed.
+    ///
+    /// `el.innerHTML = user` names the DOM sink in the field and carries the
+    /// untrusted data in the stored value; the write's own byte range places
+    /// the finding on the vulnerable statement.
+    fn explore_store_sink(
+        &mut self,
+        fi: usize,
+        base: VarId,
+        field: &str,
+        value: VarId,
+        span: Option<(usize, usize)>,
+        node_key: NodeKey,
+    ) {
+        let Some(ir) = self.prog.functions.get(fi).map(|f| f.ir) else {
+            return;
+        };
+        let language = (!ir.language.is_empty()).then_some(ir.language.as_str());
+        let root = FactTable::receiver_root(ir, base);
+        if !self.facts.sink_name_armed(
+            &self.config.sinks,
+            field,
+            root.as_deref(),
+            None,
+            language,
+            true,
+        ) {
+            return;
+        }
+        let role = self
+            .facts
+            .role_for_call_scoped(field, root.as_deref(), None, language)
+            .unwrap_or_default();
+        let label = self
+            .facts
+            .label_for_call_scoped(field, root.as_deref(), None, language);
+        let slot_triplet = (0usize, value, node_key);
+        self.explore_sink_args(
+            fi,
+            SinkSite {
+                name: field,
+                role,
+                label: label.as_deref(),
+                origin_package: None,
+                language,
+            },
+            vec![slot_triplet],
+            span,
+        );
+    }
+
+    /// Dump one sink walk's shape and memory cost under `--debug-mem`.
+    fn log_sink_mem(
+        &self,
+        fi: usize,
+        name: &str,
+        state: &ExploreState,
+        rss_pre: u64,
+        rss_walk: u64,
+    ) {
+        let mut fns: FxHashSet<usize> = FxHashSet::default();
+        for (f, _) in state.seen_nodes.iter() {
+            fns.insert(*f);
+        }
+        let mut ctxs: FxHashSet<u32> = FxHashSet::default();
+        for (_, _, _, _, c) in state.visited.iter() {
+            ctxs.insert(*c);
+        }
+        eprintln!(
+            "[mem]     walk sink={} fn={} visited={} seen_nodes={} fns={} ctxs={} chains={} cuts={} rss_pre={} rss_after_explore={}",
+            name,
+            self.prog.functions[fi].name,
+            state.visited.len(),
+            state.seen_nodes.len(),
+            fns.len(),
+            ctxs.len(),
+            self.ctx_chains.len(),
+            state.cuts.len(),
+            rss_pre,
+            rss_walk
+        );
+    }
+
+    /// Explore one configured sink's arguments. A call passes its argument
+    /// triplets; a property store passes the single value it writes.
+    fn explore_sink_args(
+        &mut self,
+        fi: usize,
+        site: SinkSite<'_>,
+        triplets: Vec<(usize, VarId, NodeKey)>,
+        explicit_span: Option<(usize, usize)>,
+    ) {
+        let Some(ir) = self.prog.functions.get(fi).map(|f| f.ir) else {
+            return;
+        };
         self.stats.sink_args_explored += triplets.len();
         let mem_probe = crate::debug_flags::DebugFlags::get().mem;
         let mem_entry = if mem_probe {
@@ -838,15 +1031,15 @@ impl<'a> BackwardTaintEngine<'a> {
                 self.config,
                 &self.facts,
                 &arg_node,
-                origin_package,
-                language,
+                site.origin_package,
+                site.language,
             ) else {
                 continue;
             };
             let finding_class = alert_info.class;
             let mut state = ExploreState {
-                sink_role: role,
-                sink_label: label.clone(),
+                sink_role: site.role,
+                sink_label: site.label.map(str::to_string),
                 ..Default::default()
             };
             state.seen_nodes.insert((fi, arg_node));
@@ -864,30 +1057,10 @@ impl<'a> BackwardTaintEngine<'a> {
                 0
             };
 
-            if crate::debug_flags::DebugFlags::get().mem
+            if mem_probe
                 && (state.visited.len() > 50_000 || rss_walk.saturating_sub(rss_pre) > 1_000)
             {
-                let mut fns: FxHashSet<usize> = FxHashSet::default();
-                for (f, _) in state.seen_nodes.iter() {
-                    fns.insert(*f);
-                }
-                let mut ctxs: FxHashSet<u32> = FxHashSet::default();
-                for (_, _, _, _, c) in state.visited.iter() {
-                    ctxs.insert(*c);
-                }
-                eprintln!(
-                    "[mem]     walk sink={} fn={} visited={} seen_nodes={} fns={} ctxs={} chains={} cuts={} rss_pre={} rss_after_explore={}",
-                    name,
-                    self.prog.functions[fi].name,
-                    state.visited.len(),
-                    state.seen_nodes.len(),
-                    fns.len(),
-                    ctxs.len(),
-                    self.ctx_chains.len(),
-                    state.cuts.len(),
-                    rss_pre,
-                    rss_walk
-                );
+                self.log_sink_mem(fi, site.name, &state, rss_pre, rss_walk);
             }
 
             let verdict = if state.saw_source {
@@ -930,13 +1103,13 @@ impl<'a> BackwardTaintEngine<'a> {
 
             self.findings.push(SinkFinding {
                 function: ir.name.clone(),
-                sink: name.to_string(),
+                sink: site.name.to_string(),
                 arg_slot,
                 alert,
                 verdict,
                 finding_class,
-                role,
-                label: label.clone(),
+                role: site.role,
+                label: site.label.map(str::to_string),
                 source_desc: state.source_desc.clone(),
                 path,
                 cut_reasons: state.cuts.clone(),
@@ -945,9 +1118,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 // definition: reports must point at the line the user fixes.
                 // (Reporting the operand's def site put `search.ts` SQLi at
                 // line 18 instead of the vulnerable `query(...)` on line 21.)
-                sink_span: call_dest
-                    .and_then(|d| ir.var_metadata.get(&d))
-                    .and_then(|m| m.byte_range)
+                sink_span: explicit_span
                     .or_else(|| ir.var_metadata.get(&var).and_then(|m| m.byte_range)),
             });
             let _ = var;
@@ -958,7 +1129,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 eprintln!(
                     "[mem]     site_total fn={} sink={} nroots={} findings={} rss_delta_kb={}",
                     self.prog.functions[fi].name,
-                    name,
+                    site.name,
                     self.stats.sink_args_explored,
                     self.findings.len(),
                     now - mem_entry
@@ -980,7 +1151,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 }
             }
             for ins in &b.instructions {
-                if Self::instr_defines(ins, root.var) {
+                if ins.dest() == Some(root.var) {
                     return matches!(
                         ins,
                         Instruction::LoadField { .. } | Instruction::LoadElement { .. }
@@ -1008,30 +1179,6 @@ impl<'a> BackwardTaintEngine<'a> {
             .get(&block)
             .and_then(|b| b.instructions.get(i))
             .is_some_and(|ins| matches!(ins, Instruction::Allocate { dest, .. } if *dest == var))
-    }
-
-    /// Does this instruction define `var` (value destinations only)?
-    fn instr_defines(instr: &Instruction, var: VarId) -> bool {
-        let dest = match instr {
-            Instruction::Assign { dest, .. }
-            | Instruction::LoadField { dest, .. }
-            | Instruction::LoadElement { dest, .. }
-            | Instruction::LoadGlobal { dest, .. }
-            | Instruction::AddressOf { dest, .. }
-            | Instruction::Dereference { dest, .. }
-            | Instruction::Cast { dest, .. }
-            | Instruction::ExtractValue { dest, .. }
-            | Instruction::BinaryOp { dest, .. }
-            | Instruction::UnaryOp { dest, .. }
-            | Instruction::Allocate { dest, .. }
-            | Instruction::Await { dest, .. } => Some(*dest),
-            Instruction::CallStatic { dest, .. }
-            | Instruction::CallVirtual { dest, .. }
-            | Instruction::CallPointer { dest, .. }
-            | Instruction::Yield { dest, .. } => *dest,
-            _ => None,
-        };
-        dest == Some(var)
     }
 
     /// Backward BFS from `root` within one root's exploration state.
@@ -1224,6 +1371,20 @@ impl<'a> BackwardTaintEngine<'a> {
                 continue;
             }
 
+            // An external call whose result the walk follows into its
+            // arguments: sound only as an assumption (the library might
+            // sanitise or might not propagate), so name it.
+            if enter_call.is_some()
+                && cross_preds.is_empty()
+                && !local_preds.is_empty()
+                && let Some(mut site) = self.cut_site(cf, &cur)
+                && site.kind == "external-call"
+                && !is_std_forwarder(&site.detail)
+            {
+                site.kind = PASSED_THROUGH;
+                record_cut_site(&mut state.cut_sites, site);
+            }
+
             for (pf, pk) in cross_preds {
                 // Context transition for the k=1 stack:
                 //  - landing on an ActualArg unwinds out of a callee → pop;
@@ -1349,22 +1510,11 @@ impl<'a> BackwardTaintEngine<'a> {
             return false;
         }
         if node.kind == crate::graph::svfg::NodeKind::InstrDef {
-            let NodeKey {
-                block,
-                instr_idx: Some(idx),
-                ..
-            } = *key
-            else {
+            let Some(instr) = key.instruction(fe.ir) else {
                 return false;
             };
-            let Some(b) = fe.ir.blocks.get(&block) else {
-                return false;
-            };
-            if idx >= b.instructions.len() {
-                return false;
-            }
             if matches!(
-                &b.instructions[idx],
+                instr,
                 Instruction::LoadGlobal { .. }
                     | Instruction::Dereference { .. }
                     | Instruction::CallPointer { .. }
@@ -1378,7 +1528,7 @@ impl<'a> BackwardTaintEngine<'a> {
             // edges and never reach this dead-end classification.
             if matches!(node.kind, crate::graph::svfg::NodeKind::ActualRet { .. })
                 && matches!(
-                    &b.instructions[idx],
+                    instr,
                     Instruction::CallStatic { dest: Some(d), .. }
                         | Instruction::CallVirtual { dest: Some(d), .. }
                     if *d == key.var
@@ -1407,4 +1557,38 @@ fn is_receiver_only_verb(name: &str) -> bool {
             | "render"
             | "aggregate"
     )
+}
+
+#[cfg(test)]
+mod forwarder_tests {
+    use super::{STD_FORWARDERS, is_std_forwarder};
+
+    /// `is_std_forwarder` binary-searches [`STD_FORWARDERS`], so an entry
+    /// inserted out of order (or duplicated) is not a compile error - the
+    /// lookup just stops finding it, and std adapters creep back into the
+    /// pass-through list. `windows(2)` with a strict `<` fails on both.
+    #[test]
+    fn the_std_forwarder_list_is_sorted_and_unique() {
+        for pair in STD_FORWARDERS.windows(2) {
+            assert!(
+                pair[0] < pair[1],
+                "`{}` must sort before `{}`; binary_search silently stops \
+                 filtering once the list is out of order",
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+
+    /// The list is the whole answer: every entry is found, and a call the
+    /// engine has no model for is not treated as an adapter.
+    #[test]
+    fn every_entry_is_found_and_unknown_calls_are_not() {
+        for name in STD_FORWARDERS {
+            assert!(is_std_forwarder(name), "`{name}` is in the list");
+        }
+        assert!(is_std_forwarder("iter"));
+        assert!(!is_std_forwarder("mystery.read"));
+        assert!(!is_std_forwarder(""));
+    }
 }

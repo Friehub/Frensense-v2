@@ -70,7 +70,7 @@ pub fn lower_source_with_facts(
 /// file that is a third unparseable used to be analyzed as if it were intact
 /// and reported as clean. The second element carries that fact so the scan
 /// can say "partially analyzed" instead.
-pub fn lower_source_detailed(
+pub(crate) fn lower_source_detailed(
     path: &str,
     source: &str,
     ext: &str,
@@ -535,12 +535,6 @@ fn lower_static(
 fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &str) {
     let mut pc = params.walk();
     for p in params.children(&mut pc) {
-        // Language-dependent parameter shapes:
-        // - JS/TS: `required_parameter`/`optional_parameter` with `pattern` field
-        // - Python: plain `identifier` children of `parameters`, plus the
-        //   annotated/defaulted wrappers (`x: T`, `x=v`, `x: T = v`, `*x`)
-        // - Rust: `parameter` node wrapping the name identifier as first child
-        // - Go: `parameter_declaration` with the name as first child
         if p.kind() == "self_parameter" {
             let name = "self".to_string();
             let v = ctx.ir.new_var(VarMetadata {
@@ -555,60 +549,77 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             ctx.env.last_mut().unwrap().insert(name, v);
             continue;
         }
-        let id = match p.kind() {
-            "required_parameter" | "optional_parameter" => param_binding(p),
-            "identifier" => Some(p),
-            // C `parameter_declaration`: shape is `type declarator`, where the
-            // declarator may be pointer_declarator → identifier (e.g. `char *p`).
-            // child(0) returns the type specifier, not the name - use the
-            // `declarator` field and walk it to find the leaf identifier.
-            "parameter_declaration" => p
-                .child_by_field_name("declarator")
-                .and_then(|d| find_param_identifier(d)),
-            // Rust `parameter`, Go `parameter_declaration` (handled above),
-            // variadic_parameter: first child is the identifier or pattern.
-            // A pattern that destructures a wrapper (`Query(p): Query<P>`,
-            // `State(db): State<Pool>`) binds the INNER identifier: naming
-            // the parameter after the whole pattern text ("Query(p)") left
-            // the body reference `p` unbound, so the extractor parameter
-            // could never be a source nor feed one.
-            "parameter" | "variadic_parameter" => param_binding(p),
-            // Python annotated/defaulted parameters. `typed_parameter` has no
-            // `name` field (the binding is its first child, possibly wrapped
-            // in a `*`/`**` splat pattern), while the default forms expose
-            // `name`. Without these arms every annotated handler parameter
-            // stayed unbound: `def h(x: Request)` never recorded `x` as a
-            // parameter at all, so neither the type annotation nor the
-            // language's parameter classification could ever see it.
-            "typed_parameter"
-            | "default_parameter"
-            | "typed_default_parameter"
-            | "list_splat_pattern"
-            | "dictionary_splat_pattern" => python_param_binding(p),
-            _ => None,
-        };
-        if let Some(id) = id {
-            let name = source[id.start_byte()..id.end_byte()].to_string();
-            // Parameter TYPE annotation (`Query<P>`, `web::Query<P>`,
-            // `*http.Request`), normalized to its path. Source vocabulary
-            // that names a type (the axum/actix extractor family) matches
-            // this: the parameter's type - not the author's variable name -
-            // decides whether the argument is attacker-controlled.
-            let type_name = p
-                .child_by_field_name("type")
-                .map(|t| normalize_type_path(&source[t.start_byte()..t.end_byte()]))
-                .filter(|t| !t.is_empty());
+        // Parameter TYPE annotation (`Query<P>`, `web::Query<P>`,
+        // `*http.Request`), normalized to its path. Source vocabulary that
+        // names a type (the axum/actix extractor family, Go's `*gin.Context`)
+        // matches this: the parameter's type - not the author's variable name -
+        // decides whether the argument is attacker-controlled. One Go
+        // declaration shares its type across every grouped name.
+        let type_name = p
+            .child_by_field_name("type")
+            .map(|t| normalize_type_path(&source[t.start_byte()..t.end_byte()]))
+            .filter(|t| !t.is_empty());
+        for binding in param_bindings(p) {
+            let name = source[binding.start_byte()..binding.end_byte()].to_string();
             let v = ctx.ir.new_var(VarMetadata {
                 source_name: Some(name.clone()),
-                type_name,
+                type_name: type_name.clone(),
                 byte_range: Some((p.start_byte(), p.end_byte())),
                 is_memory_state: false,
                 object_keys: Vec::new(),
                 declared: true,
             });
             ctx.ir.parameters.push(v);
+            // A destructured parameter (`function run({ h }: Opts)`) names no
+            // variable of its own: the pattern's names read the parts of the
+            // parameter value, exactly like `const { h } = opts` inside the
+            // body. The slot still occupies the parameter position (so the
+            // call's argument maps to it), but the pattern text is not a name
+            // the body can resolve, so it is not entered into the scope.
+            if ctx.is_destructuring_pattern(binding.kind()) {
+                ctx.bind_pattern(binding, v);
+                continue;
+            }
             ctx.env.last_mut().unwrap().insert(name, v);
         }
+    }
+}
+
+/// The binding identifiers of one parameter node, in declaration order.
+///
+/// - JS/TS: `required_parameter`/`optional_parameter` with a `pattern` field
+/// - Python: plain `identifier` children of `parameters`, plus the
+///   annotated/defaulted wrappers (`x: T`, `x=v`, `x: T = v`, `*x`)
+/// - Rust: `parameter` node wrapping the name identifier as first child
+/// - C: `parameter_declaration` shaped `type declarator`, where the declarator
+///   may be `pointer_declarator` → `identifier` (`char *p`). `child(0)` is the
+///   type specifier, so the `declarator` field is walked to its leaf.
+/// - Go: `parameter_declaration`/`variadic_parameter_declaration` shaped
+///   `name ... type`, with ONE `name` field per grouped name (`a, b string` is
+///   a single declaration). Go has no `declarator` field, so a Go parameter
+///   used to match the C arm and bind nothing: every handler parameter was an
+///   undeclared body name with no type, and the language's parameter
+///   classifier - which keys on `*gin.Context`, `*http.Request` - never saw
+///   one.
+fn param_bindings(p: tree_sitter::Node<'_>) -> Vec<tree_sitter::Node<'_>> {
+    match p.kind() {
+        "required_parameter" | "optional_parameter" | "parameter" | "variadic_parameter" => {
+            param_binding(p).into_iter().collect()
+        }
+        "identifier" => vec![p],
+        "parameter_declaration" | "variadic_parameter_declaration" => {
+            if let Some(decl) = p.child_by_field_name("declarator") {
+                return find_param_identifier(decl).into_iter().collect();
+            }
+            let mut cursor = p.walk();
+            p.children_by_field_name("name", &mut cursor).collect()
+        }
+        "typed_parameter"
+        | "default_parameter"
+        | "typed_default_parameter"
+        | "list_splat_pattern"
+        | "dictionary_splat_pattern" => python_param_binding(p).into_iter().collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -624,6 +635,12 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
 /// identifier of a wrapper-shaped pattern (`Query(p)`, `{ body }`, `&mut x`).
 fn param_binding<'t>(p: tree_sitter::Node<'t>) -> Option<tree_sitter::Node<'t>> {
     let pattern = p.child_by_field_name("pattern").or_else(|| p.child(0))?;
+    // `...parts` wraps the name: the rest marker is not part of it. Binding
+    // the parameter under the text `...parts` left the body's `parts` an
+    // undeclared name, so a rest parameter's value never reached its uses.
+    if pattern.kind() == "rest_pattern" {
+        return pattern.named_child(0);
+    }
     Some(extractor_binding(pattern).unwrap_or(pattern))
 }
 
@@ -714,6 +731,91 @@ fn find_param_identifier(node: tree_sitter::Node<'_>) -> Option<tree_sitter::Nod
 mod tests {
     use super::{lower_source, lower_source_with_facts};
     use crate::analysis::taint::facts::seeded_tables;
+
+    /// Go parameters used to bind nothing at all: the C `declarator` field
+    /// the old arm read does not exist on a Go `parameter_declaration`, so
+    /// every body reference was an undeclared name and the parameter's type -
+    /// the thing `classify_param_taint` keys on for `*http.Request` and
+    /// `*gin.Context` - was never recorded. Grouped (`a, b string`) and
+    /// variadic names share one declaration, so each name has to bind.
+    #[test]
+    fn go_parameters_are_bound_with_their_declared_types() {
+        let src = r#"
+package main
+
+import "net/http"
+
+func handle(request *http.Request, a, b string, rest ...int) {}
+"#;
+        let fns = lower_source("a.go", src, "go").unwrap();
+        let ir = &fns["handle"];
+        let bound: Vec<(&str, Option<&str>)> = ir
+            .parameters
+            .iter()
+            .map(|&v| {
+                let meta = &ir.var_metadata[&v];
+                (
+                    meta.source_name.as_deref().unwrap_or(""),
+                    meta.type_name.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            bound,
+            vec![
+                ("request", Some("*http.Request")),
+                ("a", Some("string")),
+                ("b", Some("string")),
+                ("rest", Some("int")),
+            ],
+            "every Go parameter must bind with its type: {bound:?}"
+        );
+    }
+
+    /// A destructured parameter owns no name of its own, so the slot holds one
+    /// load per bound name - and a nested pattern recurses through the load it
+    /// just emitted. A rest parameter binds its inner name, not `...name`.
+    #[test]
+    fn destructured_parameters_bind_the_names_inside_them() {
+        use crate::ir::function::Instruction;
+
+        let src = r#"
+function run({ body: { name } }: any, [first]: string[], ...rest: string[]) {}
+"#;
+        let fns = lower_source("a.ts", src, "ts").unwrap();
+        let ir = &fns["run"];
+        assert_eq!(ir.parameters.len(), 3, "one slot per parameter");
+        let rest = &ir.var_metadata[&ir.parameters[2]];
+        assert_eq!(rest.source_name.as_deref(), Some("rest"));
+
+        let mut loads: Vec<(String, String)> = Vec::new();
+        let mut elements = 0;
+        for block in ir.blocks.values() {
+            for instr in &block.instructions {
+                match instr {
+                    Instruction::LoadField { dest, field, .. } => loads.push((
+                        field.clone(),
+                        ir.var_metadata[dest]
+                            .source_name
+                            .clone()
+                            .unwrap_or_default(),
+                    )),
+                    Instruction::LoadElement { .. } => elements += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(
+            loads,
+            vec![
+                // The intermediate is the flat form's `body` binding.
+                ("body".to_string(), "body".to_string()),
+                ("name".to_string(), "name".to_string()),
+            ],
+            "nested pattern must load each part: {loads:?}"
+        );
+        assert_eq!(elements, 1, "the array pattern loads its element");
+    }
 
     fn keys(src: &str) -> Vec<String> {
         let fns = lower_source("t.ts", src, "ts").unwrap();

@@ -8,10 +8,8 @@
 //! * [`facts`], `FactTable`, `SinkSignature`, per-slot danger facts, and
 //!   spec/bundle table construction.
 //! * [`engine`], `BackwardTaintEngine`: sink-rooted backward traversal.
-//! * [`context`], k-call-site context sensitivity.
 
 pub mod config;
-pub mod context;
 pub mod engine;
 pub mod facts;
 pub mod path;
@@ -21,8 +19,6 @@ pub mod role;
 #[cfg(test)]
 mod sibling_path_tests;
 
-#[cfg(test)]
-mod context_tests;
 #[cfg(test)]
 mod engine_tests;
 #[cfg(test)]

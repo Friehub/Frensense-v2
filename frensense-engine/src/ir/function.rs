@@ -22,7 +22,7 @@ pub struct VarId(pub usize);
 /// Source name of the hidden memory-state parameter every [`FunctionIR`]
 /// allocates as its `VarId(0)`. Shared by the IR builder (which names the
 /// variable) and path reconstruction (which strips the artifact).
-pub const INITIAL_HEAP_STATE: &str = "InitialHeapState";
+pub(crate) const INITIAL_HEAP_STATE: &str = "InitialHeapState";
 
 /// A unique identifier for a Basic Block in the CFG.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -95,7 +95,7 @@ pub struct Phi {
     /// Variable defined by the phi (the merged value).
     pub dest: VarId,
     /// One `(predecessor block, variable)` pair per incoming control-flow edge: the phi takes the variable that arrives along that edge.
-    pub incoming: Vec<(BlockId, VarId)>,
+    pub(crate) incoming: Vec<(BlockId, VarId)>,
 }
 
 /// A single linear instruction in 3-Address Code form.
@@ -137,6 +137,13 @@ pub enum Instruction {
         field: String,
         /// Value stored into the field.
         src: Operand,
+        /// Byte range of the expression that performs the write (the
+        /// assignment, its member target, or the JSX attribute). The write is
+        /// the statement a property-sink finding must point at: the stored
+        /// value's variable is defined somewhere else. `None` for stores a
+        /// lowering synthesised without one source expression (object-literal
+        /// fields, test fixtures).
+        span: Option<(usize, usize)>,
     },
 
     /// `v_dest = base[index]  @ mem_in`
@@ -340,6 +347,75 @@ pub enum Instruction {
     },
 }
 
+impl Instruction {
+    /// The value variable this instruction defines, if any.
+    ///
+    /// Covers every instruction kind that produces a value: assignments,
+    /// loads, calls (when the result is used), allocations, address-of,
+    /// dereference, casts, aggregate extraction, unary/binary operations,
+    /// `await` and `yield`. Memory-state outputs are not included; see
+    /// `Instruction::mem_out`. This is the one definition of "what does this
+    /// instruction define"; do not re-match the variants elsewhere, because
+    /// a copy that forgets a variant silently drops findings on it.
+    #[must_use]
+    pub fn dest(&self) -> Option<VarId> {
+        match self {
+            Self::Assign { dest, .. }
+            | Self::LoadField { dest, .. }
+            | Self::LoadElement { dest, .. }
+            | Self::LoadGlobal { dest, .. }
+            | Self::Allocate { dest, .. }
+            | Self::AddressOf { dest, .. }
+            | Self::Dereference { dest, .. }
+            | Self::Cast { dest, .. }
+            | Self::ExtractValue { dest, .. }
+            | Self::BinaryOp { dest, .. }
+            | Self::UnaryOp { dest, .. }
+            | Self::Await { dest, .. } => Some(*dest),
+            Self::CallStatic { dest, .. }
+            | Self::CallVirtual { dest, .. }
+            | Self::CallPointer { dest, .. }
+            | Self::Yield { dest, .. } => *dest,
+            // No `_` arm on purpose: a new instruction kind must decide here
+            // whether it defines a value.
+            Self::StoreField { .. } | Self::StoreElement { .. } | Self::StoreGlobal { .. } => None,
+        }
+    }
+
+    /// The memory-state variable this instruction produces, if any.
+    #[must_use]
+    pub(crate) fn mem_out(&self) -> Option<VarId> {
+        match self {
+            Self::StoreField { mem_out, .. }
+            | Self::StoreElement { mem_out, .. }
+            | Self::StoreGlobal { mem_out, .. }
+            | Self::CallStatic { mem_out, .. }
+            | Self::CallVirtual { mem_out, .. }
+            | Self::CallPointer { mem_out, .. }
+            | Self::Allocate { mem_out, .. }
+            | Self::Await { mem_out, .. }
+            | Self::Yield { mem_out, .. } => Some(*mem_out),
+            Self::Assign { .. }
+            | Self::LoadField { .. }
+            | Self::LoadElement { .. }
+            | Self::LoadGlobal { .. }
+            | Self::AddressOf { .. }
+            | Self::Dereference { .. }
+            | Self::Cast { .. }
+            | Self::ExtractValue { .. }
+            | Self::BinaryOp { .. }
+            | Self::UnaryOp { .. } => None,
+        }
+    }
+
+    /// Every variable this instruction defines: the value result first, then
+    /// the memory-state output.
+    #[must_use]
+    pub(crate) fn defs(&self) -> Vec<VarId> {
+        self.dest().into_iter().chain(self.mem_out()).collect()
+    }
+}
+
 /// Determines how control flow exits a BasicBlock.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
@@ -374,7 +450,7 @@ pub enum Terminator {
         /// Value being thrown.
         src: Operand,
     },
-    /// No terminator yet: the block is still under construction (the state of every block created by [`BasicBlock::new`]).
+    /// No terminator yet: the block is still under construction (the state of every block created by `BasicBlock::new`).
     None,
 }
 
@@ -398,7 +474,7 @@ pub struct BasicBlock {
 
 impl BasicBlock {
     /// Creates an empty block with the given id: no phis, no instructions, [`Terminator::None`] and no edges.
-    pub fn new(id: BlockId) -> Self {
+    pub(crate) fn new(id: BlockId) -> Self {
         Self {
             id,
             phis: Vec::new(),
@@ -425,7 +501,7 @@ pub struct FunctionIR {
     /// All basic blocks, keyed by their [`BlockId`].
     pub blocks: FxHashMap<BlockId, BasicBlock>,
     /// The block execution starts in.
-    pub entry_block: BlockId,
+    pub(crate) entry_block: BlockId,
     /// Source-level metadata for every variable, including memory states.
     pub var_metadata: FxHashMap<VarId, VarMetadata>,
     /// Language key this IR was lowered from (`spec.fact_language()`:
@@ -521,6 +597,15 @@ impl FunctionIR {
         self.var_metadata.get(&var).and_then(|m| m.byte_range)
     }
 
+    /// The instruction that defines `var`, if any. The IR is SSA, so there is
+    /// at most one.
+    pub(crate) fn def_instruction(&self, var: VarId) -> Option<&Instruction> {
+        self.blocks
+            .values()
+            .flat_map(|b| b.instructions.iter())
+            .find(|instr| instr.dest() == Some(var))
+    }
+
     /// Byte range of a call instruction: the call result variable carries the
     /// call expression's range. `None` for non-calls and calls with no result.
     pub(crate) fn instr_span(&self, instr: &Instruction) -> Option<(usize, usize)> {
@@ -542,7 +627,7 @@ impl FunctionIR {
     }
 
     /// Allocates a fresh, empty, unconnected block and returns its id.
-    pub fn new_block(&mut self) -> BlockId {
+    pub(crate) fn new_block(&mut self) -> BlockId {
         let id = BlockId(self.next_block_id);
         self.next_block_id += 1;
         self.blocks.insert(id, BasicBlock::new(id));
@@ -550,28 +635,28 @@ impl FunctionIR {
     }
 
     /// Appends a phi node to `block`. Does nothing if the block does not exist.
-    pub fn push_phi(&mut self, block: BlockId, phi: Phi) {
+    pub(crate) fn push_phi(&mut self, block: BlockId, phi: Phi) {
         if let Some(b) = self.blocks.get_mut(&block) {
             b.phis.push(phi);
         }
     }
 
     /// Appends an instruction to the end of `block`. Does nothing if the block does not exist.
-    pub fn push_instruction(&mut self, block: BlockId, instr: Instruction) {
+    pub(crate) fn push_instruction(&mut self, block: BlockId, instr: Instruction) {
         if let Some(b) = self.blocks.get_mut(&block) {
             b.instructions.push(instr);
         }
     }
 
     /// Sets how `block` exits. Does nothing if the block does not exist; the CFG edges are recorded separately by [`FunctionIR::add_edge`].
-    pub fn set_terminator(&mut self, block: BlockId, terminator: Terminator) {
+    pub(crate) fn set_terminator(&mut self, block: BlockId, terminator: Terminator) {
         if let Some(b) = self.blocks.get_mut(&block) {
             b.terminator = terminator;
         }
     }
 
     /// Records a control-flow edge `from -> to` in both blocks' successor and predecessor lists. Idempotent: an edge that is already present is not added twice.
-    pub fn add_edge(&mut self, from: BlockId, to: BlockId) {
+    pub(crate) fn add_edge(&mut self, from: BlockId, to: BlockId) {
         if let Some(f) = self.blocks.get_mut(&from)
             && !f.successors.contains(&to)
         {

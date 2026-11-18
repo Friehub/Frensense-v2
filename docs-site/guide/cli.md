@@ -63,7 +63,7 @@ terminal and a silent scan there would be a bug, not an ambiguity.
 | `--sarif` | SARIF 2.1.0. Same as `--format sarif`. |
 | `--github` | GitHub Actions annotation commands. Same as `--format github`. |
 | `--show-flows` | In text output, list each step from source to sink. (JSON and SARIF always include the path.) |
-| `--explain` | Also list sink arguments that produced no finding and why (printed to stderr). |
+| `--explain` | Also list sink arguments that produced no finding and why, the library calls the backward walk flowed through on the assumption that their result carries their arguments, the callees that matched no sink fact with their call counts, and a method call's receiver as `receiver` rather than a slot number (printed to stderr). The scan summary always shows the stages a scan went through; the same figures are in the JSON report under `analysis`. |
 | `--explain-json <file>` | Write those silent sink arguments to a file as JSON. Implies `--explain`. |
 
 ### The JSON report

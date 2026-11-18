@@ -167,11 +167,11 @@ pub struct PreparedProgram {
     /// Per file, the local names that an import binds to a program function.
     pub file_aliases: FxHashMap<String, FxHashMap<String, String>>,
     /// Per file, the local names that an import binds to an external package.
-    pub file_package_imports:
+    pub(crate) file_package_imports:
         FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
-    /// Import declarations per file (see [`ModuleResolution`]).
+    /// Import declarations per file (see `ModuleResolution`).
     ///
-    /// [`ModuleResolution`]: crate::graph::module::ModuleResolution
+    /// `ModuleResolution`: crate::graph::module::ModuleResolution
     pub file_imports: FxHashMap<String, Vec<Import>>,
     /// Export/re-export declarations per file, with visibility and kind.
     pub file_exports: FxHashMap<String, Vec<Export>>,
@@ -186,11 +186,11 @@ pub struct PreparedProgram {
     /// Number of source inputs attempted by this prepared program.
     pub submitted: usize,
     /// Safety cap events that happened during per-file lowering.
-    pub lower_caps: Vec<CapHit>,
+    pub(crate) lower_caps: Vec<CapHit>,
     /// Paths that failed lowering, independent of error message formatting.
     pub lower_failed_files: Vec<String>,
     /// Lowering cost per file, feeding the slowest-file report.
-    pub file_timings: Vec<FileTiming>,
+    pub(crate) file_timings: Vec<FileTiming>,
 }
 
 impl std::fmt::Debug for PreparedProgram {
@@ -530,19 +530,19 @@ impl PreparedProgram {
     /// The export surface of one file; empty when the file declares none or
     /// its language has no export syntax the spec models.
     #[must_use]
-    pub fn exports_of(&self, file: &str) -> &[Export] {
+    pub(crate) fn exports_of(&self, file: &str) -> &[Export] {
         self.file_exports.get(file).map_or(&[], Vec::as_slice)
     }
 
     /// Every top-level declaration of one file, exported or not.
     #[must_use]
-    pub fn module_items_of(&self, file: &str) -> &[ModuleItem] {
+    pub(crate) fn module_items_of(&self, file: &str) -> &[ModuleItem] {
         self.file_module_items.get(file).map_or(&[], Vec::as_slice)
     }
 
     /// The import declarations of one file.
     #[must_use]
-    pub fn imports_of(&self, file: &str) -> &[Import] {
+    pub(crate) fn imports_of(&self, file: &str) -> &[Import] {
         self.file_imports.get(file).map_or(&[], Vec::as_slice)
     }
 }
@@ -703,11 +703,7 @@ pub fn scan_prepared(
                     let cfile = fn_file.get(&c.function).cloned().unwrap_or_default();
                     let cline = c
                         .span
-                        .and_then(|(start, _)| {
-                            let src = file_source.get(&cfile)?;
-                            let before = &src[..start.min(src.len())];
-                            Some(before.matches('\n').count() as u32 + 1)
-                        })
+                        .and_then(|(start, _)| Some(line_at(file_source.get(&cfile)?, start)))
                         .unwrap_or(0);
                     LocatedCutSite {
                         kind: c.kind,
@@ -744,9 +740,7 @@ pub fn scan_prepared(
                         .map_or(before.len(), |i| before.len() - i - 1)
                         as u32
                         + 1;
-                    let end_before = &source[..end.min(source.len())];
-                    let end_line = end_before.matches('\n').count() as u32 + 1;
-                    (line, col, end_line)
+                    (line, col, line_at(source, end))
                 })
                 .unwrap_or((0, 0, 0));
             Some(LocatedChecker {
@@ -787,6 +781,15 @@ pub fn scan_prepared(
     let failed_files = prepared.lower_failed_files.clone();
     let mut caps = prepared.lower_caps.clone();
     caps.extend(crate::telemetry::drain_caps());
+    // Real sizes of what the taint phase walked, and where its call sites left
+    // the analysis: measured here, never derived from another counter.
+    let graph = crate::telemetry::GraphSize::new(
+        prog.functions.len(),
+        prog.functions.iter().map(|f| f.svfg.nodes.len()).sum(),
+        prog.functions.iter().map(|f| f.svfg.edge_count()).sum(),
+        prog.cross_edges.values().map(Vec::len).sum(),
+    );
+    let funnel = engine.funnel.clone();
     let mut telemetry = ScanTelemetry {
         phases,
         slowest_files: prepared.file_timings.clone(),
@@ -806,6 +809,8 @@ pub fn scan_prepared(
             functions: prepared.irs.len(),
         },
         taint: engine.stats,
+        graph,
+        funnel,
     };
     telemetry
         .slowest_files
@@ -930,10 +935,15 @@ pub struct LocatedChecker {
     pub end_line: u32,
 }
 
-/// A [`crate::analysis::taint::engine::CutSite`] pinned to its file and line.
+/// 1-based line of byte `offset` in `source` (clamped to its end).
+fn line_at(source: &str, offset: usize) -> u32 {
+    source[..offset.min(source.len())].matches('\n').count() as u32 + 1
+}
+
+/// A `crate::analysis::taint::engine::CutSite` pinned to its file and line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocatedCutSite {
-    /// Reason class of the stop site, as in [`crate::analysis::taint::engine::CutSite::kind`].
+    /// Reason class of the stop site, as in `crate::analysis::taint::engine::CutSite::kind`.
     pub kind: &'static str,
     /// Function whose body contains the stop site.
     pub function: String,
@@ -956,8 +966,69 @@ pub struct LocatedFinding {
     pub line: u32,
     /// 1-based column of the sink call (0 when no span recorded).
     pub column: u32,
-    /// Where the walk met a value it could not resolve (see [`SinkFinding::cut_sites`]).
+    /// Where the walk met a value it could not resolve (see `SinkFinding::cut_sites`).
     pub cut_sites: Vec<LocatedCutSite>,
+}
+
+#[cfg(test)]
+mod passed_through_tests {
+    use super::scan;
+
+    /// A clean verdict reached through a library call the engine has no model
+    /// for names that call, so silence is traceable to the missing entry.
+    #[test]
+    fn a_clean_verdict_names_the_unmodelled_call_it_flowed_through() {
+        let (config, facts) = crate::analysis::taint::facts::seeded_tables(["ts"]);
+        let src = r#"
+app.get("/x", (req, res) => {
+  const v = mystery.read(req.params);
+  child_process.exec(v);
+});
+"#;
+        let result = scan(
+            &[(
+                "app/handler.ts".to_string(),
+                src.to_string(),
+                "ts".to_string(),
+            )],
+            &config,
+            &facts,
+        );
+        assert!(result.errors.is_empty(), "scan errors: {:?}", result.errors);
+        let passed: Vec<&str> = result
+            .located
+            .iter()
+            .flat_map(|l| l.cut_sites.iter())
+            .filter(|c| c.kind == "passed-through")
+            .map(|c| c.detail.as_str())
+            .collect();
+        assert!(
+            passed.iter().any(|d| d.contains("read")),
+            "expected the unmodelled call to be named, got {passed:?}"
+        );
+        // Standard-library adapters are defined to forward; naming them says
+        // nothing and buries the call the engine actually has no model for.
+        for adapter in ["iter", "map", "collect", "any", "find", "skip"] {
+            assert!(
+                !passed.contains(&adapter),
+                "`{adapter}` is a std adapter, not a blind spot: {passed:?}"
+            );
+        }
+        // The counters partition the call sites, and `exec` is a sink.
+        let f = &result.telemetry.funnel;
+        assert_eq!(
+            f.calls_examined,
+            f.skipped() + f.not_a_sink + f.sink_calls,
+            "the funnel counters must partition the call sites: {f:?}"
+        );
+        assert!(f.sink_calls >= 1, "exec is a sink fact: {f:?}");
+        // The rejected calls are named, not only counted, so the pipeline
+        // block can point at the vocabulary to teach.
+        assert!(
+            f.unmatched_callees.iter().any(|u| u.callee == "read"),
+            "the unmodelled callee must be named in the funnel: {f:?}"
+        );
+    }
 }
 
 #[cfg(test)]

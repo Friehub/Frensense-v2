@@ -916,3 +916,23 @@ mod conclusion_override_tests {
         assert_eq!(base.key_size_rules[0].min_bits, 4096);
     }
 }
+
+#[test]
+fn upsert_by_provenance_higher_tier_wins_and_ties_keep_existing() {
+    type Fact = (&'static str, u8);
+    let key = |a: &Fact, b: &Fact| a.0 == b.0;
+    let mut items: Vec<(Fact, Provenance)> = Vec::new();
+    upsert_by_provenance(&mut items, ("r", 1), Provenance::Authored, key);
+    // Lower tier does not replace.
+    upsert_by_provenance(&mut items, ("r", 2), Provenance::Spec, key);
+    assert_eq!(items, vec![(("r", 1), Provenance::Authored)]);
+    // A tie keeps the existing entry.
+    upsert_by_provenance(&mut items, ("r", 3), Provenance::Authored, key);
+    assert_eq!(items[0].0, ("r", 1));
+    // Higher tier replaces in place.
+    upsert_by_provenance(&mut items, ("r", 4), Provenance::Learned, key);
+    assert_eq!(items, vec![(("r", 4), Provenance::Learned)]);
+    // A different key appends.
+    upsert_by_provenance(&mut items, ("s", 5), Provenance::Spec, key);
+    assert_eq!(items.len(), 2);
+}

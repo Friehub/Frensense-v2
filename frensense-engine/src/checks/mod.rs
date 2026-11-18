@@ -21,16 +21,28 @@
 
 pub mod guard_bypass;
 pub mod health;
-pub mod int_overflow;
+pub(crate) mod int_overflow;
 pub mod leak;
 pub mod memory_summary;
-pub mod noreturn;
-pub mod oob;
+pub(crate) mod noreturn;
+pub(crate) mod oob;
 pub mod policy;
 pub mod registry;
 pub mod schema_policy;
 pub mod uaf;
 pub mod weak_hash;
+
+/// Text of a caught panic payload (`&str` and `String` payloads; anything else
+/// is reported as `unknown panic`).
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
+}
 
 #[cfg(test)]
 mod divergence_tests;
@@ -59,7 +71,9 @@ use crate::ir::function::FunctionIR;
 use rustc_hash::FxHashSet;
 
 pub use crate::analysis::taint::facts::Provenance;
-pub use registry::{CheckContext, CheckRegistry, CheckScope, NonDataflowCheck, default_registry};
+pub(crate) use registry::{
+    CheckContext, CheckRegistry, CheckScope, NonDataflowCheck, default_registry,
+};
 
 /// Last segment of a call reference: everything after the last `.`, then
 /// after the last `::` (Rust/C++ paths), so `security.hash`, `sha2::digest`
@@ -196,39 +210,22 @@ fn push_unique(
 ///
 /// `facts` carries the bundle-learned checks; pass `&FactTable::default()`
 /// when scanning without a bundle.
-pub fn check_all<'a>(
+pub(crate) fn check_all<'a>(
     irs: impl IntoIterator<Item = &'a FunctionIR>,
     facts: &FactTable,
 ) -> Vec<CheckerFinding> {
-    check_all_with_graph(irs, facts, None)
+    check_all_with_telemetry(irs, facts, None, None).0
 }
 
-/// [`check_all`] with the program value-flow graph: the UAF checker walks
-/// interprocedural free/use edges (callee parameter frees, caller-side
-/// frees, factory provenance) that intraprocedural IR alone cannot see.
-pub fn check_all_with_graph<'a>(
-    irs: impl IntoIterator<Item = &'a FunctionIR>,
-    facts: &FactTable,
-    prog: Option<&ProgramSvfg<'_>>,
-) -> Vec<CheckerFinding> {
-    check_all_with_graph_scoped(irs, facts, prog, None)
-}
-
-/// [`check_all_with_graph`] with package-scope filtering for policy facts:
-/// policies carrying `package: Some(pkg)` only fire in functions whose
-/// file imports `pkg`. `scope = None` disables filtering.
-pub fn check_all_with_graph_scoped<'a>(
-    irs: impl IntoIterator<Item = &'a FunctionIR>,
-    facts: &FactTable,
-    prog: Option<&ProgramSvfg<'_>>,
-    pkg_scope: Option<&policy::PackageScope<'_>>,
-) -> Vec<CheckerFinding> {
-    check_all_with_telemetry(irs, facts, prog, pkg_scope).0
-}
-
-/// [`check_all_with_graph_scoped`] while also collecting execution telemetry
-/// (timings, run counts, findings, and outcomes with catch_unwind failure isolation).
-pub fn check_all_with_telemetry<'a>(
+/// [`check_all`] with the program value-flow graph and package scope, while
+/// also collecting execution telemetry (timings, run counts, findings, and
+/// outcomes with catch_unwind failure isolation).
+///
+/// `prog` lets the UAF checker walk interprocedural free/use edges (callee
+/// parameter frees, caller-side frees, factory provenance) that intraprocedural
+/// IR alone cannot see. `pkg_scope`: policies carrying `package: Some(pkg)`
+/// only fire in functions whose file imports `pkg`; `None` disables filtering.
+pub(crate) fn check_all_with_telemetry<'a>(
     irs: impl IntoIterator<Item = &'a FunctionIR>,
     facts: &FactTable,
     prog: Option<&ProgramSvfg<'_>>,
@@ -239,7 +236,7 @@ pub fn check_all_with_telemetry<'a>(
 }
 
 /// [`check_all_with_telemetry`] with an explicit [`registry::CheckRegistry`].
-pub fn check_all_with_registry_and_telemetry<'a>(
+pub(crate) fn check_all_with_registry_and_telemetry<'a>(
     registry: &registry::CheckRegistry,
     irs: impl IntoIterator<Item = &'a FunctionIR>,
     facts: &FactTable,
@@ -287,13 +284,7 @@ pub fn check_all_with_registry_and_telemetry<'a>(
                 crate::telemetry::CheckOutcome::Ok
             }
             Err(payload) => {
-                let msg = if let Some(s) = payload.downcast_ref::<&str>() {
-                    s.to_string()
-                } else if let Some(s) = payload.downcast_ref::<String>() {
-                    s.clone()
-                } else {
-                    "unknown panic".to_string()
-                };
+                let msg = panic_message(payload.as_ref());
                 eprintln!("frensense: check `{id}` panicked: {msg}");
                 crate::telemetry::CheckOutcome::Panicked(msg)
             }
@@ -334,13 +325,7 @@ pub fn check_all_with_registry_and_telemetry<'a>(
                     }
                 }
                 Err(payload) => {
-                    let msg = if let Some(s) = payload.downcast_ref::<&str>() {
-                        s.to_string()
-                    } else if let Some(s) = payload.downcast_ref::<String>() {
-                        s.clone()
-                    } else {
-                        "unknown panic".to_string()
-                    };
+                    let msg = panic_message(payload.as_ref());
                     eprintln!(
                         "frensense: check `{id}` panicked on function `{}`: {msg}",
                         ir.name
@@ -517,5 +502,21 @@ pub(crate) mod learned {
             }
         }
         findings
+    }
+}
+
+#[cfg(test)]
+mod panic_message_tests {
+    use super::panic_message;
+    use std::panic::{catch_unwind, panic_any};
+
+    #[test]
+    fn extracts_str_string_and_unknown_payloads() {
+        let str_payload = catch_unwind(|| panic!("plain")).unwrap_err();
+        assert_eq!(panic_message(str_payload.as_ref()), "plain");
+        let string_payload = catch_unwind(|| panic!("n={}", 3)).unwrap_err();
+        assert_eq!(panic_message(string_payload.as_ref()), "n=3");
+        let other = catch_unwind(|| panic_any(7_u8)).unwrap_err();
+        assert_eq!(panic_message(other.as_ref()), "unknown panic");
     }
 }

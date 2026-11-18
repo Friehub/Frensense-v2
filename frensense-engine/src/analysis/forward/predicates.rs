@@ -322,21 +322,10 @@ pub(crate) fn c_result_is_independent_of_args(func: &str) -> bool {
 
 /// True if the node is a use inside a configured sanitizer call.
 pub(crate) fn is_sanitizer_use(ir: &FunctionIR, config: &TaintConfig, key: &NodeKey) -> bool {
-    let NodeKey {
-        block,
-        instr_idx: Some(idx),
-        ..
-    } = *key
-    else {
+    let Some(instr) = key.instruction(ir) else {
         return false;
     };
-    let Some(b) = ir.blocks.get(&block) else {
-        return false;
-    };
-    if idx >= b.instructions.len() {
-        return false;
-    }
-    match &b.instructions[idx] {
+    match instr {
         Instruction::CallStatic { func, .. } => config.sanitizers.contains(func),
         Instruction::CallVirtual { method, .. } => config.sanitizers.contains(method),
         _ => false,
@@ -367,21 +356,10 @@ pub(crate) fn is_sanitizer_effective_for_role(
     // agnostically, bypassing role checks). Fact-table sanitizers
     // carry a `kind` slug that `from_slug` resolves.
     let _ = config;
-    let NodeKey {
-        block,
-        instr_idx: Some(idx),
-        ..
-    } = *key
-    else {
+    let Some(instr) = key.instruction(ir) else {
         return false;
     };
-    let Some(b) = ir.blocks.get(&block) else {
-        return false;
-    };
-    if idx >= b.instructions.len() {
-        return false;
-    }
-    match &b.instructions[idx] {
+    match instr {
         Instruction::CallStatic { func, .. } => {
             // A fresh allocation or a length is not the data it was sized
             // from. Allocator wrappers carry project-specific names
@@ -453,21 +431,10 @@ pub(crate) fn is_sanitizer_use_with_facts(
     if is_sanitizer_use(ir, config, key) {
         return true;
     }
-    let NodeKey {
-        block,
-        instr_idx: Some(idx),
-        ..
-    } = *key
-    else {
+    let Some(instr) = key.instruction(ir) else {
         return false;
     };
-    let Some(b) = ir.blocks.get(&block) else {
-        return false;
-    };
-    if idx >= b.instructions.len() {
-        return false;
-    }
-    match &b.instructions[idx] {
+    match instr {
         Instruction::CallStatic { func, .. } => facts.sanitizer_fact(func).is_some(),
         Instruction::CallVirtual {
             method, receiver, ..
@@ -503,6 +470,63 @@ pub struct SinkAlert {
     pub function: String,
     /// Shape classification (Idor for identity-payload query objects).
     pub class: crate::analysis::taint::engine::FindingClass,
+}
+
+/// Slot a tainted value occupies when a property store names an armed sink.
+///
+/// `el.innerHTML = v` and a JSX attribute write taint into a field rather than
+/// into a call: the field name is the sink and the stored value is argument 0.
+fn store_field_sink<'a>(
+    ir: &FunctionIR,
+    config: &TaintConfig,
+    facts: &FactTable,
+    base: VarId,
+    field: &'a String,
+    origin_package: Option<&str>,
+    language: Option<&str>,
+) -> Option<(usize, &'a String)> {
+    let root = FactTable::receiver_root(ir, base);
+    facts
+        .sink_name_armed(
+            &config.sinks,
+            field,
+            root.as_deref(),
+            origin_package,
+            language,
+            true,
+        )
+        .then_some((0usize, field))
+}
+
+/// Whether a receiver-slot alert is really a source read rather than a sink.
+///
+/// A tainted receiver whose method name ends a configured source pattern
+/// (Go's `r.URL.Query().Get("id")`) reads taint instead of consuming it.
+fn receiver_reads_a_source(
+    ir: &FunctionIR,
+    config: &TaintConfig,
+    facts: &FactTable,
+    key: &NodeKey,
+    name: &str,
+) -> bool {
+    if is_source(ir, config, facts, key) {
+        return true;
+    }
+    SourceScope::for_ir(config, facts, ir)
+        .iter()
+        .any(|s| s.rsplit('.').next() == Some(name))
+}
+
+/// Whether a call binds parameters of a prepared statement handle.
+fn binds_prepared_parameters(ir: &FunctionIR, instr: &Instruction, facts: &FactTable) -> bool {
+    let Instruction::CallVirtual {
+        receiver: Operand::Var(r),
+        ..
+    } = instr
+    else {
+        return false;
+    };
+    receiver_is_prepared_handle(ir, *r, facts)
 }
 
 /// Alert if the node is a tainted use inside a configured sink call.
@@ -574,6 +598,16 @@ pub(crate) fn sink_alert_with_facts(
                     .map(|pos| (pos, method))
             }
         }
+        // A property assignment (`el.innerHTML = x`, a JSX attribute) is a
+        // sink the program writes to, not a call it makes.
+        Instruction::StoreField {
+            base,
+            field,
+            src: Operand::Var(sv),
+            ..
+        } if *sv == var => {
+            store_field_sink(ir, config, facts, *base, field, origin_package, language)
+        }
         _ => None,
     };
     let (slot, name) = slot_and_name?;
@@ -581,13 +615,7 @@ pub(crate) fn sink_alert_with_facts(
     // statement text was fixed when the handle was created, so `stmt.Exec(a,
     // b)` carries values, not SQL. The creating call (`db.Prepare(query)`)
     // is judged on its own.
-    if slot != usize::MAX
-        && let Instruction::CallVirtual {
-            receiver: Operand::Var(r),
-            ..
-        } = &b.instructions[idx]
-        && receiver_is_prepared_handle(ir, *r, facts)
-    {
+    if slot != usize::MAX && binds_prepared_parameters(ir, &b.instructions[idx], facts) {
         return None;
     }
     // Source-accessor precedence (RECEIVER-TAINT ALERTS ONLY): when the
@@ -600,18 +628,8 @@ pub(crate) fn sink_alert_with_facts(
     // This must NOT apply to argument-slot alerts: `req.query` is a source
     // pattern, so a blanket rule would suppress `pool.query(sql)`, a real
     // sink, because the sink name matches a source-pattern segment.
-    if slot == usize::MAX {
-        if is_source(ir, config, facts, key) {
-            return None;
-        }
-        {
-            let is_source_accessor = SourceScope::for_ir(config, facts, ir)
-                .iter()
-                .any(|s| s.rsplit('.').next() == Some(name));
-            if is_source_accessor {
-                return None;
-            }
-        }
+    if slot == usize::MAX && receiver_reads_a_source(ir, config, facts, key, name) {
+        return None;
     }
     // Slot layout is a property of the CALLED API, not of the shared
     // method name. A package-scoped fact (declared for the call's import
@@ -798,37 +816,6 @@ fn push_var(work: &mut Vec<VarId>, op: &Operand) {
     }
 }
 
-/// The instruction defining `v`, if any (first match - IR is SSA-shaped).
-fn def_of(ir: &FunctionIR, v: VarId) -> Option<&Instruction> {
-    for b in ir.blocks.values() {
-        for instr in &b.instructions {
-            let defines = match instr {
-                Instruction::Assign { dest, .. } => *dest == v,
-                Instruction::LoadField { dest, .. } => *dest == v,
-                Instruction::StoreField { .. } => false,
-                Instruction::LoadElement { dest, .. } => *dest == v,
-                Instruction::LoadGlobal { dest, .. } => *dest == v,
-                Instruction::CallStatic { dest, .. } => *dest == Some(v),
-                Instruction::CallVirtual { dest, .. } => *dest == Some(v),
-                Instruction::CallPointer { dest, .. } => *dest == Some(v),
-                Instruction::Allocate { dest, .. } => *dest == v,
-                Instruction::Dereference { dest, .. } => *dest == v,
-                Instruction::Cast { dest, .. } => *dest == v,
-                Instruction::ExtractValue { dest, .. } => *dest == v,
-                Instruction::BinaryOp { dest, .. } => *dest == v,
-                Instruction::UnaryOp { dest, .. } => *dest == v,
-                Instruction::Await { dest, .. } => *dest == v,
-                Instruction::Yield { dest, .. } => *dest == Some(v),
-                _ => false,
-            };
-            if defines {
-                return Some(instr);
-            }
-        }
-    }
-    None
-}
-
 /// True when `path` names an auth call per the spec/bundle vocabulary
 /// (`facts.auth_guard_hints`, seeded by the default pack).
 fn auth_path_matches(path: &str, facts: &FactTable) -> bool {
@@ -848,7 +835,7 @@ fn cond_derives_from_auth_call(ir: &FunctionIR, cond: &Operand, facts: &FactTabl
         if !seen.insert(v) || seen.len() > 64 {
             continue;
         }
-        let Some(instr) = def_of(ir, v) else {
+        let Some(instr) = ir.def_instruction(v) else {
             continue;
         };
         match instr {

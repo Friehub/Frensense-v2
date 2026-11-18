@@ -6,15 +6,11 @@
 
 use tree_sitter::Node;
 
-use crate::spec::{node_text, Export, Import, ItemKind, ModuleItem, Visibility};
+use crate::spec::{node_text, walk_preorder, Export, Import, ItemKind, ModuleItem, Visibility};
 
 pub(super) fn extract_js_imports<'tree>(root: Node<'tree>, source: &str) -> Vec<Import> {
     let mut imports = Vec::new();
-    let mut cursor = root.walk();
-
-    'outer: loop {
-        let node = cursor.node();
-
+    walk_preorder(root, |node| {
         if node.kind() == "import_statement" {
             // `import defaultExport from "module"`
             // `import { named, other as alias } from "module"`
@@ -58,19 +54,7 @@ pub(super) fn extract_js_imports<'tree>(root: Node<'tree>, source: &str) -> Vec<
                 }
             }
         }
-
-        if cursor.goto_first_child() {
-            continue;
-        }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                break 'outer;
-            }
-        }
-    }
+    });
 
     imports
 }
@@ -132,27 +116,11 @@ fn extract_import_specifier(child: Node<'_>, source: &str, package: &str, out: &
 
 pub(super) fn extract_js_exports<'tree>(root: Node<'tree>, source: &str) -> Vec<Export> {
     let mut exports = Vec::new();
-    let mut cursor = root.walk();
-
-    'outer: loop {
-        let node = cursor.node();
-
+    walk_preorder(root, |node| {
         if node.kind() == "export_statement" {
             extract_export_statement(node, source, &mut exports);
         }
-
-        if cursor.goto_first_child() {
-            continue;
-        }
-        loop {
-            if cursor.goto_next_sibling() {
-                break;
-            }
-            if !cursor.goto_parent() {
-                break 'outer;
-            }
-        }
-    }
+    });
 
     exports
 }

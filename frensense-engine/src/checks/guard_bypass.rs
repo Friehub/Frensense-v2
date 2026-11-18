@@ -169,7 +169,7 @@ fn feeds_predicate(ir: &FunctionIR, dest: VarId) -> bool {
                 }
                 for instr in &blk.instructions {
                     if uses_var(instr, *v)
-                        && let Some(d) = dest_of(instr)
+                        && let Some(d) = instr.dest()
                         && seen.insert(d)
                     {
                         next.push(d);
@@ -209,32 +209,12 @@ fn uses_var(instr: &Instruction, v: VarId) -> bool {
     }
 }
 
-/// The variable `instr` defines, when it defines one.
-fn dest_of(instr: &Instruction) -> Option<VarId> {
-    match instr {
-        Instruction::Assign { dest, .. }
-        | Instruction::LoadField { dest, .. }
-        | Instruction::LoadElement { dest, .. }
-        | Instruction::LoadGlobal { dest, .. }
-        | Instruction::Cast { dest, .. }
-        | Instruction::ExtractValue { dest, .. }
-        | Instruction::BinaryOp { dest, .. }
-        | Instruction::UnaryOp { dest, .. }
-        | Instruction::Await { dest, .. } => Some(*dest),
-        Instruction::CallStatic { dest, .. }
-        | Instruction::CallVirtual { dest, .. }
-        | Instruction::CallPointer { dest, .. }
-        | Instruction::Yield { dest, .. } => *dest,
-        _ => None,
-    }
-}
-
 /// Rule 2: credential hashing policy. A call named like a hasher whose
 /// argument is (or resolves to) a parameter named like a plaintext password
 /// fires the weak-credential-storage rule. Mechanism only: whether the
 /// wrapped implementation is acceptable is exactly what corpus facts
 /// (wrapper→primitive mappings) refine.
-pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
+pub(crate) fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     check_credentials_in(ir, facts, &[])
 }
 
@@ -243,7 +223,7 @@ pub fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFindi
 /// (`HashPassword(pw)` wrapping a KDF) is not judged at the call site: the
 /// wrapper's own body is checked on its own, and that is where a weak
 /// primitive would show.
-pub fn check_credentials_in(
+pub(crate) fn check_credentials_in(
     ir: &FunctionIR,
     facts: &FactTable,
     program: &[&FunctionIR],
@@ -391,7 +371,10 @@ fn allocation_of(ir: &FunctionIR, mut var: VarId) -> Option<VarId> {
 /// itself is part of the vulnerability, attacker URLs embed allowed
 /// entries. One finding per allowlist definition, spanned at the
 /// definition.
-pub fn check_allowlist_definitions(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFinding> {
+pub(crate) fn check_allowlist_definitions(
+    irs: &[&FunctionIR],
+    facts: &FactTable,
+) -> Vec<CheckerFinding> {
     // The definition finding inherits the guards' knowledge source: a
     // program whose substring guards all come from bundle-learned
     // containment callees (none built in) is a learned finding.

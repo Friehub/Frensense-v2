@@ -24,11 +24,11 @@ use rustc_hash::{FxHashMap, FxHashSet};
 /// flow-insensitive form (a sound over-approximation) and flagged
 /// `analysis_incomplete`, which the scanner reports instead of hanging or
 /// silently weakening the result.
-pub const DEFAULT_SSA_BUDGET: u64 = 5_000_000;
+pub(crate) const DEFAULT_SSA_BUDGET: u64 = 5_000_000;
 
 /// Converts a [`FunctionIR`] into SSA form: dominators, dominance frontiers, phi placement and renaming, for ordinary variables and memory states alike.
 ///
-/// Work is bounded by a budget; see [`DEFAULT_SSA_BUDGET`].
+/// Work is bounded by a budget; see `DEFAULT_SSA_BUDGET`.
 #[derive(Debug)]
 pub struct SSABuilder {
     ir: FunctionIR,
@@ -49,39 +49,6 @@ pub struct SSABuilder {
 
 impl SSABuilder {
     /// Creates a builder for `ir` with the default work budget.
-    ///
-    /// ```
-    /// use frensense_engine::ir::function::{FunctionIR, Instruction, Operand, VarMetadata};
-    /// use frensense_engine::ir::ssa::SSABuilder;
-    ///
-    /// // entry -> {then, else} -> merge, with `x` assigned in both arms and read at the merge.
-    /// let mut ir = FunctionIR::new("f".into());
-    /// let entry = ir.entry_block;
-    /// let (then_b, else_b, merge) = (ir.new_block(), ir.new_block(), ir.new_block());
-    /// ir.add_edge(entry, then_b);
-    /// ir.add_edge(entry, else_b);
-    /// ir.add_edge(then_b, merge);
-    /// ir.add_edge(else_b, merge);
-    /// let meta = || VarMetadata {
-    ///     source_name: Some("x".into()),
-    ///     type_name: None,
-    ///     byte_range: None,
-    ///     is_memory_state: false,
-    ///     object_keys: Vec::new(),
-    ///     declared: true,
-    /// };
-    /// let x = ir.new_var(meta());
-    /// let y = ir.new_var(VarMetadata { source_name: Some("y".into()), ..meta() });
-    /// ir.push_instruction(then_b, Instruction::Assign { dest: x, src: Operand::IntLiteral(1) });
-    /// ir.push_instruction(else_b, Instruction::Assign { dest: x, src: Operand::IntLiteral(2) });
-    /// ir.push_instruction(merge, Instruction::Assign { dest: y, src: Operand::Var(x) });
-    ///
-    /// let ssa = SSABuilder::new(ir).build();
-    /// // The merge block now holds a phi joining the two arms' versions of `x`.
-    /// let phi = &ssa.blocks[&merge].phis[0];
-    /// assert_eq!(phi.incoming.len(), 2);
-    /// assert!(!ssa.analysis_incomplete);
-    /// ```
     pub fn new(ir: FunctionIR) -> Self {
         Self {
             ir,
@@ -94,48 +61,15 @@ impl SSABuilder {
 
     /// Override the work budget. Tests use a tiny budget to exercise the
     /// degraded path deterministically.
-    ///
-    /// ```
-    /// use frensense_engine::ir::function::{FunctionIR, Instruction, Operand, VarMetadata};
-    /// use frensense_engine::ir::ssa::SSABuilder;
-    ///
-    /// // entry -> {then, else} -> merge, with `x` assigned in both arms and read at the merge.
-    /// let mut ir = FunctionIR::new("f".into());
-    /// let entry = ir.entry_block;
-    /// let (then_b, else_b, merge) = (ir.new_block(), ir.new_block(), ir.new_block());
-    /// ir.add_edge(entry, then_b);
-    /// ir.add_edge(entry, else_b);
-    /// ir.add_edge(then_b, merge);
-    /// ir.add_edge(else_b, merge);
-    /// let meta = || VarMetadata {
-    ///     source_name: Some("x".into()),
-    ///     type_name: None,
-    ///     byte_range: None,
-    ///     is_memory_state: false,
-    ///     object_keys: Vec::new(),
-    ///     declared: true,
-    /// };
-    /// let x = ir.new_var(meta());
-    /// let y = ir.new_var(VarMetadata { source_name: Some("y".into()), ..meta() });
-    /// ir.push_instruction(then_b, Instruction::Assign { dest: x, src: Operand::IntLiteral(1) });
-    /// ir.push_instruction(else_b, Instruction::Assign { dest: x, src: Operand::IntLiteral(2) });
-    /// ir.push_instruction(merge, Instruction::Assign { dest: y, src: Operand::Var(x) });
-    ///
-    /// // With no budget left, construction gives up: the IR comes back without
-    /// // phis, flagged so the scanner can report it.
-    /// let ssa = SSABuilder::new(ir).with_budget(0).build();
-    /// assert!(ssa.analysis_incomplete);
-    /// assert!(ssa.blocks[&merge].phis.is_empty());
-    /// ```
     #[must_use]
-    pub fn with_budget(mut self, budget: u64) -> Self {
+    pub(crate) fn with_budget(mut self, budget: u64) -> Self {
         self.budget = budget;
         self
     }
 
     /// Work units charged against the budget so far. [`Self::build`] takes the builder by value, so this reads 0 on a fresh builder and cannot report the cost of a finished build.
     #[must_use]
-    pub fn work_used(&self) -> u64 {
+    pub(crate) fn work_used(&self) -> u64 {
         self.used
     }
 
@@ -355,7 +289,7 @@ impl SSABuilder {
 
         for (b_id, block) in &self.ir.blocks {
             for instr in &block.instructions {
-                for dest in Self::get_instruction_dests(instr) {
+                for dest in instr.defs() {
                     def_blocks.entry(dest).or_default().insert(*b_id);
                 }
             }
@@ -650,43 +584,6 @@ impl SSABuilder {
         }
     }
 
-    fn get_instruction_dests(instr: &Instruction) -> Vec<VarId> {
-        let mut dests = Vec::new();
-        match instr {
-            Instruction::Assign { dest, .. }
-            | Instruction::LoadField { dest, .. }
-            | Instruction::LoadElement { dest, .. }
-            | Instruction::LoadGlobal { dest, .. }
-            | Instruction::AddressOf { dest, .. }
-            | Instruction::Dereference { dest, .. }
-            | Instruction::Cast { dest, .. }
-            | Instruction::ExtractValue { dest, .. }
-            | Instruction::BinaryOp { dest, .. }
-            | Instruction::UnaryOp { dest, .. } => dests.push(*dest),
-
-            Instruction::StoreField { mem_out, .. }
-            | Instruction::StoreElement { mem_out, .. }
-            | Instruction::StoreGlobal { mem_out, .. } => dests.push(*mem_out),
-
-            Instruction::Allocate { dest, mem_out, .. }
-            | Instruction::Await { dest, mem_out, .. } => {
-                dests.push(*dest);
-                dests.push(*mem_out);
-            }
-
-            Instruction::CallStatic { dest, mem_out, .. }
-            | Instruction::CallVirtual { dest, mem_out, .. }
-            | Instruction::CallPointer { dest, mem_out, .. }
-            | Instruction::Yield { dest, mem_out, .. } => {
-                if let Some(d) = dest {
-                    dests.push(*d);
-                }
-                dests.push(*mem_out);
-            }
-        }
-        dests
-    }
-
     fn rename_instruction_defs(
         &mut self,
         instr: &mut Instruction,
@@ -752,5 +649,119 @@ mod tests {
 
         assert!(built.analysis_incomplete);
         assert_eq!(crate::telemetry::Cap::SsaDegraded.recorded(), 1);
+    }
+}
+
+#[cfg(test)]
+/// Assertions lifted from the doc examples of items that are now
+/// crate-private; a doctest cannot see them.
+mod doc_examples {
+    #[test]
+    fn doc_example_with_budget() {
+        use crate::ir::function::{FunctionIR, Instruction, Operand, VarMetadata};
+        use crate::ir::ssa::SSABuilder;
+
+        // entry -> {then, else} -> merge, with `x` assigned in both arms and read at the merge.
+        let mut ir = FunctionIR::new("f".into());
+        let entry = ir.entry_block;
+        let (then_b, else_b, merge) = (ir.new_block(), ir.new_block(), ir.new_block());
+        ir.add_edge(entry, then_b);
+        ir.add_edge(entry, else_b);
+        ir.add_edge(then_b, merge);
+        ir.add_edge(else_b, merge);
+        let meta = || VarMetadata {
+            source_name: Some("x".into()),
+            type_name: None,
+            byte_range: None,
+            is_memory_state: false,
+            object_keys: Vec::new(),
+            declared: true,
+        };
+        let x = ir.new_var(meta());
+        let y = ir.new_var(VarMetadata {
+            source_name: Some("y".into()),
+            ..meta()
+        });
+        ir.push_instruction(
+            then_b,
+            Instruction::Assign {
+                dest: x,
+                src: Operand::IntLiteral(1),
+            },
+        );
+        ir.push_instruction(
+            else_b,
+            Instruction::Assign {
+                dest: x,
+                src: Operand::IntLiteral(2),
+            },
+        );
+        ir.push_instruction(
+            merge,
+            Instruction::Assign {
+                dest: y,
+                src: Operand::Var(x),
+            },
+        );
+
+        // With no budget left, construction gives up: the IR comes back without
+        // phis, flagged so the scanner can report it.
+        let ssa = SSABuilder::new(ir).with_budget(0).build();
+        assert!(ssa.analysis_incomplete);
+        assert!(ssa.blocks[&merge].phis.is_empty());
+    }
+    #[test]
+    fn doc_example_new() {
+        use crate::ir::function::{FunctionIR, Instruction, Operand, VarMetadata};
+        use crate::ir::ssa::SSABuilder;
+
+        // entry -> {then, else} -> merge, with `x` assigned in both arms and read at the merge.
+        let mut ir = FunctionIR::new("f".into());
+        let entry = ir.entry_block;
+        let (then_b, else_b, merge) = (ir.new_block(), ir.new_block(), ir.new_block());
+        ir.add_edge(entry, then_b);
+        ir.add_edge(entry, else_b);
+        ir.add_edge(then_b, merge);
+        ir.add_edge(else_b, merge);
+        let meta = || VarMetadata {
+            source_name: Some("x".into()),
+            type_name: None,
+            byte_range: None,
+            is_memory_state: false,
+            object_keys: Vec::new(),
+            declared: true,
+        };
+        let x = ir.new_var(meta());
+        let y = ir.new_var(VarMetadata {
+            source_name: Some("y".into()),
+            ..meta()
+        });
+        ir.push_instruction(
+            then_b,
+            Instruction::Assign {
+                dest: x,
+                src: Operand::IntLiteral(1),
+            },
+        );
+        ir.push_instruction(
+            else_b,
+            Instruction::Assign {
+                dest: x,
+                src: Operand::IntLiteral(2),
+            },
+        );
+        ir.push_instruction(
+            merge,
+            Instruction::Assign {
+                dest: y,
+                src: Operand::Var(x),
+            },
+        );
+
+        let ssa = SSABuilder::new(ir).build();
+        // The merge block now holds a phi joining the two arms' versions of `x`.
+        let phi = &ssa.blocks[&merge].phis[0];
+        assert_eq!(phi.incoming.len(), 2);
+        assert!(!ssa.analysis_incomplete);
     }
 }

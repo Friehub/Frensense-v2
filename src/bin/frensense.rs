@@ -241,7 +241,7 @@ fn print_help() {
         "  --show-flows               Also embed the source->sink taint flow in text output (JSON/SARIF always carry the path)"
     );
     println!(
-        "  --explain                  Also print every silent sink argument and why the engine stayed quiet (stderr)"
+        "  --explain                  Also print every silent sink argument, the library calls the walk flowed through on assumption, and why the engine stayed quiet (stderr)"
     );
     println!(
         "  --explain-json <file>      Write every silent sink argument, with the value the engine could not resolve, as JSON (implies --explain)"

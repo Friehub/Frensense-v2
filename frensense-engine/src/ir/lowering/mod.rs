@@ -18,16 +18,17 @@ mod const_eval;
 /// The per-function lowering state.
 pub mod context;
 /// Lowering of loops, branches, conditionals, `match`, returns and jumps.
-pub mod control_flow;
+pub(crate) mod control_flow;
 /// Lowering of declarations.
 pub mod decl;
 /// Lowering of expressions: operators, member access, composite literals, literals and casts.
 pub mod expr;
 /// Classification of assignment targets.
-pub mod lvalue;
+pub(crate) mod lvalue;
 
-pub use context::{LoopTarget, LoweringContext};
-pub use lvalue::LValue;
+pub(crate) use context::LoopTarget;
+pub use context::LoweringContext;
+pub(crate) use lvalue::LValue;
 
 use crate::ir::function::Operand;
 use frensense_lang::NodeRole;
@@ -71,6 +72,17 @@ impl<'a> LoweringContext<'a> {
             // `switch` gets a real condition chain (case labels as
             // conditions) instead of the coarse branch-with-sequential-body.
             _ if node.kind() == "switch_statement" => self.visit_switch(node),
+
+            // JSX element attributes are writes to a props object. Lowering
+            // them as spanned field stores lets `<div dangerouslySetInnerHTML={…} />`
+            // reach property-sink matching exactly like `el.innerHTML = …`.
+            _ if matches!(
+                node.kind(),
+                "jsx_element" | "jsx_self_closing_element" | "jsx_fragment"
+            ) =>
+            {
+                self.visit_jsx_element(node)
+            }
 
             // C preprocessor chains: alternatives are exclusive configs.
             _ if matches!(

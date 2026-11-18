@@ -13,7 +13,7 @@ use tree_sitter::Node;
 /// *loop*'s `continue_target` (switches contribute `None` so a `continue`
 /// below them still finds the enclosing loop).
 #[derive(Debug)]
-pub struct LoopTarget {
+pub(crate) struct LoopTarget {
     /// Block a `break` jumps to.
     pub break_target: BlockId,
     /// Block a `continue` jumps to; `None` for a switch.
@@ -30,7 +30,7 @@ pub struct LoweringContext<'a> {
     pub ir: FunctionIR,
 
     /// The current BasicBlock being populated
-    pub current_block: BlockId,
+    pub(crate) current_block: BlockId,
 
     /// Lexical Environment mapping variable names to their VarId
     pub env: Vec<FxHashMap<String, VarId>>,
@@ -41,10 +41,10 @@ pub struct LoweringContext<'a> {
     pub memory_var: VarId,
 
     /// Jump target blocks for labeled statements: label_name -> BlockId
-    pub labels: FxHashMap<String, BlockId>,
+    pub(crate) labels: FxHashMap<String, BlockId>,
 
     /// Loop/switch stack for `break` and `continue` (innermost last).
-    pub loop_stack: Vec<LoopTarget>,
+    pub(crate) loop_stack: Vec<LoopTarget>,
 
     /// Optional learned fact table providing dynamic grammar overrides.
     pub facts: Option<&'a FactTable>,
@@ -83,7 +83,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// Like [`LoweringContext::new`], but consults `facts` for learned grammar roles and features before falling back to the language spec.
-    pub fn new_with_facts(
+    pub(crate) fn new_with_facts(
         spec: &'a dyn LanguageSpec,
         source: &'a str,
         func_name: String,
@@ -109,7 +109,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// Retrieve or allocate a BlockId for a named label.
-    pub fn get_or_create_label_block(&mut self, name: &str) -> BlockId {
+    pub(crate) fn get_or_create_label_block(&mut self, name: &str) -> BlockId {
         if let Some(&bid) = self.labels.get(name) {
             bid
         } else {
@@ -120,7 +120,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// Dynamic node role query: consults learned bundle facts, then falls back to `LanguageSpec::classify`.
-    pub fn classify_node(&self, kind: &str) -> NodeRole {
+    pub(crate) fn classify_node(&self, kind: &str) -> NodeRole {
         let lang = self.spec.fact_language();
         if let Some(facts) = self.facts
             && let Some(role) = facts.get_grammar_role(lang, kind)
@@ -154,7 +154,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// Dynamic template fragment query.
-    pub fn is_template_fragment(&self, kind: &str) -> bool {
+    pub(crate) fn is_template_fragment(&self, kind: &str) -> bool {
         let lang = self.spec.fact_language();
         if let Some(facts) = self.facts
             && let Some(has_feat) =
@@ -241,7 +241,7 @@ impl<'a> LoweringContext<'a> {
     /// # Panics
     ///
     /// Panics if the scope stack is empty. A context built by [`LoweringContext::new`] starts with one scope, so this only happens if every scope has been popped.
-    pub fn resolve_identifier(&mut self, node: Node) -> Operand {
+    pub(crate) fn resolve_identifier(&mut self, node: Node) -> Operand {
         let name = self.source[node.start_byte()..node.end_byte()].to_string();
 
         for scope in self.env.iter().rev() {
@@ -266,7 +266,7 @@ impl<'a> LoweringContext<'a> {
     /// Fresh temporary for lowering-synthesized values (compound assignment,
     /// increment/decrement). Spanned to `node` so findings on the result
     /// resolve to the statement that produced it.
-    pub fn new_temp(&mut self, node: Node) -> VarId {
+    pub(crate) fn new_temp(&mut self, node: Node) -> VarId {
         self.ir.new_var(VarMetadata {
             source_name: None,
             type_name: None,
@@ -277,9 +277,45 @@ impl<'a> LoweringContext<'a> {
         })
     }
 
+    /// Emits a field write on `base`, threading the current memory state.
+    ///
+    /// `span` is the source range of the expression that performs the write;
+    /// property sinks report there rather than at the stored value's definition.
+    pub(crate) fn store_field(
+        &mut self,
+        base: VarId,
+        field: String,
+        src: Operand,
+        span: Option<(usize, usize)>,
+    ) {
+        self.ir.push_instruction(
+            self.current_block,
+            Instruction::StoreField {
+                mem_out: self.memory_var,
+                mem_in: self.memory_var,
+                base,
+                field,
+                src,
+                span,
+            },
+        );
+    }
+
+    /// Fresh temporary that also records the name the source program gives the
+    /// value it stands for, so name-based vocabulary can see it.
+    pub(crate) fn new_named_temp(&mut self, node: Node, name: Option<String>) -> VarId {
+        let temp = self.new_temp(node);
+        if let Some(name) = name
+            && let Some(meta) = self.ir.var_metadata.get_mut(&temp)
+        {
+            meta.source_name = Some(name);
+        }
+        temp
+    }
+
     /// Generic child walk shared by degenerate shapes (returns the last
     /// child operand, same semantics as the catch-all arm).
-    pub fn visit_children_generic(&mut self, node: Node) -> Option<Operand> {
+    pub(crate) fn visit_children_generic(&mut self, node: Node) -> Option<Operand> {
         let mut cursor = node.walk();
         let mut last_op = None;
         for child in node.children(&mut cursor) {

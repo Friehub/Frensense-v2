@@ -14,10 +14,10 @@ use super::types::FreeSite;
 
 /// Above this many instructions the points-to analysis uses the two-phase
 /// (Steensgaard-gated Andersen) mode, mirroring `SvfgBuilder`'s choice.
-pub const TWO_PHASE_MIN_INSTRS: usize = 4096;
+pub(crate) const TWO_PHASE_MIN_INSTRS: usize = 4096;
 
 /// Every (block, idx, var) that releases `var` in this function.
-pub fn collect_frees(ir: &FunctionIR, summaries: &MemorySummaryRegistry) -> Vec<FreeSite> {
+pub(crate) fn collect_frees(ir: &FunctionIR, summaries: &MemorySummaryRegistry) -> Vec<FreeSite> {
     let mut out = Vec::new();
     for (&bid, block) in &ir.blocks {
         for (idx, instr) in block.instructions.iter().enumerate() {
@@ -42,7 +42,10 @@ pub fn collect_frees(ir: &FunctionIR, summaries: &MemorySummaryRegistry) -> Vec<
 /// Every walk start: pointer use sites (load/store/deref bases) plus the
 /// free sites themselves (double-free pairs are use-after-free on free
 /// instructions).
-pub fn collect_start_sites(ir: &FunctionIR, frees: &[FreeSite]) -> Vec<(BlockId, usize, VarId)> {
+pub(crate) fn collect_start_sites(
+    ir: &FunctionIR,
+    frees: &[FreeSite],
+) -> Vec<(BlockId, usize, VarId)> {
     let mut out: Vec<(BlockId, usize, VarId)> = Vec::new();
     for (&bid, block) in &ir.blocks {
         for (idx, instr) in block.instructions.iter().enumerate() {
@@ -69,7 +72,7 @@ pub fn collect_start_sites(ir: &FunctionIR, frees: &[FreeSite]) -> Vec<(BlockId,
 }
 
 /// True when `instr` releases `var` (builtin free or summary-consumed slot).
-pub fn free_of(instr: &Instruction, var: VarId, summaries: &MemorySummaryRegistry) -> bool {
+pub(crate) fn free_of(instr: &Instruction, var: VarId, summaries: &MemorySummaryRegistry) -> bool {
     match instr {
         Instruction::CallStatic { func: _, args, .. } => {
             for (slot, a) in args.iter().enumerate() {
@@ -90,7 +93,11 @@ pub fn free_of(instr: &Instruction, var: VarId, summaries: &MemorySummaryRegistr
 /// through `MemorySummaryRegistry::from_facts`): `free(p)` consumes
 /// slot 0 because the vocabulary says so, not because the engine
 /// hardcodes the name.
-pub fn free_slot(instr: &Instruction, slot: usize, summaries: &MemorySummaryRegistry) -> bool {
+pub(crate) fn free_slot(
+    instr: &Instruction,
+    slot: usize,
+    summaries: &MemorySummaryRegistry,
+) -> bool {
     let Instruction::CallStatic { func, .. } = instr else {
         return false;
     };
@@ -99,14 +106,18 @@ pub fn free_slot(instr: &Instruction, slot: usize, summaries: &MemorySummaryRegi
 
 /// The instruction at `(block, idx)`, when the index addresses a real
 /// instruction (phi keys / terminator sentinels yield `None`).
-pub fn instr_at(ir: &FunctionIR, block: BlockId, idx: Option<usize>) -> Option<&Instruction> {
+pub(crate) fn instr_at(
+    ir: &FunctionIR,
+    block: BlockId,
+    idx: Option<usize>,
+) -> Option<&Instruction> {
     let idx = idx?;
     ir.blocks.get(&block)?.instructions.get(idx)
 }
 
 /// Points-to overlap; empty sets are NOT aliases (unknown ≠ aliased, the
 /// zero-FP direction).
-pub fn may_alias(pts: &PointsToAnalysis, a: VarId, b: VarId) -> bool {
+pub(crate) fn may_alias(pts: &PointsToAnalysis, a: VarId, b: VarId) -> bool {
     if a == b {
         return true;
     }
@@ -118,7 +129,9 @@ pub fn may_alias(pts: &PointsToAnalysis, a: VarId, b: VarId) -> bool {
 
 /// `(callee_fn, FormalRet) → caller ActualRet` reverse index, derived from
 /// the forward cross-edge map.
-pub fn reverse_cross(prog: &ProgramSvfg<'_>) -> FxHashMap<(usize, NodeKey), Vec<(usize, NodeKey)>> {
+pub(crate) fn reverse_cross(
+    prog: &ProgramSvfg<'_>,
+) -> FxHashMap<(usize, NodeKey), Vec<(usize, NodeKey)>> {
     let mut rev: FxHashMap<(usize, NodeKey), Vec<(usize, NodeKey)>> = FxHashMap::default();
     for ((from_f, from_k), edges) in &prog.cross_edges {
         for (to_f, to_k) in edges {

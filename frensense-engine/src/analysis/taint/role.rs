@@ -17,7 +17,7 @@ pub use frensense_lang::severity::SinkRole;
 /// serializes on [`crate::analysis::taint::facts::LearnedFactEntry::LanguageSink`]
 /// (the serde wire form). Unknown names keep the conservative default.
 #[must_use]
-pub fn sink_role_from_name(name: &str) -> SinkRole {
+pub(crate) fn sink_role_from_name(name: &str) -> SinkRole {
     let role_part = name.split_once(':').map(|(r, _)| r).unwrap_or(name);
     match role_part {
         "execution" => SinkRole::Execution,
@@ -34,12 +34,12 @@ pub fn sink_role_from_name(name: &str) -> SinkRole {
 /// Extract the optional label slug serialized after the colon in a role string
 /// (e.g. `"execution:prototype"` -> `Some("prototype")`).
 #[must_use]
-pub fn sink_label_slug_from_role_str(name: &str) -> Option<&str> {
+pub(crate) fn sink_label_slug_from_role_str(name: &str) -> Option<&str> {
     name.split_once(':').map(|(_, slug)| slug)
 }
 
 /// The snake_case wire name of a [`SinkRole`] - the inverse of
-/// [`sink_role_from_name`]. The default-pack generator serializes this
+/// `sink_role_from_name`. The default-pack generator serializes this
 /// onto [`crate::analysis::taint::facts::LearnedFactEntry::LanguageSink`],
 /// so the pack stores role names instead of serde enum indices (bundle
 /// stability across enum reorders).

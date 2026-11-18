@@ -14,7 +14,7 @@ impl<'a> LoweringContext<'a> {
     /// Handles `name = value`, multi-target forms (`body, err := f(x)`), destructuring (`const { a, b } = obj` becomes one `LoadField` per property), declaration-position member or element stores (`m["k"] = v`) and value-less declarations (`char *p;`). A container statement lowers each of its declarators. Declared names are flagged `declared`, except under `static` or `extern` storage.
     ///
     /// Returns `None`: a declaration produces no value.
-    pub fn visit_declaration(
+    pub(crate) fn visit_declaration(
         &mut self,
         node: Node,
         name_field: &str,
@@ -89,39 +89,8 @@ impl<'a> LoweringContext<'a> {
             (Some(pattern), Some(value_node)) if self.is_destructuring_pattern(pattern.kind()) => {
                 // Destructuring: `const { a: x, b } = obj`.
                 // Lower the RHS first (it defines the base value).
-                let base_op = self.visit_node(value_node);
-                if let Some(Operand::Var(base)) = base_op {
-                    let mut pc = pattern.walk();
-                    for sub in pattern.named_children(&mut pc) {
-                        // `key: sub_name` or shorthand `name`.
-                        let (prop, target) = if self.is_pair_pattern(sub.kind()) {
-                            let k = sub.child_by_field_name("key");
-                            let v = sub.child_by_field_name("value");
-                            match (k, v) {
-                                (Some(k), Some(v)) => (Some(k), Some(v)),
-                                _ => (None, None),
-                            }
-                        } else {
-                            (Some(sub), Some(sub))
-                        };
-                        if let (Some(k), Some(v)) = (prop, target) {
-                            let field = self.source[k.start_byte()..k.end_byte()].to_string();
-                            if let Operand::Var(dest) = self.resolve_identifier(v) {
-                                self.mark_declared(dest);
-                                self.ir.push_instruction(
-                                    self.current_block,
-                                    Instruction::LoadField {
-                                        dest,
-                                        mem_in: self.memory_var,
-                                        base,
-                                        field,
-                                    },
-                                );
-                                // A destructured element is not the whole RHS.
-                                self.forget_const(dest);
-                            }
-                        }
-                    }
+                if let Some(Operand::Var(base)) = self.visit_node(value_node) {
+                    self.bind_pattern(pattern, base);
                 }
                 None
             }
@@ -144,18 +113,12 @@ impl<'a> LoweringContext<'a> {
                             );
                             self.record_const(dest, value_node, &rhs_op);
                         }
-                        LValue::Field { base, field } => {
-                            self.ir.push_instruction(
-                                self.current_block,
-                                Instruction::StoreField {
-                                    mem_out: self.memory_var,
-                                    mem_in: self.memory_var,
-                                    base,
-                                    field,
-                                    src: rhs_op,
-                                },
-                            );
-                        }
+                        LValue::Field { base, field } => self.store_field(
+                            base,
+                            field,
+                            rhs_op,
+                            Some((node.start_byte(), node.end_byte())),
+                        ),
                         LValue::Element { base, index } => {
                             self.ir.push_instruction(
                                 self.current_block,
@@ -213,6 +176,97 @@ impl<'a> LoweringContext<'a> {
                     }
                 }
                 None
+            }
+        }
+    }
+
+    /// Binds the names inside a destructuring pattern to the parts of `base`.
+    ///
+    /// `const { a: x, b } = obj` and a destructured parameter
+    /// (`function run({ h }: Opts)`) bind the same way: one load per name,
+    /// `LoadField` for an object member and `LoadElement` for an array
+    /// position. A nested pattern (`{ a: { b } }`) recurses through the load
+    /// it just emitted, so the inner name reads that part instead of the whole
+    /// value - which is why `const { a: { b } } = obj; eval(b)` used to leave
+    /// `b` undefined. A rest element (`{ a, ...rest }`, `[head, ...tail]`)
+    /// takes whatever is left, so it binds the whole `base`.
+    pub(crate) fn bind_pattern(&mut self, pattern: Node, base: VarId) {
+        if !self.is_destructuring_pattern(pattern.kind()) {
+            // A plain identifier target binds the whole value.
+            if let Operand::Var(dest) = self.resolve_identifier(pattern) {
+                self.mark_declared(dest);
+                self.ir.push_instruction(
+                    self.current_block,
+                    Instruction::Assign {
+                        dest,
+                        src: Operand::Var(base),
+                    },
+                );
+                self.forget_const(dest);
+            }
+            return;
+        }
+        let array = pattern.kind() == "array_pattern";
+        let mut cursor = pattern.walk();
+        let parts: Vec<Node> = pattern.named_children(&mut cursor).collect();
+        for part in parts {
+            let (key, target) = match part.kind() {
+                // `key: target`.
+                kind if self.is_pair_pattern(kind) => (
+                    part.child_by_field_name("key"),
+                    part.child_by_field_name("value"),
+                ),
+                // `{ a = fallback }` binds `a` from the member `a`.
+                "object_assignment_pattern" => (
+                    part.child_by_field_name("left"),
+                    part.child_by_field_name("left"),
+                ),
+                // `...rest` is not a name: it takes the remaining value.
+                "rest_pattern" => (None, part.named_child(0)),
+                // Shorthand `{ a }` / positional `[a]`: the name is the key.
+                _ => (Some(part), Some(part)),
+            };
+            let Some(target) = target else { continue };
+            let part_name = key.map(|k| self.source[k.start_byte()..k.end_byte()].to_string());
+            let nested = self.is_destructuring_pattern(target.kind());
+            let dest = if nested {
+                // A nested pattern is the flat form written twice:
+                // `{ body: { name } }` means `const { body } = x; const {
+                // name } = body`. The intermediate carries the part's name so
+                // name vocabulary (a variable named `body` is a request body)
+                // sees the variable the flat form would have created.
+                self.new_named_temp(target, part_name.clone())
+            } else {
+                let Operand::Var(dest) = self.resolve_identifier(target) else {
+                    continue;
+                };
+                dest
+            };
+            self.mark_declared(dest);
+            let load = match part_name {
+                None => Instruction::Assign {
+                    dest,
+                    src: Operand::Var(base),
+                },
+                // An array position is not a key: any element may be read.
+                Some(_) if array => Instruction::LoadElement {
+                    dest,
+                    mem_in: self.memory_var,
+                    base,
+                    index: Operand::Unknown,
+                },
+                Some(field) => Instruction::LoadField {
+                    dest,
+                    mem_in: self.memory_var,
+                    base,
+                    field,
+                },
+            };
+            self.ir.push_instruction(self.current_block, load);
+            // A destructured element is not the whole RHS.
+            self.forget_const(dest);
+            if nested {
+                self.bind_pattern(target, dest);
             }
         }
     }

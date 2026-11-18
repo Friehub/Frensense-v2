@@ -46,11 +46,8 @@
 //! * [`ProgramSvfg::cross_edges`], the explicit interprocedural edge list
 //!   (deterministic, serialisable, feeds task 4.5's corpus graph store).
 //! * [`ProgramSvfg`]'s per-function [`TaintSummary`]s, computed bottom-up.
-//! * [`InterproceduralTaintEngine`], BFS over local + cross edges; alerts are
-//!   reported with the function in which the sink lives.
 
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::collections::VecDeque;
 
 use crate::analysis::taint::config::TaintConfig;
 use crate::analysis::taint::facts::FactTable;
@@ -67,10 +64,10 @@ pub mod predicates;
 /// Per-function summaries used to cut or pass taint across calls.
 pub mod summaries;
 
-pub use bindings::*;
+pub(crate) use bindings::*;
 pub use predicates::SinkAlert;
 pub(crate) use predicates::*;
-pub use summaries::*;
+pub(crate) use summaries::*;
 
 // ---------------------------------------------------------------------------
 // Per-function entry
@@ -128,7 +125,7 @@ impl<'a> ProgramSvfg<'a> {
 
     /// Like [`ProgramSvfg::new`] but consults an explicit [`FactTable`] for
     /// learned sink signatures and sanitizers during summary computation.
-    pub fn new_with_facts(
+    pub(crate) fn new_with_facts(
         irs: &FxHashMap<String, &'a FunctionIR>,
         config: &TaintConfig,
         facts: &FactTable,
@@ -137,7 +134,7 @@ impl<'a> ProgramSvfg<'a> {
     }
 
     /// Build a [`ProgramSvfg`] with explicit module aliases and function-to-file mappings.
-    pub fn new_with_module_aliases(
+    pub(crate) fn new_with_module_aliases(
         irs: &FxHashMap<String, &'a FunctionIR>,
         config: &TaintConfig,
         facts: &FactTable,
@@ -252,7 +249,7 @@ impl<'a> ProgramSvfg<'a> {
     }
 
     /// Look up a function's index by name.
-    pub fn function_index(&self, name: &str) -> Option<usize> {
+    pub(crate) fn function_index(&self, name: &str) -> Option<usize> {
         self.func_index.get(name).copied()
     }
 
@@ -268,21 +265,10 @@ impl<'a> ProgramSvfg<'a> {
         })
     }
 
-    /// Local successors of a node, minus suppressed pass-through edges.
-    pub fn local_successors(&self, fi: usize, key: &NodeKey) -> Vec<NodeKey> {
-        match self.functions[fi].svfg.node(key) {
-            Some(n) => n
-                .successors()
-                .into_iter()
-                .filter(|s| !self.suppressed.contains(&(fi, *key, *s)))
-                .collect(),
-            None => Vec::new(),
-        }
-    }
-
-    /// Local predecessors of a node, minus suppressed pass-through edges
-    /// (mirror of [`ProgramSvfg::local_successors`] for backward traversal).
-    pub fn local_predecessors(&self, fi: usize, key: &NodeKey) -> Vec<NodeKey> {
+    /// Local predecessors of a node, minus suppressed pass-through edges (the
+    /// demand-driven walk's edge set; suppression is what keeps a sanitizing
+    /// callee from leaking taint through the local pass-through edge).
+    pub(crate) fn local_predecessors(&self, fi: usize, key: &NodeKey) -> Vec<NodeKey> {
         match self.functions[fi].svfg.node(key) {
             Some(n) => n
                 .predecessors()
@@ -291,149 +277,5 @@ impl<'a> ProgramSvfg<'a> {
                 .collect(),
             None => Vec::new(),
         }
-    }
-
-    /// Interprocedural successors of a node (cross edges out).
-    pub fn inter_successors(&self, fi: usize, key: &NodeKey) -> Vec<(usize, NodeKey)> {
-        self.cross_edges
-            .get(&(fi, *key))
-            .cloned()
-            .unwrap_or_default()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Interprocedural taint engine
-// ---------------------------------------------------------------------------
-
-/// BFS taint propagation over the whole-program value-flow structure.
-///
-/// Cost remains proportional to the taint-reachable subgraph: local successors
-/// plus explicit cross edges, no fixed-point loop, no visit to functions or
-/// variables off every taint path.
-#[derive(Debug)]
-pub struct InterproceduralTaintEngine<'a> {
-    prog: &'a ProgramSvfg<'a>,
-    config: &'a TaintConfig,
-    facts: FactTable,
-    tainted: FxHashSet<(usize, NodeKey)>,
-    /// Distinct sink alerts raised so far. [`Self::run`] appends to this list and never clears it.
-    pub alerts: Vec<SinkAlert>,
-}
-
-impl<'a> InterproceduralTaintEngine<'a> {
-    /// Creates an engine over `prog` using `config`, with the fact table derived from the config.
-    pub fn new(prog: &'a ProgramSvfg<'a>, config: &'a TaintConfig) -> Self {
-        Self {
-            prog,
-            config,
-            facts: FactTable::from_config(config),
-            tainted: FxHashSet::default(),
-            alerts: Vec::new(),
-        }
-    }
-
-    /// Merge additional (e.g. bundle-learned) facts over the default table.
-    pub fn with_fact_table(mut self, facts: &FactTable) -> Self {
-        self.facts.merge(facts);
-        self
-    }
-
-    /// Run the BFS from all source nodes across all functions.
-    ///
-    /// ```
-    /// use frensense_engine::analysis::forward::{InterproceduralTaintEngine, ProgramSvfg};
-    /// use frensense_engine::analysis::taint::config::TaintConfig;
-    /// use frensense_engine::harness::lower_source;
-    /// use frensense_engine::ir::function::FunctionIR;
-    ///
-    /// let cfg = TaintConfig {
-    ///     sources: ["req.body".to_string()].into_iter().collect(),
-    ///     sinks: ["query".to_string()].into_iter().collect(),
-    ///     sanitizers: Default::default(),
-    /// };
-    /// let src = "declare const db: any\n\
-    ///            function run(q: any) { db.query(q) }\n\
-    ///            export function h(req: any) { run(req.body.id) }";
-    /// let owned = lower_source("u.ts", src, "ts").unwrap();
-    /// let irs: rustc_hash::FxHashMap<String, &FunctionIR> =
-    ///     owned.iter().map(|(k, v)| (k.clone(), v)).collect();
-    /// let prog = ProgramSvfg::new(&irs, &cfg);
-    ///
-    /// let mut engine = InterproceduralTaintEngine::new(&prog, &cfg);
-    /// engine.run();
-    /// // The source is in `h`; taint crosses the call and reaches the sink in `run`.
-    /// let alert = &engine.alerts[0];
-    /// assert_eq!((alert.function.as_str(), alert.sink.as_str(), alert.slot), ("run", "query", 0));
-    /// // Running again does not duplicate alerts.
-    /// let before = engine.alerts.len();
-    /// engine.run();
-    /// assert_eq!(engine.alerts.len(), before);
-    /// ```
-    pub fn run(&mut self) {
-        let mut queue: VecDeque<(usize, NodeKey)> = VecDeque::new();
-
-        // Seeds: source definitions in every function (deterministic order).
-        for fi in 0..self.prog.functions.len() {
-            let fe = &self.prog.functions[fi];
-            let mut keys: Vec<NodeKey> = fe.svfg.nodes.keys().copied().collect();
-            keys.sort_by_key(|k| (k.block.0, k.instr_idx, k.var.0));
-            for k in keys {
-                if is_source(fe.ir, self.config, &self.facts, &k) {
-                    self.tainted.insert((fi, k));
-                    queue.push_back((fi, k));
-                }
-            }
-        }
-
-        while let Some((fi, cur)) = queue.pop_front() {
-            let fe = &self.prog.functions[fi];
-
-            // Sink check at every visited node.
-            if let Some(alert) = sink_alert_with_facts(
-                fe.ir,
-                self.config,
-                &self.facts,
-                &cur,
-                None,
-                (!fe.ir.language.is_empty()).then_some(fe.ir.language.as_str()),
-            ) && !self.alerts.contains(&alert)
-            {
-                self.alerts.push(alert);
-            }
-
-            if fe.svfg.node(&cur).is_none() {
-                continue;
-            }
-
-            // Local edges (suppressed pass-through edges removed).
-            for succ in self.prog.local_successors(fi, &cur) {
-                if is_sanitizer_use_with_facts(fe.ir, self.config, &self.facts, &succ) {
-                    continue;
-                }
-                self.visit(fi, succ, &mut queue);
-            }
-
-            // Interprocedural edges (actual-arg → formal-param,
-            // formal-ret → actual-ret).
-            for (gi, gk) in self.prog.inter_successors(fi, &cur) {
-                let ge = &self.prog.functions[gi];
-                if is_sanitizer_use_with_facts(ge.ir, self.config, &self.facts, &gk) {
-                    continue;
-                }
-                self.visit(gi, gk, &mut queue);
-            }
-        }
-    }
-
-    fn visit(&mut self, fi: usize, key: NodeKey, queue: &mut VecDeque<(usize, NodeKey)>) {
-        if self.tainted.insert((fi, key)) {
-            queue.push_back((fi, key));
-        }
-    }
-
-    /// The set of tainted `(function, node)` pairs, for debugging/tests.
-    pub fn tainted_nodes(&self) -> &FxHashSet<(usize, NodeKey)> {
-        &self.tainted
     }
 }

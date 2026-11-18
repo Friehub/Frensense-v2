@@ -92,6 +92,15 @@ impl NodeKey {
         }
     }
 
+    /// The instruction this node defines or uses, or `None` for phi nodes,
+    /// parameter sentinels and out-of-range indices.
+    pub(crate) fn instruction<'a>(&self, ir: &'a FunctionIR) -> Option<&'a Instruction> {
+        ir.blocks
+            .get(&self.block)?
+            .instructions
+            .get(self.instr_idx?)
+    }
+
     pub(crate) fn instr(block: BlockId, idx: usize, var: VarId) -> Self {
         Self {
             block,
@@ -158,14 +167,14 @@ pub struct SvfgNode {
 
 impl SvfgNode {
     /// Successor keys in deterministic (sorted) order.
-    pub fn successors(&self) -> Vec<NodeKey> {
+    pub(crate) fn successors(&self) -> Vec<NodeKey> {
         let mut v: Vec<NodeKey> = self.successors.iter().copied().collect();
         v.sort_by_key(|k| (k.block.0, k.instr_idx, k.var.0));
         v
     }
 
     /// Predecessor keys in deterministic (sorted) order.
-    pub fn predecessors(&self) -> Vec<NodeKey> {
+    pub(crate) fn predecessors(&self) -> Vec<NodeKey> {
         let mut v: Vec<NodeKey> = self.predecessors.iter().copied().collect();
         v.sort_by_key(|k| (k.block.0, k.instr_idx, k.var.0));
         v
@@ -178,7 +187,7 @@ impl SvfgNode {
 
 /// The Sparse Value-Flow Graph for a single function.
 ///
-/// Build it with [`SvfgBuilder::build`], then query it with the helper
+/// Build it with `SvfgBuilder::build`, then query it with the helper
 /// methods.
 #[derive(Debug, Default, Clone)]
 pub struct Svfg {
@@ -216,14 +225,20 @@ impl Svfg {
         self.nodes.get(key)
     }
 
+    /// Number of value-flow edges leaving every node in this function's
+    /// graph, for the scan telemetry's graph size.
+    pub(crate) fn edge_count(&self) -> usize {
+        self.nodes.values().map(|n| n.successors.len()).sum()
+    }
+
     /// All nodes whose `kind` matches a predicate.
-    pub fn nodes_where<F: Fn(&SvfgNode) -> bool>(&self, pred: F) -> Vec<&SvfgNode> {
+    pub(crate) fn nodes_where<F: Fn(&SvfgNode) -> bool>(&self, pred: F) -> Vec<&SvfgNode> {
         self.nodes.values().filter(|n| pred(n)).collect()
     }
 
     /// Every node that is a `FormalParam`, convenient as BFS seeds for
     /// parameter-taint analysis.
-    pub fn param_nodes(&self) -> Vec<&SvfgNode> {
+    pub(crate) fn param_nodes(&self) -> Vec<&SvfgNode> {
         self.nodes_where(|n| n.kind == NodeKind::FormalParam)
     }
 
@@ -276,7 +291,7 @@ impl Svfg {
 /// Step 3 is O(1) per use because SSA guarantees exactly one definition for
 /// every variable, we just look up the pre-built `def_site` table.
 #[derive(Debug)]
-pub struct SvfgBuilder<'a> {
+pub(crate) struct SvfgBuilder<'a> {
     ir: &'a FunctionIR,
     graph: Svfg,
     buffer_builtins: Vec<crate::analysis::taint::facts::BufferBuiltinSpec>,
@@ -290,7 +305,7 @@ pub struct SvfgBuilder<'a> {
 
 impl<'a> SvfgBuilder<'a> {
     /// Creates a builder for the function `ir`.
-    pub fn new(ir: &'a FunctionIR) -> Self {
+    pub(crate) fn new(ir: &'a FunctionIR) -> Self {
         Self {
             ir,
             graph: Svfg::default(),
@@ -301,12 +316,12 @@ impl<'a> SvfgBuilder<'a> {
     }
 
     /// Consume the builder and return the finished graph plus the def-site table.
-    pub fn build(self) -> (Svfg, FxHashMap<VarId, NodeKey>) {
+    pub(crate) fn build(self) -> (Svfg, FxHashMap<VarId, NodeKey>) {
         self.build_inner()
     }
 
     /// Like [`SvfgBuilder::build`], but also models the given buffer-manipulation builtins, so that a call whose name matches a spec adds an edge from its source argument to later reads of its destination object (the base variable, with pointer arithmetic stripped). The edges are added only when the function's language is `c` or `cpp` and `specs` is non-empty; otherwise this behaves like [`SvfgBuilder::build`].
-    pub fn build_with_buffer_builtins(
+    pub(crate) fn build_with_buffer_builtins(
         mut self,
         specs: &[crate::analysis::taint::facts::BufferBuiltinSpec],
     ) -> (Svfg, FxHashMap<VarId, NodeKey>) {
@@ -314,31 +329,27 @@ impl<'a> SvfgBuilder<'a> {
         self.build_inner()
     }
 
-    fn build_inner(mut self) -> (Svfg, FxHashMap<VarId, NodeKey>) {
-        // -----------------------------------------------------------------
-        // Pass 0: Register formal parameters as def nodes.
-        // -----------------------------------------------------------------
-        // Parameters are not "inside" any instruction, so we give them their
-        // own node kind and a synthetic key. We reserve instr_idx positions
-        // that can never collide with real instructions: real instructions
-        // occupy [0, n), terminators use MAX-1, so parameters live at
-        // MAX - 2 - i (one distinct slot per parameter).
+    /// Pass 0: register formal parameters and the initial memory state as def
+    /// nodes. Neither is "inside" an instruction, so each gets a synthetic
+    /// key: real instructions occupy `[0, n)` and terminators use `MAX-1`, so
+    /// parameters live at `MAX - 2 - i` (one distinct slot per parameter).
+    fn register_formals(&mut self) {
         let entry = self.ir.entry_block;
         let param_slot_base = usize::MAX - 2;
-
         for (idx, &param_var) in self.ir.parameters.iter().enumerate() {
             let key = NodeKey::instr(entry, param_slot_base - idx, param_var);
             self.graph.ensure_node(key, NodeKind::FormalParam);
             self.def_site.insert(param_var, key);
         }
-
         // The initial memory state is also a "parameter" of sorts.
-        {
-            let mem = self.ir.initial_memory_state;
-            let key = NodeKey::instr(entry, param_slot_base, mem);
-            self.graph.ensure_node(key, NodeKind::FormalParam);
-            self.def_site.insert(mem, key);
-        }
+        let mem = self.ir.initial_memory_state;
+        let key = NodeKey::instr(entry, param_slot_base, mem);
+        self.graph.ensure_node(key, NodeKind::FormalParam);
+        self.def_site.insert(mem, key);
+    }
+
+    fn build_inner(mut self) -> (Svfg, FxHashMap<VarId, NodeKey>) {
+        self.register_formals();
 
         // -----------------------------------------------------------------
         // Pass 1: Walk every block and register def nodes + def sites.
@@ -359,7 +370,7 @@ impl<'a> SvfgBuilder<'a> {
 
             // --- Regular instructions ---
             for (idx, instr) in block.instructions.iter().enumerate() {
-                for def_var in Self::instruction_defs(instr) {
+                for def_var in instr.defs() {
                     let key = NodeKey::instr(block_id, idx, def_var);
                     self.graph.ensure_node(key, NodeKind::InstrDef);
                     self.def_site.insert(def_var, key);
@@ -384,7 +395,7 @@ impl<'a> SvfgBuilder<'a> {
 
             // --- Regular instructions ---
             for (idx, instr) in block.instructions.iter().enumerate() {
-                let defs = Self::instruction_defs(instr);
+                let defs = instr.defs();
 
                 // Memory-state handling: mem_in is consumed and (if the
                 // instruction produces mem_out) the memory flows onward.
@@ -950,43 +961,6 @@ impl<'a> SvfgBuilder<'a> {
     // These mirror `SSABuilder::get_instruction_dests` / `replace_uses` but
     // return owned lists rather than mutating in place.
     // -----------------------------------------------------------------------
-
-    fn instruction_defs(instr: &Instruction) -> Vec<VarId> {
-        let mut v = Vec::with_capacity(2);
-        match instr {
-            Instruction::Assign { dest, .. }
-            | Instruction::LoadField { dest, .. }
-            | Instruction::LoadElement { dest, .. }
-            | Instruction::LoadGlobal { dest, .. }
-            | Instruction::AddressOf { dest, .. }
-            | Instruction::Dereference { dest, .. }
-            | Instruction::Cast { dest, .. }
-            | Instruction::ExtractValue { dest, .. }
-            | Instruction::BinaryOp { dest, .. }
-            | Instruction::UnaryOp { dest, .. } => v.push(*dest),
-
-            Instruction::StoreField { mem_out, .. }
-            | Instruction::StoreElement { mem_out, .. }
-            | Instruction::StoreGlobal { mem_out, .. } => v.push(*mem_out),
-
-            Instruction::Allocate { dest, mem_out, .. }
-            | Instruction::Await { dest, mem_out, .. } => {
-                v.push(*dest);
-                v.push(*mem_out);
-            }
-
-            Instruction::CallStatic { dest, mem_out, .. }
-            | Instruction::CallVirtual { dest, mem_out, .. }
-            | Instruction::CallPointer { dest, mem_out, .. }
-            | Instruction::Yield { dest, mem_out, .. } => {
-                if let Some(d) = dest {
-                    v.push(*d);
-                }
-                v.push(*mem_out);
-            }
-        }
-        v
-    }
 
     fn instruction_uses(instr: &Instruction) -> Vec<VarId> {
         let mut v: Vec<VarId> = Vec::with_capacity(4);

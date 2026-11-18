@@ -328,32 +328,8 @@ fn reaching_index(
             }
         }
         for instr in &block.instructions {
-            let dest = match instr {
-                Instruction::Assign { dest, .. }
-                | Instruction::Cast { dest, .. }
-                | Instruction::BinaryOp { dest, .. }
-                | Instruction::UnaryOp { dest, .. }
-                | Instruction::LoadField { dest, .. }
-                | Instruction::LoadElement { dest, .. }
-                | Instruction::LoadGlobal { dest, .. }
-                | Instruction::AddressOf { dest, .. }
-                | Instruction::Dereference { dest, .. }
-                | Instruction::ExtractValue { dest, .. }
-                | Instruction::Allocate { dest, .. }
-                | Instruction::Await { dest, .. }
-                | Instruction::CallStatic {
-                    dest: Some(dest), ..
-                }
-                | Instruction::CallVirtual {
-                    dest: Some(dest), ..
-                }
-                | Instruction::CallPointer {
-                    dest: Some(dest), ..
-                }
-                | Instruction::Yield {
-                    dest: Some(dest), ..
-                } => *dest,
-                _ => continue,
+            let Some(dest) = instr.dest() else {
+                continue;
             };
             def_block.entry(dest).or_insert(bid);
             match instr {

@@ -28,7 +28,7 @@ use crate::analysis::taint::engine::BackwardStats;
 /// hides its own caveats is not reviewable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum Cap {
+pub(crate) enum Cap {
     /// The value lattice stopped iterating after
     /// `MAX_ITERATIONS * (blocks + 1)` worklist rounds; branch sharpening for
     /// the affected function is whatever the truncated state held.
@@ -89,7 +89,7 @@ impl Cap {
 
     /// Stable identifier used in the JSON report.
     #[must_use]
-    pub const fn id(self) -> &'static str {
+    pub(crate) const fn id(self) -> &'static str {
         match self {
             Cap::ValueIterations => "value_iterations",
             Cap::CallContextDepth => "call_context_depth",
@@ -107,7 +107,7 @@ impl Cap {
     /// What the truncation cost, in analysis terms. Advisory prose only: the
     /// engine never branches on it.
     #[must_use]
-    pub const fn effect(self) -> &'static str {
+    pub(crate) const fn effect(self) -> &'static str {
         match self {
             Cap::ValueIterations => {
                 "value lattice stopped early; branch constants may be less precise"
@@ -143,7 +143,7 @@ impl Cap {
     /// Set `FRENSdbg_CAPS` to announce each cap once per report window on
     /// stderr. The counter is always updated; only the announcement is
     /// debug-gated.
-    pub fn record(self) {
+    pub(crate) fn record(self) {
         CAP_COUNTS.with(|counts| {
             let mut counts = counts.borrow_mut();
             counts[self.slot()] = counts[self.slot()].saturating_add(1);
@@ -172,7 +172,7 @@ impl Cap {
     /// How many times this cap has fired on the current thread since its
     /// counters were last drained.
     #[must_use]
-    pub fn recorded(self) -> u64 {
+    pub(crate) fn recorded(self) -> u64 {
         CAP_COUNTS.with(|counts| counts.borrow()[self.slot()])
     }
 }
@@ -183,7 +183,7 @@ impl Cap {
 /// accumulating across a long-lived process (MCP/LSP servers scan
 /// repeatedly).
 #[must_use]
-pub fn drain_caps() -> Vec<CapHit> {
+pub(crate) fn drain_caps() -> Vec<CapHit> {
     let all = [
         Cap::ValueIterations,
         Cap::CallContextDepth,
@@ -253,11 +253,11 @@ pub struct FunctionTiming {
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapHit {
-    /// [`Cap::id`] of the valve.
+    /// `Cap::id` of the valve.
     pub cap: String,
     /// How many times it fired in this scan.
     pub hits: usize,
-    /// [`Cap::effect`] of the valve, in prose.
+    /// `Cap::effect` of the valve, in prose.
     pub effect: String,
 }
 
@@ -307,6 +307,194 @@ pub struct InputAccounting {
 
 /// How many `parse_partial_files` paths the report keeps per scan.
 pub const PARTIAL_SAMPLE: usize = 25;
+
+/// What the program graph contained when the taint phase started walking.
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct GraphSize {
+    /// Functions in the analysed program.
+    pub functions: usize,
+    /// Value-flow nodes across every function.
+    pub nodes: usize,
+    /// Value-flow edges within functions.
+    pub edges: usize,
+    /// Call and parameter edges between functions.
+    pub cross_edges: usize,
+}
+
+/// One callee the sink matcher ran on and rejected, with how often it was
+/// called.
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct UnmatchedCallee {
+    /// Callee name as the matcher saw it (a package symbol when the call is
+    /// an import).
+    pub callee: String,
+    /// Call sites that named it and matched no sink fact.
+    pub calls: usize,
+}
+
+impl UnmatchedCallee {
+    /// A callee name and how often the matcher rejected it.
+    #[must_use]
+    pub fn new(callee: impl Into<String>, calls: usize) -> Self {
+        Self {
+            callee: callee.into(),
+            calls,
+        }
+    }
+}
+
+/// Where call sites left the taint phase: examined, skipped before matching,
+/// matched no sink fact, or armed a sink whose arguments were then walked.
+///
+/// The counters partition the call sites, so
+/// `calls_examined = skipped_* + not_a_sink + sink_calls` for every scan, and
+/// a scan whose `not_a_sink` is large is a scan whose vocabulary the engine
+/// never walks.
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct TaintFunnel {
+    /// Call instructions the analysis looked at.
+    pub calls_examined: usize,
+    /// Skipped: the callee names a local variable or closure in this function.
+    pub skipped_local_callable: usize,
+    /// Skipped: the callee is a function defined in the analysed program.
+    pub skipped_program_local: usize,
+    /// Skipped: a receiver-only verb (`get`, `post`, ...) called without a
+    /// receiver, so it cannot be a client method invocation.
+    pub skipped_receiver_only_verb: usize,
+    /// Ran the sink matcher and matched no sink fact.
+    pub not_a_sink: usize,
+    /// Matched a sink fact; its arguments were the walk's seeds.
+    pub sink_calls: usize,
+    /// The callees behind `not_a_sink`, with their call counts. Bounded at 32
+    /// distinct names while scanning; see [`TaintFunnel::top_unmatched`] for
+    /// the busiest few.
+    pub unmatched_callees: Vec<UnmatchedCallee>,
+}
+
+/// Distinct unmatched callees one funnel keeps while scanning. Bounded
+/// because [`TaintFunnel::record_unmatched`] runs per call site: a lookup over
+/// a few dozen names stays cheap, and names past the bound are still counted
+/// in `not_a_sink`.
+const MISSED_CALLEE_TRACKED: usize = 32;
+
+/// Unmatched callees [`TaintFunnel::top_unmatched`] reports: the busiest
+/// handful, so a wide vocabulary does not print a page of one-call names.
+const MISSED_CALLEE_SAMPLE: usize = 8;
+
+/// Busiest first; the name breaks ties so two reports of the same scan print
+/// the same order.
+fn busiest_first(a: &UnmatchedCallee, b: &UnmatchedCallee) -> std::cmp::Ordering {
+    b.calls.cmp(&a.calls).then_with(|| a.callee.cmp(&b.callee))
+}
+
+impl GraphSize {
+    /// A measured graph size; the scan builds it, frontends read it.
+    #[must_use]
+    pub fn new(functions: usize, nodes: usize, edges: usize, cross_edges: usize) -> Self {
+        Self {
+            functions,
+            nodes,
+            edges,
+            cross_edges,
+        }
+    }
+
+    /// Fold another group's size in: every count adds.
+    pub fn merge(&mut self, other: &Self) {
+        self.functions += other.functions;
+        self.nodes += other.nodes;
+        self.edges += other.edges;
+        self.cross_edges += other.cross_edges;
+    }
+}
+
+impl TaintFunnel {
+    /// A funnel whose counters partition `calls_examined`: the skip reasons as
+    /// `(local callable, program-local callee, receiver-only verb)`, then the
+    /// calls that matched no sink fact and the calls that armed one.
+    #[must_use]
+    pub fn new(
+        calls_examined: usize,
+        skipped: (usize, usize, usize),
+        not_a_sink: usize,
+        sink_calls: usize,
+    ) -> Self {
+        let (skipped_local_callable, skipped_program_local, skipped_receiver_only_verb) = skipped;
+        Self {
+            calls_examined,
+            skipped_local_callable,
+            skipped_program_local,
+            skipped_receiver_only_verb,
+            not_a_sink,
+            sink_calls,
+            unmatched_callees: Vec::new(),
+        }
+    }
+
+    /// Record one call site that ran the sink matcher and matched no sink
+    /// fact, keeping a running count per callee name.
+    ///
+    /// The tracked list holds the first 32 distinct names seen; a call to a
+    /// name past that bound is still counted in [`Self::not_a_sink`], because
+    /// the total is what the funnel partitions on.
+    pub fn record_unmatched(&mut self, callee: &str) {
+        self.not_a_sink += 1;
+        if let Some(entry) = self
+            .unmatched_callees
+            .iter_mut()
+            .find(|entry| entry.callee == callee)
+        {
+            entry.calls += 1;
+        } else if self.unmatched_callees.len() < MISSED_CALLEE_TRACKED {
+            self.unmatched_callees.push(UnmatchedCallee::new(callee, 1));
+        }
+    }
+
+    /// The busiest callees that matched no sink fact, most calls first and
+    /// the name as the tie-break, at most eight of them.
+    #[must_use]
+    pub fn top_unmatched(&self) -> Vec<&UnmatchedCallee> {
+        let mut top: Vec<&UnmatchedCallee> = self.unmatched_callees.iter().collect();
+        top.sort_by(|a, b| busiest_first(a, b));
+        top.truncate(MISSED_CALLEE_SAMPLE);
+        top
+    }
+
+    /// Fold another group's funnel in: every counter adds.
+    pub fn merge(&mut self, other: &Self) {
+        self.calls_examined += other.calls_examined;
+        self.skipped_local_callable += other.skipped_local_callable;
+        self.skipped_program_local += other.skipped_program_local;
+        self.skipped_receiver_only_verb += other.skipped_receiver_only_verb;
+        self.not_a_sink += other.not_a_sink;
+        for entry in &other.unmatched_callees {
+            match self
+                .unmatched_callees
+                .iter_mut()
+                .find(|seen| seen.callee == entry.callee)
+            {
+                Some(seen) => seen.calls += entry.calls,
+                None => self.unmatched_callees.push(entry.clone()),
+            }
+        }
+        // Two wide groups can exceed the bound together; keep the busiest.
+        self.unmatched_callees.sort_by(busiest_first);
+        self.unmatched_callees.truncate(MISSED_CALLEE_TRACKED);
+        self.sink_calls += other.sink_calls;
+    }
+
+    /// Calls skipped before the matcher ran, for any of the three reasons.
+    #[must_use]
+    pub fn skipped(&self) -> usize {
+        self.skipped_local_callable + self.skipped_program_local + self.skipped_receiver_only_verb
+    }
+}
 
 /// The outcome of executing one check.
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
@@ -359,6 +547,10 @@ pub struct ScanTelemetry {
     pub input: InputAccounting,
     /// Backward-taint traversal counters (the demand-driven cost model).
     pub taint: BackwardStats,
+    /// Size of the program graph the taint phase walked.
+    pub graph: GraphSize,
+    /// Where the taint phase's call sites left the analysis.
+    pub funnel: TaintFunnel,
     /// Check-by-check execution timings, findings count, and outcomes.
     pub checks: Vec<CheckTelemetry>,
     /// Non-fatal scan errors (failed files, worker failures, unsupported input).
@@ -366,7 +558,7 @@ pub struct ScanTelemetry {
 }
 
 /// How many entries the slow-file and slow-function lists keep.
-pub const SLOW_SAMPLE: usize = 10;
+pub(crate) const SLOW_SAMPLE: usize = 10;
 
 impl ScanTelemetry {
     /// Fold another scan's telemetry in (the CLI scans one group per
@@ -395,12 +587,14 @@ impl ScanTelemetry {
         self.taint.sanitized += other.taint.sanitized;
         self.taint.unknown += other.taint.unknown;
         self.taint.clean += other.taint.clean;
+        self.graph.merge(&other.graph);
+        self.funnel.merge(&other.funnel);
         self.checks.extend(other.checks);
     }
 
     /// Collapse per-group rows into one per-phase row, cap hits summed by
     /// name, suppressions summed by reason, and the slow lists trimmed to
-    /// [`SLOW_SAMPLE`]. Call once, after every group has been merged.
+    /// `SLOW_SAMPLE`. Call once, after every group has been merged.
     pub fn finalize(&mut self) {
         let mut phases: Vec<PhaseTiming> = Vec::new();
         for p in &self.phases {
@@ -505,13 +699,118 @@ impl ScanTelemetry {
 
 /// Milliseconds elapsed since `start`, as a reportable number.
 #[must_use]
-pub fn millis_since(start: std::time::Instant) -> u128 {
+pub(crate) fn millis_since(start: std::time::Instant) -> u128 {
     start.elapsed().as_millis()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Cap, drain_caps};
+    use super::{
+        Cap, GraphSize, MISSED_CALLEE_SAMPLE, MISSED_CALLEE_TRACKED, ScanTelemetry, TaintFunnel,
+        drain_caps,
+    };
+
+    /// The CLI scans one group per language family and merges the results: a
+    /// group that walked no calls must not erase another group's counters, and
+    /// the partition has to survive the fold.
+    #[test]
+    fn merge_adds_the_graph_size_and_the_funnel() {
+        let mut a = ScanTelemetry {
+            graph: GraphSize::new(3, 10, 12, 2),
+            // 1 + 2 + 0 skipped + 4 unmatched + 2 sinks = 9 examined.
+            funnel: TaintFunnel::new(9, (1, 2, 0), 4, 2),
+            ..ScanTelemetry::default()
+        };
+        let b = ScanTelemetry {
+            graph: GraphSize::new(5, 20, 25, 7),
+            // 0 + 1 + 3 skipped + 5 unmatched + 2 sinks = 11 examined.
+            funnel: TaintFunnel::new(11, (0, 1, 3), 5, 2),
+            ..ScanTelemetry::default()
+        };
+
+        a.merge(b);
+
+        assert_eq!(a.graph.functions, 8);
+        assert_eq!(a.graph.nodes, 30);
+        assert_eq!(a.graph.edges, 37);
+        assert_eq!(a.graph.cross_edges, 9);
+        assert_eq!(a.funnel.calls_examined, 20);
+        assert_eq!(a.funnel.skipped(), 7);
+        assert_eq!(a.funnel.not_a_sink, 9);
+        assert_eq!(a.funnel.sink_calls, 4);
+        assert_eq!(
+            a.funnel.calls_examined,
+            a.funnel.skipped() + a.funnel.not_a_sink + a.funnel.sink_calls,
+            "the partition must survive the merge"
+        );
+
+        // A group that analysed nothing contributes nothing.
+        a.merge(ScanTelemetry::default());
+        assert_eq!(a.graph.nodes, 30);
+        assert_eq!(a.funnel.calls_examined, 20);
+    }
+
+    /// The funnel names the callees it rejected, and a per-group fold sums
+    /// the same name instead of duplicating it.
+    #[test]
+    fn the_funnel_names_and_merges_the_callees_it_rejected() {
+        let mut a = TaintFunnel::default();
+        a.record_unmatched("read");
+        a.record_unmatched("read");
+        a.record_unmatched("noop");
+
+        let mut b = TaintFunnel::default();
+        b.record_unmatched("read");
+        b.record_unmatched("deserialize");
+
+        a.merge(&b);
+
+        assert_eq!(a.not_a_sink, 5);
+        let top: Vec<(&str, usize)> = a
+            .top_unmatched()
+            .into_iter()
+            .map(|entry| (entry.callee.as_str(), entry.calls))
+            .collect();
+        assert_eq!(
+            top,
+            vec![("read", 3), ("deserialize", 1), ("noop", 1)],
+            "busiest first, then by name: {top:?}"
+        );
+    }
+
+    /// The tracked list is bounded so a wide vocabulary cannot turn every
+    /// report into a name dump; the count it explains is not.
+    #[test]
+    fn the_tracked_callee_list_is_bounded_and_the_count_is_not() {
+        let mut wide = TaintFunnel::default();
+        for i in 0..(MISSED_CALLEE_TRACKED + 5) {
+            wide.record_unmatched(&format!("callee_{i}"));
+        }
+        assert_eq!(
+            wide.not_a_sink,
+            MISSED_CALLEE_TRACKED + 5,
+            "every rejected call is counted, even when its name is not kept"
+        );
+        assert_eq!(wide.unmatched_callees.len(), MISSED_CALLEE_TRACKED);
+        assert_eq!(
+            wide.top_unmatched().len(),
+            MISSED_CALLEE_SAMPLE,
+            "the report keeps only the busiest handful"
+        );
+
+        // Folding a second wide group in cannot grow the list past the bound.
+        let mut other = TaintFunnel::default();
+        for i in 0..MISSED_CALLEE_TRACKED {
+            other.record_unmatched(&format!("other_{i}"));
+        }
+        wide.merge(&other);
+        assert_eq!(wide.unmatched_callees.len(), MISSED_CALLEE_TRACKED);
+        assert_eq!(
+            wide.top_unmatched()[0].callee,
+            "callee_0",
+            "every count is tied, so the name decides the order"
+        );
+    }
 
     /// The caps that used to truncate silently must reach the report with
     /// their stable ids, and a drain must reset them for the next scan.

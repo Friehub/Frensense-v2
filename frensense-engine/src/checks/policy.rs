@@ -66,7 +66,7 @@ fn callee_matches(taught: &str, written: &str) -> bool {
 /// carrying `package: Some(pkg)` only fire in functions whose file
 /// imports `pkg` (mirrors the sink/source package-scoping model).
 #[derive(Debug)]
-pub struct PackageScope<'a> {
+pub(crate) struct PackageScope<'a> {
     /// Function name -> source file path.
     pub fn_file: &'a FxHashMap<String, String>,
     /// File path -> (local import name -> import record).
@@ -74,24 +74,21 @@ pub struct PackageScope<'a> {
 }
 
 impl<'a> PackageScope<'a> {
+    /// The import table that applies to `fn_name`, with the single-file fallback.
+    pub(crate) fn imports_for(
+        &self,
+        fn_name: &str,
+    ) -> Option<&'a FxHashMap<String, PackageImport>> {
+        crate::graph::module::imports_for_function(self.fn_file, self.file_package_imports, fn_name)
+    }
+
     /// Does the file containing `fn_name` import `pkg`?
     ///
-    /// Mirrors the taint engine's single-file fallback
-    /// (`walk.rs`): when the map holds exactly one file's imports,
-    /// use those regardless of the function's declared file.
-    pub fn fn_imports_package(&self, fn_name: &str, pkg: &str) -> bool {
-        let imports = self
-            .fn_file
-            .get(fn_name)
-            .and_then(|file| self.file_package_imports.get(file))
-            .or_else(|| {
-                if self.file_package_imports.len() == 1 {
-                    self.file_package_imports.values().next()
-                } else {
-                    None
-                }
-            });
-        imports.is_some_and(|m| m.values().any(|i| i.package == pkg))
+    /// Uses the taint engine's single-file fallback
+    /// ([`imports_for_function`](crate::graph::module::imports_for_function)).
+    pub(crate) fn fn_imports_package(&self, fn_name: &str, pkg: &str) -> bool {
+        self.imports_for(fn_name)
+            .is_some_and(|m| m.values().any(|i| i.package == pkg))
     }
 }
 
@@ -144,7 +141,7 @@ pub fn check_program(irs: &[&FunctionIR], facts: &FactTable) -> Vec<CheckerFindi
 /// [`check_program`] with package-scope filtering: policies carrying
 /// `package: Some(pkg)` only fire in functions whose file imports `pkg`.
 /// `scope = None` disables filtering (backward-compatible default).
-pub fn check_program_scoped(
+pub(crate) fn check_program_scoped(
     irs: &[&FunctionIR],
     facts: &FactTable,
     scope: Option<&PackageScope<'_>>,
@@ -197,17 +194,7 @@ pub fn check_program_scoped(
     let mut alias_maps: FxHashMap<&str, FxHashMap<String, String>> = FxHashMap::default();
     if let Some(scope) = scope {
         for ir in irs {
-            let imports = scope
-                .fn_file
-                .get(ir.name.as_str())
-                .and_then(|file| scope.file_package_imports.get(file))
-                .or_else(|| {
-                    if scope.file_package_imports.len() == 1 {
-                        scope.file_package_imports.values().next()
-                    } else {
-                        None
-                    }
-                });
+            let imports = scope.imports_for(ir.name.as_str());
             if let Some(imports) = imports {
                 let aliases: FxHashMap<String, String> = imports
                     .iter()

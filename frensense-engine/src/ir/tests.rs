@@ -175,6 +175,7 @@ pub(super) mod tests {
                 base: obj,
                 field: "data".into(),
                 src: Operand::Var(malicious),
+                span: None,
             },
         );
 
@@ -188,6 +189,7 @@ pub(super) mod tests {
                 base: obj,
                 field: "data".into(),
                 src: Operand::StringLiteral("safe".into()),
+                span: None,
             },
         );
 
@@ -768,5 +770,40 @@ pub(super) mod tests {
         assert_eq!(strip_quotes("'a\""), "'a\"");
         assert_eq!(strip_quotes("plain"), "plain");
         assert_eq!(strip_quotes(""), "");
+    }
+
+    #[test]
+    fn instruction_dest_and_defs_cover_value_and_memory_outputs() {
+        let v = VarId;
+        // Kinds the old per-file copies disagreed on.
+        let addr = Instruction::AddressOf {
+            dest: v(1),
+            src: v(0),
+        };
+        let deref = Instruction::Dereference {
+            dest: v(2),
+            mem_in: v(9),
+            ptr: Operand::Var(v(1)),
+        };
+        let alloc = Instruction::Allocate {
+            dest: v(3),
+            mem_out: v(10),
+            mem_in: v(9),
+            kind: AllocationKind::Object,
+        };
+        let store = Instruction::StoreField {
+            mem_out: v(11),
+            mem_in: v(9),
+            base: v(3),
+            field: "f".into(),
+            src: Operand::IntLiteral(0),
+            span: None,
+        };
+        assert_eq!(addr.dest(), Some(v(1)));
+        assert_eq!(deref.dest(), Some(v(2)));
+        assert_eq!(alloc.defs(), vec![v(3), v(10)]);
+        assert_eq!(store.dest(), None);
+        assert_eq!(store.defs(), vec![v(11)]);
+        assert_eq!(addr.mem_out(), None);
     }
 }

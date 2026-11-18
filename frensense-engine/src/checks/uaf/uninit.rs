@@ -12,7 +12,10 @@ use super::types::{FreeSite, Violation, finding};
 /// Check for deallocations where the freed pointer has a feasible path
 /// with no reaching definition (e.g. uninitialized stack slot freed on
 /// an unchecked error/EOF path).
-pub fn check_uninitialized_frees(ir: &FunctionIR, frees: &[FreeSite]) -> Vec<CheckerFinding> {
+pub(crate) fn check_uninitialized_frees(
+    ir: &FunctionIR,
+    frees: &[FreeSite],
+) -> Vec<CheckerFinding> {
     let mut findings = Vec::new();
 
     for f in frees {
@@ -154,7 +157,7 @@ fn has_no_reaching_def(ir: &FunctionIR, f: &FreeSite) -> bool {
                     return false;
                 }
             }
-            if !instr_defines_var(instr, f.var) {
+            if instr.dest() != Some(f.var) {
                 continue;
             }
             // The def reaches the free when it precedes the free in the
@@ -318,7 +321,7 @@ fn is_error_guarded(ir: &FunctionIR, target_block: BlockId, c_var: VarId) -> boo
     let mut def_block = None;
     for (&bid, block) in &ir.blocks {
         for instr in &block.instructions {
-            if instr_defines_var(instr, c_var) {
+            if instr.dest() == Some(c_var) {
                 def_block = Some(bid);
                 break;
             }
@@ -358,33 +361,6 @@ fn is_error_guarded(ir: &FunctionIR, target_block: BlockId, c_var: VarId) -> boo
     }
 
     false
-}
-
-fn instr_defines_var(instr: &Instruction, var: VarId) -> bool {
-    match instr {
-        Instruction::Assign { dest, .. }
-        | Instruction::LoadField { dest, .. }
-        | Instruction::LoadElement { dest, .. }
-        | Instruction::LoadGlobal { dest, .. }
-        | Instruction::CallStatic {
-            dest: Some(dest), ..
-        }
-        | Instruction::CallVirtual {
-            dest: Some(dest), ..
-        }
-        | Instruction::CallPointer {
-            dest: Some(dest), ..
-        }
-        | Instruction::Allocate { dest, .. }
-        | Instruction::AddressOf { dest, .. }
-        | Instruction::Dereference { dest, .. }
-        | Instruction::Cast { dest, .. }
-        | Instruction::ExtractValue { dest, .. }
-        | Instruction::BinaryOp { dest, .. }
-        | Instruction::UnaryOp { dest, .. }
-        | Instruction::Await { dest, .. } => *dest == var,
-        _ => false,
-    }
 }
 
 fn can_reach(ir: &FunctionIR, from: BlockId, to: BlockId) -> bool {

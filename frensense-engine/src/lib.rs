@@ -66,4 +66,4 @@ pub struct FileId(pub u32);
 /// Opaque identifier for a scope within a single analysis session, the scope-level counterpart of [`FileId`].
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ScopeId(pub u64);
+pub(crate) struct ScopeId(pub u64);

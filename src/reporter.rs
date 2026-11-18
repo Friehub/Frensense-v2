@@ -13,110 +13,8 @@ use std::path::Path;
 pub struct Reporter;
 
 impl Reporter {
-    /// Generates a Markdown report grouped by severity.
-    #[must_use]
-    pub fn to_markdown(advisories: &[Advisory], path: &str) -> String {
-        Self::to_markdown_detailed(advisories, path, None)
-    }
-
-    /// Generates a Markdown report that says what the scan could recognize.
-    ///
-    /// A "No findings" Markdown report is the easiest place to overclaim: it
-    /// leaves the reader with a clean bill of health and no denominator. The
-    /// coverage block supplies one.
-    #[must_use]
-    pub fn to_markdown_detailed(
-        advisories: &[Advisory],
-        path: &str,
-        coverage: Option<&Coverage>,
-    ) -> String {
-        let mut md = format!("# Frensense Report for {path}\n\n");
-        if advisories.is_empty() {
-            match coverage {
-                Some(c) if !c.recognized_anything() => md.push_str(
-                    "**No findings - no sink site was recognized in this scan.** \
-                     The scan does not show the code is safe.\n",
-                ),
-                Some(c) if c.files_not_analyzed() > 0 => {
-                    let _ = writeln!(
-                        md,
-                        "**No findings - only {} of {} source file(s) were analyzed.** \
-                         The rest were not scanned.\n",
-                        c.files_analyzed, c.files_found
-                    );
-                }
-                Some(c) if !c.fully_resolved() => {
-                    let _ = writeln!(
-                        md,
-                        "**No findings - {} sink site(s) were left undecided.**",
-                        c.unresolved_sites
-                    );
-                }
-                Some(_) => md.push_str("**Analysis Complete:** No findings.\n"),
-                None => md.push_str("**No findings reported.**\n"),
-            }
-            if let Some(c) = coverage {
-                md.push('\n');
-                let _ = writeln!(
-                    md,
-                    "- Files analyzed: {}/{}",
-                    c.files_analyzed, c.files_found
-                );
-                let _ = writeln!(
-                    md,
-                    "- Sink sites recognized: {} (in {} file(s))",
-                    c.sink_sites, c.files_with_sink_sites
-                );
-                let _ = writeln!(
-                    md,
-                    "- Files with no recognized sink: {}",
-                    c.files_without_sink_sites
-                );
-                let _ = writeln!(md, "- Undecided sink sites: {}", c.unresolved_sites);
-            }
-            return md;
-        }
-        for sev in [
-            crate::Severity::Critical,
-            crate::Severity::Warning,
-            crate::Severity::Info,
-        ] {
-            let filtered: Vec<&Advisory> =
-                advisories.iter().filter(|a| a.severity == sev).collect();
-            if filtered.is_empty() {
-                continue;
-            }
-            let _ = writeln!(md, "## {:?}", sev);
-            for adv in filtered {
-                let _ = writeln!(md, "### {}", adv.title);
-                let _ = writeln!(md, "- **Location**: `{}:{}`  ", adv.file_path, adv.line);
-                let _ = writeln!(md, "- **Observation**: {}  ", adv.observation);
-                let _ = writeln!(md, "- **Impact**: {}  ", adv.impact);
-                let _ = writeln!(md, "- **Improvement**: {}  \n", adv.improvement);
-            }
-        }
-        md
-    }
-
-    /// Generates a SARIF report for CI/CD integration.
-    #[must_use]
-    pub fn to_sarif(advisories: &[Advisory], root_path: &Path) -> serde_json::Value {
-        Self::to_sarif_detailed(advisories, root_path, None, &[])
-    }
-
-    /// Generates a SARIF report with invocations and execution telemetry.
-    #[must_use]
-    pub fn to_sarif_detailed(
-        advisories: &[Advisory],
-        root_path: &Path,
-        telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
-        incomplete: &[frensense_engine::scan::IncompleteFunction],
-    ) -> serde_json::Value {
-        Self::to_sarif_with_coverage(advisories, root_path, telemetry, incomplete, None)
-    }
-
-    /// [`to_sarif_detailed`](Self::to_sarif_detailed) plus what the run
-    /// actually covered.
+    /// Generates a SARIF report with invocations, execution telemetry and what
+    /// the run actually covered.
     ///
     /// A SARIF report is how CI consumes a scan, so the coverage gaps travel
     /// as `toolExecutionNotifications` (a consumer that ignores them still
@@ -477,18 +375,6 @@ fn escape_workflow_message(value: &str) -> String {
     value.replace('%', "%25").replace(['\r', '\n'], " ")
 }
 
-/// Deterministic one-line description of one taint-path step.
-///
-/// Presentation of the engine's structured [`PathStep`] data: the engine
-/// records steps, this renders them for text, SARIF codeFlows, and LSP
-/// clients. Without the step's source span the wording falls back to SSA
-/// variable numbers (`v11`); [`describe_step`] resolves the real expression
-/// instead.
-#[must_use]
-pub fn describe_path_step(step: &PathStep) -> String {
-    describe_step(step, None)
-}
-
 /// One taint-path step, named from the source text at its span when known.
 ///
 /// The IR names values `v11`; the developer names them `resp.data`. With the
@@ -748,7 +634,7 @@ fn line_col_for(file: &str, byte_offset: usize) -> Option<(usize, usize)> {
 mod taint_render_tests {
     use frensense_engine::analysis::taint::path::{PathStep, TaintPath};
 
-    use super::{describe_path_step, describe_step, render_taint_path};
+    use super::{describe_step, render_taint_path};
 
     /// A temporary file plus the byte range of `needle` inside it.
     fn fixture(name: &str, source: &str, needle: &str) -> (String, (usize, usize)) {
@@ -900,7 +786,7 @@ mod taint_render_tests {
             },
         ];
         for step in &steps {
-            assert!(!describe_path_step(step).is_empty());
+            assert!(!describe_step(step, None).is_empty());
         }
     }
 }
@@ -948,7 +834,7 @@ mod sarif_line_mapping_tests {
     #[test]
     fn sarif_groups_findings_by_stable_rule_id_not_message() {
         let advisories = vec![rule_advisory("a"), rule_advisory("b")];
-        let sarif = Reporter::to_sarif(&advisories, Path::new("."));
+        let sarif = Reporter::to_sarif_with_coverage(&advisories, Path::new("."), None, &[], None);
         let run = &sarif["runs"][0];
         let rules = run["tool"]["driver"]["rules"].as_array().expect("rules");
         assert_eq!(rules.len(), 1, "two findings, one rule");
@@ -962,7 +848,13 @@ mod sarif_line_mapping_tests {
 
     #[test]
     fn sarif_carries_producer_identity_block() {
-        let sarif = Reporter::to_sarif(&[rule_advisory("a")], Path::new("."));
+        let sarif = Reporter::to_sarif_with_coverage(
+            &[rule_advisory("a")],
+            Path::new("."),
+            None,
+            &[],
+            None,
+        );
         let driver = &sarif["runs"][0]["tool"]["driver"];
         let f = &driver["properties"]["frensense"];
         assert_eq!(f["name"], "frensense");

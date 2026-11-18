@@ -2,9 +2,8 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-use super::options::CliOptions;
 use crate::engine::files::UnsupportedSourceFile;
-use crate::explain::ExplainRecord;
+use crate::explain::{ExplainRecord, slot_label};
 use crate::policy::Coverage;
 use crate::reporter::Reporter;
 use crate::{Advisory, FrensenseError, Result};
@@ -169,37 +168,7 @@ fn status_label(status: ScanStatus, findings: usize, coverage: Option<&Coverage>
     }
 }
 
-/// Print a structured scan summary block.
-pub fn print_scan_summary(
-    advisories: &[Advisory],
-    input_path: &std::path::Path,
-    duration: std::time::Duration,
-    output_path: Option<&std::path::Path>,
-) {
-    print_scan_summary_detailed(advisories, input_path, duration, output_path, None, &[]);
-}
-
-/// Print a structured scan summary block with status and caveats.
-pub fn print_scan_summary_detailed(
-    advisories: &[Advisory],
-    input_path: &std::path::Path,
-    duration: std::time::Duration,
-    output_path: Option<&std::path::Path>,
-    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
-    incomplete: &[frensense_engine::scan::IncompleteFunction],
-) {
-    print_scan_summary_detailed_with_coverage(
-        advisories,
-        input_path,
-        duration,
-        output_path,
-        telemetry,
-        incomplete,
-        None,
-    );
-}
-
-/// [`print_scan_summary_detailed`] plus what the scan actually covered.
+/// Prints the scan summary block, including what the scan actually covered.
 ///
 /// The coverage line is the denominator behind "no findings": without it a
 /// scan that analyzed 3 of 40 files is indistinguishable from one that
@@ -291,6 +260,16 @@ pub fn print_scan_summary_detailed_with_coverage(
             );
         }
     }
+    if telem.input.submitted > 0 {
+        // Not `print!`: the stage ledger is one block, written in one go so it
+        // cannot interleave with the progress output on the same stream.
+        use std::io::Write as _;
+        let _ = write!(
+            std::io::stdout(),
+            "{}",
+            render_stages(telem, advisories.len())
+        );
+    }
     println!("Findings Breakdown:");
     println!("  - Critical:       {critical}");
     println!("  - Warning:        {warning}");
@@ -370,23 +349,6 @@ pub fn print_scan_summary_detailed_with_coverage(
     }
 }
 
-/// The JSON report envelope: `schema_version` + `producer` identity block,
-/// then the finding payload, plus `analysis_incomplete`: the functions whose
-/// per-function work budget expired and were therefore analyzed in degraded
-/// (flow-insensitive) form. Additive - consumers already ignoring unknown
-/// keys keep working - so the schema version is unchanged.
-///
-/// Extracted so the shape is testable (and golden-assertable) without a
-/// filesystem. Bump [`crate::REPORT_SCHEMA_VERSION`] when a key here is
-/// renamed, removed, or changes type.
-#[must_use]
-pub fn json_report(
-    advisories: &[Advisory],
-    incomplete: &[frensense_engine::scan::IncompleteFunction],
-) -> serde_json::Value {
-    json_report_with_skips(advisories, incomplete, None, &[])
-}
-
 /// The one-line headline above the summary when the scan reported nothing.
 ///
 /// "Analysis Complete: No findings." was printed for every empty result,
@@ -414,16 +376,6 @@ fn no_findings_headline(status: ScanStatus, coverage: Option<&Coverage>) -> Stri
     }
 }
 
-/// The JSON report envelope with full `analysis` telemetry object.
-#[must_use]
-pub fn json_report_with_telemetry(
-    advisories: &[Advisory],
-    incomplete: &[frensense_engine::scan::IncompleteFunction],
-    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
-) -> serde_json::Value {
-    json_report_with_skips(advisories, incomplete, telemetry, &[])
-}
-
 /// The JSON report envelope including the source files the scan skipped
 /// because the engine has no spec for their language. The extra object is
 /// additive (`analysis.coverage.unsupported_source_files`), so the schema
@@ -436,6 +388,34 @@ pub fn json_report_with_skips(
     skipped: &[UnsupportedSourceFile],
 ) -> serde_json::Value {
     json_report_with_coverage(advisories, incomplete, telemetry, skipped, None)
+}
+
+/// The `analysis.graph` block: the sizes of the program the taint phase
+/// actually walked.
+fn graph_json(graph: &frensense_engine::telemetry::GraphSize) -> serde_json::Value {
+    serde_json::json!({
+        "functions": graph.functions,
+        "nodes": graph.nodes,
+        "edges": graph.edges,
+        "cross_edges": graph.cross_edges,
+    })
+}
+
+/// The `analysis.funnel` block: where the call sites left the taint phase,
+/// including the busiest callees that matched no sink fact.
+fn funnel_json(f: &frensense_engine::telemetry::TaintFunnel) -> serde_json::Value {
+    serde_json::json!({
+        "calls_examined": f.calls_examined,
+        "skipped_local_callable": f.skipped_local_callable,
+        "skipped_program_local": f.skipped_program_local,
+        "skipped_receiver_only_verb": f.skipped_receiver_only_verb,
+        "not_a_sink": f.not_a_sink,
+        "sink_calls": f.sink_calls,
+        "unmatched_callees": f.top_unmatched().iter().map(|entry| serde_json::json!({
+            "callee": entry.callee,
+            "calls": entry.calls,
+        })).collect::<Vec<_>>(),
+    })
 }
 
 /// [`json_report_with_skips`] plus what the scan actually covered.
@@ -514,6 +494,10 @@ pub fn json_report_with_coverage(
             "unknown": telem.taint.unknown,
             "clean": telem.taint.clean,
         },
+        // The sizes and call-site accounting behind the summary's graph and
+        // taint lines, so a JSON consumer sees the same numbers.
+        "graph": graph_json(&telem.graph),
+        "funnel": funnel_json(&telem.funnel),
         "truncations": telem.caps.iter().map(|c| serde_json::json!({
             "cap": c.cap,
             "hits": c.hits,
@@ -565,91 +549,7 @@ pub fn json_report_with_coverage(
     })
 }
 
-/// Print results in the requested format.
-///
-/// `incomplete` names the functions analyzed in degraded form because their
-/// per-function work budget expired; they are announced on stderr (never
-/// silently) and reported under `analysis_incomplete` in JSON.
-///
-/// If `output_path` is provided, writes the formatted report to that destination
-/// and prints status summary to stdout.
-///
-/// # Errors
-/// Returns an error if serialization or file writing fails.
-pub fn print_results(
-    advisories: &[Advisory],
-    incomplete: &[frensense_engine::scan::IncompleteFunction],
-    format: &str,
-    input_path: &std::path::Path,
-    duration: Option<std::time::Duration>,
-    output_path: Option<&std::path::Path>,
-) -> Result<()> {
-    print_results_with_skips(
-        advisories,
-        incomplete,
-        None,
-        &[],
-        format,
-        input_path,
-        duration,
-        output_path,
-    )
-}
-
-/// Print results with full telemetry and status reporting.
-pub fn print_results_detailed(
-    advisories: &[Advisory],
-    incomplete: &[frensense_engine::scan::IncompleteFunction],
-    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
-    format: &str,
-    input_path: &std::path::Path,
-    duration: Option<std::time::Duration>,
-    output_path: Option<&std::path::Path>,
-) -> Result<()> {
-    print_results_with_skips(
-        advisories,
-        incomplete,
-        telemetry,
-        &[],
-        format,
-        input_path,
-        duration,
-        output_path,
-    )
-}
-
-/// Print results and say which source files the scan could not analyze
-/// because the engine has no language spec for them.
-///
-/// The warning goes to stderr so it never contaminates stdout reports, and it
-/// prints even when the scan of the supported files was otherwise complete: a
-/// polyglot repository where 30 of 40 files are Ruby must not present itself
-/// as a clean JavaScript scan.
-#[allow(clippy::too_many_arguments)]
-pub fn print_results_with_skips(
-    advisories: &[Advisory],
-    incomplete: &[frensense_engine::scan::IncompleteFunction],
-    telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
-    skipped: &[UnsupportedSourceFile],
-    format: &str,
-    input_path: &std::path::Path,
-    duration: Option<std::time::Duration>,
-    output_path: Option<&std::path::Path>,
-) -> Result<()> {
-    print_results_with_coverage(
-        advisories,
-        incomplete,
-        telemetry,
-        skipped,
-        None,
-        format,
-        input_path,
-        duration,
-        output_path,
-    )
-}
-
-/// [`print_results_with_skips`] plus what the scan could recognize.
+/// Prints the findings and the scan summary, including what the scan could recognize.
 ///
 /// `coverage` is the denominator behind "no findings": a report that prints
 /// "Clean" without it cannot be falsified, because a scan that recognized no
@@ -894,6 +794,104 @@ pub fn format_hidden_summary(tier: crate::RuleTier, count: usize) -> String {
     )
 }
 
+/// The stage ledger shown in every human-format scan summary: one line per
+/// stage a scan went through, so a slow or empty stage is visible without a
+/// flag. Pure over the telemetry, which `--json` consumers also receive.
+fn render_stages(telem: &frensense_engine::telemetry::ScanTelemetry, reported: usize) -> String {
+    use std::fmt::Write as _;
+    let ms = |name: &str| {
+        telem
+            .phases
+            .iter()
+            .find(|p| p.phase == name)
+            .map_or(0, |p| p.ms)
+    };
+    let (i, g, f, t) = (&telem.input, &telem.graph, &telem.funnel, &telem.taint);
+    let dropped: usize = telem.suppressed.iter().map(|s| s.count).sum();
+    let mut out = String::from("Stages:\n");
+    let _ = writeln!(
+        out,
+        "  parse+lower  {:>6} ms  {} file(s) given, {} lowered, {} failed -> {} function(s)",
+        ms("lower"),
+        i.submitted,
+        i.scanned,
+        i.failed,
+        i.functions
+    );
+    let _ = writeln!(
+        out,
+        "  graph        {:>6} ms  {} function(s), {} value-flow node(s), {} edge(s), {} cross-function edge(s)",
+        ms("graph"),
+        g.functions,
+        g.nodes,
+        g.edges,
+        g.cross_edges
+    );
+    let _ = writeln!(
+        out,
+        "  checks       {:>6} ms  {} check(s), {} finding(s)",
+        ms("checks"),
+        telem.checks.len(),
+        telem.checks.iter().map(|c| c.findings).sum::<usize>()
+    );
+    let _ = writeln!(
+        out,
+        "  taint        {:>6} ms  {} call(s) -> {} sink call(s) -> {} argument(s) walked ({} vulnerable)",
+        ms("taint"),
+        f.calls_examined,
+        f.sink_calls,
+        t.sink_args_explored,
+        t.vulnerable
+    );
+    let _ = writeln!(
+        out,
+        "  report                  {reported} reported, {dropped} dropped at the reporting gate"
+    );
+    out
+}
+
+/// Where the taint phase's call sites left the pipeline: the numbers behind
+/// the summary's taint line, printed by `--explain`.
+fn render_funnel(telem: &frensense_engine::telemetry::ScanTelemetry) -> String {
+    use std::fmt::Write as _;
+    let f = &telem.funnel;
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "Pipeline: where {} call(s) left the engine",
+        f.calls_examined
+    );
+    let _ = writeln!(
+        out,
+        "  skipped before matching   {:>6}   (local callable {}, program-local callee {}, receiver-only verb {})",
+        f.skipped(),
+        f.skipped_local_callable,
+        f.skipped_program_local,
+        f.skipped_receiver_only_verb
+    );
+    let _ = writeln!(
+        out,
+        "  matched no sink fact      {:>6}   <- vocabulary the engine never walks",
+        f.not_a_sink
+    );
+    let top = f.top_unmatched();
+    if !top.is_empty() {
+        let _ = writeln!(
+            out,
+            "  most-called callees with no sink fact   ({} name(s) tracked, busiest first):",
+            f.unmatched_callees.len()
+        );
+        for entry in top {
+            let _ = writeln!(out, "    {:<26}{:>5}", entry.callee, entry.calls);
+        }
+    }
+    let _ = writeln!(out, "  matched a sink fact       {:>6}", f.sink_calls);
+    for s in &telem.suppressed {
+        let _ = writeln!(out, "  reporting gate: {:<24}{:>6}", s.reason, s.count);
+    }
+    out
+}
+
 /// Print the `--explain` section: every explored sink argument that did
 /// NOT become an advisory, with the reason the engine stayed silent, as well
 /// as counts of findings hidden by profile tiers.
@@ -923,18 +921,28 @@ pub fn print_explain(
     });
     for r in sorted {
         eprintln!(
-            "  {:<14} {}:{}  {}(arg {})",
-            r.verdict, r.file, r.line, r.sink, r.arg_slot
+            "  {:<14} {}:{}  {}({})",
+            r.verdict,
+            r.file,
+            r.line,
+            r.sink,
+            slot_label(r.arg_slot)
         );
         eprintln!("      why: {}", r.reason);
         for c in &r.cut_sites {
-            let what = if c.detail.is_empty() {
-                c.kind.to_string()
+            let passed = c.kind == "passed-through";
+            let what = match (passed, c.detail.is_empty()) {
+                (true, _) => format!("`{}`", c.detail),
+                (false, true) => c.kind.to_string(),
+                (false, false) => format!("{} `{}`", c.kind, c.detail),
+            };
+            let verb = if passed {
+                "flowed through"
             } else {
-                format!("{} `{}`", c.kind, c.detail)
+                "stopped at"
             };
             eprintln!(
-                "      stopped at: {what} in {} ({}:{})",
+                "      {verb}: {what} in {} ({}:{})",
                 c.function, c.file, c.line
             );
         }
@@ -1020,6 +1028,12 @@ pub fn print_explain_coverage(
                 coverage.unresolved_sites - coverage.unresolved_sample.len()
             );
         }
+    }
+    if let Some(telem) = telemetry {
+        // One block, written in one go so it cannot interleave with the
+        // rest of the explain output on the same stream.
+        use std::io::Write as _;
+        let _ = write!(std::io::stderr(), "\n{}", render_funnel(telem));
     }
 }
 
@@ -1238,11 +1252,6 @@ pub fn compare_baseline(advisories: &[Advisory], path: &str) -> Result<bool> {
         println!("\n[OK] No new advisories compared to baseline.");
     }
     Ok(regression_detected)
-}
-
-/// Apply CLI filters to advisories.
-pub fn apply_filters(advisories: &mut [Advisory], options: &CliOptions) {
-    let _ = (advisories, options);
 }
 
 /// `frensense explain <rule-id>`: what one built-in rule means and how to fix
@@ -1635,11 +1644,17 @@ mod explain_rule_tests {
 /// `REPORT_SCHEMA_VERSION` and this test move together.
 #[cfg(test)]
 mod json_report_schema_tests {
-    use super::{json_report, json_report_with_coverage, json_report_with_telemetry};
+    use super::json_report_with_coverage;
     use crate::Advisory;
     use crate::engine::files::UnsupportedSourceFile;
-    use frensense_engine::telemetry::ScanTelemetry;
+    use frensense_engine::telemetry::{GraphSize, ScanTelemetry, TaintFunnel};
     use std::path::Path;
+
+    fn sorted_keys(obj: &serde_json::Map<String, serde_json::Value>) -> Vec<&str> {
+        let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        keys
+    }
 
     fn adv() -> Advisory {
         Advisory::bare(
@@ -1653,7 +1668,7 @@ mod json_report_schema_tests {
 
     #[test]
     fn envelope_carries_schema_version_and_producer() {
-        let report = json_report(&[adv()], &[]);
+        let report = json_report_with_coverage(&[adv()], &[], None, &[], None);
         assert_eq!(report["schema_version"], crate::REPORT_SCHEMA_VERSION);
         assert_eq!(report["clean"], false);
         assert_eq!(report["advisory_count"], 1);
@@ -1670,7 +1685,7 @@ mod json_report_schema_tests {
 
     #[test]
     fn clean_report_still_has_the_envelope() {
-        let report = json_report(&[], &[]);
+        let report = json_report_with_coverage(&[], &[], None, &[], None);
         assert_eq!(report["clean"], true);
         assert_eq!(report["advisory_count"], 0);
         // The producer block is present even with no findings - a consumer
@@ -1680,7 +1695,7 @@ mod json_report_schema_tests {
 
     #[test]
     fn analysis_envelope_has_required_keys() {
-        let report = json_report_with_telemetry(&[], &[], None);
+        let report = json_report_with_coverage(&[], &[], None, &[], None);
         let analysis = &report["analysis"];
         // All top-level keys must be present.
         assert!(analysis["status"].is_string(), "analysis.status missing");
@@ -1706,12 +1721,72 @@ mod json_report_schema_tests {
             analysis["slowest_functions"].is_array(),
             "analysis.slowest_functions missing"
         );
+        assert!(analysis["graph"].is_object(), "analysis.graph missing");
+        assert!(analysis["funnel"].is_object(), "analysis.funnel missing");
+    }
+
+    /// Every key a consumer reads the measured graph and taint numbers from,
+    /// pinned with its value: a rename, a drop or a type change fails here.
+    #[test]
+    fn analysis_graph_and_funnel_keys_are_pinned() {
+        // 1 + 2 + 0 skipped + 6 unmatched + 2 sinks = 11 examined. Four
+        // unmatched came from the constructor, two from `record_unmatched`.
+        let mut funnel = TaintFunnel::new(11, (1, 2, 0), 4, 2);
+        funnel.record_unmatched("read");
+        funnel.record_unmatched("read");
+        let telem = ScanTelemetry {
+            graph: GraphSize::new(3, 10, 12, 2),
+            funnel,
+            ..ScanTelemetry::default()
+        };
+
+        let report = json_report_with_coverage(&[], &[], Some(&telem), &[], None);
+        let analysis = &report["analysis"];
+
+        let graph = analysis["graph"].as_object().expect("analysis.graph");
+        assert_eq!(
+            sorted_keys(graph),
+            ["cross_edges", "edges", "functions", "nodes"]
+        );
+        assert_eq!(graph["functions"], 3);
+        assert_eq!(graph["nodes"], 10);
+        assert_eq!(graph["edges"], 12);
+        assert_eq!(graph["cross_edges"], 2);
+
+        let funnel = analysis["funnel"].as_object().expect("analysis.funnel");
+        assert_eq!(
+            sorted_keys(funnel),
+            [
+                "calls_examined",
+                "not_a_sink",
+                "sink_calls",
+                "skipped_local_callable",
+                "skipped_program_local",
+                "skipped_receiver_only_verb",
+                "unmatched_callees",
+            ]
+        );
+        assert_eq!(funnel["calls_examined"], 11);
+        assert_eq!(funnel["skipped_local_callable"], 1);
+        assert_eq!(funnel["skipped_program_local"], 2);
+        assert_eq!(funnel["skipped_receiver_only_verb"], 0);
+        assert_eq!(funnel["not_a_sink"], 6);
+        assert_eq!(funnel["sink_calls"], 2);
+
+        let callees = funnel["unmatched_callees"]
+            .as_array()
+            .expect("analysis.funnel.unmatched_callees");
+        assert_eq!(callees.len(), 1, "{report}");
+        let entry = callees[0].as_object().expect("unmatched callee entry");
+        assert_eq!(sorted_keys(entry), ["callee", "calls"]);
+        assert_eq!(entry["callee"], "read");
+        assert_eq!(entry["calls"], 2);
     }
 
     #[test]
     fn analysis_status_reflects_scan_telemetry() {
         // No engine telemetry supplied → legacy API treats it as complete.
-        let report = json_report_with_telemetry(&[], &[], None);
+        let report = json_report_with_coverage(&[], &[], None, &[], None);
         assert_eq!(report["analysis"]["status"], "complete");
 
         // With a partial-parse file recorded → Partial.
@@ -1719,7 +1794,7 @@ mod json_report_schema_tests {
         telem.input.scanned = 1;
         telem.input.parse_partial = 1;
         telem.input.parse_partial_files.push("bad.py".into());
-        let report = json_report_with_telemetry(&[], &[], Some(&telem));
+        let report = json_report_with_coverage(&[], &[], Some(&telem), &[], None);
         assert_eq!(report["analysis"]["status"], "partial");
     }
 
@@ -1750,7 +1825,7 @@ mod json_report_schema_tests {
 
     #[test]
     fn reports_without_skips_keep_an_empty_unsupported_object() {
-        let report = json_report_with_telemetry(&[], &[], None);
+        let report = json_report_with_coverage(&[], &[], None, &[], None);
         let coverage = &report["analysis"]["coverage"]["unsupported_source_files"];
         assert_eq!(coverage["count"], 0);
         assert_eq!(coverage["languages"].as_array().map(Vec::len), Some(0));
@@ -2025,5 +2100,93 @@ mod explain_learned_rule_tests {
         b.patterns.clear();
         b.learned_facts.clear();
         assert!(bundle_rule_index(&b).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod stage_report_tests {
+    use super::{render_funnel, render_stages};
+    use frensense_engine::telemetry::{
+        GraphSize, PhaseTiming, ScanTelemetry, SuppressionCount, TaintFunnel,
+    };
+
+    /// Collapse runs of whitespace so column alignment is not asserted.
+    fn squash(s: &str) -> String {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    fn telemetry() -> ScanTelemetry {
+        let phase = |name: &str, ms| PhaseTiming {
+            phase: name.to_string(),
+            ms,
+        };
+        let mut t = ScanTelemetry {
+            phases: vec![
+                phase("lower", 12),
+                phase("graph", 4),
+                phase("checks", 2),
+                phase("taint", 7),
+            ],
+            ..ScanTelemetry::default()
+        };
+        t.input.submitted = 14;
+        t.input.scanned = 13;
+        t.input.failed = 1;
+        t.input.functions = 25;
+        t.graph = GraphSize::new(25, 760, 865, 4);
+        // 3 local callable + 2 program-local + 2 receiver-only + 40 matched
+        // no sink + 25 armed a sink = 72 examined. Three of the 40 were
+        // recorded by name (`read` twice, `noop` once).
+        t.funnel = TaintFunnel::new(72, (3, 2, 2), 37, 25);
+        t.funnel.record_unmatched("read");
+        t.funnel.record_unmatched("read");
+        t.funnel.record_unmatched("noop");
+        t.taint.sink_args_explored = 30;
+        t.taint.vulnerable = 1;
+        t.suppressed = vec![SuppressionCount {
+            reason: "not-reportable".to_string(),
+            count: 15,
+        }];
+        t
+    }
+
+    #[test]
+    fn the_stage_ledger_has_one_line_per_stage() {
+        let text = render_stages(&telemetry(), 3);
+        for needle in [
+            "parse+lower 12 ms 14 file(s) given, 13 lowered, 1 failed -> 25 function(s)",
+            "graph 4 ms 25 function(s), 760 value-flow node(s), 865 edge(s), 4 cross-function edge(s)",
+            "taint 7 ms 72 call(s) -> 25 sink call(s) -> 30 argument(s) walked (1 vulnerable)",
+            "report 3 reported, 15 dropped at the reporting gate",
+        ] {
+            assert!(
+                squash(&text).contains(&squash(needle)),
+                "missing `{needle}` in:\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_funnel_partitions_the_call_sites() {
+        let telem = telemetry();
+        let text = render_funnel(&telem);
+        assert_eq!(
+            telem.funnel.calls_examined,
+            telem.funnel.skipped() + telem.funnel.not_a_sink + telem.funnel.sink_calls,
+            "the counters must partition the call sites"
+        );
+        for needle in [
+            "Pipeline: where 72 call(s) left the engine",
+            "skipped before matching 7 (local callable 3, program-local callee 2, receiver-only verb 2)",
+            "matched no sink fact 40",
+            "most-called callees with no sink fact (2 name(s) tracked, busiest first): read 2 noop 1",
+            "matched a sink fact 25",
+            "reporting gate: not-reportable 15",
+        ] {
+            assert!(
+                squash(&text).contains(&squash(needle)),
+                "missing `{needle}` in:\n{text}"
+            );
+        }
     }
 }

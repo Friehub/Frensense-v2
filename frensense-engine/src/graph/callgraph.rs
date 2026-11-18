@@ -17,7 +17,7 @@
 //!    holds a function reference or a callback parameter
 //!    (`router.get(path, handler)` lowers the handler reference to a Var).
 //!
-//! This module resolves all three into [`CallTarget`]s per call site, using
+//! This module resolves all three into `CallTarget`s per call site, using
 //! only information in the lowered IRs:
 //!
 //! * **Alias chains**, SSA `Assign` chains over function-reference Vars.
@@ -51,7 +51,7 @@ use crate::ir::function::*;
 /// dispatch, callbacks); the interprocedural layer installs cross edges for
 /// every target, sound (any target may run) and precise enough for taint.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum CallTarget {
+pub(crate) enum CallTarget {
     /// A function in the analysed program, by its program-level key.
     Function(String),
     /// `Class.method` dispatch on a receiver of known class.
@@ -70,7 +70,7 @@ impl CallTarget {
     /// The program-function key this target resolves to, if internal.
     /// Method targets resolve under the `Class.method` key convention (see
     /// [`method_key`]).
-    pub fn internal_key(&self) -> Option<String> {
+    pub(crate) fn internal_key(&self) -> Option<String> {
         match self {
             CallTarget::Function(n) => Some(n.clone()),
             CallTarget::Method { class, method } => Some(method_key(class, method)),
@@ -79,7 +79,7 @@ impl CallTarget {
     }
 
     /// Whether the target lies outside the analysed program.
-    pub fn is_external(&self) -> bool {
+    pub(crate) fn is_external(&self) -> bool {
         matches!(self, CallTarget::External(_))
     }
 }
@@ -87,16 +87,7 @@ impl CallTarget {
 /// Program-index key for a method implementation. The project lowering
 /// registers methods qualified as `Class.method`; bare-named duplicates are
 /// matched by the caller (interprocedural layer) as a fallback.
-///
-/// ```
-/// use frensense_engine::graph::callgraph::{CallTarget, method_key};
-///
-/// assert_eq!(method_key("User", "save"), "User.save");
-/// let t = CallTarget::Method { class: "User".into(), method: "save".into() };
-/// assert_eq!(t.internal_key().as_deref(), Some("User.save"));
-/// assert_eq!(CallTarget::External("fs.open".into()).internal_key(), None);
-/// ```
-pub fn method_key(class: &str, method: &str) -> String {
+pub(crate) fn method_key(class: &str, method: &str) -> String {
     format!("{class}.{method}")
 }
 
@@ -106,7 +97,7 @@ pub fn method_key(class: &str, method: &str) -> String {
 
 /// Resolved call graph: per-call-site targets plus program-level edges.
 #[derive(Debug, Default)]
-pub struct CallGraph {
+pub(crate) struct CallGraph {
     /// Program functions, sorted (the IR map's keys).
     pub functions: Vec<String>,
     /// `(caller_fn, (block, instr_idx)) → resolved targets` for every call
@@ -124,7 +115,12 @@ pub struct CallGraph {
 
 impl CallGraph {
     /// Targets for one call instruction inside `fn`.
-    pub fn targets_at(&self, fn_name: &str, block: usize, instr_idx: usize) -> &[CallTarget] {
+    pub(crate) fn targets_at(
+        &self,
+        fn_name: &str,
+        block: usize,
+        instr_idx: usize,
+    ) -> &[CallTarget] {
         self.sites
             .get(&(fn_name.to_string(), (block, instr_idx)))
             .map(|v| v.as_slice())
@@ -150,7 +146,7 @@ struct FnFacts {
 /// Input: every function's IR, keyed by program-level name (the same map the
 /// `ProgramSvfg` builder consumes).
 #[derive(Debug)]
-pub struct CallGraphBuilder<'a> {
+pub(crate) struct CallGraphBuilder<'a> {
     irs: &'a FxHashMap<String, &'a FunctionIR>,
     aliases: Option<&'a FxHashMap<String, FxHashMap<String, String>>>,
     fn_file: Option<&'a FxHashMap<String, String>>,
@@ -158,7 +154,7 @@ pub struct CallGraphBuilder<'a> {
 
 impl<'a> CallGraphBuilder<'a> {
     /// Creates a builder over `irs`, keyed by program-level function name, with no import aliases.
-    pub fn new(irs: &'a FxHashMap<String, &'a FunctionIR>) -> Self {
+    pub(crate) fn new(irs: &'a FxHashMap<String, &'a FunctionIR>) -> Self {
         Self {
             irs,
             aliases: None,
@@ -167,7 +163,7 @@ impl<'a> CallGraphBuilder<'a> {
     }
 
     /// Supplies per-file import aliases and the function-to-file map, so a call through an imported symbol resolves to the function it names.
-    pub fn with_aliases(
+    pub(crate) fn with_aliases(
         mut self,
         aliases: Option<&'a FxHashMap<String, FxHashMap<String, String>>>,
         fn_file: Option<&'a FxHashMap<String, String>>,
@@ -190,7 +186,7 @@ impl<'a> CallGraphBuilder<'a> {
     }
 
     /// Resolves every call site in every function and returns the call graph.
-    pub fn build(&self) -> CallGraph {
+    pub(crate) fn build(&self) -> CallGraph {
         let mut functions: Vec<String> = self.irs.keys().cloned().collect();
         functions.sort();
         let fn_set: FxHashSet<&str> = functions.iter().map(|s| s.as_str()).collect();
@@ -616,4 +612,22 @@ impl<'a> CallGraphBuilder<'a> {
 /// If `fname` is a qualified method name (`Class.method`), return `Class`.
 fn this_class_of(fname: &str) -> Option<String> {
     fname.rsplit_once('.').map(|(c, _)| c.to_string())
+}
+
+#[cfg(test)]
+/// Assertions lifted from the doc examples of items that are now
+/// crate-private; a doctest cannot see them.
+mod doc_examples {
+    #[test]
+    fn doc_example_method_key() {
+        use crate::graph::callgraph::{CallTarget, method_key};
+
+        assert_eq!(method_key("User", "save"), "User.save");
+        let t = CallTarget::Method {
+            class: "User".into(),
+            method: "save".into(),
+        };
+        assert_eq!(t.internal_key().as_deref(), Some("User.save"));
+        assert_eq!(CallTarget::External("fs.open".into()).internal_key(), None);
+    }
 }

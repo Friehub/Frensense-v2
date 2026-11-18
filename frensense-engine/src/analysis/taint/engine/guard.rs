@@ -44,40 +44,6 @@ impl GuardMap {
         // Walk: cond var → def instruction, up to 3 hops, collecting
         // guard-call vars along the way (handles `!ALLOWED.has(x)`,
         // `x != null && SAFE.test(x)` shape fragments).
-        fn defs_of(instr: &Instruction) -> Vec<VarId> {
-            let mut v = Vec::with_capacity(2);
-            match instr {
-                Instruction::Assign { dest, .. }
-                | Instruction::AddressOf { dest, .. }
-                | Instruction::LoadField { dest, .. }
-                | Instruction::LoadElement { dest, .. }
-                | Instruction::LoadGlobal { dest, .. }
-                | Instruction::Cast { dest, .. }
-                | Instruction::ExtractValue { dest, .. }
-                | Instruction::BinaryOp { dest, .. }
-                | Instruction::UnaryOp { dest, .. } => v.push(*dest),
-                Instruction::CallStatic { dest, .. }
-                | Instruction::CallVirtual { dest, .. }
-                | Instruction::CallPointer { dest, .. } => {
-                    if let Some(d) = dest {
-                        v.push(*d);
-                    }
-                }
-                _ => {}
-            }
-            v
-        }
-        fn def_site_of(ir: &FunctionIR, v: VarId) -> Option<&Instruction> {
-            for b in ir.blocks.values() {
-                for i in &b.instructions {
-                    if defs_of(i).contains(&v) {
-                        return Some(i);
-                    }
-                }
-            }
-            None
-        }
-
         // Find guard calls and the vars they check.
         // A guard call is a CallVirtual/CallStatic whose method has a
         // guard-style SanitizerFact. The checked var is the first Var arg
@@ -128,7 +94,7 @@ impl GuardMap {
                     out.push(*v);
                     let mut cur_v = *v;
                     for _ in 0..3 {
-                        if let Some(def) = def_site_of(ir, cur_v) {
+                        if let Some(def) = ir.def_instruction(cur_v) {
                             match def {
                                 Instruction::AddressOf { src, .. } => {
                                     out.push(*src);
@@ -205,7 +171,7 @@ impl GuardMap {
             for _hop in 0..3 {
                 let mut next = Vec::new();
                 for (v, sense) in &frontier {
-                    let Some(instr) = def_site_of(ir, *v) else {
+                    let Some(instr) = ir.def_instruction(*v) else {
                         continue;
                     };
                     match instr {
@@ -286,7 +252,7 @@ impl GuardMap {
                                             op: uop,
                                             src: Operand::Var(inner),
                                             ..
-                                        }) = def_site_of(ir, *u)
+                                        }) = ir.def_instruction(*u)
                                             && uop == "typeof"
                                         {
                                             guards.entry(*inner).or_default().push(safe_block);

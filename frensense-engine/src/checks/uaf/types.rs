@@ -7,8 +7,13 @@ use crate::checks::Provenance;
 use crate::ir::function::{BlockId, FunctionIR, VarId};
 
 /// A violation of the object lifecycle.
+///
+/// `Free` is the subject of each variant, not a decorative suffix: the three
+/// cases are the ways a release can go wrong, so trimming it would leave
+/// `UseAfter`, `Double` and `Uninitialized`.
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Violation {
+pub(crate) enum Violation {
     /// Memory used after free (read or write through an aliasing var).
     UseAfterFree,
     /// The same object freed twice.
@@ -19,7 +24,7 @@ pub enum Violation {
 
 /// One site that releases the object held by `var`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FreeSite {
+pub(crate) struct FreeSite {
     /// Block containing the freeing instruction.
     pub block: BlockId,
     /// Index of the freeing instruction within its block.
@@ -30,7 +35,7 @@ pub struct FreeSite {
 
 /// How a discovered (free, use) pair must be validated before firing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PairCheck {
+pub(crate) enum PairCheck {
     /// Free and use are both in the scanned function: must-reach in this CFG.
     Local,
     /// Free lives in the callee entered at `call`; the call must precede the
@@ -53,7 +58,7 @@ pub enum PairCheck {
 
 /// One discovered pair awaiting must-validation.
 #[derive(Debug, Clone, Copy)]
-pub struct Pair {
+pub(crate) struct Pair {
     /// Kind of violation this pair would be.
     pub violation: Violation,
     /// How the pair must be validated before it is reported.
@@ -66,7 +71,7 @@ pub struct Pair {
 
 /// Which function a walk step currently sits in, relative to the start.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CrossCtx {
+pub(crate) enum CrossCtx {
     /// Inside the scanned (start) function.
     None,
     /// Inside a callee entered from the start function at `call`.
@@ -88,7 +93,7 @@ pub enum CrossCtx {
 /// Builds the checker finding for `violation` on `var`.
 ///
 /// The variable is named from its source metadata (or `v<id>` when it has none), and the span is the byte range of `span_var` when one is given.
-pub fn finding(
+pub(crate) fn finding(
     ir: &FunctionIR,
     violation: Violation,
     var: &VarId,

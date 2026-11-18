@@ -62,6 +62,29 @@
 //! }
 //! ```
 //!
+//! ## The JavaScript family: one spec, three dialects
+//!
+//! JavaScript, TypeScript and a Vue SFC's script block share one tree-sitter
+//! grammar family, one node classification and one import/export extractor, so
+//! they are implemented once: [`providers::javascript::JsFamily`] asks a member
+//! for its [`providers::javascript::JsDialect`] — the grammar, extensions,
+//! symbol query and region wrapper that actually differ — and a blanket impl
+//! supplies the rest of [`spec::LanguageSpec`].
+//!
+//! ```rust,ignore
+//! use frensense_lang::providers::javascript::{JavaScriptSpec, JsDialect, JsFamily};
+//!
+//! // A family member states its dialect and nothing else.
+//! impl JsFamily for JavaScriptSpec {
+//!     const DIALECT: JsDialect = JsDialect::JavaScript;
+//! }
+//! ```
+//!
+//! A new single-file container (Svelte, Astro) adds a
+//! [`providers::javascript::JsDialect`] arm and overrides `preprocess_source`
+//! when the file wraps script code; it does not restate the grammar-facing
+//! contract. See [`providers::javascript::JsFamily`] for the full contract.
+//!
 //! ## Migration Guide for Each Engine Subsystem
 //!
 //! ### 1. `fingerprint.rs` - function detection

@@ -5,13 +5,13 @@
 //! The non-dataflow check seam: one trait, one registry, one driver.
 //!
 //! Every non-dataflow check declares *how often it runs* and *how to run*;
-//! the driver in [`super::check_all_with_graph_scoped`] supplies everything
+//! the driver in `super::check_all_with_telemetry` supplies everything
 //! that is common to all of them - the IR set, the whole-program value-flow
 //! graph, the fact table, the package scope, the interprocedural memory
 //! summaries - and owns the single finding-identity/dedup rule.
 //!
 //! Adding a check class is a new module plus one line in
-//! [`default_registry`]. The driver does not change, `scan.rs` does not
+//! `default_registry`. The driver does not change, `scan.rs` does not
 //! change, and every existing check keeps its own mechanism (a proof over
 //! the IR), while the *vocabulary* it consumes stays in [`FactTable`].
 //!
@@ -30,7 +30,7 @@ use crate::ir::function::FunctionIR;
 
 /// How often a registered check runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CheckScope {
+pub(crate) enum CheckScope {
     /// Once per function, with [`CheckContext::current`] set.
     Function,
     /// Once over the whole IR set, for checks that correlate definitions
@@ -46,7 +46,7 @@ pub enum CheckScope {
 /// [`crate::telemetry::Cap`] so they reach `truncations`, as the UAF walker
 /// and SSA builder now do. A driver that wants per-check callbacks can supply
 /// its own sink; wiring this trait alone does not make truncations visible.
-pub trait DiagnosticSink: Sync {
+pub(crate) trait DiagnosticSink: Sync {
     /// Report that the check truncated its analysis due to a safety cap or budget.
     fn truncated(&self, cap: &'static str);
     /// Report that the check skipped analysis for this subject (e.g. missing callers).
@@ -55,7 +55,7 @@ pub trait DiagnosticSink: Sync {
 
 /// A no-op diagnostic sink used by default.
 #[derive(Debug)]
-pub struct NoopDiagnosticSink;
+pub(crate) struct NoopDiagnosticSink;
 
 impl DiagnosticSink for NoopDiagnosticSink {
     fn truncated(&self, _cap: &'static str) {}
@@ -63,7 +63,7 @@ impl DiagnosticSink for NoopDiagnosticSink {
 }
 
 /// Shared instance of [`NoopDiagnosticSink`].
-pub static NOOP_DIAGNOSTIC_SINK: NoopDiagnosticSink = NoopDiagnosticSink;
+pub(crate) static NOOP_DIAGNOSTIC_SINK: NoopDiagnosticSink = NoopDiagnosticSink;
 
 /// Everything a non-dataflow check may consult.
 ///
@@ -71,7 +71,7 @@ pub static NOOP_DIAGNOSTIC_SINK: NoopDiagnosticSink = NoopDiagnosticSink;
 /// of one `check_all*` call; a check returns findings and never mutates
 /// the context.
 #[derive(Clone, Copy)]
-pub struct CheckContext<'a> {
+pub(crate) struct CheckContext<'a> {
     /// Every function in the scanned program, in driver order.
     pub irs: &'a [&'a FunctionIR],
     /// The function under check: `Some` exactly when the running check is
@@ -109,7 +109,7 @@ impl<'a> CheckContext<'a> {
     /// Panics when a [`CheckScope::Program`] check asks for a single
     /// subject: the scope method and `run` disagree, which is a
     /// programming error, not a property of the scanned code.
-    pub fn ir(&self) -> &'a FunctionIR {
+    pub(crate) fn ir(&self) -> &'a FunctionIR {
         self.current
             .expect("function-scoped check ran without a current function")
     }
@@ -123,7 +123,7 @@ impl<'a> CheckContext<'a> {
 ///
 /// `Sync` is required because the default registry is a `static`: every
 /// implementation is stateless.
-pub trait NonDataflowCheck: Sync {
+pub(crate) trait NonDataflowCheck: Sync {
     /// Stable id for this check class, used by diagnostics, per-class
     /// stats, and (future) bundle capability declarations.
     fn id(&self) -> &'static str;
@@ -142,7 +142,7 @@ pub trait NonDataflowCheck: Sync {
 /// Registry order is part of the output contract: the driver's final sort
 /// is stable, so findings sharing a `(function, span)` key keep their
 /// insertion order, which follows this list on function-scoped runs.
-pub struct CheckRegistry {
+pub(crate) struct CheckRegistry {
     checks: &'static [&'static dyn NonDataflowCheck],
 }
 
@@ -157,23 +157,23 @@ impl std::fmt::Debug for CheckRegistry {
 
 impl CheckRegistry {
     /// Construct a registry from a static slice of check references.
-    pub const fn from_slice(checks: &'static [&'static dyn NonDataflowCheck]) -> Self {
+    pub(crate) const fn from_slice(checks: &'static [&'static dyn NonDataflowCheck]) -> Self {
         Self { checks }
     }
 
     /// The registered check classes, in run order.
-    pub fn checks(&self) -> impl Iterator<Item = &'static dyn NonDataflowCheck> + '_ {
+    pub(crate) fn checks(&self) -> impl Iterator<Item = &'static dyn NonDataflowCheck> + '_ {
         self.checks.iter().copied()
     }
 
     /// Number of registered check classes.
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.checks.len()
     }
 
     /// Whether no check is registered (only constructible by a caller
     /// building its own registry; [`default_registry`] is never empty).
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.checks.is_empty()
     }
 }
@@ -372,7 +372,7 @@ impl NonDataflowCheck for Policies {
 /// Function-scoped checks are listed in the order the driver used to chain
 /// them per function; program-scoped checks are listed first because they
 /// run once, before any per-function pass.
-pub fn default_registry() -> CheckRegistry {
+pub(crate) fn default_registry() -> CheckRegistry {
     static CHECKS: &[&dyn NonDataflowCheck] = &[
         &AllowlistDefinitions,
         &Policies,

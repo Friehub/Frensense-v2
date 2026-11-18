@@ -15,7 +15,7 @@ impl<'a> LoweringContext<'a> {
     /// # Panics
     ///
     /// Does not panic in practice: the one `unwrap` pops the only operand and is guarded by a length check.
-    pub fn visit_binary_op(&mut self, node: Node) -> Option<Operand> {
+    pub(crate) fn visit_binary_op(&mut self, node: Node) -> Option<Operand> {
         let mut operands: Vec<Operand> = Vec::new();
         let mut operator: Option<String> = None;
         let mut cursor = node.walk();
@@ -54,14 +54,7 @@ impl<'a> LoweringContext<'a> {
         let mut it = operands.into_iter();
         let mut acc = it.next().unwrap();
         for rhs in it {
-            let next_dest = self.ir.new_var(VarMetadata {
-                source_name: None,
-                type_name: None,
-                byte_range: Some((node.start_byte(), node.end_byte())),
-                is_memory_state: false,
-                object_keys: Vec::new(),
-                declared: false,
-            });
+            let next_dest = self.new_temp(node);
             self.ir.push_instruction(
                 self.current_block,
                 Instruction::BinaryOp {
@@ -149,14 +142,7 @@ impl<'a> LoweringContext<'a> {
             return Some(Operand::Var(dest));
         }
 
-        let dest = self.ir.new_var(VarMetadata {
-            source_name: None,
-            type_name: None,
-            byte_range: Some((node.start_byte(), node.end_byte())),
-            is_memory_state: false,
-            object_keys: Vec::new(),
-            declared: false,
-        });
+        let dest = self.new_temp(node);
         self.ir.push_instruction(
             self.current_block,
             Instruction::UnaryOp {
@@ -217,35 +203,21 @@ impl<'a> LoweringContext<'a> {
                 result
             }
             LValue::Field { base, field } => {
-                let cur = self.new_temp(node);
-                self.ir.push_instruction(
-                    self.current_block,
+                let mem_in = self.memory_var;
+                let load_field = field.clone();
+                let (cur, step) = self.read_modify(node, bin_op, Operand::IntLiteral(1), |dest| {
                     Instruction::LoadField {
-                        dest: cur,
-                        mem_in: self.memory_var,
+                        dest,
+                        mem_in,
                         base,
-                        field: field.clone(),
-                    },
-                );
-                let step = self.new_temp(node);
-                self.ir.push_instruction(
-                    self.current_block,
-                    Instruction::BinaryOp {
-                        dest: step,
-                        op: bin_op.to_string(),
-                        lhs: Operand::Var(cur),
-                        rhs: Operand::IntLiteral(1),
-                    },
-                );
-                self.ir.push_instruction(
-                    self.current_block,
-                    Instruction::StoreField {
-                        mem_out: self.memory_var,
-                        mem_in: self.memory_var,
-                        base,
-                        field,
-                        src: Operand::Var(step),
-                    },
+                        field: load_field,
+                    }
+                });
+                self.store_field(
+                    base,
+                    field,
+                    Operand::Var(step),
+                    Some((node.start_byte(), node.end_byte())),
                 );
                 if is_postfix {
                     Operand::Var(cur)
@@ -254,26 +226,16 @@ impl<'a> LoweringContext<'a> {
                 }
             }
             LValue::Element { base, index } => {
-                let cur = self.new_temp(node);
-                self.ir.push_instruction(
-                    self.current_block,
+                let mem_in = self.memory_var;
+                let load_index = index.clone();
+                let (cur, step) = self.read_modify(node, bin_op, Operand::IntLiteral(1), |dest| {
                     Instruction::LoadElement {
-                        dest: cur,
-                        mem_in: self.memory_var,
+                        dest,
+                        mem_in,
                         base,
-                        index: index.clone(),
-                    },
-                );
-                let step = self.new_temp(node);
-                self.ir.push_instruction(
-                    self.current_block,
-                    Instruction::BinaryOp {
-                        dest: step,
-                        op: bin_op.to_string(),
-                        lhs: Operand::Var(cur),
-                        rhs: Operand::IntLiteral(1),
-                    },
-                );
+                        index: load_index,
+                    }
+                });
                 self.ir.push_instruction(
                     self.current_block,
                     Instruction::StoreElement {
@@ -296,7 +258,7 @@ impl<'a> LoweringContext<'a> {
     /// Lowers `object.property` or `object[index]`.
     ///
     /// The result is a fresh variable carrying the access's byte range, defined by a `LoadField` when the language classifies the property node as a property name, a `LoadElement` when the property evaluates to a variable, and a `LoadField` on the property text otherwise. Returns `None` when the object does not evaluate to a variable.
-    pub fn visit_member_access(
+    pub(crate) fn visit_member_access(
         &mut self,
         node: Node,
         object_field: &str,
@@ -361,53 +323,53 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
+    /// The field name and lowered value of one `key: value` child of a
+    /// composite literal; the name is `None` when the grammar gives the pair
+    /// no static key.
+    fn composite_entry(&mut self, child: Node) -> (Option<String>, Option<Operand>) {
+        let key = child.child_by_field_name("key").map(|k| {
+            self.source[k.start_byte()..k.end_byte()]
+                .trim_matches(|ch| ch == '"' || ch == '\'')
+                .to_string()
+        });
+        (key, self.visit_node(child))
+    }
+
     /// Lowers a composite literal (object, array). Uniformly keyed objects and arrays become an allocation with one store per property or element, so reads stay field-sensitive; objects with unkeyed children (such as spreads) are not allocated: the result is the child variable when there is exactly one, and a fresh variable merging the child variables otherwise.
-    pub fn visit_composite(&mut self, node: Node) -> Option<Operand> {
-        // Evaluate every named child once; keyed pairs are remembered so the
-        // composite can be lowered field-sensitively (allocation + stores)
-        // instead of collapsing all children into one union variable.
+    pub(crate) fn visit_composite(&mut self, node: Node) -> Option<Operand> {
+        // Keyed pairs are remembered so the composite lowers field-sensitively.
         let mut cursor = node.walk();
         let children: Vec<Node> = node
             .children(&mut cursor)
             .filter(|c| c.is_named() && c.kind() != "comment")
             .collect();
-
         let mut child_ops: Vec<Operand> = Vec::new();
         let mut pair_keys: Vec<String> = Vec::new();
-        // (field, value) entries for structural literals; field is `None`
-        // for spread elements and other unkeyed children.
+        // Field is `None` for spreads and other unkeyed children.
         let mut entries: Vec<(Option<String>, Operand)> = Vec::new();
         let mut all_keyed = true;
 
         for c in children {
-            if self.is_pair_entry(c.kind()) {
-                let key = c.child_by_field_name("key").map(|k| {
-                    self.source[k.start_byte()..k.end_byte()]
-                        .trim_matches(|ch| ch == '"' || ch == '\'')
-                        .to_string()
-                });
-                if let Some(k) = &key {
-                    pair_keys.push(k.clone());
-                }
-                if let Some(op) = self.visit_node(c) {
-                    child_ops.push(op.clone());
-                    match key {
-                        Some(k) => entries.push((Some(k), op)),
-                        None => {
-                            all_keyed = false;
-                            entries.push((None, op));
-                        }
-                    }
-                } else {
-                    // A pair without a value operand (e.g. a function-valued
-                    // child) still proves the object is not uniformly keyed.
-                    all_keyed = false;
-                }
-            } else if let Some(op) = self.visit_node(c) {
-                all_keyed = false;
-                child_ops.push(op.clone());
-                entries.push((None, op));
+            let pair = self.is_pair_entry(c.kind());
+            let (key, op) = if pair {
+                self.composite_entry(c)
+            } else {
+                (None, self.visit_node(c))
+            };
+            if let Some(k) = &key {
+                pair_keys.push(k.clone());
             }
+            let Some(op) = op else {
+                // A pair without a value operand (e.g. a function-valued
+                // child) still proves the object is not uniformly keyed; an
+                // unkeyed child with no operand changes nothing.
+                all_keyed &= !pair;
+                continue;
+            };
+            // Only a pair with a static key keeps the literal uniformly keyed.
+            all_keyed &= pair && key.is_some();
+            child_ops.push(op.clone());
+            entries.push((key, op));
         }
 
         let kind_is_object = node.kind() == "object";
@@ -453,16 +415,7 @@ impl<'a> LoweringContext<'a> {
             if kind_is_object {
                 for (field, src) in entries {
                     if let Some(field) = field {
-                        self.ir.push_instruction(
-                            self.current_block,
-                            Instruction::StoreField {
-                                mem_out: self.memory_var,
-                                mem_in: self.memory_var,
-                                base: dest,
-                                field,
-                                src,
-                            },
-                        );
+                        self.store_field(dest, field, src, None);
                     }
                 }
             } else {
@@ -527,7 +480,7 @@ impl<'a> LoweringContext<'a> {
     /// Lowers a literal.
     ///
     /// A string that mixes literal text with at least one interpolated or concatenated part is folded into a left-associative `concat` chain, so checks can see a fixed prefix before a tainted part. A string with no such mix yields its last non-fragment child's value, or its source text as a string literal. Any other literal is an integer literal when its text parses as `i64` and its source text as a string literal otherwise.
-    pub fn visit_literal(&mut self, node: Node) -> Option<Operand> {
+    pub(crate) fn visit_literal(&mut self, node: Node) -> Option<Operand> {
         if self.is_template_string(node.kind())
             || node.kind() == "string"
             || node.kind() == "binary_expression"
@@ -635,7 +588,7 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// Lowers a cast or type assertion as the value of its first value-producing child: the cast does not change the value.
-    pub fn visit_cast(&mut self, node: Node) -> Option<Operand> {
+    pub(crate) fn visit_cast(&mut self, node: Node) -> Option<Operand> {
         let mut cursor = node.walk();
         let mut first = None;
         for child in node.children(&mut cursor) {
@@ -645,4 +598,94 @@ impl<'a> LoweringContext<'a> {
         }
         first
     }
+
+    /// Lowers a JSX element into a props object and returns it.
+    ///
+    /// Attributes become spanned [`Instruction::StoreField`]s on a temporary
+    /// standing for the props, so a sink name written as an attribute
+    /// (`<div dangerouslySetInnerHTML={{ __html: html }} />`) travels the same
+    /// property-sink path as `el.innerHTML = html`. Children are lowered in
+    /// place so nested elements keep their own attribute stores.
+    pub(crate) fn visit_jsx_element(&mut self, node: Node) -> Option<Operand> {
+        let props = self.new_temp(node);
+        self.ir.push_instruction(
+            self.current_block,
+            Instruction::Allocate {
+                dest: props,
+                mem_out: self.memory_var,
+                mem_in: self.memory_var,
+                kind: AllocationKind::Object,
+            },
+        );
+        match node.kind() {
+            "jsx_self_closing_element" => self.store_jsx_attributes(node, props),
+            "jsx_fragment" => self.lower_jsx_children(node),
+            _ => {
+                let mut cursor = node.walk();
+                for child in node.named_children(&mut cursor) {
+                    match child.kind() {
+                        "jsx_opening_element" => self.store_jsx_attributes(child, props),
+                        "jsx_children" => self.lower_jsx_children(child),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        Some(Operand::Var(props))
+    }
+
+    /// Lowers every child node in place, so nested elements and expressions
+    /// keep the stores and calls they lower into.
+    fn lower_jsx_children(&mut self, node: Node) {
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            self.visit_node(child);
+        }
+    }
+
+    /// Stores each attributed value of a JSX tag under the attribute's own
+    /// name on `props`.
+    ///
+    /// An attribute node is `name={value}`: the first part that is not the
+    /// value expression names the field, the rest produces the stored value.
+    /// Valueless (`disabled`) and spread (`{...rest}`) attributes carry no
+    /// name-value pair and only have their expression lowered.
+    fn store_jsx_attributes(&mut self, tag: Node, props: VarId) {
+        let mut cursor = tag.walk();
+        for attr in tag.named_children(&mut cursor) {
+            if attr.kind() != "jsx_attribute" {
+                self.visit_node(attr);
+                continue;
+            }
+            let mut parts = attr.walk();
+            let mut name: Option<String> = None;
+            let mut value: Option<Operand> = None;
+            for part in attr.named_children(&mut parts) {
+                if name.is_none() && !is_jsx_value(part.kind()) {
+                    name = self
+                        .source
+                        .get(part.start_byte()..part.end_byte())
+                        .map(str::to_string);
+                } else if let Some(op) = self.visit_node(part) {
+                    value = Some(op);
+                }
+            }
+            if let (Some(field), Some(src)) = (name, value) {
+                self.store_field(
+                    props,
+                    field,
+                    src,
+                    Some((attr.start_byte(), attr.end_byte())),
+                );
+            }
+        }
+    }
+}
+
+/// Node kinds that make up a JSX attribute's value rather than its name.
+fn is_jsx_value(kind: &str) -> bool {
+    matches!(
+        kind,
+        "jsx_expression" | "string" | "jsx_element" | "jsx_self_closing_element" | "jsx_fragment"
+    )
 }

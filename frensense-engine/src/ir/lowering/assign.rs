@@ -88,6 +88,23 @@ impl<'a> LoweringContext<'a> {
         let Some(op) = op else {
             return rhs;
         };
+        let (_, tmp) = self.read_modify(node, op, rhs, load);
+        Operand::Var(tmp)
+    }
+
+    /// Loads the current value with `load(cur)`, then defines a temporary
+    /// holding `cur <op> rhs`. Returns `(cur, result)`.
+    ///
+    /// The one lowering of a read-modify-write on a field or element: both
+    /// compound assignment (`o.f += 2`) and update expressions (`o.f++`,
+    /// which also needs `cur` for the postfix value) go through it.
+    pub(super) fn read_modify(
+        &mut self,
+        node: Node,
+        op: &str,
+        rhs: Operand,
+        load: impl FnOnce(VarId) -> Instruction,
+    ) -> (VarId, VarId) {
         let cur = self.new_temp(node);
         self.ir.push_instruction(self.current_block, load(cur));
         let tmp = self.new_temp(node);
@@ -100,7 +117,7 @@ impl<'a> LoweringContext<'a> {
                 rhs,
             },
         );
-        Operand::Var(tmp)
+        (cur, tmp)
     }
 
     /// Lowers an assignment `lhs = rhs`; the field names of the two sides come from the language spec's role for the node.
@@ -108,7 +125,7 @@ impl<'a> LoweringContext<'a> {
     /// A variable target becomes an `Assign`, a field target a `StoreField` and an element target a `StoreElement`. A compound operator (`+=`, `*=`) lowers as a read-modify-write: a `BinaryOp` of the target and the right side, then the store. A multi-target left side (`a, b = f()`) binds the right side to every plain-variable target.
     ///
     /// Returns the assigned variable when the target is a plain variable (so `a = b = c` and `if (!(p = malloc(n)))` see the variable), the right-hand operand for a multi-target assignment, and `None` for a field or element target.
-    pub fn visit_assignment(
+    pub(crate) fn visit_assignment(
         &mut self,
         node: Node,
         lhs_field: &str,
@@ -131,6 +148,19 @@ impl<'a> LoweringContext<'a> {
 
         let rhs_op = self.visit_node(right_node).unwrap_or(Operand::Unknown);
         let compound = self.compound_operator(node);
+
+        // A pattern target (`({ a } = rhs)`, `[a, b] = rhs`) is not a
+        // variable, field or element: each name binds to a load off the
+        // value, exactly as the declaration form (`const { a } = rhs`) does.
+        // Without this the target had no lvalue, so no store was emitted and
+        // every name read an undefined variable afterwards.
+        if compound.is_none()
+            && self.is_destructuring_pattern(left_node.kind())
+            && let Operand::Var(base) = rhs_op.clone()
+        {
+            self.bind_pattern(left_node, base);
+            return Some(rhs_op);
+        }
 
         // Multi-target form (`body, err := f(x)`, `a, b = g()`): the call's
         // result is a tuple, and any element of it can carry the taint. The
@@ -196,16 +226,7 @@ impl<'a> LoweringContext<'a> {
                         field: field.clone(),
                     }
                 });
-                self.ir.push_instruction(
-                    self.current_block,
-                    Instruction::StoreField {
-                        mem_out: self.memory_var,
-                        mem_in: self.memory_var,
-                        base,
-                        field,
-                        src,
-                    },
-                );
+                self.store_field(base, field, src, Some((node.start_byte(), node.end_byte())));
             }
             Some(LValue::Element { base, index }) => {
                 let mem_in = self.memory_var;

@@ -7,12 +7,12 @@
 //! * [`svfg`], per-function sparse value-flow graph.
 //! * [`callgraph`], dispatch resolution (aliases, methods, re-exports).
 //! * [`heap`], points-to analysis (Andersen, inclusion-based).
-//! * [`steensgaard`], unification points-to (near-linear; R4 phase 1).
+//! * `steensgaard`, unification points-to (near-linear; R4 phase 1).
 
 pub mod callgraph;
 pub mod heap;
 pub mod module;
-pub mod steensgaard;
+pub(crate) mod steensgaard;
 pub mod svfg;
 
 #[cfg(test)]
