@@ -327,6 +327,18 @@ impl<'a> LoweringContext<'a> {
         }
     }
 
+    /// The field name and lowered value of one `key: value` child of a
+    /// composite literal; the name is `None` when the grammar gives the pair
+    /// no static key.
+    fn composite_entry(&mut self, child: Node) -> (Option<String>, Option<Operand>) {
+        let key = child.child_by_field_name("key").map(|k| {
+            self.source[k.start_byte()..k.end_byte()]
+                .trim_matches(|ch| ch == '"' || ch == '\'')
+                .to_string()
+        });
+        (key, self.visit_node(child))
+    }
+
     /// Lowers a composite literal (object, array). Uniformly keyed objects and arrays become an allocation with one store per property or element, so reads stay field-sensitive; objects with unkeyed children (such as spreads) are not allocated: the result is the child variable when there is exactly one, and a fresh variable merging the child variables otherwise.
     pub(crate) fn visit_composite(&mut self, node: Node) -> Option<Operand> {
         // Evaluate every named child once; keyed pairs are remembered so the
@@ -346,34 +358,26 @@ impl<'a> LoweringContext<'a> {
         let mut all_keyed = true;
 
         for c in children {
-            if self.is_pair_entry(c.kind()) {
-                let key = c.child_by_field_name("key").map(|k| {
-                    self.source[k.start_byte()..k.end_byte()]
-                        .trim_matches(|ch| ch == '"' || ch == '\'')
-                        .to_string()
-                });
-                if let Some(k) = &key {
-                    pair_keys.push(k.clone());
-                }
-                if let Some(op) = self.visit_node(c) {
-                    child_ops.push(op.clone());
-                    match key {
-                        Some(k) => entries.push((Some(k), op)),
-                        None => {
-                            all_keyed = false;
-                            entries.push((None, op));
-                        }
-                    }
-                } else {
-                    // A pair without a value operand (e.g. a function-valued
-                    // child) still proves the object is not uniformly keyed.
-                    all_keyed = false;
-                }
-            } else if let Some(op) = self.visit_node(c) {
-                all_keyed = false;
-                child_ops.push(op.clone());
-                entries.push((None, op));
+            let pair = self.is_pair_entry(c.kind());
+            let (key, op) = if pair {
+                self.composite_entry(c)
+            } else {
+                (None, self.visit_node(c))
+            };
+            if let Some(k) = &key {
+                pair_keys.push(k.clone());
             }
+            let Some(op) = op else {
+                // A pair without a value operand (e.g. a function-valued
+                // child) still proves the object is not uniformly keyed; an
+                // unkeyed child with no operand changes nothing.
+                all_keyed &= !pair;
+                continue;
+            };
+            // Only a pair with a static key keeps the literal uniformly keyed.
+            all_keyed &= pair && key.is_some();
+            child_ops.push(op.clone());
+            entries.push((key, op));
         }
 
         let kind_is_object = node.kind() == "object";

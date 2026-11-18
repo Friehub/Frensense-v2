@@ -329,31 +329,27 @@ impl<'a> SvfgBuilder<'a> {
         self.build_inner()
     }
 
-    fn build_inner(mut self) -> (Svfg, FxHashMap<VarId, NodeKey>) {
-        // -----------------------------------------------------------------
-        // Pass 0: Register formal parameters as def nodes.
-        // -----------------------------------------------------------------
-        // Parameters are not "inside" any instruction, so we give them their
-        // own node kind and a synthetic key. We reserve instr_idx positions
-        // that can never collide with real instructions: real instructions
-        // occupy [0, n), terminators use MAX-1, so parameters live at
-        // MAX - 2 - i (one distinct slot per parameter).
+    /// Pass 0: register formal parameters and the initial memory state as def
+    /// nodes. Neither is "inside" an instruction, so each gets a synthetic
+    /// key: real instructions occupy `[0, n)` and terminators use `MAX-1`, so
+    /// parameters live at `MAX - 2 - i` (one distinct slot per parameter).
+    fn register_formals(&mut self) {
         let entry = self.ir.entry_block;
         let param_slot_base = usize::MAX - 2;
-
         for (idx, &param_var) in self.ir.parameters.iter().enumerate() {
             let key = NodeKey::instr(entry, param_slot_base - idx, param_var);
             self.graph.ensure_node(key, NodeKind::FormalParam);
             self.def_site.insert(param_var, key);
         }
-
         // The initial memory state is also a "parameter" of sorts.
-        {
-            let mem = self.ir.initial_memory_state;
-            let key = NodeKey::instr(entry, param_slot_base, mem);
-            self.graph.ensure_node(key, NodeKind::FormalParam);
-            self.def_site.insert(mem, key);
-        }
+        let mem = self.ir.initial_memory_state;
+        let key = NodeKey::instr(entry, param_slot_base, mem);
+        self.graph.ensure_node(key, NodeKind::FormalParam);
+        self.def_site.insert(mem, key);
+    }
+
+    fn build_inner(mut self) -> (Svfg, FxHashMap<VarId, NodeKey>) {
+        self.register_formals();
 
         // -----------------------------------------------------------------
         // Pass 1: Walk every block and register def nodes + def sites.

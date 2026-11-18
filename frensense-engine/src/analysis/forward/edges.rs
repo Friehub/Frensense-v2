@@ -274,9 +274,7 @@ impl<'a> ProgramSvfg<'a> {
 
                     for (arg_key, slot) in &b.args {
                         let arg_var = arg_key.var;
-                        if roots[fi].is_none() {
-                            roots[fi] = Some(object_roots(self.functions[fi].ir));
-                        }
+                        self.ensure_roots(&mut roots, fi);
                         let arg_root = match roots[fi].as_ref().unwrap().get(&arg_var).copied() {
                             Some(r) => r,
                             None => continue,
@@ -290,9 +288,7 @@ impl<'a> ProgramSvfg<'a> {
                                 continue;
                             }
                             for ld in &g_loads {
-                                if roots[gi].is_none() {
-                                    roots[gi] = Some(object_roots(self.functions[gi].ir));
-                                }
+                                self.ensure_roots(&mut roots, gi);
                                 if roots[gi].as_ref().unwrap().get(&ld.base).copied()
                                     != Some(param_root)
                                 {
@@ -307,9 +303,7 @@ impl<'a> ProgramSvfg<'a> {
 
                         // 2. callee store → caller load.
                         for st in &g_stores {
-                            if roots[gi].is_none() {
-                                roots[gi] = Some(object_roots(self.functions[gi].ir));
-                            }
+                            self.ensure_roots(&mut roots, gi);
                             if roots[gi].as_ref().unwrap().get(&st.base).copied()
                                 != Some(param_root)
                             {
@@ -352,9 +346,7 @@ impl<'a> ProgramSvfg<'a> {
                                 if field_ops[gj].is_none() {
                                     field_ops[gj] = Some(collect_field_ops(self.functions[gj].ir));
                                 }
-                                if roots[gj].is_none() {
-                                    roots[gj] = Some(object_roots(self.functions[gj].ir));
-                                }
+                                self.ensure_roots(&mut roots, gj);
                                 let sibling_root = ObjectRoot::Param(sj);
                                 for st in &g_stores {
                                     if roots[gi].as_ref().unwrap().get(&st.base).copied()
@@ -389,6 +381,13 @@ impl<'a> ProgramSvfg<'a> {
         // parameter/return edges installed by Step 4).
         for edges in self.cross_edges.values_mut() {
             sort_dedup_edges(edges);
+        }
+    }
+
+    /// Fill the object-root cache of function `fi` on first use.
+    fn ensure_roots(&self, roots: &mut [Option<FxHashMap<VarId, ObjectRoot>>], fi: usize) {
+        if roots[fi].is_none() {
+            roots[fi] = Some(object_roots(self.functions[fi].ir));
         }
     }
 }

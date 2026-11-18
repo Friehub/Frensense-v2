@@ -100,27 +100,6 @@ impl Steensgaard {
             .unwrap_or(0)
             + 1000;
 
-        // Represent a (base, field) access by a synthetic variable so
-        // equality constraints on field reads/writes unify correctly.
-        let field_rep = |uf: &mut UnionFind,
-                         field_var: &mut FxHashMap<(VarId, String), VarId>,
-                         next: &mut usize,
-                         base: VarId,
-                         field: &str|
-         -> VarId {
-            let key = (base, field.to_string());
-            if let Some(&v) = field_var.get(&key) {
-                return v;
-            }
-            let v = VarId(*next);
-            *next += 1;
-            field_var.insert(key, v);
-            uf.find(v.0);
-            // The field access points into the base's class neighborhood:
-            // unify with nothing by default; constraints drive merging.
-            v
-        };
-
         // Seed: every parameter and allocated var is its own class root.
         for &p in &ir.parameters {
             uf.find(p.0);
@@ -229,6 +208,28 @@ impl Steensgaard {
     pub(crate) fn class_of(&self, v: VarId) -> Option<ClassId> {
         self.class_of.get(&v).copied()
     }
+}
+
+/// The synthetic variable representing a `(base, field)` access, created on
+/// first use so equality constraints on field reads and writes unify.
+fn field_rep(
+    uf: &mut UnionFind,
+    field_var: &mut FxHashMap<(VarId, String), VarId>,
+    next: &mut usize,
+    base: VarId,
+    field: &str,
+) -> VarId {
+    let key = (base, field.to_string());
+    if let Some(&v) = field_var.get(&key) {
+        return v;
+    }
+    let v = VarId(*next);
+    *next += 1;
+    field_var.insert(key, v);
+    uf.find(v.0);
+    // The field access points into the base's class neighborhood: unify with
+    // nothing by default; constraints drive merging.
+    v
 }
 
 /// Synthetic field-representation vars live above the real var-id space;
