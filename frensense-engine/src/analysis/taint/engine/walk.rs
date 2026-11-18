@@ -1437,3 +1437,37 @@ fn is_receiver_only_verb(name: &str) -> bool {
             | "aggregate"
     )
 }
+
+#[cfg(test)]
+mod forwarder_tests {
+    use super::{STD_FORWARDERS, is_std_forwarder};
+
+    /// `is_std_forwarder` binary-searches [`STD_FORWARDERS`], so an entry
+    /// inserted out of order (or duplicated) is not a compile error - the
+    /// lookup just stops finding it, and std adapters creep back into the
+    /// pass-through list. `windows(2)` with a strict `<` fails on both.
+    #[test]
+    fn the_std_forwarder_list_is_sorted_and_unique() {
+        for pair in STD_FORWARDERS.windows(2) {
+            assert!(
+                pair[0] < pair[1],
+                "`{}` must sort before `{}`; binary_search silently stops \
+                 filtering once the list is out of order",
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+
+    /// The list is the whole answer: every entry is found, and a call the
+    /// engine has no model for is not treated as an adapter.
+    #[test]
+    fn every_entry_is_found_and_unknown_calls_are_not() {
+        for name in STD_FORWARDERS {
+            assert!(is_std_forwarder(name), "`{name}` is in the list");
+        }
+        assert!(is_std_forwarder("iter"));
+        assert!(!is_std_forwarder("mystery.read"));
+        assert!(!is_std_forwarder(""));
+    }
+}

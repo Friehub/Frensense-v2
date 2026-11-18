@@ -360,6 +360,14 @@ impl GraphSize {
             cross_edges,
         }
     }
+
+    /// Fold another group's size in: every count adds.
+    pub fn merge(&mut self, other: &Self) {
+        self.functions += other.functions;
+        self.nodes += other.nodes;
+        self.edges += other.edges;
+        self.cross_edges += other.cross_edges;
+    }
 }
 
 impl TaintFunnel {
@@ -492,10 +500,7 @@ impl ScanTelemetry {
         self.taint.sanitized += other.taint.sanitized;
         self.taint.unknown += other.taint.unknown;
         self.taint.clean += other.taint.clean;
-        self.graph.functions += other.graph.functions;
-        self.graph.nodes += other.graph.nodes;
-        self.graph.edges += other.graph.edges;
-        self.graph.cross_edges += other.graph.cross_edges;
+        self.graph.merge(&other.graph);
         self.funnel.merge(&other.funnel);
         self.checks.extend(other.checks);
     }
@@ -613,7 +618,47 @@ pub(crate) fn millis_since(start: std::time::Instant) -> u128 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cap, drain_caps};
+    use super::{Cap, GraphSize, ScanTelemetry, TaintFunnel, drain_caps};
+
+    /// The CLI scans one group per language family and merges the results: a
+    /// group that walked no calls must not erase another group's counters, and
+    /// the partition has to survive the fold.
+    #[test]
+    fn merge_adds_the_graph_size_and_the_funnel() {
+        let mut a = ScanTelemetry {
+            graph: GraphSize::new(3, 10, 12, 2),
+            // 1 + 2 + 0 skipped + 4 unmatched + 2 sinks = 9 examined.
+            funnel: TaintFunnel::new(9, (1, 2, 0), 4, 2),
+            ..ScanTelemetry::default()
+        };
+        let b = ScanTelemetry {
+            graph: GraphSize::new(5, 20, 25, 7),
+            // 0 + 1 + 3 skipped + 5 unmatched + 2 sinks = 11 examined.
+            funnel: TaintFunnel::new(11, (0, 1, 3), 5, 2),
+            ..ScanTelemetry::default()
+        };
+
+        a.merge(b);
+
+        assert_eq!(a.graph.functions, 8);
+        assert_eq!(a.graph.nodes, 30);
+        assert_eq!(a.graph.edges, 37);
+        assert_eq!(a.graph.cross_edges, 9);
+        assert_eq!(a.funnel.calls_examined, 20);
+        assert_eq!(a.funnel.skipped(), 7);
+        assert_eq!(a.funnel.not_a_sink, 9);
+        assert_eq!(a.funnel.sink_calls, 4);
+        assert_eq!(
+            a.funnel.calls_examined,
+            a.funnel.skipped() + a.funnel.not_a_sink + a.funnel.sink_calls,
+            "the partition must survive the merge"
+        );
+
+        // A group that analysed nothing contributes nothing.
+        a.merge(ScanTelemetry::default());
+        assert_eq!(a.graph.nodes, 30);
+        assert_eq!(a.funnel.calls_examined, 20);
+    }
 
     /// The caps that used to truncate silently must reach the report with
     /// their stable ids, and a drain must reset them for the next scan.
