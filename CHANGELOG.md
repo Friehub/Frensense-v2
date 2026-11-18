@@ -51,6 +51,20 @@ harness and keeps no changelog.
   points at the vocabulary to teach rather than only a number; the same list is
   under `analysis.funnel.unmatched_callees` in the JSON report.
 
+### Changed
+
+#### Repository & Release Tooling
+
+- **The clippy debt baseline records what the refactor removed.** Four
+  functions the `too_many_lines` lint flagged were split along the seams they
+  already had (`Steensgaard::analyze`'s field-representative synthesis,
+  `Svfg`'s formal-parameter registration, `ProgramSvfg`'s object-root cache,
+  `LoweringContext::visit_composite`'s child lowering), which took
+  `frensense-engine::clippy::too_many_lines` from 25 to 20 sites and
+  `indexing_slicing` from 177 to 168. `clippy-ratchet.py --update` rewrote
+  `.github/scripts/clippy-baseline.json` with the measured counts (973 sites in
+  62 pairs), so the removed debt cannot creep back in unnoticed.
+
 ### Removed
 
 Code in the consumer library with no caller anywhere (verified by search over
