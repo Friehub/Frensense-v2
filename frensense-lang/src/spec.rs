@@ -585,6 +585,17 @@ pub trait LanguageSpec: Send + Sync + 'static {
         false
     }
 
+    /// A composite literal that is keyed (`{ a: 1 }`) rather than positional.
+    ///
+    /// The lowering allocates a keyed composite as an object and stores each
+    /// entry under its field, keeping reads field-sensitive; one that is
+    /// neither keyed nor positional (a parenthesized expression, a grammar's
+    /// own composite wrapper) keeps the conservative union lowering. Answering
+    /// `true` here for such a shape would silently make it field-sensitive.
+    fn is_object_composite(&self, _kind: &str) -> bool {
+        false
+    }
+
     /// A destructuring pattern that binds by position (`[a, b]`) rather than
     /// by name (`{ a }`). Only meaningful when
     /// [`is_destructuring_pattern`](Self::is_destructuring_pattern) is true.

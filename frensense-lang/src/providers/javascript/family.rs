@@ -287,6 +287,10 @@ impl<T: JsFamily> LanguageSpec for T {
         kind == "array"
     }
 
+    fn is_object_composite(&self, kind: &str) -> bool {
+        kind == "object"
+    }
+
     fn is_array_pattern(&self, kind: &str) -> bool {
         kind == "array_pattern"
     }

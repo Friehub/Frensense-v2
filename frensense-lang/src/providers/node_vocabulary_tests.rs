@@ -52,6 +52,9 @@ fn javascript_family_answers_its_placement_questions() {
 
     assert!(ts.is_array_composite("array"));
     assert!(!ts.is_array_composite("object"));
+    assert!(ts.is_object_composite("object"));
+    assert!(!ts.is_object_composite("array"));
+    assert!(!ts.is_object_composite("parenthesized_expression"));
     assert!(ts.is_array_pattern("array_pattern"));
     assert!(!ts.is_array_pattern("object_pattern"));
 
