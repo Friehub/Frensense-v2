@@ -336,6 +336,84 @@ fn every_grammar_finds_its_parameter_list_and_bindings() {
     );
 }
 
+fn function_name_text(ext: &str, source: &str) -> Option<String> {
+    let spec = spec(ext);
+    let tree = parse(spec, source);
+    let function = first_function(spec, tree.root_node())?;
+    spec.function_name_node(function)
+        .map(|node| source[node.start_byte()..node.end_byte()].to_string())
+}
+
+#[test]
+fn function_name_resolves_through_a_declarator_chain() {
+    assert_eq!(
+        function_name_text("ts", "function run() {}").as_deref(),
+        Some("run")
+    );
+    assert_eq!(
+        function_name_text("py", "def run(): pass").as_deref(),
+        Some("run")
+    );
+    assert_eq!(
+        function_name_text("go", "package main\nfunc run() {}").as_deref(),
+        Some("run")
+    );
+    assert_eq!(
+        function_name_text("rs", "fn run() {}").as_deref(),
+        Some("run")
+    );
+
+    // C names the function inside the declarator chain, not in a `name` field.
+    assert_eq!(
+        function_name_text("c", "void run(void) {}").as_deref(),
+        Some("run")
+    );
+    assert_eq!(
+        function_name_text("c", "void *run(void) {}").as_deref(),
+        Some("run"),
+        "a pointer declarator wraps the function declarator"
+    );
+
+    // An anonymous function value binds no name.
+    assert_eq!(function_name_text("ts", "const run = () => {}"), None);
+}
+
+#[test]
+fn target_clause_and_switch_vocabulary() {
+    for ext in ["ts", "py", "rs", "go", "c"] {
+        let s = spec(ext);
+
+        for kind in [
+            "expression_list",
+            "identifier_list",
+            "pattern_list",
+            "tuple_pattern",
+        ] {
+            assert!(s.is_multi_target_node(kind), "{ext}: {kind}");
+        }
+        assert!(!s.is_multi_target_node("identifier"), "{ext}");
+
+        // A switch's `break` leaves the switch, not the loop around it.
+        assert!(s.is_switch_like_node("switch_statement"), "{ext}");
+        assert!(
+            s.is_switch_like_node("expression_switch_statement"),
+            "{ext}"
+        );
+        assert!(!s.is_switch_like_node("if_statement"), "{ext}");
+
+        assert!(s.is_else_clause("else_clause"), "{ext}");
+        assert!(!s.is_else_clause("if_clause"), "{ext}");
+
+        assert!(s.is_case_alternative("case_clause"), "{ext}");
+        assert!(s.is_case_alternative("match_arm"), "{ext}");
+        assert!(!s.is_case_alternative("if_statement"), "{ext}");
+
+        assert!(s.is_containment_node("statement_block"), "{ext}");
+        assert!(s.is_containment_node("function_body"), "{ext}");
+        assert!(!s.is_containment_node("identifier"), "{ext}");
+    }
+}
+
 #[test]
 fn a_receiver_is_only_a_parameter_where_the_grammar_has_one() {
     assert!(spec("rs").is_self_parameter("self_parameter"));

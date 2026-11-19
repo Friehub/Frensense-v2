@@ -754,6 +754,41 @@ pub trait LanguageSpec: Send + Sync + 'static {
         kind == "union_pattern"
     }
 
+    /// A left-hand side that lists several assignment targets (`a, b = …`).
+    ///
+    /// The default is the union the lowering has always accepted across the
+    /// grammars (Python's and C's expression lists, JS's pattern lists).
+    fn is_multi_target_node(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "expression_list" | "identifier_list" | "pattern_list" | "tuple_pattern"
+        )
+    }
+
+    /// A node that is, or wraps, a body of statements (`*_block`, `*_body`).
+    /// Used where a grammar puts a loop's body behind neither a field nor a
+    /// statement kind.
+    fn is_containment_node(&self, kind: &str) -> bool {
+        self.is_block_node(kind) || kind.contains("body")
+    }
+
+    /// The `else` clause of a conditional (`else_clause`, `else_statement`).
+    fn is_else_clause(&self, kind: &str) -> bool {
+        kind.contains("else")
+    }
+
+    /// A node whose `break` belongs to a `switch` rather than the enclosing
+    /// loop, including the grammars that lower a Go switch as a branch.
+    fn is_switch_like_node(&self, kind: &str) -> bool {
+        kind.contains("switch")
+    }
+
+    /// A clause or arm of a `match`, including the grammars that spell it
+    /// `*_arm` rather than `case`.
+    fn is_case_alternative(&self, kind: &str) -> bool {
+        kind.contains("arm") || kind.contains("case")
+    }
+
     /// A node whose value may be a string built from literal and interpolated
     /// parts: a template string, a quoted string, an implicit concatenation,
     /// or a `+` chain the lowering folds part by part.
@@ -841,6 +876,33 @@ pub trait LanguageSpec: Send + Sync + 'static {
             cur = node
                 .child_by_field_name("parameters")
                 .or_else(|| node.child_by_field_name(params_field.as_ref()));
+        }
+        None
+    }
+
+    /// The node that names a function definition.
+    ///
+    /// Follows the [`NodeRole::Function`]'s `name_field` until it reaches an
+    /// [`NodeRole::Identifier`]. A grammar that names the function inside a
+    /// declarator chain (C: `function_definition → declarator →
+    /// function_declarator → identifier`, with `pointer_declarator` in between
+    /// for `void *f(void)`) says so by exposing that chain in `name_field`, so
+    /// no consumer walks it.
+    ///
+    /// `None` for a function that binds no name (arrow function, lambda,
+    /// closure, and a Python `decorated_definition`, whose name belongs to the
+    /// wrapped definition).
+    fn function_name_node<'t>(&self, fn_node: Node<'t>) -> Option<Node<'t>> {
+        let NodeRole::Function { name_field, .. } = self.classify(fn_node.kind()) else {
+            return None;
+        };
+        let field = name_field?;
+        let mut cur = fn_node.child_by_field_name(field.as_ref());
+        while let Some(node) = cur {
+            if matches!(self.classify(node.kind()), NodeRole::Identifier) {
+                return Some(node);
+            }
+            cur = node.child_by_field_name(field.as_ref());
         }
         None
     }
