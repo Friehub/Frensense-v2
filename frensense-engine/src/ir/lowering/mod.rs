@@ -144,4 +144,7 @@ impl<'a> LoweringContext<'a> {
 }
 
 #[cfg(test)]
+mod kind_migration_tests;
+
+#[cfg(test)]
 mod tests;

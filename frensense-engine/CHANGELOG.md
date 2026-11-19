@@ -198,6 +198,21 @@ what this crate does.
 
 ### Changed
 
+- **The harness binds parameters through `frensense-lang`, not its own grammar
+  tables.** `lower_one` read a hardcoded `parameters` field, walked C's
+  `function_definition → declarator → function_declarator` chain by hand, and
+  carried a table naming every grammar's parameter spellings
+  (`required_parameter`, `typed_parameter`, `list_splat_pattern`,
+  `parameter_declaration`, ...), plus a second table for the receiver. It now
+  calls `function_params`, `param_bindings` and `is_self_parameter`; 142 lines
+  of per-grammar vocabulary leave the engine, which no longer knows how any
+  language spells a parameter. No behaviour change: the moved tables are
+  verbatim and the IR-level tests
+  (`go_parameters_are_bound_with_their_declared_types`,
+  `destructured_parameters_bind_the_names_inside_them`) pass unchanged.
+  `ir::lowering::kind_migration_tests` additionally pins every migrated query to
+  the comparison it replaced by walking real parse trees for all five grammars.
+
 - `CutSite` `"passed-through"` sites skip standard-library adapters (`iter`,
   `collect`, `map`, `map_err`, ...): they forward their operands by definition,
   so naming them buried the calls the engine genuinely has no model for.

@@ -436,18 +436,13 @@ fn lower_one(
 ) -> FunctionIR {
     let mut ctx = LoweringContext::new_with_facts(spec, source, name.to_string(), facts);
 
-    // First try the direct `parameters` field (JS/TS/Python/Rust/Go).
-    // For C, the function_definition has no direct `parameters` field; instead
-    // the shape is: function_definition → declarator (function_declarator) →
-    //   parameters (parameter_list).  Walk that chain as a fallback.
-    let params = fn_node.child_by_field_name("parameters").or_else(|| {
-        fn_node
-            .child_by_field_name("declarator")
-            .and_then(|decl| find_function_declarator(decl))
-            .and_then(|fd| fd.child_by_field_name("parameters"))
-    });
-    if let Some(params) = params {
-        bind_params(&mut ctx, params, source);
+    // The list lives wherever the grammar puts it: a `parameters` field for
+    // most languages, one declarator hop further for C (`function_definition →
+    // declarator → function_declarator → parameters`). `function_params`
+    // follows `NodeRole::Function::params_field` until it reaches a
+    // `Parameters` node, so the engine carries no C-specific walk.
+    if let Some(params) = spec.function_params(fn_node) {
+        bind_params(&mut ctx, spec, params, source);
     }
     if let Some(body) = fn_node.child_by_field_name("body") {
         let has_implicit_ret = spec.implicit_return_node(fn_node, body).is_some();
@@ -472,17 +467,6 @@ fn lower_one(
         .map(str::to_owned)
         .collect();
     ir
-}
-
-/// Walk a declarator chain until we find a `function_declarator` node.
-/// Handles C shapes like: pointer_declarator → function_declarator.
-fn find_function_declarator(node: tree_sitter::Node<'_>) -> Option<tree_sitter::Node<'_>> {
-    if node.kind() == "function_declarator" {
-        return Some(node);
-    }
-    // pointer_declarator, abstract_declarator, etc. may wrap it
-    node.child_by_field_name("declarator")
-        .and_then(find_function_declarator)
 }
 
 /// Lower a top-level non-function initializer (`const x = new Set([...])`,
@@ -532,10 +516,15 @@ fn lower_static(
     ir
 }
 
-fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &str) {
+fn bind_params(
+    ctx: &mut LoweringContext,
+    spec: &dyn frensense_lang::spec::LanguageSpec,
+    params: tree_sitter::Node,
+    source: &str,
+) {
     let mut pc = params.walk();
     for p in params.children(&mut pc) {
-        if p.kind() == "self_parameter" {
+        if spec.is_self_parameter(p.kind()) {
             let name = "self".to_string();
             let v = ctx.ir.new_var(VarMetadata {
                 source_name: Some(name.clone()),
@@ -559,7 +548,7 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             .child_by_field_name("type")
             .map(|t| normalize_type_path(&source[t.start_byte()..t.end_byte()]))
             .filter(|t| !t.is_empty());
-        for binding in param_bindings(p) {
+        for binding in spec.param_bindings(p) {
             let name = source[binding.start_byte()..binding.end_byte()].to_string();
             let v = ctx.ir.new_var(VarMetadata {
                 source_name: Some(name.clone()),
@@ -583,105 +572,6 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             ctx.env.last_mut().unwrap().insert(name, v);
         }
     }
-}
-
-/// The binding identifiers of one parameter node, in declaration order.
-///
-/// - JS/TS: `required_parameter`/`optional_parameter` with a `pattern` field
-/// - Python: plain `identifier` children of `parameters`, plus the
-///   annotated/defaulted wrappers (`x: T`, `x=v`, `x: T = v`, `*x`)
-/// - Rust: `parameter` node wrapping the name identifier as first child
-/// - C: `parameter_declaration` shaped `type declarator`, where the declarator
-///   may be `pointer_declarator` → `identifier` (`char *p`). `child(0)` is the
-///   type specifier, so the `declarator` field is walked to its leaf.
-/// - Go: `parameter_declaration`/`variadic_parameter_declaration` shaped
-///   `name ... type`, with ONE `name` field per grouped name (`a, b string` is
-///   a single declaration). Go has no `declarator` field, so a Go parameter
-///   used to match the C arm and bind nothing: every handler parameter was an
-///   undeclared body name with no type, and the language's parameter
-///   classifier - which keys on `*gin.Context`, `*http.Request` - never saw
-///   one.
-fn param_bindings(p: tree_sitter::Node<'_>) -> Vec<tree_sitter::Node<'_>> {
-    match p.kind() {
-        "required_parameter" | "optional_parameter" | "parameter" | "variadic_parameter" => {
-            param_binding(p).into_iter().collect()
-        }
-        "identifier" => vec![p],
-        "parameter_declaration" | "variadic_parameter_declaration" => {
-            if let Some(decl) = p.child_by_field_name("declarator") {
-                return find_param_identifier(decl).into_iter().collect();
-            }
-            let mut cursor = p.walk();
-            p.children_by_field_name("name", &mut cursor).collect()
-        }
-        "typed_parameter"
-        | "default_parameter"
-        | "typed_default_parameter"
-        | "list_splat_pattern"
-        | "dictionary_splat_pattern" => python_param_binding(p).into_iter().collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// The binding identifier of a wrapper-shaped parameter pattern.
-///
-/// `Query(p)` (and `State(db)`, `Json(body)`) is a *named* pattern: it has a
-/// `type` field naming the wrapper plus one binding inside. The binding - not
-/// the wrapper - is what the body references, so the parameter must be named
-/// after it. Any other pattern (plain `identifier`, a JS object/array
-/// destructuring pattern with no `type` field, `&mut x`) is returned as-is so
-/// existing naming is untouched.
-/// The binding node of a parameter: a plain identifier, or the INNER
-/// identifier of a wrapper-shaped pattern (`Query(p)`, `{ body }`, `&mut x`).
-fn param_binding<'t>(p: tree_sitter::Node<'t>) -> Option<tree_sitter::Node<'t>> {
-    let pattern = p.child_by_field_name("pattern").or_else(|| p.child(0))?;
-    // `...parts` wraps the name: the rest marker is not part of it. Binding
-    // the parameter under the text `...parts` left the body's `parts` an
-    // undeclared name, so a rest parameter's value never reached its uses.
-    if pattern.kind() == "rest_pattern" {
-        return pattern.named_child(0);
-    }
-    Some(extractor_binding(pattern).unwrap_or(pattern))
-}
-
-/// The binding identifier of a Python parameter node.
-///
-/// Python wraps annotated and defaulted parameters: `typed_parameter` has no
-/// `name` field (its first child is the binding), while
-/// `default_parameter`/`typed_default_parameter` expose `name`. A splat
-/// parameter (`*args`, `**kwargs`, with or without an annotation) wraps the
-/// identifier in `list_splat_pattern`/`dictionary_splat_pattern`. Only an
-/// identifier is a binding: a tuple pattern (`def f((a, b))`) has no single
-/// name, and naming the parameter after the pattern text would bind a name
-/// the body never references.
-fn python_param_binding<'t>(p: tree_sitter::Node<'t>) -> Option<tree_sitter::Node<'t>> {
-    let binding = p.child_by_field_name("name").or_else(|| match p.kind() {
-        "list_splat_pattern" | "dictionary_splat_pattern" => p.named_child(0),
-        _ => p.child(0),
-    })?;
-    match binding.kind() {
-        "identifier" => Some(binding),
-        "list_splat_pattern" | "dictionary_splat_pattern" => {
-            let mut cursor = binding.walk();
-            binding
-                .named_children(&mut cursor)
-                .find(|c| c.kind() == "identifier")
-        }
-        _ => None,
-    }
-}
-
-fn extractor_binding<'t>(pattern: tree_sitter::Node<'t>) -> Option<tree_sitter::Node<'t>> {
-    let wrapper = pattern.child_by_field_name("type")?;
-    let mut cursor = pattern.walk();
-    let mut inner = pattern
-        .named_children(&mut cursor)
-        .filter(|c| c.id() != wrapper.id());
-    let first = inner.next()?;
-    if first.kind() != "identifier" || inner.next().is_some() {
-        return None;
-    }
-    Some(first)
 }
 
 /// Normalize a parameter type annotation to its path: strip references and
@@ -713,17 +603,6 @@ fn normalize_type_path(raw: &str) -> String {
         owned
     } else {
         path
-    }
-}
-
-/// Walk a C declarator chain to find the leaf `identifier`.
-/// Handles pointer_declarator, array_declarator, etc.
-fn find_param_identifier(node: tree_sitter::Node<'_>) -> Option<tree_sitter::Node<'_>> {
-    match node.kind() {
-        "identifier" => Some(node),
-        _ => node
-            .child_by_field_name("declarator")
-            .and_then(find_param_identifier),
     }
 }
 
