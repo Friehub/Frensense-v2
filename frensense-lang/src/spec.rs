@@ -74,44 +74,66 @@ pub enum NodeRole {
     },
 
     // ── Assignments / declarations ────────────────────────────────────────
-    /// A variable declaration with an initializer.
-    /// `let x = expr` (JS/Rust), `x := expr` (Go).
+    /// A variable declaration with an initializer: `let x = expr` (JS/Rust),
+    /// `x := expr` (Go), and Python's `x = expr`, which has no separate
+    /// declaration form.
     Declaration {
+        /// Field holding the declared name (or binding pattern).
         name_field: Cow<'static, str>,
+        /// Field holding the initializer expression.
         value_field: Cow<'static, str>,
     },
-    /// A mutation of an existing binding.
-    /// `x = expr` (all languages), `x += expr`.
+    /// A mutation of an existing binding (`x = expr`, `x += expr`).
+    ///
+    /// Only the grammars that spell mutation as its own node kind use this;
+    /// Python's plain `x = expr` is a [`NodeRole::Declaration`].
     Assignment {
+        /// Field holding the assigned target.
         lhs_field: Cow<'static, str>,
+        /// Field holding the assigned value expression.
         rhs_field: Cow<'static, str>,
     },
 
     // ── Calls ─────────────────────────────────────────────────────────────
     /// Any function / method invocation.
     Call {
+        /// Field holding the callee expression.
         callee_field: Cow<'static, str>,
+        /// Field holding the argument list node.
         args_field: Cow<'static, str>,
     },
     /// Member / field access producing a value (not a call).
     /// `obj.field`, `obj->field`, `obj.attribute`.
     MemberAccess {
+        /// Field holding the accessed object.
         object_field: Cow<'static, str>,
+        /// Field holding the accessed property name.
         property_field: Cow<'static, str>,
     },
 
     // ── Control flow ──────────────────────────────────────────────────────
-    Branch, // if / switch / match-arm
+    /// An `if` / `else if` / `else` chain, or a C-style `switch_statement`.
+    ///
+    /// Grammars whose switch/match dispatches on one subject are
+    /// [`NodeRole::Match`] instead, and a ternary expression is
+    /// [`NodeRole::Conditional`].
+    Branch,
     /// Ternary conditional EXPRESSION (`a ? b : c`, Python `a if c else b`).
     /// Separate from Branch: both arms are expressions producing a value,
     /// lowered as branch + Phi, not as a statement-level fork.
     Conditional,
-    Loop,    // for / while / do / loop
-    Return,  // return statement / expression
-    Try,     // try { … }
-    Catch,   // catch / except clause
-    Finally, // finally clause
-    Throw,   // throw / raise
+    /// A loop (`for`, `while`, `do`, `loop`): the CFG adds a back-edge.
+    Loop,
+    /// A `return` statement or expression.
+    Return,
+    /// A `try` block: the exception edge starts here.
+    Try,
+    /// An exception handler (`catch` clause, Python `except` clause).
+    Catch,
+    /// A `finally` block.
+    Finally,
+    /// A `throw` statement or expression (Python `raise`).
+    Throw,
 
     // ── Special language patterns ─────────────────────────────────────────
     /// Go: `if err != nil { return … }` - structurally a Branch but semantically
@@ -124,11 +146,13 @@ pub enum NodeRole {
     /// Rust: the `?` postfix operator - propagates errors, terminates the
     /// current scope if the value is `Err`.
     ErrorPropagation,
-    /// Rust async block, JS/TS `await`, Python `await`.
+    /// An `await` expression (JS/TS, Python, Rust) or Go's `defer` / `go`
+    /// statement, whose work runs outside the current evaluation.
     Await,
 
     // ── Structural ────────────────────────────────────────────────────────
-    Block, // { … } / indented block
+    /// A block of statements (`{ … }`, an indented block).
+    Block,
     /// Value-context composite literal: JS/TS `object` used as a value (not a
     /// statement block), `array`, `object_pattern` in expression position.
     /// Uniformly-keyed objects and arrays lower to an allocation with one
@@ -138,17 +162,24 @@ pub enum NodeRole {
     /// value. Objects with unkeyed children (spreads) keep the legacy
     /// may-analysis union - conservative for taint.
     Composite,
-    Import,     // import / use / require
-    Export,     // export (JS/TS only)
-    Identifier, // bare name reference
-    Literal,    // string / number / bool literal
+    /// An import declaration or call: `import`, `use`, `require`.
+    Import,
+    /// An export declaration (JS/TS only).
+    Export,
+    /// A bare name reference.
+    Identifier,
+    /// A literal value: string, number, boolean or null.
+    Literal,
 
     // ── Supplementary structural roles ────────────────────────────────────
-    /// Parameter list: `formal_parameters` (JS/TS), `parameter_list` (Go),
-    /// `parameters` (Python), `parameter_declaration` (C).
+    /// A parameter list (`formal_parameters` in JS/TS, `parameters` in
+    /// Python, `parameter_list` in Go/C) or one parameter node a grammar
+    /// spells on its own (`parameter`, `parameter_declaration`,
+    /// `typed_parameter`, `default_parameter`, `positional_separator`, ...).
     Parameters,
-    /// Argument list: `arguments` (JS/TS), `argument_list` (Python/Go/C),
-    /// `token_tree` (Rust macros).
+    /// An argument list: `arguments` (JS/TS/Rust), `argument_list`
+    /// (Python/Go/C), Python's `generator_expression`, or a Rust macro's
+    /// `token_tree`.
     Arguments,
     /// A named call argument (`f(secure=False)`): Python `keyword_argument`.
     /// Distinct from a plain expression so the IR can keep the argument's
@@ -172,7 +203,11 @@ pub enum NodeRole {
     Match,
     /// Rust: `unsafe { … }` block.
     Unsafe,
-    /// Rust async block, JS/TS `async function`, Python `async def`.
+    /// An async block (`async { … }` in Rust, Python `async_block`).
+    ///
+    /// A JS/TS `async function` / Python `async def` is still a
+    /// [`NodeRole::Function`]: only a block *without* a function of its own
+    /// gets this role.
     AsyncBlock,
 
     /// Anything the engine does not need to inspect.
@@ -245,30 +280,50 @@ pub enum LiteralShape {
 /// Broad category for what a package is used for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PackageCategory {
+    /// Web framework (Express, Flask, Django, Actix).
     HttpFramework,
+    /// GraphQL server or client library.
     GraphQL,
+    /// WebSocket server or client library.
     WebSocket,
+    /// Transactional or marketing email service.
     EmailService,
+    /// Relational database driver or ORM (SQL injection risk).
     SqlDatabase,
+    /// Document / key-value store driver (NoSQL injection risk).
     NoSqlDatabase,
+    /// Process or shell command execution library.
     CommandExecution,
+    /// File system API.
     FileSystem,
-    HttpClient,      // SSRF risk
-    TemplateEngine,  // SSTI / XSS
-    Deserialization, // unsafe deserialize
+    /// HTTP client library (SSRF risk).
+    HttpClient,
+    /// Template engine (SSTI / XSS).
+    TemplateEngine,
+    /// Serializer or deserializer (unsafe deserialize).
+    Deserialization,
+    /// Cryptographic primitive.
     Crypto,
+    /// Logging library.
     Logging,
+    /// Test framework or assertion library.
     Testing,
 }
 
 /// Broad origin of tainted data.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TaintOrigin {
-    UserInput,   // HTTP request body/query/path/header
-    Environment, // process.env / os.environ / std::env
-    FileSystem,  // file read whose path came from user
-    Database,    // query result that may contain injection
-    Network,     // IPC / downstream API response
+    /// HTTP request body, query, path or header.
+    UserInput,
+    /// Process environment (`process.env`, `os.environ`, `std::env`).
+    Environment,
+    /// A file read whose path came from the user.
+    FileSystem,
+    /// A query result that may contain injected data.
+    Database,
+    /// An IPC or downstream API response.
+    Network,
+    /// A caller-defined origin, carried verbatim.
     Custom(String),
 }
 
@@ -329,32 +384,49 @@ pub struct Export {
 /// Written or inferred visibility of a declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Visibility {
+    /// Visible outside the declaring module.
     Public,
+    /// Visible within the crate / package but not outside it.
     Internal,
+    /// Visible only within the declaring item.
     Private,
 }
 
 /// The syntactic or semantic kind of a module-level declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ItemKind {
+    /// Function or method.
     Function,
+    /// Compile-time constant.
     Constant,
+    /// Mutable or inferred variable binding.
     Variable,
+    /// Class definition.
     Class,
+    /// Enum definition.
     Enum,
+    /// Interface definition.
     Interface,
+    /// Type alias, `typedef` or associated type.
     Type,
+    /// Module or namespace declaration.
     Module,
+    /// Struct definition.
     Struct,
+    /// Trait definition.
     Trait,
+    /// Anything else the extractor found.
     Other,
 }
 
 /// A top-level item declared in a module.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ModuleItem {
+    /// The declared name, as written in source.
     pub name: String,
+    /// What kind of item it is.
     pub kind: ItemKind,
+    /// Its written or inferred visibility.
     pub visibility: Visibility,
 }
 
@@ -423,7 +495,7 @@ pub trait LanguageSpec: Send + Sync + 'static {
         std::borrow::Cow::Borrowed(source)
     }
 
-    /// The language key theFactTable and learned bundles key this spec's
+    /// The language key the FactTable and learned bundles key this spec's
     /// knowledge under. Defaults to [`name`](Self::name); a container
     /// format delegating to another spec's grammar also delegates its
     /// vocabulary (a Vue SFC's script is TypeScript, so its facts live in

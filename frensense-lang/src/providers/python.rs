@@ -417,6 +417,11 @@ const PYTHON_CALL_QUERY: &str = r#"
 
 // ── PythonSpec ────────────────────────────────────────────────────────────────
 
+/// [`LanguageSpec`] for Python (`.py`, `.pyi`, `.pyw`).
+///
+/// Covers the grammar's `call`/`attribute` node spellings, its annotated,
+/// defaulted and splat parameters, `with … as` context managers and the
+/// statement form of `match`.
 #[derive(Debug)]
 pub struct PythonSpec;
 

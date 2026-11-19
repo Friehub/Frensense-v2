@@ -310,6 +310,11 @@ const GO_CALL_QUERY: &str = r#"
 
 // ── GoSpec ────────────────────────────────────────────────────────────────────
 
+/// [`LanguageSpec`] for Go (`.go`).
+///
+/// Distinguishes `method_declaration` from `function_declaration`, resolves
+/// selector fields through `field_identifier`, and recognizes the language's
+/// error guard (`if err != nil { return … }`) and `:=` declarations.
 #[derive(Debug)]
 pub struct GoSpec;
 

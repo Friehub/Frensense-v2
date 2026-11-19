@@ -138,6 +138,12 @@ fn c_package_category(pkg: &str) -> Option<PackageCategory> {
 
 // ── CSpec ─────────────────────────────────────────────────────────────────────
 
+/// [`LanguageSpec`] for C (`.c`, `.h`).
+///
+/// Classifies the C grammar's declarator-chain shapes (`function_definition`
+/// reaching its parameters and name through `declarator`), its preprocessor
+/// conditionals and its storage-class/pointer expressions, so no consumer
+/// walks a declarator chain by hand.
 #[derive(Debug)]
 pub struct CSpec;
 

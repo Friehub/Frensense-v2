@@ -390,6 +390,11 @@ const RUST_CALL_QUERY: &str = r#"
 
 // ── LanguageSpec ────────────────────────────────────────────────────────────────
 
+/// [`LanguageSpec`] for Rust (`.rs`).
+///
+/// Covers `field_expression`/`method_call_expression` property access, the
+/// `?` error-propagation operator, `self_parameter` receivers, match guards
+/// and macro `token_tree` argument lists.
 #[derive(Debug)]
 pub struct RustSpec;
 

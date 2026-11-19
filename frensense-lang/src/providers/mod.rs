@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
+
+//! Built-in [`LanguageSpec`](crate::spec::LanguageSpec) providers.
+//!
+//! One module per grammar family: [`c_lang`], [`go`], [`javascript`],
+//! [`python`] and [`rust_lang`]. Each implements the trait for its own node
+//! vocabulary and leaves the cross-language defaults in place where the
+//! grammar agrees with them; the JavaScript module additionally covers the
+//! TypeScript/TSX dialects and single-file containers through
+//! [`javascript::JsFamily`].
+//!
+//! [`crate::registry`] owns the extension -> spec lookup, so nothing here
+//! decides which provider handles which file.
 pub mod c_lang;
 pub mod go;
 pub mod javascript;
