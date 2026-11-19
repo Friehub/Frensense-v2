@@ -198,6 +198,16 @@ what this crate does.
 
 ### Changed
 
+- **Declaration and assignment lowering ask the spec for pattern and storage
+  vocabulary.** `decl.rs`, `assign.rs`, `lvalue.rs` and `call.rs` named
+  `storage_class_specifier`, `array_pattern`, `object_assignment_pattern`,
+  `rest_pattern`, `pointer_expression` and `assignment_expression` directly.
+  They now use `is_storage_class_specifier`, `is_array_pattern`,
+  `is_assignment_pattern`, `is_rest_pattern`, `is_pointer_expression` and the
+  `NodeRole::Assignment` role; the multi-target list test moved onto the context
+  as `is_multi_target`, backed by `is_multi_target_node`. No node-kind
+  comparison remains in those four files; 575 engine tests unchanged.
+
 - **Expression lowering asks the spec about comments, strings, composites and
   JSX.** Every `child.kind() == "comment"` skip, the four-part string-folding
   test in `visit_literal`, the `object` / `array` split that picks
