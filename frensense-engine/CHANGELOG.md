@@ -198,6 +198,18 @@ what this crate does.
 
 ### Changed
 
+- **CFG construction asks the spec about shape, clauses and jumps.** The 23 node
+  kind comparisons in `control_flow.rs` are gone: loop and branch bodies and
+  conditions (`is_block_or_statement`, `is_loop_condition_node`,
+  `is_branch_condition_node`, `is_containment_node`), switch and match clauses
+  (`is_case_clause`, `is_case_alternative`, `is_match_statement`), the else arm
+  (`is_else_clause`), break-target handling (`is_switch_like_node`,
+  `is_jump_target_name`), preprocessor else (`is_preproc_else`), comment skips
+  (`is_comment`) and the match-arm binder's two pattern shapes
+  (`is_binding_pattern`, `is_structured_pattern`). `has_break_label` takes the
+  spec explicitly because it is a free function. No behaviour change; 575 engine
+  tests and the loop-shape differential test are unchanged.
+
 - **Declaration and assignment lowering ask the spec for pattern and storage
   vocabulary.** `decl.rs`, `assign.rs`, `lvalue.rs` and `call.rs` named
   `storage_class_specifier`, `array_pattern`, `object_assignment_pattern`,
