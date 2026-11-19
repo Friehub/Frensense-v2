@@ -616,6 +616,22 @@ pub trait LanguageSpec: Send + Sync + 'static {
         false
     }
 
+    /// A match-arm pattern that binds one name (`case x:`, Rust's `x`).
+    ///
+    /// The default is the union the binder applies to every grammar: a plain
+    /// `identifier` is a binding in Python, JS and Rust alike, and
+    /// `identifier_pattern` is Rust's explicit spelling for the same thing.
+    fn is_binding_pattern(&self, kind: &str) -> bool {
+        matches!(kind, "identifier" | "identifier_pattern")
+    }
+
+    /// A match-arm pattern that destructures a value by type
+    /// (`Point { x, y }`, `Some(v)`): the binding names are its children, so
+    /// the binder recurses into it instead of using its text.
+    fn is_structured_pattern(&self, kind: &str) -> bool {
+        matches!(kind, "tuple_struct_pattern" | "struct_pattern")
+    }
+
     /// A C-family storage-class specifier (`static`, `extern`).
     fn is_storage_class_specifier(&self, _kind: &str) -> bool {
         false

@@ -386,6 +386,22 @@ fn function_name_resolves_through_a_declarator_chain() {
 }
 
 #[test]
+fn match_binding_vocabulary_is_the_binder_union() {
+    for ext in ["ts", "py", "rs", "go", "c"] {
+        let s = spec(ext);
+        // A plain identifier binds a name in every grammar that has patterns.
+        assert!(s.is_binding_pattern("identifier"), "{ext}");
+        assert!(s.is_binding_pattern("identifier_pattern"), "{ext}");
+        assert!(!s.is_binding_pattern("case_pattern"), "{ext}");
+        // The structured spellings are Rust's; no other grammar emits them,
+        // so the union answers without a per-language override.
+        assert!(s.is_structured_pattern("struct_pattern"), "{ext}");
+        assert!(s.is_structured_pattern("tuple_struct_pattern"), "{ext}");
+        assert!(!s.is_structured_pattern("case_pattern"), "{ext}");
+    }
+}
+
+#[test]
 fn target_clause_and_switch_vocabulary() {
     for ext in ["ts", "py", "rs", "go", "c"] {
         let s = spec(ext);
