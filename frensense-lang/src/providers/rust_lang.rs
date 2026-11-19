@@ -421,6 +421,11 @@ impl LanguageSpec for RustSpec {
         kind == "closure_expression"
     }
 
+    /// `&self` / `&mut self`. The receiver binds the keyword, not its text.
+    fn is_self_parameter(&self, kind: &str) -> bool {
+        kind == "self_parameter"
+    }
+
     fn is_match_guard(&self, kind: &str) -> bool {
         kind == "match_guard"
     }

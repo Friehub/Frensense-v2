@@ -16,6 +16,7 @@
 
 use crate::registry::spec_for_ext;
 use crate::spec::{JsxPart, JumpKind, LanguageSpec, LiteralShape};
+use tree_sitter::Node;
 
 fn spec(ext: &str) -> &'static dyn LanguageSpec {
     spec_for_ext(ext).expect("spec for extension")
@@ -255,4 +256,93 @@ fn string_expression_covers_the_folding_union() {
     // grammars answer through `is_template_string`, which defaults to false.
     assert!(spec("ts").is_string_expression("template_string"));
     assert!(!spec("c").is_string_expression("template_string"));
+}
+
+// ── Parameter binding ────────────────────────────────────────────────────────
+
+fn parse(spec: &dyn LanguageSpec, source: &str) -> tree_sitter::Tree {
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&spec.tree_sitter_language())
+        .expect("language");
+    parser.parse(source, None).expect("parse")
+}
+
+fn first_function<'t>(spec: &dyn LanguageSpec, node: Node<'t>) -> Option<Node<'t>> {
+    if spec.is_function_node(node.kind()) && node.child_by_field_name("body").is_some() {
+        return Some(node);
+    }
+    let mut cursor = node.walk();
+    let children: Vec<Node<'t>> = node.named_children(&mut cursor).collect();
+    children
+        .into_iter()
+        .find_map(|child| first_function(spec, child))
+}
+
+/// The names a function binds in its parameter list, in declaration order.
+fn parameter_names(ext: &str, source: &str) -> Vec<String> {
+    let spec = spec(ext);
+    let tree = parse(spec, source);
+    let function = first_function(spec, tree.root_node()).expect("a function definition");
+    let params = spec.function_params(function).expect("a parameter list");
+    let mut cursor = params.walk();
+    let children: Vec<Node> = params.children(&mut cursor).collect();
+    let mut names = Vec::new();
+    for param in children {
+        if spec.is_self_parameter(param.kind()) {
+            names.push("self".to_string());
+            continue;
+        }
+        for binding in spec.param_bindings(param) {
+            names.push(source[binding.start_byte()..binding.end_byte()].to_string());
+        }
+    }
+    names
+}
+
+#[test]
+fn every_grammar_finds_its_parameter_list_and_bindings() {
+    assert_eq!(
+        parameter_names("ts", "function run(a: string, ...rest: any[]) {}"),
+        vec!["a", "rest"],
+        "a rest parameter binds its inner name, not `...rest`"
+    );
+
+    assert_eq!(
+        parameter_names("py", "def run(a: int, b=1, *args, **kwargs): pass"),
+        vec!["a", "b", "args", "kwargs"],
+        "annotated, defaulted and splat parameters each bind one name"
+    );
+
+    assert_eq!(
+        parameter_names("rs", "fn run(&self, a: i32) {}"),
+        vec!["self", "a"],
+        "a receiver binds the keyword, not `&self`"
+    );
+
+    // Go groups names under one declaration and has no `declarator` field.
+    assert_eq!(
+        parameter_names("go", "func handle(a, b string, rest ...int) {}"),
+        vec!["a", "b", "rest"],
+        "grouped and variadic names all bind"
+    );
+
+    // C hides the list behind the declarator chain, and the name behind a
+    // pointer declarator.
+    assert_eq!(
+        parameter_names("c", "void run(char *p, int n) {}"),
+        vec!["p", "n"],
+        "the parameter list sits inside the function declarator"
+    );
+}
+
+#[test]
+fn a_receiver_is_only_a_parameter_where_the_grammar_has_one() {
+    assert!(spec("rs").is_self_parameter("self_parameter"));
+    for ext in ["ts", "py", "go", "c"] {
+        assert!(
+            !spec(ext).is_self_parameter("self_parameter"),
+            "{ext} has no receiver parameter"
+        );
+    }
 }
