@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795012569396,
+  "lastUpdate": 1795113297837,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -2721,6 +2721,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/09cbfc303d05ec4a4ba0299c1ab9e71186cf0111"
         },
         "date": 1795012568036,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 33.9,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 38.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 4.1,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 172,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 32,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "f1b382fd964f24f4cb1ba7018fa6b21c9f688e70",
+          "message": "Merge pull request #156 from Friehub/engine/subscript-quotes\n\nfix(engine): unquote a subscript's field name",
+          "timestamp": "2026-11-19T19:33:54+01:00",
+          "tree_id": "00c9f26809c7bd9db3a20effe2dd709d1b41b4eb",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/f1b382fd964f24f4cb1ba7018fa6b21c9f688e70"
+        },
+        "date": 1795113296950,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
