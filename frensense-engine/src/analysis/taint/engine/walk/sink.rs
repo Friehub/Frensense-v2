@@ -596,67 +596,11 @@ impl<'a> BackwardTaintEngine<'a> {
         };
 
         for (arg_slot, var, arg_node) in triplets {
-            let Some(alert_info) = sink_alert_with_facts(
-                ir,
-                self.config,
-                &self.facts,
-                &arg_node,
-                site.origin_package,
-                site.language,
-            ) else {
+            let Some(walk) = self.walk_sink_arg(fi, ir, site, (arg_slot, var, arg_node), mem_probe)
+            else {
                 continue;
             };
-            let finding_class = alert_info.class;
-            let mut state = ExploreState {
-                sink_role: site.role,
-                sink_label: site.label.map(str::to_string),
-                ..Default::default()
-            };
-            state.seen_nodes.insert((fi, arg_node));
-            self.current_parents.clear();
-            self.current_root = Some((fi, arg_node));
-            let rss_pre = if crate::debug_flags::DebugFlags::get().mem {
-                crate::debug_flags::rss_kb()
-            } else {
-                0
-            };
-            self.explore_from(fi, arg_node, &mut state);
-            let rss_walk = if crate::debug_flags::DebugFlags::get().mem {
-                crate::debug_flags::rss_kb()
-            } else {
-                0
-            };
-
-            if mem_probe
-                && (state.visited.len() > 50_000 || rss_walk.saturating_sub(rss_pre) > 1_000)
-            {
-                self.log_sink_mem(fi, site.name, &state, rss_pre, rss_walk);
-            }
-
-            let verdict = if state.saw_source {
-                BackwardVerdict::Vulnerable
-            } else if state.saw_unknown {
-                BackwardVerdict::Unknown
-            } else if state.saw_sanitized_root_only {
-                BackwardVerdict::Sanitized
-            } else {
-                BackwardVerdict::Clean
-            };
-
-            // Bookkeeping for stats.
-            self.stats.nodes_visited += state.seen_nodes.len();
-            let mut fns: FxHashSet<usize> = FxHashSet::default();
-            for (f, _) in state.seen_nodes.iter() {
-                fns.insert(*f);
-            }
-            self.stats.functions_visited += fns.len();
-
-            match verdict {
-                BackwardVerdict::Vulnerable => self.stats.vulnerable += 1,
-                BackwardVerdict::Sanitized => self.stats.sanitized += 1,
-                BackwardVerdict::Unknown => self.stats.unknown += 1,
-                BackwardVerdict::Clean => self.stats.clean += 1,
-            }
+            self.record_arg_stats(&walk.state, &walk.verdict);
 
             // A method call's receiver is not an argument (#100, #133). Its
             // tainted provenance still reaches the sink - `new AdmZip(taint)`
@@ -667,46 +611,13 @@ impl<'a> BackwardTaintEngine<'a> {
             // writes a constant, and listing `res` as an argument made the
             // call "1 site undecided" while every all-args sink over-counted
             // `findings`/`located` by one Clean entry per call.
-            if arg_slot == crate::graph::svfg::RECEIVER_ARG_INDEX
-                && verdict != BackwardVerdict::Vulnerable
+            if walk.arg_slot == crate::graph::svfg::RECEIVER_ARG_INDEX
+                && walk.verdict != BackwardVerdict::Vulnerable
             {
                 continue;
             }
 
-            let alert = if verdict == BackwardVerdict::Vulnerable {
-                Some(alert_info)
-            } else {
-                None
-            };
-
-            // Reconstruct the source→sink chain for vulnerable findings.
-            let path = if verdict == BackwardVerdict::Vulnerable && self.capture_paths {
-                self.reconstruct_path(state.source_node, state.source_desc.clone())
-            } else {
-                TaintPath::default()
-            };
-
-            self.findings.push(SinkFinding {
-                function: ir.name.clone(),
-                sink: site.name.to_string(),
-                arg_slot,
-                alert,
-                verdict,
-                finding_class,
-                role: site.role,
-                label: site.label.map(str::to_string),
-                source_desc: state.source_desc.clone(),
-                path,
-                cut_reasons: state.cuts.clone(),
-                cut_sites: state.cut_sites.clone(),
-                // Span of the SINK CALL itself, not the tainted operand's
-                // definition: reports must point at the line the user fixes.
-                // (Reporting the operand's def site put `search.ts` SQLi at
-                // line 18 instead of the vulnerable `query(...)` on line 21.)
-                sink_span: explicit_span
-                    .or_else(|| ir.var_metadata.get(&var).and_then(|m| m.byte_range)),
-            });
-            let _ = var;
+            self.push_sink_finding(ir, site, explicit_span, walk);
         }
         if mem_probe {
             let now = crate::debug_flags::rss_kb();
@@ -721,5 +632,150 @@ impl<'a> BackwardTaintEngine<'a> {
                 );
             }
         }
+    }
+
+    /// Walk one argument of a sink call back to its roots.
+    ///
+    /// `None` when the call shape carries no alert for this slot, so the caller
+    /// explores (and counts) only the slots that actually carry data.
+    fn walk_sink_arg(
+        &mut self,
+        fi: usize,
+        ir: &FunctionIR,
+        site: SinkSite<'_>,
+        arg: (usize, VarId, NodeKey),
+        mem_probe: bool,
+    ) -> Option<ArgWalk> {
+        let (arg_slot, var, arg_node) = arg;
+        let alert_info = sink_alert_with_facts(
+            ir,
+            self.config,
+            &self.facts,
+            &arg_node,
+            site.origin_package,
+            site.language,
+        )?;
+        let finding_class = alert_info.class;
+        let mut state = ExploreState {
+            sink_role: site.role,
+            sink_label: site.label.map(str::to_string),
+            ..Default::default()
+        };
+        state.seen_nodes.insert((fi, arg_node));
+        self.current_parents.clear();
+        self.current_root = Some((fi, arg_node));
+        let rss_pre = if crate::debug_flags::DebugFlags::get().mem {
+            crate::debug_flags::rss_kb()
+        } else {
+            0
+        };
+        self.explore_from(fi, arg_node, &mut state);
+        let rss_walk = if crate::debug_flags::DebugFlags::get().mem {
+            crate::debug_flags::rss_kb()
+        } else {
+            0
+        };
+
+        if mem_probe && (state.visited.len() > 50_000 || rss_walk.saturating_sub(rss_pre) > 1_000) {
+            self.log_sink_mem(fi, site.name, &state, rss_pre, rss_walk);
+        }
+
+        let verdict = verdict_of(&state);
+        let alert = if verdict == BackwardVerdict::Vulnerable {
+            Some(alert_info)
+        } else {
+            None
+        };
+        Some(ArgWalk {
+            arg_slot,
+            var,
+            verdict,
+            alert,
+            finding_class,
+            state,
+        })
+    }
+
+    /// Fold one explored argument into the run statistics.
+    fn record_arg_stats(&mut self, state: &ExploreState, verdict: &BackwardVerdict) {
+        self.stats.nodes_visited += state.seen_nodes.len();
+        let mut fns: FxHashSet<usize> = FxHashSet::default();
+        for (f, _) in state.seen_nodes.iter() {
+            fns.insert(*f);
+        }
+        self.stats.functions_visited += fns.len();
+
+        match *verdict {
+            BackwardVerdict::Vulnerable => self.stats.vulnerable += 1,
+            BackwardVerdict::Sanitized => self.stats.sanitized += 1,
+            BackwardVerdict::Unknown => self.stats.unknown += 1,
+            BackwardVerdict::Clean => self.stats.clean += 1,
+        }
+    }
+
+    /// Record one explored argument as a finding.
+    fn push_sink_finding(
+        &mut self,
+        ir: &FunctionIR,
+        site: SinkSite<'_>,
+        explicit_span: Option<(usize, usize)>,
+        walk: ArgWalk,
+    ) {
+        // Reconstruct the source→sink chain for vulnerable findings.
+        let path = if walk.verdict == BackwardVerdict::Vulnerable && self.capture_paths {
+            self.reconstruct_path(walk.state.source_node, walk.state.source_desc.clone())
+        } else {
+            TaintPath::default()
+        };
+
+        self.findings.push(SinkFinding {
+            function: ir.name.clone(),
+            sink: site.name.to_string(),
+            arg_slot: walk.arg_slot,
+            alert: walk.alert,
+            verdict: walk.verdict,
+            finding_class: walk.finding_class,
+            role: site.role,
+            label: site.label.map(str::to_string),
+            source_desc: walk.state.source_desc.clone(),
+            path,
+            cut_reasons: walk.state.cuts.clone(),
+            cut_sites: walk.state.cut_sites.clone(),
+            // Span of the SINK CALL itself, not the tainted operand's
+            // definition: reports must point at the line the user fixes.
+            // (Reporting the operand's def site put `search.ts` SQLi at
+            // line 18 instead of the vulnerable `query(...)` on line 21.)
+            sink_span: explicit_span
+                .or_else(|| ir.var_metadata.get(&walk.var).and_then(|m| m.byte_range)),
+        });
+    }
+}
+
+/// One explored sink argument: the walk's verdict and the state it produced.
+struct ArgWalk {
+    /// Slot the argument occupies, `RECEIVER_ARG_INDEX` for a method receiver.
+    arg_slot: usize,
+    /// Operand variable, used for the sink span fallback.
+    var: VarId,
+    /// Outcome of the backward walk.
+    verdict: BackwardVerdict,
+    /// Alert facts, kept only for vulnerable arguments.
+    alert: Option<SinkAlert>,
+    /// Shape classification used for every reported argument.
+    finding_class: FindingClass,
+    /// Exploration state, consumed when the finding is emitted.
+    state: ExploreState,
+}
+
+/// Collapse an exploration's flags into the single verdict reported.
+fn verdict_of(state: &ExploreState) -> BackwardVerdict {
+    if state.saw_source {
+        BackwardVerdict::Vulnerable
+    } else if state.saw_unknown {
+        BackwardVerdict::Unknown
+    } else if state.saw_sanitized_root_only {
+        BackwardVerdict::Sanitized
+    } else {
+        BackwardVerdict::Clean
     }
 }
