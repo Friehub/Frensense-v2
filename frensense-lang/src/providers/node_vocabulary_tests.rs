@@ -57,6 +57,10 @@ fn javascript_family_answers_its_placement_questions() {
     assert!(!ts.is_object_composite("parenthesized_expression"));
     assert!(ts.is_array_pattern("array_pattern"));
     assert!(!ts.is_array_pattern("object_pattern"));
+    assert!(ts.is_assignment_pattern("object_assignment_pattern"));
+    assert!(!ts.is_assignment_pattern("assignment_expression"));
+    assert!(ts.is_rest_pattern("rest_pattern"));
+    assert!(!ts.is_rest_pattern("spread_element"));
 
     // The statement form is the one the condition-chain lowering owns.
     assert!(ts.is_switch_statement("switch_statement"));

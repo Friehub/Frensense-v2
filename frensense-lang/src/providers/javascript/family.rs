@@ -295,6 +295,14 @@ impl<T: JsFamily> LanguageSpec for T {
         kind == "array_pattern"
     }
 
+    fn is_assignment_pattern(&self, kind: &str) -> bool {
+        kind == "object_assignment_pattern"
+    }
+
+    fn is_rest_pattern(&self, kind: &str) -> bool {
+        kind == "rest_pattern"
+    }
+
     fn is_switch_statement(&self, kind: &str) -> bool {
         kind == "switch_statement"
     }

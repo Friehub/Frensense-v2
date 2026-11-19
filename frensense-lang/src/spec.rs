@@ -603,6 +603,19 @@ pub trait LanguageSpec: Send + Sync + 'static {
         false
     }
 
+    /// A destructured binding with a fallback value (`{ a = 1 }`): the name on
+    /// the left of `=` reads the member of the same name, and the right side is
+    /// only used when the member is absent.
+    fn is_assignment_pattern(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A rest element in a pattern (`...rest`, `*rest`): it binds everything
+    /// the pattern did not, and carries no name of its own.
+    fn is_rest_pattern(&self, _kind: &str) -> bool {
+        false
+    }
+
     /// A C-family storage-class specifier (`static`, `extern`).
     fn is_storage_class_specifier(&self, _kind: &str) -> bool {
         false
