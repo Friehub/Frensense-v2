@@ -47,6 +47,18 @@ what this crate does.
 
 ### Fixed
 
+- **A quoted subscript names the same field as the bare key.** Member access
+  took the property node's source text verbatim, so a quoted subscript kept its
+  delimiters: `cmds['a']` lowered to `LoadField field: "'a'"` while the object
+  literal stored `a`, no store matched the load, and
+  `exec(cmds['a'])` over `const cmds = { a: "ping " + host }` was reported
+  `Clean` with 0 findings (issue #95). The read and the lvalue write path now
+  pass the text through `ir::function::strip_quotes`, so `cmds['a']`,
+  `cmds["a"]`, `{ "a": … }` read with `['a']`, and `m['k'] = v` all agree with
+  the store-side key; computed indexes (`cmds[k]`) still lower to
+  `LoadElement`. Measured on the repro: **0 → 1 finding**, and the five
+  spelling variants (`.a`, `['a']`, `["a"]`, `[k]`, quoted store) each report
+  once.
 - **A method sink's receiver is no longer reported as an argument.** The
   backward walk explores a virtual call's receiver as slot `usize::MAX` and
   reported it whatever the verdict, so every all-args sink over-counted

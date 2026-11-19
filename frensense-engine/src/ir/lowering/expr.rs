@@ -255,6 +255,13 @@ impl<'a> LoweringContext<'a> {
         })
     }
 
+    /// The field name a member access reads: the property's source text with
+    /// one matching quote pair removed, so `obj['a']` reads the same field the
+    /// object literal wrote for key `a` (#95).
+    fn property_text(&self, prop_node: Node) -> String {
+        strip_quotes(&self.source[prop_node.start_byte()..prop_node.end_byte()]).to_string()
+    }
+
     /// Lowers `object.property` or `object[index]`.
     ///
     /// The result is a fresh variable carrying the access's byte range, defined by a `LoadField` when the language classifies the property node as a property name, a `LoadElement` when the property evaluates to a variable, and a `LoadField` on the property text otherwise. Returns `None` when the object does not evaluate to a variable.
@@ -282,8 +289,7 @@ impl<'a> LoweringContext<'a> {
                 declared: false,
             });
             if self.is_property_kind(prop_node.kind()) {
-                let field_name =
-                    self.source[prop_node.start_byte()..prop_node.end_byte()].to_string();
+                let field_name = self.property_text(prop_node);
                 self.ir.push_instruction(
                     self.current_block,
                     Instruction::LoadField {
@@ -305,8 +311,7 @@ impl<'a> LoweringContext<'a> {
                     },
                 );
             } else {
-                let field_name =
-                    self.source[prop_node.start_byte()..prop_node.end_byte()].to_string();
+                let field_name = self.property_text(prop_node);
                 self.ir.push_instruction(
                     self.current_block,
                     Instruction::LoadField {
