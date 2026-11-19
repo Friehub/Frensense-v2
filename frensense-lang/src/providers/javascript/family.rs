@@ -32,7 +32,7 @@ use std::borrow::Cow;
 use tree_sitter::Node;
 
 use crate::spec::{
-    Export, Import, LanguageSpec, ModuleItem, NodeRole, PackageCategory, TaintOrigin,
+    Export, Import, JsxPart, LanguageSpec, ModuleItem, NodeRole, PackageCategory, TaintOrigin,
 };
 
 use super::{
@@ -266,6 +266,60 @@ impl<T: JsFamily> LanguageSpec for T {
 
     fn is_ternary_straight_line(&self, kind: &str) -> bool {
         is_js_ternary_straight_line(kind)
+    }
+
+    fn is_variable_declaration_statement(&self, kind: &str) -> bool {
+        matches!(kind, "lexical_declaration" | "variable_declaration")
+    }
+
+    fn is_variable_declarator(&self, kind: &str) -> bool {
+        kind == "variable_declarator"
+    }
+
+    // The two anonymous function spellings the extraction walk binds to a
+    // name. `function_declaration` / `method_definition` are excluded on
+    // purpose: they carry their own name.
+    fn is_function_value(&self, kind: &str) -> bool {
+        matches!(kind, "arrow_function" | "function_expression")
+    }
+
+    fn is_array_composite(&self, kind: &str) -> bool {
+        kind == "array"
+    }
+
+    fn is_array_pattern(&self, kind: &str) -> bool {
+        kind == "array_pattern"
+    }
+
+    fn is_switch_statement(&self, kind: &str) -> bool {
+        kind == "switch_statement"
+    }
+
+    fn is_case_clause(&self, kind: &str) -> bool {
+        matches!(kind, "switch_case" | "switch_default")
+    }
+
+    fn jsx_part(&self, kind: &str) -> Option<JsxPart> {
+        match kind {
+            "jsx_element" => Some(JsxPart::Element),
+            "jsx_self_closing_element" => Some(JsxPart::SelfClosingElement),
+            "jsx_fragment" => Some(JsxPart::Fragment),
+            "jsx_opening_element" => Some(JsxPart::OpeningElement),
+            "jsx_children" => Some(JsxPart::Children),
+            "jsx_attribute" => Some(JsxPart::Attribute),
+            _ => None,
+        }
+    }
+
+    fn is_jsx_attribute_value(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "jsx_expression"
+                | "string"
+                | "jsx_element"
+                | "jsx_self_closing_element"
+                | "jsx_fragment"
+        )
     }
 
     fn implicit_return_node<'a>(&self, fn_node: Node<'a>, body: Node<'a>) -> Option<Node<'a>> {

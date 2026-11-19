@@ -165,6 +165,33 @@ impl LanguageSpec for CSpec {
         kind == "cast_expression"
     }
 
+    fn is_storage_class_specifier(&self, kind: &str) -> bool {
+        kind == "storage_class_specifier"
+    }
+
+    fn is_pointer_expression(&self, kind: &str) -> bool {
+        kind == "pointer_expression"
+    }
+
+    fn is_preproc_conditional(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "preproc_if" | "preproc_ifdef" | "preproc_elif" | "preproc_elifdef" | "preproc_else"
+        )
+    }
+
+    fn is_preproc_else(&self, kind: &str) -> bool {
+        kind == "preproc_else"
+    }
+
+    fn is_switch_statement(&self, kind: &str) -> bool {
+        kind == "switch_statement"
+    }
+
+    fn is_case_clause(&self, kind: &str) -> bool {
+        kind == "case_statement"
+    }
+
     fn wrap_region(&self, code: &str) -> String {
         format!("void _region() {{\n{}\n}}", code)
     }

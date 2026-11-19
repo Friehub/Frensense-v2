@@ -10,3 +10,7 @@ pub mod rust_lang;
 #[cfg(test)]
 #[path = "module_surface_tests.rs"]
 mod module_surface_tests;
+
+#[cfg(test)]
+#[path = "node_vocabulary_tests.rs"]
+mod node_vocabulary_tests;

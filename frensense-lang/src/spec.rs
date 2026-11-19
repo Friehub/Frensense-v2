@@ -152,6 +152,48 @@ pub enum NodeRole {
 
 impl NodeRole {}
 
+/// A statement that transfers control to a labelled block or out of the
+/// current loop/switch.
+///
+/// Named so the CFG lowering dispatches on the grammar's answer instead of
+/// repeating a grammar's spellings: the default below is the C/JS pair the
+/// lowering has always recognized, and a grammar whose jump nodes are spelled
+/// differently overrides [`LanguageSpec::jump_kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum JumpKind {
+    /// `goto label;`
+    Goto,
+    /// `label:` - the target of a `goto`.
+    Label,
+    /// `break;` / `break label;`
+    Break,
+    /// `continue;` / `continue label;`
+    Continue,
+}
+
+/// The parts of JSX/TSX markup the lowering turns into prop stores.
+///
+/// Only the TypeScript/TSX grammar has these node kinds, so only the JavaScript
+/// family overrides [`LanguageSpec::jsx_part`]; every other language answers
+/// `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum JsxPart {
+    /// `<div>…</div>` - holds an opening element and a children run.
+    Element,
+    /// `<div />` - attributes and no children.
+    SelfClosingElement,
+    /// `<>…</>` - children only.
+    Fragment,
+    /// `<div …>` inside an [`JsxPart::Element`].
+    OpeningElement,
+    /// The children run of an [`JsxPart::Element`].
+    Children,
+    /// `name={value}`.
+    Attribute,
+}
+
 /// Broad category for what a package is used for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PackageCategory {
@@ -477,6 +519,131 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// Returns `true` if this node kind represents an assignment expression in declaration position
     /// (e.g. Python `subscript`, `attribute`).
     fn is_declaration_assignment(&self, _kind: &str) -> bool {
+        false
+    }
+
+    // ── Node-kind vocabulary ──────────────────────────────────────────────
+
+    // `classify` answers "what value does this node produce", but a few
+    // grammar decisions are about *placement*: a comment among a statement's
+    // children, the declarator inside a declaration, a JSX attribute, a jump
+    // target. They are named here so no consumer keeps its own copy of a
+    // grammar's spellings. Every default is `false`/`None` (or the one
+    // language-agnostic spelling) so a provider states only what its grammar
+    // actually has.
+
+    /// A comment node. Every supported grammar spells it `comment`; a grammar
+    /// that does not overrides this.
+    fn is_comment(&self, kind: &str) -> bool {
+        kind == "comment"
+    }
+
+    /// A statement that introduces variable declarators (`const x = 1`,
+    /// `var x`). The engine binds the declarators it contains.
+    fn is_variable_declaration_statement(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A single declarator inside a
+    /// [`is_variable_declaration_statement`](Self::is_variable_declaration_statement).
+    fn is_variable_declarator(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A function *value*: a function node that carries no name of its own
+    /// (arrow function, function expression, lambda, closure, func literal).
+    ///
+    /// Distinct from [`is_function_node`](Self::is_function_node), which also
+    /// matches declarations: binding a value to a name is not the same act as
+    /// declaring the function that name refers to.
+    fn is_function_value(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A composite literal that is array-shaped (`[a, b]`) rather than keyed
+    /// (`{ a: 1 }`).
+    fn is_array_composite(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A destructuring pattern that binds by position (`[a, b]`) rather than
+    /// by name (`{ a }`). Only meaningful when
+    /// [`is_destructuring_pattern`](Self::is_destructuring_pattern) is true.
+    fn is_array_pattern(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A C-family storage-class specifier (`static`, `extern`).
+    fn is_storage_class_specifier(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A pointer dereference expression (`*p`), which names the value `p`
+    /// points at rather than the pointer itself.
+    fn is_pointer_expression(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A preprocessor conditional branch (`#if`, `#ifdef`, `#elif`, `#else`),
+    /// whose arms are alternative configurations rather than a runtime fork.
+    fn is_preproc_conditional(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// The `#else` branch of a preprocessor conditional - the false arm's
+    /// body, not a fork of its own.
+    fn is_preproc_else(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A statement-form `switch`, which the lowering turns into a condition
+    /// chain (one comparison per case) rather than the coarse
+    /// branch-with-sequential-body.
+    fn is_switch_statement(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A clause of a `switch` (`case`, `default`).
+    fn is_case_clause(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A statement-form `match` whose arms may be pruned when the subject is
+    /// a compile-time constant. The expression form produces a value its
+    /// caller consumes, which the pruned path does not synthesize.
+    fn is_match_statement(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A guard on a match arm. It turns the arm into a runtime predicate, so
+    /// the arm can never be selected statically.
+    fn is_match_guard(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// The jump statement `kind` is, if any.
+    ///
+    /// The default is the C/JS vocabulary the CFG lowering has always
+    /// handled; a grammar that spells its jumps differently (`break_expression`
+    /// in Rust, for example) overrides it.
+    fn jump_kind(&self, kind: &str) -> Option<JumpKind> {
+        match kind {
+            "goto_statement" => Some(JumpKind::Goto),
+            "labeled_statement" => Some(JumpKind::Label),
+            "break_statement" => Some(JumpKind::Break),
+            "continue_statement" => Some(JumpKind::Continue),
+            _ => None,
+        }
+    }
+
+    /// The JSX/TSX part `kind` is, if any.
+    fn jsx_part(&self, _kind: &str) -> Option<JsxPart> {
+        None
+    }
+
+    /// A node that can be the value half of a JSX attribute: `{expr}`, a
+    /// literal string, or a nested element.
+    fn is_jsx_attribute_value(&self, _kind: &str) -> bool {
         false
     }
 

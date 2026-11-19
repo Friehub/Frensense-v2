@@ -417,6 +417,14 @@ impl LanguageSpec for RustSpec {
         kind == "type_cast_expression"
     }
 
+    fn is_function_value(&self, kind: &str) -> bool {
+        kind == "closure_expression"
+    }
+
+    fn is_match_guard(&self, kind: &str) -> bool {
+        kind == "match_guard"
+    }
+
     fn implicit_return_node<'a>(&self, _fn_node: Node<'a>, body: Node<'a>) -> Option<Node<'a>> {
         if body.kind() == "block" {
             let mut cursor = body.walk();

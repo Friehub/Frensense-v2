@@ -452,6 +452,18 @@ impl LanguageSpec for PythonSpec {
         matches!(kind, "subscript" | "attribute")
     }
 
+    fn is_function_value(&self, kind: &str) -> bool {
+        kind == "lambda"
+    }
+
+    fn is_match_statement(&self, kind: &str) -> bool {
+        kind == "match_statement"
+    }
+
+    fn is_match_guard(&self, kind: &str) -> bool {
+        kind == "if_clause"
+    }
+
     /// Python `with open(path) as f:` - extracts the path argument.
     fn context_manager_call<'s>(&self, node: Node<'_>, source: &'s str) -> Option<&'s str> {
         python_context_manager_call(node, source)

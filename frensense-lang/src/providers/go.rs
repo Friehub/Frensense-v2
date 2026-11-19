@@ -339,6 +339,10 @@ impl LanguageSpec for GoSpec {
         kind == "field_identifier"
     }
 
+    fn is_function_value(&self, kind: &str) -> bool {
+        kind == "func_literal"
+    }
+
     /// Go-specific: detect `if err != nil { return … }`.
     fn is_error_guard<'tree>(&self, node: Node<'tree>, source: &str) -> bool {
         go_is_error_guard(node, source)
