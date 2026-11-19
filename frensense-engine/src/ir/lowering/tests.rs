@@ -332,3 +332,35 @@ fn jsx_attribute_lowers_to_a_spanned_store() {
         Some("dangerouslySetInnerHTML={{ __html: html }}")
     );
 }
+
+/// #95: a quoted subscript names the same static field as the bare key. The
+/// lowering kept the literal's quotes, so `cmds['a']` read field `'a'` while
+/// the object literal stored `a`, and a read of `m['k'] = v` wrote `'k'`.
+#[test]
+fn quoted_subscripts_use_the_unquoted_field_name() {
+    use crate::ir::function::Instruction;
+
+    let read = r#"const cmds = { a: "x" }; exec(cmds['a']);"#;
+    let fns = lower_source_with_facts("t.ts", read, "ts", None).expect("lower t.ts");
+    let loaded: Vec<String> = fns
+        .values()
+        .flat_map(|f| f.blocks.values().flat_map(|b| b.instructions.iter()))
+        .filter_map(|i| match i {
+            Instruction::LoadField { field, .. } => Some(field.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(loaded, ["a"], "a quoted subscript must read field `a`");
+
+    let write = r#"function f(m: any) { m['k'] = 1; }"#;
+    let fns = lower_source_with_facts("t2.ts", write, "ts", None).expect("lower t2.ts");
+    let stored: Vec<String> = fns
+        .values()
+        .flat_map(|f| f.blocks.values().flat_map(|b| b.instructions.iter()))
+        .filter_map(|i| match i {
+            Instruction::StoreField { field, .. } => Some(field.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stored, ["k"], "a quoted store key must write field `k`");
+}

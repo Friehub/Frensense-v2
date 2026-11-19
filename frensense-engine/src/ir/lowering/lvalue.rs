@@ -2,7 +2,7 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-use crate::ir::function::{Operand, VarId};
+use crate::ir::function::{Operand, VarId, strip_quotes};
 use crate::ir::lowering::LoweringContext;
 use frensense_lang::NodeRole;
 use tree_sitter::Node;
@@ -77,9 +77,10 @@ impl<'a> LoweringContext<'a> {
                         // three into LoadElement/CallPointer, losing sink names.
                         Some(Operand::Var(index_var)) => {
                             if self.is_property_kind(prop_node.kind()) {
-                                let field_name = self.source
-                                    [prop_node.start_byte()..prop_node.end_byte()]
-                                    .to_string();
+                                let field_name = strip_quotes(
+                                    &self.source[prop_node.start_byte()..prop_node.end_byte()],
+                                )
+                                .to_string();
                                 Some(LValue::Field {
                                     base: base_var,
                                     field: field_name,
@@ -92,9 +93,10 @@ impl<'a> LoweringContext<'a> {
                             }
                         }
                         _ => {
-                            let field_name = self.source
-                                [prop_node.start_byte()..prop_node.end_byte()]
-                                .to_string();
+                            let field_name = strip_quotes(
+                                &self.source[prop_node.start_byte()..prop_node.end_byte()],
+                            )
+                            .to_string();
                             Some(LValue::Field {
                                 base: base_var,
                                 field: field_name,

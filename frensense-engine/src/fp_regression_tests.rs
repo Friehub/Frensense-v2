@@ -502,3 +502,30 @@ const el = <div dangerouslySetInnerHTML={{ __html: "<b>static</b>" }} />;
     let res = run("tsx", "d.tsx", src);
     assert!(!vulnerable(&res, "dangerouslySetInnerHTML"));
 }
+
+/// #95: `obj['a']` is a static field read, so it must match the `a` an object
+/// literal stored. The lowering kept the literal's quotes in the field name,
+/// the store never matched, and the flow to `exec` was lost.
+#[test]
+fn quoted_subscript_matches_the_object_literal_field() {
+    let src = r#"
+import { exec } from "child_process";
+import express from "express";
+const app = express();
+app.get("/a", async (req, res) => {
+  const host = req.query.host as string;
+  const cmds = { a: "ping " + host };
+  exec(cmds['a']);
+  res.send("ok");
+});
+"#;
+    let res = run("ts", "obj.ts", src);
+    assert!(
+        vulnerable(&res, "exec"),
+        "a quoted subscript must reach the field the literal stored: {:?}",
+        res.findings
+            .iter()
+            .map(|f| (f.sink.clone(), f.verdict.clone()))
+            .collect::<Vec<_>>()
+    );
+}
