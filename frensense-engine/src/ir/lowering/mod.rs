@@ -31,13 +31,13 @@ pub use context::LoweringContext;
 pub(crate) use lvalue::LValue;
 
 use crate::ir::function::Operand;
-use frensense_lang::NodeRole;
+use frensense_lang::{JsxPart, JumpKind, NodeRole};
 use tree_sitter::Node;
 
 impl<'a> LoweringContext<'a> {
     /// Lowers one AST node into the current block, dispatching on the node's role (a learned bundle role first, then the language spec).
     ///
-    /// Dispatch is by role (declaration, assignment, member access, call, loop, branch, match, return, try, operators, identifier, literal, composite), with a few kind-specific cases (`switch_statement`, preprocessor conditionals, `goto`, labels, `break`, `continue`). Function definitions are skipped, and any other node is lowered by walking its children.
+    /// Dispatch is by role (declaration, assignment, member access, call, loop, branch, match, return, try, operators, identifier, literal, composite), with a few grammar-specific cases the language spec answers (`is_switch_statement`, `jsx_part`, `is_preproc_conditional`, `jump_kind`). Function definitions are skipped, and any other node is lowered by walking its children.
     ///
     /// Returns the operand holding the node's value, or `None` for statements and nodes that produce no value.
     pub fn visit_node(&mut self, node: Node) -> Option<Operand> {
@@ -71,29 +71,24 @@ impl<'a> LoweringContext<'a> {
 
             // `switch` gets a real condition chain (case labels as
             // conditions) instead of the coarse branch-with-sequential-body.
-            _ if node.kind() == "switch_statement" => self.visit_switch(node),
+            _ if self.spec.is_switch_statement(node.kind()) => self.visit_switch(node),
 
             // JSX element attributes are writes to a props object. Lowering
             // them as spanned field stores lets `<div dangerouslySetInnerHTML={…} />`
             // reach property-sink matching exactly like `el.innerHTML = …`.
+            // Only the element forms carry props and children: an opening
+            // element or a children run is lowered by its enclosing element,
+            // so routing every JSX part here would duplicate their stores.
             _ if matches!(
-                node.kind(),
-                "jsx_element" | "jsx_self_closing_element" | "jsx_fragment"
+                self.spec.jsx_part(node.kind()),
+                Some(JsxPart::Element | JsxPart::SelfClosingElement | JsxPart::Fragment)
             ) =>
             {
                 self.visit_jsx_element(node)
             }
 
             // C preprocessor chains: alternatives are exclusive configs.
-            _ if matches!(
-                node.kind(),
-                "preproc_if"
-                    | "preproc_ifdef"
-                    | "preproc_elif"
-                    | "preproc_elifdef"
-                    | "preproc_else"
-            ) =>
-            {
+            _ if self.spec.is_preproc_conditional(node.kind()) => {
                 self.visit_preproc_conditional(node)
             }
 
@@ -133,10 +128,16 @@ impl<'a> LoweringContext<'a> {
             // (`CallStatic`); captures flow through closure edges.
             NodeRole::Function { .. } => None,
 
-            _ if node.kind() == "goto_statement" => self.visit_goto(node),
-            _ if node.kind() == "labeled_statement" => self.visit_labeled_statement(node),
-            _ if node.kind() == "break_statement" => self.visit_break(node),
-            _ if node.kind() == "continue_statement" => self.visit_continue(node),
+            _ if self.spec.jump_kind(node.kind()) == Some(JumpKind::Goto) => self.visit_goto(node),
+            _ if self.spec.jump_kind(node.kind()) == Some(JumpKind::Label) => {
+                self.visit_labeled_statement(node)
+            }
+            _ if self.spec.jump_kind(node.kind()) == Some(JumpKind::Break) => {
+                self.visit_break(node)
+            }
+            _ if self.spec.jump_kind(node.kind()) == Some(JumpKind::Continue) => {
+                self.visit_continue(node)
+            }
 
             _ => self.visit_children_generic(node),
         }

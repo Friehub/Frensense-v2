@@ -198,6 +198,16 @@ what this crate does.
 
 ### Changed
 
+- **`visit_node` dispatches on the language spec instead of grammar spellings.**
+  The lowering's fallback arms compared `node.kind()` against
+  `switch_statement`, the five `preproc_*` kinds, the four jump kinds and the
+  three JSX element kinds. They now ask `is_switch_statement`,
+  `is_preproc_conditional`, `jump_kind` and `jsx_part`; the JSX arm deliberately
+  accepts only element, self-closing element and fragment, because an opening
+  element or children run is lowered by its enclosing element and routing it
+  here would duplicate every prop store. No behaviour change; the 575-test
+  suite is unchanged.
+
 - **The harness binds parameters through `frensense-lang`, not its own grammar
   tables.** `lower_one` read a hardcoded `parameters` field, walked C's
   `function_definition → declarator → function_declarator` chain by hand, and
