@@ -13,6 +13,35 @@
 //! across nine small traits creates nine places a new language author can
 //! forget to implement one. A single trait with good defaults makes the
 //! "forgot to implement" case a compile error, not a silent empty result.
+//!
+//! # The three layers of grammar knowledge
+//!
+//! A subsystem asks the spec at whichever layer matches its question, from
+//! coarsest to finest:
+//!
+//! 1. **Roles** - [`LanguageSpec::classify`] answers "what is this node?" with a
+//!    [`NodeRole`], field names included. Use it when one answer drives one
+//!    branch (`Call`, `Return`, `Composite`, ...).
+//! 2. **Predicates** - `is_*` queries answer a yes/no question the analysis
+//!    asks about a node it already holds: [`LanguageSpec::is_statement_node`],
+//!    [`LanguageSpec::is_block_node`], [`LanguageSpec::is_case_clause`],
+//!    [`LanguageSpec::is_jump_target_name`],
+//!    [`LanguageSpec::is_function_value`],
+//!    [`LanguageSpec::is_discard_pattern`], and the rest. They exist because a
+//!    role is sometimes too narrow (one grammar spells one concept several
+//!    ways) or too broad, while a lowering site only needs the boolean. Every
+//!    predicate defaults to the cross-language superset, so a provider overrides
+//!    only what its grammar spells differently.
+//! 3. **Tables** - [`LanguageSpec::jump_kind`],
+//!    [`LanguageSpec::literal_shape`] and [`LanguageSpec::param_bindings`] map a
+//!    kind to structured data (which jump, which literal shape, which binding),
+//!    for walkers that dispatch on the answer instead of branching on a
+//!    boolean.
+//!
+//! The rule for contributors: **the engine may not spell a node kind.** When a
+//! decision needs one, add a layer-1/2/3 query here with a default that
+//! reproduces today's behaviour, override it per grammar where the spelling
+//! differs, and pin both in `providers/node_vocabulary_tests.rs`.
 
 use std::borrow::Cow;
 

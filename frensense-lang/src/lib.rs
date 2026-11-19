@@ -301,6 +301,36 @@
 //!     _ => {}
 //! }
 //! ```
+//!
+//! ### 10. IR lowering (`ir/lowering/*`, `harness.rs`)
+//!
+//! **Before:** lowering compared node kinds inline - `k.contains("statement")`,
+//! `matches!(kind, "case_pattern" | "union_pattern")`, `node.kind() ==
+//! "preproc_else"`, `"arrow_function" | "function_expression"` for bindable
+//! function values, `"break"`/`"continue"` special-cased at each site - and C's
+//! declarator chain was hand-walked (once for parameters, once for names).
+//!
+//! **After:** lowering asks the vocabulary layer and never spells a kind. A
+//! shape question is a predicate, a dispatch is a role or a table:
+//!
+//! ```rust,ignore
+//! // shape: is this child a block/statement body?
+//! if self.spec.is_block_or_statement(child.kind()) { ... }
+//! // dispatch: what is this node, and what are its fields called?
+//! if let NodeRole::Call { callee_field, args_field } = spec.classify(node.kind()) { ... }
+//! // structured answer: which jump is this?
+//! match self.spec.jump_kind(node.kind()) {
+//!     Some(JumpKind::Break) => ...,
+//!     Some(JumpKind::Continue) => ...,
+//!     _ => {}
+//! }
+//! ```
+//!
+//! A new grammar implements the trait and its lowering works; before, every
+//! engine file needed its own new arm. `spec.rs` documents the three layers
+//! (roles, predicates, tables), and the engine's
+//! `ir/lowering/kind_migration_tests.rs` pins each query against the comparison
+//! it replaced by walking real parse trees, so an empty walk cannot pass.
 
 pub mod intrinsics;
 pub mod providers;
