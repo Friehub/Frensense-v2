@@ -30,6 +30,7 @@
 //! `switch`, ternary, `try`), because a variable assigned on one path is not
 //! constant after the merge. Recording is only sound if that rule is kept.
 
+use frensense_lang::LiteralShape;
 use frensense_lang::NodeRole;
 use rustc_hash::FxHashMap;
 use tree_sitter::Node;
@@ -175,7 +176,7 @@ impl<'a> LoweringContext<'a> {
         let mut operand = None;
         let mut operator = None;
         for child in node.children(&mut cursor) {
-            if child.kind() == "comment" {
+            if self.spec.is_comment(child.kind()) {
                 continue;
             }
             if child.is_named() && operand.is_none() {
@@ -224,7 +225,7 @@ impl<'a> LoweringContext<'a> {
         let mut operators: Vec<String> = Vec::new();
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "comment" {
+            if self.spec.is_comment(child.kind()) {
                 continue;
             }
             let text = self.source[child.start_byte()..child.end_byte()].trim();
@@ -406,11 +407,14 @@ fn arithmetic_const(op: &str, left: &ConstValue, right: &ConstValue) -> Option<C
 // ---------------------------------------------------------------------------
 
 /// The pattern node of a `match` arm / `case` clause.
-pub(super) fn match_arm_pattern<'t>(arm: Node<'t>) -> Option<Node<'t>> {
+pub(super) fn match_arm_pattern<'t>(
+    arm: Node<'t>,
+    spec: &dyn frensense_lang::spec::LanguageSpec,
+) -> Option<Node<'t>> {
     arm.child_by_field_name("pattern").or_else(|| {
         let mut cursor = arm.walk();
         arm.children(&mut cursor)
-            .find(|n| n.is_named() && n.kind().contains("pattern"))
+            .find(|n| n.is_named() && spec.is_match_pattern_node(n.kind()))
     })
 }
 
@@ -449,11 +453,11 @@ impl<'a> LoweringContext<'a> {
             let mut cursor = arm.walk();
             if arm
                 .children(&mut cursor)
-                .any(|n| matches!(n.kind(), "if_clause" | "match_guard"))
+                .any(|n| self.spec.is_match_guard(n.kind()))
             {
                 return None;
             }
-            let pat = match_arm_pattern(*arm)?;
+            let pat = match_arm_pattern(*arm, self.spec)?;
             match self.pattern_matches(subject, pat) {
                 Some(true) => return Some(Some(i)),
                 Some(false) => {}
@@ -468,12 +472,13 @@ impl<'a> LoweringContext<'a> {
     /// reference the evaluator cannot resolve).
     fn pattern_matches(&self, subject: &ConstValue, pat: Node) -> Option<bool> {
         let text = self.source[pat.start_byte()..pat.end_byte()].trim();
-        match pat.kind() {
+        let kind = pat.kind();
+        match kind {
             // The discard pattern matches anything; it binds nothing.
-            "_" => (text == "_").then_some(true),
+            _ if self.spec.is_discard_pattern(kind) => (text == "_").then_some(true),
             // Python wraps every case pattern in `case_pattern`, and `_`
             // arrives as an anonymous child, leaving no named child.
-            "case_pattern" => {
+            _ if self.spec.is_pattern_wrapper(kind) => {
                 let mut cursor = pat.walk();
                 let named: Vec<Node> = pat.named_children(&mut cursor).collect();
                 if named.is_empty() {
@@ -482,7 +487,7 @@ impl<'a> LoweringContext<'a> {
                 self.pattern_const(pat).map(|v| v == *subject)
             }
             // `case 'C' | 'D':` - the arm executes if any alternative matches.
-            "union_pattern" => {
+            _ if self.spec.is_alternative_pattern(kind) => {
                 let mut saw_unknown = false;
                 let mut cursor = pat.walk();
                 for child in pat.named_children(&mut cursor) {
@@ -505,17 +510,17 @@ impl<'a> LoweringContext<'a> {
     /// constant here even when a same-named variable has a recorded value.
     fn pattern_const(&self, pat: Node) -> Option<ConstValue> {
         let text = self.source[pat.start_byte()..pat.end_byte()].trim();
-        match pat.kind() {
-            "string" | "concatenated_string" | "integer" | "float" => {
+        let kind = pat.kind();
+        match self.spec.literal_shape(kind) {
+            Some(LiteralShape::String | LiteralShape::Integer | LiteralShape::Float) => {
                 if preceded_by_minus(self.source, pat) {
                     return None;
                 }
                 self.const_value(pat)
             }
-            "true" => Some(ConstValue::Bool(true)),
-            "false" => Some(ConstValue::Bool(false)),
-            "none" | "null" => Some(ConstValue::Null),
-            "case_pattern" => {
+            Some(LiteralShape::Boolean(value)) => Some(ConstValue::Bool(value)),
+            Some(LiteralShape::Null) => Some(ConstValue::Null),
+            _ if self.spec.is_pattern_wrapper(kind) => {
                 let mut cursor = pat.walk();
                 let named: Vec<Node> = pat.named_children(&mut cursor).collect();
                 let [only] = named.as_slice() else {

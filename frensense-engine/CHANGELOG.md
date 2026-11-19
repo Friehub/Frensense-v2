@@ -198,6 +198,18 @@ what this crate does.
 
 ### Changed
 
+- **Match-arm evaluation asks the spec for patterns and literals.**
+  `const_eval.rs` matched `pat.kind()` against `_`, `case_pattern`,
+  `union_pattern`, `string`, `concatenated_string`, `integer`, `float`, `true`,
+  `false`, `none` and `null`, and scanned for `"pattern"` children and
+  `if_clause` / `match_guard` guards. The two state machines now match on
+  `literal_shape` and the pattern queries (`is_discard_pattern`,
+  `is_pattern_wrapper`, `is_alternative_pattern`, `is_match_pattern_node`,
+  `is_match_guard`). `match_arm_pattern` is a free function, so it takes the
+  spec explicitly. No behaviour change: the foldable literal set, the discard
+  and alternative handling, and the "a guard makes the arm undecidable" rule are
+  the same; 575 engine tests unchanged.
+
 - **CFG construction asks the spec about shape, clauses and jumps.** The 23 node
   kind comparisons in `control_flow.rs` are gone: loop and branch bodies and
   conditions (`is_block_or_statement`, `is_loop_condition_node`,

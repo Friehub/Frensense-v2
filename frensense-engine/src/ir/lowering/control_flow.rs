@@ -839,7 +839,7 @@ impl<'a> LoweringContext<'a> {
             self.current_block = arm_blocks[i];
             self.env.push(FxHashMap::default());
 
-            if let Some(pat) = match_arm_pattern(*arm) {
+            if let Some(pat) = match_arm_pattern(*arm, self.spec) {
                 self.bind_match_pattern(pat, &scrutinee_op);
             }
 
