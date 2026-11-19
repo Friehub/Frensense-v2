@@ -15,7 +15,7 @@
 //! answer makes a language-specific decision look language-independent.
 
 use crate::registry::spec_for_ext;
-use crate::spec::{JsxPart, JumpKind, LanguageSpec};
+use crate::spec::{JsxPart, JumpKind, LanguageSpec, LiteralShape};
 
 fn spec(ext: &str) -> &'static dyn LanguageSpec {
     spec_for_ext(ext).expect("spec for extension")
@@ -172,4 +172,87 @@ fn vocabulary_does_not_leak_across_grammars() {
     assert!(!spec("go").is_match_statement("match_statement"));
     assert!(!spec("rs").is_storage_class_specifier("storage_class_specifier"));
     assert!(!spec("ts").is_storage_class_specifier("storage_class_specifier"));
+}
+
+/// The CFG builder discovers a loop/branch body by shape, because the grammars
+/// disagree about which fields they expose. Each answer below is the one the
+/// builder applies today, so moving the call sites cannot move a finding.
+#[test]
+fn shape_vocabulary_matches_the_lowering_heuristics() {
+    for ext in ["ts", "py", "rs", "go", "c"] {
+        let s = spec(ext);
+
+        // A statement, a block or a `*_body` node can own a body.
+        assert!(s.is_body_node("block"), "{ext}: block");
+        assert!(s.is_body_node("statement_block"), "{ext}: statement_block");
+        assert!(s.is_body_node("if_statement"), "{ext}: if_statement");
+        assert!(s.is_body_node("function_body"), "{ext}: function_body");
+        assert!(!s.is_body_node("identifier"), "{ext}: identifier");
+        assert!(s.is_block_or_statement("compound_statement"), "{ext}");
+        assert!(!s.is_block_or_statement("string"), "{ext}");
+
+        // The condition is what is neither body nor declarator nor header clause.
+        assert!(s.is_loop_condition_node("binary_expression"), "{ext}");
+        assert!(!s.is_loop_condition_node("for_statement"), "{ext}");
+        assert!(!s.is_loop_condition_node("variable_declarator"), "{ext}");
+        assert!(!s.is_loop_condition_node("update_expression"), "{ext}");
+        assert!(!s.is_branch_condition_node("variable_declaration"), "{ext}");
+        assert!(
+            !s.is_branch_condition_node("assignment_expression"),
+            "{ext}"
+        );
+        assert!(s.is_branch_condition_node("call_expression"), "{ext}");
+
+        // Go labels its jump targets `statement_identifier`; others do not.
+        assert!(s.is_jump_target_name("statement_identifier"), "{ext}");
+        assert!(s.is_jump_target_name("identifier"), "{ext}");
+        assert!(!s.is_jump_target_name("field_identifier"), "{ext}");
+
+        // Match-arm patterns: an alternative, Python's wrapper, the discard.
+        assert!(s.is_match_pattern_node("case_pattern"), "{ext}");
+        assert!(s.is_alternative_pattern("union_pattern"), "{ext}");
+        assert!(s.is_pattern_wrapper("case_pattern"), "{ext}");
+        assert!(s.is_discard_pattern("_"), "{ext}");
+        assert!(!s.is_discard_pattern("wildcard_pattern"), "{ext}");
+    }
+}
+
+#[test]
+fn literal_shape_names_only_the_foldable_literals() {
+    for ext in ["ts", "py", "rs", "go", "c"] {
+        let s = spec(ext);
+        assert_eq!(
+            s.literal_shape("string"),
+            Some(LiteralShape::String),
+            "{ext}"
+        );
+        assert_eq!(
+            s.literal_shape("concatenated_string"),
+            Some(LiteralShape::String)
+        );
+        assert_eq!(s.literal_shape("integer"), Some(LiteralShape::Integer));
+        assert_eq!(s.literal_shape("float"), Some(LiteralShape::Float));
+        assert_eq!(s.literal_shape("true"), Some(LiteralShape::Boolean(true)));
+        assert_eq!(s.literal_shape("false"), Some(LiteralShape::Boolean(false)));
+        assert_eq!(s.literal_shape("none"), Some(LiteralShape::Null));
+        assert_eq!(s.literal_shape("null"), Some(LiteralShape::Null));
+        assert_eq!(s.literal_shape("identifier"), None);
+        assert_eq!(s.literal_shape("call_expression"), None);
+    }
+}
+
+#[test]
+fn string_expression_covers_the_folding_union() {
+    for ext in ["ts", "py", "rs", "go", "c"] {
+        let s = spec(ext);
+        for kind in ["string", "concatenated_string", "binary_expression"] {
+            assert!(s.is_string_expression(kind), "{ext}: {kind}");
+        }
+        assert!(!s.is_string_expression("identifier"), "{ext}");
+    }
+
+    // A template string is the JavaScript family's spelling; the other
+    // grammars answer through `is_template_string`, which defaults to false.
+    assert!(spec("ts").is_string_expression("template_string"));
+    assert!(!spec("c").is_string_expression("template_string"));
 }

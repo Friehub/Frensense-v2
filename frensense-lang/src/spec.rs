@@ -194,6 +194,25 @@ pub enum JsxPart {
     Attribute,
 }
 
+/// The literal a node spells, when the lowering can fold it at compile time.
+///
+/// Used by match-arm selection: only a pattern that spells one of these can
+/// be compared against a constant subject without running the program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LiteralShape {
+    /// A quoted string or an implicit concatenation of them.
+    String,
+    /// An integer literal.
+    Integer,
+    /// A floating-point literal.
+    Float,
+    /// `true` / `false`.
+    Boolean(bool),
+    /// `none` / `null`.
+    Null,
+}
+
 /// Broad category for what a package is used for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PackageCategory {
@@ -645,6 +664,116 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// literal string, or a nested element.
     fn is_jsx_attribute_value(&self, _kind: &str) -> bool {
         false
+    }
+
+    // ── Grammar shape ─────────────────────────────────────────────────────
+
+    // The CFG builder discovers a loop's body and condition, a branch's
+    // condition and consequence, and a switch's clauses by *shape* rather than
+    // by field, because the grammars disagree about which fields they expose.
+    // Those shape questions are answered here, so the builder does not spell
+    // out `contains("statement")`-style vocabulary for every language.
+    //
+    // The defaults are the vocabulary the builder applies today to every
+    // grammar. A provider narrows them when its grammar disagrees.
+
+    /// A node that carries statements (`*_statement`).
+    fn is_statement_node(&self, kind: &str) -> bool {
+        kind.contains("statement")
+    }
+
+    /// A node that is a block of statements.
+    fn is_block_node(&self, kind: &str) -> bool {
+        kind == "block" || kind.contains("block")
+    }
+
+    /// A node that can stand in for a statement or a block - a body, a
+    /// branch's consequence, a loop's body.
+    fn is_block_or_statement(&self, kind: &str) -> bool {
+        self.is_statement_node(kind) || self.is_block_node(kind)
+    }
+
+    /// A node that owns a nested body, including the grammars that name it
+    /// `*_body` instead of `*_block`.
+    fn is_body_node(&self, kind: &str) -> bool {
+        self.is_block_or_statement(kind) || kind.ends_with("body")
+    }
+
+    /// A declarator wrapper (`*_declarator`).
+    fn is_declarator_node(&self, kind: &str) -> bool {
+        kind.contains("declarator")
+    }
+
+    /// The update or initializer clause of a `for` header.
+    fn is_loop_update_or_initializer(&self, kind: &str) -> bool {
+        kind.contains("update") || kind.contains("initializer")
+    }
+
+    /// A node that can be the condition operand of a loop: anything that is
+    /// not the body, a declarator, an update or an initializer.
+    fn is_loop_condition_node(&self, kind: &str) -> bool {
+        !self.is_block_or_statement(kind)
+            && !self.is_declarator_node(kind)
+            && !self.is_loop_update_or_initializer(kind)
+    }
+
+    /// A node that can be the condition operand of a branch.
+    fn is_branch_condition_node(&self, kind: &str) -> bool {
+        !self.is_statement_node(kind)
+            && !self.is_block_node(kind)
+            && !kind.contains("declaration")
+            && !kind.contains("assignment")
+    }
+
+    /// A name that can be the target of `break`/`continue`/`goto`:
+    /// `statement_identifier` in Go's labelled statements, a plain identifier
+    /// elsewhere.
+    fn is_jump_target_name(&self, kind: &str) -> bool {
+        kind == "statement_identifier" || kind == "identifier"
+    }
+
+    /// A pattern node of a match arm.
+    fn is_match_pattern_node(&self, kind: &str) -> bool {
+        kind.contains("pattern")
+    }
+
+    /// The discard pattern (`_`), which matches anything and binds nothing.
+    fn is_discard_pattern(&self, kind: &str) -> bool {
+        kind == "_"
+    }
+
+    /// A wrapper a grammar puts around every arm pattern (Python's
+    /// `case_pattern`), transparent for matching.
+    fn is_pattern_wrapper(&self, kind: &str) -> bool {
+        kind == "case_pattern"
+    }
+
+    /// A pattern that is an alternative of others (`case 'a' | 'b':`): the arm
+    /// executes when any alternative matches.
+    fn is_alternative_pattern(&self, kind: &str) -> bool {
+        kind == "union_pattern"
+    }
+
+    /// A node whose value may be a string built from literal and interpolated
+    /// parts: a template string, a quoted string, an implicit concatenation,
+    /// or a `+` chain the lowering folds part by part.
+    fn is_string_expression(&self, kind: &str) -> bool {
+        self.is_template_string(kind)
+            || matches!(kind, "string" | "binary_expression" | "concatenated_string")
+    }
+
+    /// The literal `kind` spells, when the lowering can fold it at compile
+    /// time. `None` for anything that needs the program to run.
+    fn literal_shape(&self, kind: &str) -> Option<LiteralShape> {
+        match kind {
+            "string" | "concatenated_string" => Some(LiteralShape::String),
+            "integer" => Some(LiteralShape::Integer),
+            "float" => Some(LiteralShape::Float),
+            "true" => Some(LiteralShape::Boolean(true)),
+            "false" => Some(LiteralShape::Boolean(false)),
+            "none" | "null" => Some(LiteralShape::Null),
+            _ => None,
+        }
     }
 
     /// If the function body has an implicit return expression (e.g. Rust trailing expression

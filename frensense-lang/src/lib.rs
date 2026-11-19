@@ -316,4 +316,6 @@ pub use registry::{all_specs, spec_for_ext, spec_for_path, LanguageRegistry};
 pub use severity::{
     checker_rule_tier, Profile, RuleTier, SanitizerKind, Severity, SinkRole, SEVERITY_LABELS,
 };
-pub use spec::{Import, JsxPart, JumpKind, LanguageSpec, NodeRole, PackageCategory, TaintOrigin};
+pub use spec::{
+    Import, JsxPart, JumpKind, LanguageSpec, LiteralShape, NodeRole, PackageCategory, TaintOrigin,
+};
