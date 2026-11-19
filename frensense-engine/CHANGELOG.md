@@ -198,6 +198,18 @@ what this crate does.
 
 ### Changed
 
+- **The harness asks the spec for declarations, function values, call fields
+  and names.** The extraction walk tested `lexical_declaration` /
+  `variable_declaration`, `variable_declarator`, `arrow_function` /
+  `function_expression`, `export_statement` and `call_expression` (plus its
+  `function` / `arguments` fields) by name, and `function_name_of` hand-walked
+  C's declarator chain. They now use `is_variable_declaration_statement`,
+  `is_variable_declarator`, `is_function_value`, the `NodeRole::Export` and
+  `NodeRole::Call` roles (field names included), and `function_name_node`.
+  `harness.rs` contains no node-kind comparison, so the crate's grammar
+  knowledge is now entirely behind `LanguageSpec`. No behaviour change; 575
+  engine tests unchanged.
+
 - **Match-arm evaluation asks the spec for patterns and literals.**
   `const_eval.rs` matched `pat.kind()` against `_`, `case_pattern`,
   `union_pattern`, `string`, `concatenated_string`, `integer`, `float`, `true`,

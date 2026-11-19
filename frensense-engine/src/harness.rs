@@ -15,6 +15,7 @@ use crate::analysis::taint::facts::FactTable;
 use crate::ir::function::*;
 use crate::ir::lowering::LoweringContext;
 use crate::ir::ssa::SSABuilder;
+use frensense_lang::NodeRole;
 
 /// Lower a single source file into a set of SSA'd `FunctionIR`s keyed by
 /// function name.
@@ -106,7 +107,7 @@ pub(crate) fn lower_source_detailed(
         // `method_definition`, Python `function_definition` (+ async),
         // Rust `function_item`, Go `function_declaration` / `method_declaration`.
         if spec.is_function_node(node.kind()) {
-            let name = function_name_of(node, source);
+            let name = function_name_of(node, source, spec);
             // Skip only bindings whose lexical declaration or route
             // registration already lowered this node under its binding
             // name. EVERY other function - including nameless nested ones
@@ -122,10 +123,10 @@ pub(crate) fn lower_source_detailed(
         }
         // Top-level arrow functions bound to consts/lets, the dominant
         // shape for utility libraries (`export const hash = (d) => ...`).
-        if node.kind() == "lexical_declaration" || node.kind() == "variable_declaration" {
+        if spec.is_variable_declaration_statement(node.kind()) {
             let mut dc = node.walk();
             for decl in node.named_children(&mut dc) {
-                if decl.kind() != "variable_declarator" {
+                if !spec.is_variable_declarator(decl.kind()) {
                     continue;
                 }
                 crate::dbg_trace!(
@@ -141,7 +142,7 @@ pub(crate) fn lower_source_detailed(
                     .child_by_field_name("name")
                     .map(|n| source[n.start_byte()..n.end_byte()].to_string())
                     .unwrap_or_else(|| format!("<fn@{}>", decl.start_byte()));
-                if value.kind() == "arrow_function" || value.kind() == "function_expression" {
+                if spec.is_function_value(value.kind()) {
                     bound_fns.insert(value.start_byte());
                     let mut ir = lower_one(&name, value, source, spec, facts);
                     ir.enclosing_fn = enclosing_extracted_name(value, source, path, spec, facts);
@@ -162,10 +163,13 @@ pub(crate) fn lower_source_detailed(
             }
         }
         // Route-registration handlers: `app.get("/", (req, res) => ...)`.
-        if node.kind() == "call_expression"
+        if let NodeRole::Call {
+            callee_field,
+            args_field,
+        } = spec.classify(node.kind())
             && let (Some(callee), Some(args)) = (
-                node.child_by_field_name("function"),
-                node.child_by_field_name("arguments"),
+                node.child_by_field_name(callee_field.as_ref()),
+                node.child_by_field_name(args_field.as_ref()),
             )
         {
             let callee_text = &source[callee.start_byte()..callee.end_byte()];
@@ -173,7 +177,7 @@ pub(crate) fn lower_source_detailed(
                 let mut ac = args.walk();
                 let arg_nodes: Vec<_> = args.named_children(&mut ac).collect();
                 for a in &arg_nodes {
-                    if a.kind() == "arrow_function" || a.kind() == "function_expression" {
+                    if spec.is_function_value(a.kind()) {
                         let name = format!("<{}:handler@{}>", path, a.start_byte());
                         bound_fns.insert(a.start_byte());
                         let mut ir = lower_one(&name, *a, source, spec, facts);
@@ -258,17 +262,17 @@ fn module_scope_skip(
     if spec.is_function_node(kind) || spec.import_node_kinds().contains(&kind) {
         return true;
     }
-    if matches!(kind, "lexical_declaration" | "variable_declaration") {
+    if spec.is_variable_declaration_statement(kind) {
         return true;
     }
     // `export const x = ...` / `export function f` wrap the same nodes; a
     // default export of an expression (`export default runTool(cmd)`) does
     // execute at import time and stays in the module IR.
-    if kind == "export_statement" {
+    if matches!(spec.classify(kind), NodeRole::Export) {
         let mut cursor = node.walk();
         return node.named_children(&mut cursor).any(|child| {
             spec.is_function_node(child.kind())
-                || matches!(child.kind(), "lexical_declaration" | "variable_declaration")
+                || spec.is_variable_declaration_statement(child.kind())
         });
     }
     false
@@ -310,24 +314,14 @@ fn inside_function(node: tree_sitter::Node, spec: &dyn frensense_lang::spec::Lan
 }
 
 /// The declaration-level name of a function node: the `name` field, or the
-/// C-style declarator chain (`function_definition → declarator → ...`).
-fn function_name_of(node: tree_sitter::Node, source: &str) -> Option<String> {
-    node.child_by_field_name("name")
-        .or_else(|| {
-            let mut decl = node.child_by_field_name("declarator");
-            while let Some(d) = decl {
-                if d.kind() == "identifier" {
-                    return Some(d);
-                }
-                if let Some(inner) = d.child_by_field_name("declarator") {
-                    decl = Some(inner);
-                } else {
-                    let mut c = d.walk();
-                    return d.children(&mut c).find(|k| k.kind() == "identifier");
-                }
-            }
-            None
-        })
+/// grammar's declarator chain (`function_definition -> declarator -> ...`),
+/// which the language spec resolves.
+fn function_name_of(
+    node: tree_sitter::Node,
+    source: &str,
+    spec: &dyn frensense_lang::spec::LanguageSpec,
+) -> Option<String> {
+    spec.function_name_node(node)
         .map(|n| source[n.start_byte()..n.end_byte()].to_string())
 }
 
@@ -344,15 +338,15 @@ fn extracted_ancestor_name(
 ) -> Option<String> {
     // Direct declaration name (function_declaration, method_definition,
     // named function expression) - same order as extraction.
-    if let Some(name) = function_name_of(fn_node, source) {
+    if let Some(name) = function_name_of(fn_node, source, spec) {
         return Some(name);
     }
     // Bound to a const/let: the lexical branch extracts it under the
     // binding's name (`const helper = (x) => …`).
     if let Some(parent) = fn_node.parent()
-        && parent.kind() == "variable_declarator"
+        && spec.is_variable_declarator(parent.kind())
         && parent.child_by_field_name("value") == Some(fn_node)
-        && (fn_node.kind() == "arrow_function" || fn_node.kind() == "function_expression")
+        && spec.is_function_value(fn_node.kind())
     {
         let name = parent
             .child_by_field_name("name")
@@ -362,10 +356,10 @@ fn extracted_ancestor_name(
     }
     // Route-registration handler: `app.get("/", handler)`.
     if let Some(args) = fn_node.parent()
-        && args.kind() == "arguments"
+        && matches!(spec.classify(args.kind()), NodeRole::Arguments)
         && let Some(call) = args.parent()
-        && call.kind() == "call_expression"
-        && let Some(callee) = call.child_by_field_name("function")
+        && let NodeRole::Call { callee_field, .. } = spec.classify(call.kind())
+        && let Some(callee) = call.child_by_field_name(callee_field.as_ref())
         && is_route_registration(&source[callee.start_byte()..callee.end_byte()], spec, facts)
     {
         return Some(format!("<{}:handler@{}>", path, fn_node.start_byte()));
@@ -490,7 +484,7 @@ fn lower_static(
     // module-level name to walk. Record the binding as an assignment, the
     // module-level twin of the `Assign` the declaration path emits inside a
     // function body.
-    if value_node.kind() == "identifier"
+    if matches!(ctx.classify_node(value_node.kind()), NodeRole::Identifier)
         && let Some(Operand::Var(src)) = init
     {
         let dest = ctx.ir.new_var(VarMetadata {
