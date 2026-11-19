@@ -198,6 +198,16 @@ what this crate does.
 
 ### Changed
 
+- **Expression lowering asks the spec about comments, strings, composites and
+  JSX.** Every `child.kind() == "comment"` skip, the four-part string-folding
+  test in `visit_literal`, the `object` / `array` split that picks
+  `AllocationKind`, the JSX element/opening/children dispatch and the JSX
+  attribute-value test are now `is_comment`, `is_string_expression` (kept behind
+  the learned-facts `is_template_string` wrapper so a bundle can still widen
+  it), `is_object_composite` / `is_array_composite`, `jsx_part` and
+  `is_jsx_attribute_value`. `expr.rs` contains no node-kind comparison.
+  No behaviour change; 575 engine tests unchanged.
+
 - **`visit_node` dispatches on the language spec instead of grammar spellings.**
   The lowering's fallback arms compared `node.kind()` against
   `switch_statement`, the five `preproc_*` kinds, the four jump kinds and the
