@@ -69,6 +69,17 @@ what this crate does.
   that no check called it; safety caps already reach `truncations` through
   `telemetry::Cap`). No analysis code changes: every removal was
   unreachable from the crate's own entry points.
+- **Test-only helpers are compiled only for tests.** Fifteen crate-internal
+  items the library never calls are now `#[cfg(test)]`: the
+  `without_suppression` analysis mode, `LearnedFactEntry::wire_index`,
+  `FactTable::role_for_call`/`is_sink_call`, `dedup_by_shape`,
+  `check_all`, `check_credentials`,
+  `CheckRegistry::from_slice`/`len`/`is_empty`, `FunctionIR::push_phi`,
+  `SSABuilder::with_budget`, and `PreparedProgram::exports_of` /
+  `module_items_of` / `imports_of`. Their unit tests exercise them exactly as
+  before; the library build no longer carries them. Two doc links that
+  pointed at cfg(test) items became plain code spans so rustdoc stays clean
+  under `-D rustdoc::broken_intra_doc_links`.
 
 ### Fixed
 

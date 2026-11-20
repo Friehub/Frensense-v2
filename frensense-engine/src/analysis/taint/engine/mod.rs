@@ -671,6 +671,7 @@ impl<'a> BackwardTaintEngine<'a> {
     /// mode: any caller-side arg→dest edge leaks the walk past sanitizing
     /// callees, so verdicts may be `Vulnerable` where the precise mode says
     /// `Sanitized`). Useful as a sound upper bound.
+    #[cfg(test)]
     pub(crate) fn without_suppression(mut self) -> Self {
         self.honour_suppression = false;
         self

@@ -530,18 +530,21 @@ impl PreparedProgram {
     /// The export surface of one file; empty when the file declares none or
     /// its language has no export syntax the spec models.
     #[must_use]
+    #[cfg(test)]
     pub(crate) fn exports_of(&self, file: &str) -> &[Export] {
         self.file_exports.get(file).map_or(&[], Vec::as_slice)
     }
 
     /// Every top-level declaration of one file, exported or not.
     #[must_use]
+    #[cfg(test)]
     pub(crate) fn module_items_of(&self, file: &str) -> &[ModuleItem] {
         self.file_module_items.get(file).map_or(&[], Vec::as_slice)
     }
 
     /// The import declarations of one file.
     #[must_use]
+    #[cfg(test)]
     pub(crate) fn imports_of(&self, file: &str) -> &[Import] {
         self.file_imports.get(file).map_or(&[], Vec::as_slice)
     }
