@@ -61,6 +61,7 @@ impl SSABuilder {
 
     /// Override the work budget. Tests use a tiny budget to exercise the
     /// degraded path deterministically.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn with_budget(mut self, budget: u64) -> Self {
         self.budget = budget;

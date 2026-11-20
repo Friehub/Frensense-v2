@@ -246,6 +246,7 @@ impl TaintPath {
 
 /// Dedup helper: keep one representative per shape, preferring the finding
 /// with the most steps (most informative path). Returns indices into `paths`.
+#[cfg(test)]
 pub(crate) fn dedup_by_shape(paths: &[TaintPath]) -> Vec<usize> {
     let mut best: FxHashMap<String, usize> = FxHashMap::default();
     for (i, p) in paths.iter().enumerate() {

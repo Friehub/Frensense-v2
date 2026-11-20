@@ -108,6 +108,7 @@ impl FactTable {
     /// `KVNamespace` for `kv.put(t)`), that entry's role wins over the bare
     /// last-segment entry's. Falls back to [`Self::sink_signature`] when no
     /// receiver-specific role exists.
+    #[cfg(test)]
     pub(crate) fn role_for_call(
         &self,
         last: &str,
@@ -423,6 +424,7 @@ impl FactTable {
     ///   from dotted client entries AND the receiver root is a known
     ///   client, `m.get(t)` on an arbitrary Map is never a sink, while
     ///   `got.get(taint)` is.
+    #[cfg(test)]
     pub(crate) fn is_sink_call(&self, last: &str, receiver_root: Option<&str>) -> bool {
         self.is_sink_call_scoped(last, receiver_root, None, None)
     }

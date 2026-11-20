@@ -128,6 +128,7 @@ impl std::fmt::Debug for CheckRegistry {
 
 impl CheckRegistry {
     /// Construct a registry from a static slice of check references.
+    #[cfg(test)]
     pub(crate) const fn from_slice(checks: &'static [&'static dyn NonDataflowCheck]) -> Self {
         Self { checks }
     }
