@@ -83,13 +83,12 @@ fn classify_python(kind: &str) -> NodeRole {
         },
 
         // ── Control flow ─────────────────────────────────────────────────
-        // `match_statement` is matched below as `NodeRole::Match`, next to
+        // `match_statement` is classified below as `NodeRole::Match`, next to
         // Rust's `match_expression` and Go's switch statements: it dispatches
-        // on one subject and executes exactly one arm. Leaving it in this
-        // Branch arm (a duplicate pattern) made it lower as a plain `if` whose
-        // "consequence" was the whole case block, so every arm executed and
-        // an unreachable tainted arm tainted the join.
-        "if_statement" | "conditional_expression" => NodeRole::Branch,
+        // on one subject and executes exactly one arm. Lowering it as a plain
+        // `if` whose "consequence" was the whole case block made every arm
+        // execute, so an unreachable tainted arm tainted the join.
+        "if_statement" => NodeRole::Branch,
         "for_statement" | "while_statement" => NodeRole::Loop,
         "return_statement" => NodeRole::Return,
         "try_statement" => NodeRole::Try,
