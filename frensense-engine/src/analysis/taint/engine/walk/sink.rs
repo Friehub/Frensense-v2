@@ -105,21 +105,46 @@ impl<'a> BackwardTaintEngine<'a> {
         // tables happen to rank low.
         let origin_package = call.origin.as_deref();
         let triplets = sink_triplets(block, idx, receiver, args);
-        if triplets.is_empty() {
-            return;
+        let site = SinkSite {
+            name,
+            role,
+            label: label.as_deref(),
+            origin_package,
+            language,
+        };
+        // Slot of the first argument that is a literal rather than a value:
+        // nothing to walk, but the call still has a verdict.
+        let literal_arg_slot = args.iter().position(|a| !matches!(a, Operand::Var(_)));
+        let findings_before = self.findings.len();
+        let no_triplets = triplets.is_empty();
+        if !no_triplets {
+            self.explore_sink_args(fi, site, triplets, call_dest.and_then(|d| ir.var_span(d)));
         }
-        self.explore_sink_args(
-            fi,
-            SinkSite {
-                name,
-                role,
-                label: label.as_deref(),
-                origin_package,
-                language,
-            },
-            triplets,
-            call_dest.and_then(|d| ir.var_span(d)),
-        );
+        // A sink whose data operands are all literals has nothing to walk:
+        // `os.system("echo hi")` contributes only its receiver triplet, and a
+        // clean receiver is deliberately not reported (#100, #133). The call
+        // then left no finding at all, so coverage counted the file as one
+        // that contained "no sink site the engine models" and `--explain`
+        // stayed silent about a call the engine had in fact matched.
+        // Recognition is a verdict, not reportability: record the Clean one.
+        if self.findings.len() == findings_before && (no_triplets || literal_arg_slot.is_some()) {
+            let arg_slot = literal_arg_slot.unwrap_or(0);
+            self.findings.push(SinkFinding {
+                function: ir.name.clone(),
+                sink: name.to_string(),
+                arg_slot,
+                alert: None,
+                verdict: BackwardVerdict::Clean,
+                finding_class: FindingClass::Injection,
+                role: site.role,
+                label: site.label.map(str::to_string),
+                source_desc: None,
+                path: TaintPath::default(),
+                cut_reasons: vec!["value-const"],
+                cut_sites: Vec::new(),
+                sink_span: call_dest.and_then(|d| ir.var_span(d)),
+            });
+        }
     }
 
     /// A property assignment is a write, not a call: `el.innerHTML = x` reaches

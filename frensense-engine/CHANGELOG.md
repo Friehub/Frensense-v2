@@ -47,6 +47,18 @@ what this crate does.
 
 ### Fixed
 
+- **A sink call whose data argument is a literal is still a recognized sink
+  site.** `os.system("echo hi")` only contributes its receiver triplet to the
+  backward walk, and a clean receiver is deliberately not reported, so the
+  call left no finding at all: `ScanResult::located` (and therefore the CLI's
+  `Sink Sites`, MCP's `analysis.coverage.sink_sites` and `--explain`) counted
+  the file as containing "no sink site the engine models" even though the
+  engine had matched the call. A matched site now keeps a `Clean` record with
+  the `value-const` cut reason when nothing else was recorded for it, so
+  coverage is a verdict about recognition rather than about reportability.
+  Measured on the repro: `Sink Sites` **0 → 1**, `Not Recognized` **1 → 0**,
+  `--explain` goes **silent → one `clean` entry**, and advisories are
+  unchanged (a non-vulnerable record is still dropped at the reporting gate).
 - **A quoted subscript names the same field as the bare key.** Member access
   took the property node's source text verbatim, so a quoted subscript kept its
   delimiters: `cmds['a']` lowered to `LoadField field: "'a'"` while the object
