@@ -531,6 +531,25 @@ impl LanguageSpec for PythonSpec {
         // middle named child, unlike JS/C where it comes first.
         1
     }
+
+    /// Python `for_statement` has named fields `left` (the loop variable
+    /// pattern) and `right` (the iterable expression).
+    ///
+    /// `for item in request.args.get("p"):` lowers `right` as a call whose
+    /// return value is the sequence iterated over. Without emitting IR for the
+    /// right child the iterable's taint never reaches the loop variable, and
+    /// any read from the list (or any use of `item`) appears clean.
+    fn for_loop_iterable<'t>(
+        &self,
+        node: tree_sitter::Node<'t>,
+    ) -> Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)> {
+        if node.kind() != "for_statement" {
+            return None;
+        }
+        let binding = node.child_by_field_name("left")?;
+        let iterable = node.child_by_field_name("right")?;
+        Some((binding, iterable))
+    }
 }
 
 // ── Module surface ────────────────────────────────────────────────────────────

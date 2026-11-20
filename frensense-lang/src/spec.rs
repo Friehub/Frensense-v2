@@ -858,6 +858,23 @@ pub trait LanguageSpec: Send + Sync + 'static {
             && !self.is_loop_update_or_initializer(kind)
     }
 
+    /// For a `for … in/of iterable` loop node, return the iterable child node
+    /// (the expression being iterated over) and the loop variable binding node.
+    ///
+    /// Returns `None` for `while`, `do`, or C-style `for` loops that have no
+    /// iterable child. The engine visits the iterable in the loop header block
+    /// so that taint from the iterable reaches the loop variable.
+    ///
+    /// Python `for_statement`: `left` = binding, `right` = iterable.
+    /// JS/TS `for_in_statement` / `for_of_statement`: `left` = binding,
+    /// `right` = iterable.
+    fn for_loop_iterable<'t>(
+        &self,
+        _node: tree_sitter::Node<'t>,
+    ) -> Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)> {
+        None
+    }
+
     /// A node that can be the condition operand of a branch.
     fn is_branch_condition_node(&self, kind: &str) -> bool {
         !self.is_statement_node(kind)
