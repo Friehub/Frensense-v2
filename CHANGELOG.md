@@ -67,6 +67,23 @@ harness and keeps no changelog.
   forward engine's 1,343 test lines (#147) then took the total to 969
   (`indexing_slicing` 168 → 164).
 
+- **The workspace manifests stop warning, and `frensense-devtools` joins the
+  lint contract.** Four members (`frensense`, `frensense-lang`,
+  `frensense-engine`, `frensense-bundler`) set `package.homepage` to the same
+  URL as `package.documentation`, which cargo's `cargo::redundant_homepage`
+  lint reported on every build; the key is removed and `documentation` is the
+  one link. `frensense-devtools` was the only member without
+  `[lints] workspace = true` (`cargo::missing_lints_inheritance`), so the deny
+  tier and the clippy budget never applied to the probe binaries; it now
+  inherits the set. That surfaced 42 diagnostics the unpublished harness had
+  never been measured against (`print_stdout` 21, `unwrap_used` 9,
+  `expect_used` 4, `float_arithmetic` 3, `indexing_slicing` 3,
+  `print_stderr` 2), which `.github/scripts/clippy-baseline.json` now records
+  as existing debt rather than rewriting probe code in a metadata commit: the
+  same shape `frensense-packgen`'s baseline already carries for its printing
+  binary (`print_stdout` 2, `print_stderr` 9). No behaviour changed, and no
+  baseline number for another crate moved.
+
 ### Fixed
 
 - **Sinks the binder and the sink matcher used to drop now report.** A scan

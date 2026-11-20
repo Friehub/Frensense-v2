@@ -7,6 +7,9 @@ description = "Frensense devtools: corpus end-to-end runners and IR probes (not 
 license = "GPL-3.0-only"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 frensense-engine = { path = "../frensense-engine", version = "0.9.0", features = ["serialize"] }
 frensense-lang = { path = "../frensense-lang", version = "0.8.0" }
