@@ -71,9 +71,7 @@ use crate::ir::function::FunctionIR;
 use rustc_hash::FxHashSet;
 
 pub use crate::analysis::taint::facts::Provenance;
-pub(crate) use registry::{
-    CheckContext, CheckRegistry, CheckScope, NonDataflowCheck, default_registry,
-};
+pub(crate) use registry::{CheckContext, CheckScope};
 
 /// Last segment of a call reference: everything after the last `.`, then
 /// after the last `::` (Rust/C++ paths), so `security.hash`, `sha2::digest`
@@ -115,7 +113,7 @@ pub struct CheckerFinding {
 
 /// The single finding identity: two findings from the same function with
 /// the same rule at the same span are the same finding. This is the only
-/// dedup key - [`check_all`] is the one place findings are deduplicated.
+/// dedup key - `check_all` is the one place findings are deduplicated.
 fn finding_key(f: &CheckerFinding) -> (String, String, usize) {
     (
         f.function.clone(),
@@ -210,6 +208,7 @@ fn push_unique(
 ///
 /// `facts` carries the bundle-learned checks; pass `&FactTable::default()`
 /// when scanning without a bundle.
+#[cfg(test)]
 pub(crate) fn check_all<'a>(
     irs: impl IntoIterator<Item = &'a FunctionIR>,
     facts: &FactTable,
@@ -217,7 +216,7 @@ pub(crate) fn check_all<'a>(
     check_all_with_telemetry(irs, facts, None, None).0
 }
 
-/// [`check_all`] with the program value-flow graph and package scope, while
+/// `check_all` with the program value-flow graph and package scope, while
 /// also collecting execution telemetry (timings, run counts, findings, and
 /// outcomes with catch_unwind failure isolation).
 ///
@@ -256,7 +255,6 @@ pub(crate) fn check_all_with_registry_and_telemetry<'a>(
         facts,
         pkg_scope,
         summaries: &summaries,
-        diag: &registry::NOOP_DIAGNOSTIC_SINK,
     };
 
     let mut seen: FxHashSet<(String, String, usize)> = FxHashSet::default();

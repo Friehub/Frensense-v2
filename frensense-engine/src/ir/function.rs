@@ -635,6 +635,7 @@ impl FunctionIR {
     }
 
     /// Appends a phi node to `block`. Does nothing if the block does not exist.
+    #[cfg(test)]
     pub(crate) fn push_phi(&mut self, block: BlockId, phi: Phi) {
         if let Some(b) = self.blocks.get_mut(&block) {
             b.phis.push(phi);

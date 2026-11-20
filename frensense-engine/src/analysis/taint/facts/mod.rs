@@ -82,21 +82,12 @@ pub use kinds::*;
 pub use table::*;
 pub use vocabulary::*;
 
-/// The shipped default-pack fact table exactly as every consumer sees it
-/// ([`LearnedFactEntry`]s -> [`FactTable`] under [`Provenance::Spec`]).
-/// Engine tests merge this instead of relying on deleted spec seeds
-/// (Phase 6.1).
-///
-/// The pack crosses the engine<->bundler dev-dependency cycle as raw
-/// bytes: bundler-typed or engine-typed values returned through the
-/// bundler would resolve to a duplicate `frensense-engine` crate unit.
-#[cfg(test)]
-pub(crate) fn default_pack_table() -> FactTable {
-    fact_table_from_entries_with(&default_pack_entries(), Provenance::Spec)
-}
-
 /// The default pack's entries as the engine decodes them (bytes cross the
-/// engine<->packgen dependency edge; see [`default_pack_table`]).
+/// engine<->packgen dependency edge).
+///
+/// The pack crosses that edge as raw bytes: bundler-typed or engine-typed
+/// values returned through the bundler would resolve to a duplicate
+/// `frensense-engine` crate unit.
 #[cfg(test)]
 pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
     let bytes = frensense_packgen::default_pack_entry_bytes();

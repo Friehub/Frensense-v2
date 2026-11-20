@@ -24,31 +24,32 @@ tree-sitter-rust = { version = "0.23", optional = true }
 tree-sitter-typescript = { version = "0.23", optional = true }
 tree-sitter-javascript = { version = "0.23", optional = true }
 tree-sitter-python = { version = "0.23", optional = true }
-tree-sitter-html = { version = "0.23", optional = true }
 rustc-hash = "1.1"
 serde = { version = "1.0", features = ["derive"], optional = true }
-bincode = { version = "1", optional = true }
 
 [features]
 default = ["rust", "typescript", "full-analysis"]
 rust = ["dep:tree-sitter-rust"]
 typescript = ["dep:tree-sitter-typescript", "dep:tree-sitter-javascript"]
 python = ["dep:tree-sitter-python"]
-html = ["dep:tree-sitter-html"]
-serialize = ["dep:serde", "dep:bincode"]
+# Compatibility no-op: HTML has no provider in `frensense-lang`, so this
+# feature never selected a grammar the engine could use.
+html = []
+serialize = ["dep:serde"]
 full-analysis = []
 
 # These optional dependencies are selected by downstream language-feature
 # names but their grammar crates are consumed by frensense-lang, not this crate.
-# bincode is used by serialization test helpers.
 [package.metadata.cargo-machete]
 ignored = [
     "tree-sitter-rust",
     "tree-sitter-typescript",
     "tree-sitter-javascript",
     "tree-sitter-python",
-    "tree-sitter-html",
 ]
 
 [dev-dependencies]
 frensense-packgen = { path = "../frensense-packgen" }
+# The `.frc` payload codec: the library only needs the serde derives, so this
+# is test-only (round-trip tests for the learned-fact vocabulary).
+bincode = "1"

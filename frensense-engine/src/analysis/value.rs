@@ -81,14 +81,6 @@ impl Value {
         }
     }
 
-    /// Is this a definite constant (the precise strata)?
-    pub(crate) fn is_const(&self) -> bool {
-        matches!(
-            self,
-            Value::IntConst(_) | Value::StrConst(_) | Value::BoolConst(_)
-        )
-    }
-
     /// Intersect an integer value/range with an inclusive interval `[min_lo, max_hi]`.
     pub(crate) fn intersect_interval(&self, min_lo: Option<i64>, max_hi: Option<i64>) -> Value {
         match self {

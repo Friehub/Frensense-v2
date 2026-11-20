@@ -471,7 +471,7 @@ impl LearnedFactEntry {
     /// not know must be rebuilt instead of misdecoded.
     ///
     /// The ratchet test in `vocabulary.rs` fails if this list and
-    /// [`Self::wire_index`] disagree, so a new variant cannot arrive
+    /// `Self::wire_index` disagree, so a new variant cannot arrive
     /// silently.
     pub(crate) const VARIANT_TAGS: [&'static str; 42] = [
         "source",
@@ -521,6 +521,7 @@ impl LearnedFactEntry {
     /// Wire index of this variant. Exhaustive on purpose: adding a variant
     /// is a compile error here, which is the reminder to append its tag to
     /// [`Self::VARIANT_TAGS`] (the ratchet test fails until it is).
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn wire_index(&self) -> usize {
         match self {
