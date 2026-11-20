@@ -357,9 +357,15 @@ pub(super) mod demand_tests {
         let prog = build_program(vec![main]);
         let (findings, stats) = run_backward(&cfg, &prog);
 
-        // Literal args are not Var operands → nothing to explore.
+        // Literal args are not Var operands → nothing to explore, but the call
+        // is still a sink site the engine matched: it keeps one Clean record
+        // (`value-const`) so coverage and `--explain` see the recognition
+        // instead of reporting the file as having no sink site at all.
         assert_eq!(stats.sink_args_explored, 0);
-        assert!(findings.is_empty());
+        assert_eq!(findings.len(), 1, "got {findings:?}");
+        assert_eq!(findings[0].verdict, BackwardVerdict::Clean);
+        assert_eq!(findings[0].cut_reasons, vec!["value-const"]);
+        assert!(findings[0].alert.is_none());
     }
 
     // -----------------------------------------------------------------------
@@ -2452,5 +2458,42 @@ export function b(id: any): void {
             "path must cross caller→callee; got {:?}",
             vulns[0].path
         );
+    }
+
+    /// A matched sink call whose data operand is a literal still leaves a
+    /// finding. `os.system("echo hi")` contributes only its receiver triplet,
+    /// and a clean receiver is deliberately not reported, so the call used to
+    /// vanish from `findings`/`located` entirely: coverage counted the file as
+    /// one with "no sink site the engine models" and `--explain` said nothing
+    /// about a call the engine had in fact matched. Recognition is a verdict,
+    /// not reportability, so the site keeps its `Clean` record.
+    #[test]
+    fn a_literal_only_sink_call_still_records_its_verdict() {
+        use crate::analysis::taint::facts::seeded_tables;
+        use crate::harness::lower_source;
+
+        let src = "import os\n\n\ndef handler():\n    os.system(\"echo hi\")\n";
+        let irs = lower_source("probe.py", src, "py").expect("lower probe");
+        let prog = build_program(irs.into_values().collect());
+        let (cfg, facts) = seeded_tables(["py"]);
+
+        let mut engine = BackwardTaintEngine::new(&prog, &cfg).with_fact_table(&facts);
+        engine.run();
+
+        assert_eq!(
+            engine.findings.len(),
+            1,
+            "the matched call must leave one record, got {:?}",
+            engine
+                .findings
+                .iter()
+                .map(|f| (&f.function, &f.sink, f.verdict.clone()))
+                .collect::<Vec<_>>()
+        );
+        let finding = &engine.findings[0];
+        assert_eq!(finding.sink, "system");
+        assert_eq!(finding.arg_slot, 0, "the literal argument's slot");
+        assert_eq!(finding.verdict, BackwardVerdict::Clean);
+        assert!(finding.cut_reasons.contains(&"value-const"));
     }
 }
