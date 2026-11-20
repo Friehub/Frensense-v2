@@ -318,7 +318,11 @@ impl Engine {
                 .push(format!("failed to read {file}: {error}"));
         }
         result.telemetry.input.unsupported += unsupported;
-        if unsupported > 0 {
+        // Only record as an engine error when no supported files could be scanned at all.
+        // In a polyglot tree where supported files were scanned, unsupported files are
+        // tracked as a coverage denominator (Coverage.files_unsupported) rather than
+        // demoting healthy scans to Partial.
+        if unsupported > 0 && result.telemetry.input.scanned == 0 {
             result.telemetry.errors.push(format!(
                 "{unsupported} unsupported or absent source input(s)"
             ));
@@ -401,7 +405,14 @@ impl Engine {
         for loc in &result.located {
             let f = &loc.finding;
             if !crate::policy::reports_finding(f) {
-                not_reportable += 1;
+                // Only count as suppressed/not-reportable if this was an actual vulnerable
+                // finding dropped by generic card or missing alert. Clean and Sanitized
+                // arguments are confirmed safe verdicts, not findings dropped at the gate.
+                if f.verdict
+                    == frensense_engine::analysis::taint::engine::BackwardVerdict::Vulnerable
+                {
+                    not_reportable += 1;
+                }
                 // --explain: record every silent sink argument so users can
                 // see where the engine looked and stayed quiet (why).
                 if self.explain

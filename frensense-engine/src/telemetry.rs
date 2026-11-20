@@ -688,7 +688,7 @@ impl ScanTelemetry {
     pub fn is_complete(&self) -> bool {
         self.caps.is_empty()
             && self.input.failed == 0
-            && self.input.unsupported == 0
+            && (self.input.unsupported == 0 || self.input.scanned > 0)
             && self.errors.is_empty()
             && self.input.parse_partial == 0
             && self

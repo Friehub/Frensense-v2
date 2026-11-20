@@ -62,6 +62,7 @@ pub(crate) static PY_SOURCE_PATTERNS: &[&str] = &[
     "request.form.get",
     "request.json",
     "request.data",
+    "request.query_string",
     "request.values",
     "request.files",
     "request.cookies",

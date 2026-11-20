@@ -26,4 +26,13 @@ pub(crate) static PY_SINK_SIGNATURES: &[(&str, &[usize], bool)] = &[
     // ── Jinja2: render is the sink; render_template(sql_string, ctx),
     // slot 0 is the template, ctx is a binding namespace ──
     ("render_template", &[0], true),
+    // ── XPath: slot 0 is the expression, every other argument binds into
+    // it. `tree.xpath(expr, name=value)` binds the XPath variable `$name`,
+    // and `lxml.etree.XPath(expr)` compiles the expression: a tainted
+    // *binding* or namespace map cannot change the compiled expression, so
+    // `name=bar` is a parameter channel, not injection. Restricting the
+    // slot removed the false positives on the OWASP xpathi binding family
+    // while leaving the concatenated-expression findings intact.
+    ("xpath", &[0], true),
+    ("XPath", &[0], true),
 ];

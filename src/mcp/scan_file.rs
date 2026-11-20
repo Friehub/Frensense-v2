@@ -162,7 +162,11 @@ pub(crate) fn mcp_analysis(
     incomplete: &[frensense_engine::scan::IncompleteFunction],
 ) -> (bool, Value) {
     let status = crate::cli::ScanStatus::compute(telemetry, incomplete);
-    let clean = status.clean(advisories.is_empty(), coverage);
+    let below_confidence = telemetry
+        .suppressed
+        .iter()
+        .any(|s| s.reason == "below-confidence" && s.count > 0);
+    let clean = status.clean(advisories.is_empty(), coverage) && !below_confidence;
     let block = json!({
         "status": status,
         "coverage": {
@@ -206,6 +210,33 @@ pub(crate) fn result_payload_detailed(
     let telem = telemetry.unwrap_or(&empty_telem);
     let cov = coverage.cloned().unwrap_or_default();
     let (clean, analysis) = mcp_analysis(advisories, &cov, telem, incomplete);
+    let message = if clean {
+        Some(if cov.recognized_anything() {
+            "no findings".to_string()
+        } else {
+            "no findings; no sink site was recognized in this file, so findings there cannot be ruled out".to_string()
+        })
+    } else if advisories.is_empty()
+        && telem
+            .suppressed
+            .iter()
+            .any(|s| s.reason == "below-confidence" && s.count > 0)
+    {
+        Some("no findings; potential finding(s) were dropped below confidence threshold".to_string())
+    } else if advisories.is_empty() && !cov.fully_resolved() {
+        Some(format!(
+            "no findings; {} sink site(s) could not be decided",
+            cov.unresolved_sites
+        ))
+    } else if advisories.is_empty() && cov.files_not_analyzed() > 0 {
+        Some(format!(
+            "no findings; only {}/{} source file(s) were analyzed, so the rest cannot be ruled out",
+            cov.files_analyzed, cov.files_found
+        ))
+    } else {
+        None
+    };
+
     let mut payload = json!({
         "clean": clean,
         "file": path.display().to_string(),
@@ -221,22 +252,8 @@ pub(crate) fn result_payload_detailed(
         // code.
         "analysis": analysis,
     });
-    if clean {
-        payload["message"] = json!(if cov.recognized_anything() {
-            "no findings"
-        } else {
-            "no findings; no sink site was recognized in this file, so findings there cannot be ruled out"
-        });
-    } else if advisories.is_empty() && !cov.fully_resolved() {
-        payload["message"] = json!(format!(
-            "no findings; {} sink site(s) could not be decided",
-            cov.unresolved_sites
-        ));
-    } else if advisories.is_empty() && cov.files_not_analyzed() > 0 {
-        payload["message"] = json!(format!(
-            "no findings; only {}/{} source file(s) were analyzed, so the rest cannot be ruled out",
-            cov.files_analyzed, cov.files_found
-        ));
+    if let (Some(msg), Some(map)) = (message, payload.as_object_mut()) {
+        map.insert("message".to_string(), json!(msg));
     }
     payload
 }

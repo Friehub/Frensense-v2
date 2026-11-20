@@ -16,6 +16,29 @@ are the reasons the asset moved.
 There is no semver contract here (nothing is published, and
 `cargo semver-checks` excludes it). The version tracks the workspace line.
 
+## [0.8.2]
+
+### Added
+
+- **Framework-specific knowledge files for JavaScript and TypeScript.**
+  Reorganized the JS/TS vocabulary out of a single monolithic table into
+  per-framework modules:
+  - `nextjs.rs`: Package-scoped sinks for `NextResponse.redirect`, `NextResponse.rewrite`,
+    `NextResponse.json` (`next/server`), `redirect`, `permanentRedirect` (`next/navigation`),
+    `revalidatePath`, `revalidateTag` (`next/cache`); request sources for `cookies`, `headers`,
+    `useSearchParams`, `useParams`, `usePathname`, `request.nextUrl.*`.
+  - `vue.rs`: Package-scoped sinks for `navigateTo`, `router.push`, `router.replace`
+    (`vue-router`, `@vue/router`); source patterns for route parameters/query; reactivity
+    propagators for `ref`, `reactive`, `computed`, `toRef`, `toRefs`, and Pinia stores.
+  - `nestjs.rs`: Package-scoped SQL/NoSQL sinks for `@nestjs/typeorm` (`query`,
+    `createQueryBuilder`, `execute`) and `@nestjs/mongoose` (`find`, `findOne`, `findById`,
+    `updateOne`, `updateMany`, `deleteOne`, `deleteMany`); route decorators (`@Get`, `@Post`,
+    `@Put`, `@Delete`, `@Patch`, `@All`).
+  - `nuxt.rs`: Package-scoped sinks for `sendRedirect`, `setResponseHeader`,
+    `appendResponseHeader` (`h3`), `$fetch` (`ofetch`, `nuxt`), `useFetch`, `useAsyncData`,
+    `navigateTo` (`nuxt`); request extractors for `getQuery`, `readBody`, etc.
+  - `core.rs`: Generic DOM, Node.js, and core JavaScript/TypeScript APIs.
+
 ## [0.8.1]
 
 ### Added
@@ -35,6 +58,23 @@ There is no semver contract here (nothing is published, and
 
 ### Changed
 
+- **`xpath`/`XPath` take a slot signature: argument 0 only.** The Python
+  vocabulary declared neither name, so the sink fell back to "all arguments
+  dangerous" and every keyword binding was reported as expression injection:
+  `tree.xpath(expr, name=value)` binds `value` as an XPath variable, and
+  `lxml.etree.XPath(expr)` compiles the expression, so a tainted *binding* or
+  namespace map cannot change the compiled query. Both calls now declare slot 0
+  as the expression and mark the remaining slots as binding arguments;
+  concatenated expressions keep firing. Measured on the 1,230-case OWASP suite:
+  CWE-643 FP **14 → 2**, TP **14 → 22**. The regenerated
+  `frensense-bundler/assets/frensense-default.frc` is committed with this
+  change.
+- **`getvalue` propagates its receiver; `get` does not.** `io.StringIO.getvalue`
+  returns everything written with `write`, so the receiver's taint is what the
+  call yields. `get` is deliberately not declared: `ConfigParser.get(s, k)` and
+  `dict.get(k)` are keyed reads that the engine resolves through the keyed store
+  edge, and a receiver-wide rule would return every value the object ever stored
+  whichever key was asked for.
 - **Built-in weak-hash, insecure-config and key-size rules carry no
   `message`.** The scanner renders a spec rule's observation from the
   `frensense-lang` template keyed by rule id and `params`; the pack's copy was

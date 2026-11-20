@@ -7,8 +7,8 @@
 //! resolves to that package, and stay silent otherwise.
 //!
 //! Triplets:
-//! 1. import + factory singleton (`new PrismaClient()`) arms `@prisma/client`
-//!   , fires (the legitimate Prisma raw-SQL shape).
+//! 1. import + factory singleton (`new PrismaClient()`) arms `@prisma/client`,
+//!    fires (the legitimate Prisma raw-SQL shape).
 //! 2. no import, unrelated receiver object, silent (the false-positive
 //!    class package scoping exists to close).
 //! 3. wrong-package import (`database-js` lookalike), silent (origin
@@ -104,6 +104,146 @@ export async function fine(id: string) {
         assert!(
             !findings.iter().any(|f| f.sink.contains("queryRaw")),
             "parameterized `$queryRaw` tagged template must stay silent; got {findings:?}"
+        );
+    }
+
+    /// Next.js `NextResponse.rewrite` package-scoped to `next/server`.
+    const NEXTJS_POSITIVE: &str = r#"
+import { NextResponse } from 'next/server'
+export function GET(request: Request) {
+  const url = new URL(request.url).searchParams.get('dest') || '/'
+  return NextResponse.rewrite(url)
+}
+"#;
+
+    const NEXTJS_WRONG_ORIGIN: &str = r#"
+import { NextResponse } from 'custom-server'
+export function GET(request: Request) {
+  const url = new URL(request.url).searchParams.get('dest') || '/'
+  return NextResponse.rewrite(url)
+}
+"#;
+
+    #[test]
+    fn nextjs_rewrite_fires_with_next_server_import() {
+        let findings = run(NEXTJS_POSITIVE);
+        assert!(
+            findings.iter().any(|f| f.sink.contains("rewrite")),
+            "NextResponse.rewrite with next/server origin must fire; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn nextjs_rewrite_silent_on_foreign_origin() {
+        let findings = run(NEXTJS_WRONG_ORIGIN);
+        assert!(
+            !findings.iter().any(|f| f.sink.contains("rewrite")),
+            "NextResponse.rewrite without next/server origin must stay silent; got {findings:?}"
+        );
+    }
+
+    /// Vue Router `navigateTo` package-scoped to `vue-router`.
+    const VUE_ROUTER_POSITIVE: &str = r#"
+import { navigateTo } from 'vue-router'
+export function redirectUser(target: string) {
+  navigateTo(target)
+}
+"#;
+
+    const VUE_ROUTER_WRONG_ORIGIN: &str = r#"
+import { navigateTo } from 'local-navigator'
+export function redirectUser(target: string) {
+  navigateTo(target)
+}
+"#;
+
+    #[test]
+    fn vue_router_navigateto_fires_with_vue_router_import() {
+        let findings = run(VUE_ROUTER_POSITIVE);
+        assert!(
+            findings.iter().any(|f| f.sink.contains("navigateTo")),
+            "navigateTo with vue-router origin must fire; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn vue_router_navigateto_silent_on_foreign_origin() {
+        let findings = run(VUE_ROUTER_WRONG_ORIGIN);
+        assert!(
+            !findings.iter().any(|f| f.sink.contains("navigateTo")),
+            "navigateTo without vue-router origin must stay silent; got {findings:?}"
+        );
+    }
+
+    /// Nuxt / ofetch `$fetch` SSRF sink package-scoped to `ofetch`.
+    const OFETCH_POSITIVE: &str = r#"
+import { $fetch } from 'ofetch'
+export async function fetchUser(url: string) {
+  return await $fetch(url)
+}
+"#;
+
+    const OFETCH_WRONG_ORIGIN: &str = r#"
+import { $fetch } from 'custom-http'
+export async function fetchUser(url: string) {
+  return await $fetch(url)
+}
+"#;
+
+    #[test]
+    fn ofetch_sink_fires_with_ofetch_import() {
+        let findings = run(OFETCH_POSITIVE);
+        assert!(
+            findings.iter().any(|f| f.sink.contains("$fetch")),
+            "$fetch with ofetch origin must fire; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn ofetch_sink_silent_on_foreign_origin() {
+        let findings = run(OFETCH_WRONG_ORIGIN);
+        assert!(
+            !findings.iter().any(|f| f.sink.contains("$fetch")),
+            "$fetch without ofetch origin must stay silent; got {findings:?}"
+        );
+    }
+
+    /// NestJS `@nestjs/typeorm` createQueryBuilder SQL injection sink.
+    const NESTJS_TYPEORM_POSITIVE: &str = r#"
+import { DataSource } from '@nestjs/typeorm'
+const ds = new DataSource()
+export async function search(query: string) {
+  return ds.createQueryBuilder(query)
+}
+"#;
+
+    const NESTJS_TYPEORM_WRONG_ORIGIN: &str = r#"
+import { DataSource } from 'custom-repo'
+const ds = new DataSource()
+export async function search(query: string) {
+  return ds.createQueryBuilder(query)
+}
+"#;
+
+    #[test]
+    fn nestjs_typeorm_fires_with_import() {
+        let findings = run(NESTJS_TYPEORM_POSITIVE);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.sink.contains("createQueryBuilder")),
+            "createQueryBuilder with @nestjs/typeorm origin must fire; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn nestjs_typeorm_silent_on_foreign_origin() {
+        let findings = run(NESTJS_TYPEORM_WRONG_ORIGIN);
+        assert!(
+            !findings
+                .iter()
+                .any(|f| f.sink.contains("createQueryBuilder")),
+            "createQueryBuilder without @nestjs/typeorm origin must stay silent; got {findings:?}"
         );
     }
 }

@@ -119,6 +119,160 @@ impl NodeKey {
 /// arguments, so they carry no slot number.
 pub const RECEIVER_ARG_INDEX: usize = usize::MAX;
 
+/// Does this method write its arguments into the receiver object, so a later
+/// read from that object sees the stored value?
+///
+/// Two families share the shape: collection mutators (`list.append`,
+/// `set.add`, `array.push`) and library-state setters (`ConfigParser.set`,
+/// `StringIO.write`). Without the store edge the argument's taint never
+/// reaches the object, and the reader that returns the accumulated state
+/// (`ConfigParser.get`, `StringIO.getvalue`) reads a clean value.
+///
+/// Both passes that model container writes (the whole-container fill edge and
+/// the field-sensitive store list) consult this one predicate so the two
+/// models cannot drift apart.
+fn mutates_receiver_object(method: &str) -> bool {
+    matches!(
+        method,
+        "append" | "push" | "add" | "extend" | "unshift" | "insert" | "set" | "write"
+    )
+}
+
+/// Separator joining a keyed library call's literal key parts into one field
+/// name. `set(section, key)` and `get(section, key)` both map to
+/// `section\u{1f}key`, so the halves of a keyed pair agree while any other
+/// key stays distinct.
+const KEYED_FIELD_SEP: char = '\u{1f}';
+
+/// Join the literal key parts of a keyed library call into one field name.
+fn join_keyed_field(parts: &[&str]) -> String {
+    let mut field = String::with_capacity(parts.iter().map(|p| p.len() + 1).sum());
+    for (i, part) in parts.iter().enumerate() {
+        if i > 0 {
+            field.push(KEYED_FIELD_SEP);
+        }
+        field.push_str(part);
+    }
+    field
+}
+
+/// The field a keyed library store writes, from its literal key arguments.
+///
+/// `conf.set('s', 'k', value)` writes `s\u{1f}k`; the two-argument form
+/// (`m.set('k', value)`) writes `k`. A non-literal key leaves the store
+/// unkeyed: it keeps the wildcard path so a caller passing a variable key
+/// still sees the value.
+fn keyed_store_field(args: &[Operand]) -> Option<String> {
+    let literal = |i: usize| match args.get(i) {
+        Some(Operand::StringLiteral(s)) => Some(s.as_str()),
+        _ => None,
+    };
+    match (literal(0), literal(1)) {
+        (Some(a), Some(b)) if args.len() >= 3 => Some(join_keyed_field(&[a, b])),
+        (Some(a), _) if args.len() == 2 => Some(a.to_string()),
+        _ => None,
+    }
+}
+
+/// True when this node is the receiver operand of a literal-keyed library
+/// read (`conf.get('s', 'k')`, `m.get('k')`).
+///
+/// Such a read takes its value from the Pass-3 keyed store edge for that exact
+/// key, so the blanket "external method call passes its receiver to the
+/// result" fallback must not run for it: that fallback would taint the read
+/// with every value the object ever stored, whichever key it asked for.
+/// Unkeyed reads (`d.get(variable_key)`) keep the fallback.
+pub(crate) fn is_keyed_library_read(ir: &FunctionIR, key: &NodeKey) -> bool {
+    let receiver = match key.instruction(ir) {
+        Some(Instruction::CallVirtual {
+            receiver: Operand::Var(r),
+            method,
+            args,
+            ..
+        }) if *r == key.var && method == "get" && keyed_load_field(args).is_some() => *r,
+        _ => return false,
+    };
+    let Some(name) = ir
+        .var_metadata
+        .get(&receiver)
+        .and_then(|m| m.source_name.as_deref())
+    else {
+        return false;
+    };
+    keyed_store_base_names(ir).contains(name)
+}
+
+/// Names of the objects this function stores into under a literal key.
+///
+/// The keyed read model applies only to a state object the same function
+/// populates with `set(section, key, value)` or `set(key, value)`. A framework
+/// accessor such as `request.args.get("name")` has no such store - it reads a
+/// request parameter - and cutting its receiver edge would delete the source.
+fn keyed_store_base_names(ir: &FunctionIR) -> FxHashSet<&str> {
+    let mut names = FxHashSet::default();
+    for block in ir.blocks.values() {
+        for instr in &block.instructions {
+            if let Instruction::CallVirtual {
+                receiver: Operand::Var(r),
+                method,
+                args,
+                ..
+            } = instr
+                && method == "set"
+                && keyed_store_field(args).is_some()
+                && let Some(name) = ir
+                    .var_metadata
+                    .get(r)
+                    .and_then(|m| m.source_name.as_deref())
+            {
+                names.insert(name);
+            }
+        }
+    }
+    names
+}
+
+/// The field a keyed library read loads, from its literal key arguments.
+///
+/// `conf.get('s', 'k')` reads `s\u{1f}k`, matching the store above; the
+/// one-argument form (`m.get('k')`) reads `k`, matching `m['k']` element
+/// stores. Returns `None` when any key part is not a literal, which keeps the
+/// read conservative: the receiver's own taint flows to the result.
+fn keyed_load_field(args: &[Operand]) -> Option<String> {
+    if args.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::with_capacity(args.len());
+    for arg in args {
+        match arg {
+            Operand::StringLiteral(s) => parts.push(s.as_str()),
+            _ => return None,
+        }
+    }
+    Some(join_keyed_field(&parts))
+}
+
+/// Positional element accesses of the containers
+/// [`SvfgBuilder::positional_lists`] could model.
+#[derive(Debug, Default)]
+struct PositionalLists {
+    /// `(block, instruction)` of a store the shape model owns, so the generic
+    /// wildcard store collection skips it.
+    writes: FxHashSet<(BlockId, usize)>,
+    /// `(block, instruction)` of a literal-index read -> the store that holds
+    /// that index there (`None` = the slot is empty, so the read is clean).
+    /// Absent means the read is not positional.
+    reads: FxHashMap<(BlockId, usize), Option<(BlockId, usize, VarId)>>,
+}
+
+/// Methods that change a container's element layout.
+fn changes_list_shape(method: &str) -> bool {
+    matches!(
+        method,
+        "append" | "push" | "insert" | "extend" | "remove" | "pop" | "clear" | "sort" | "reverse"
+    )
+}
+
 /// What role a node plays for its variable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
@@ -347,6 +501,11 @@ impl<'a> SvfgBuilder<'a> {
         let mut block_ids: Vec<BlockId> = self.ir.blocks.keys().copied().collect();
         block_ids.sort_by_key(|b| b.0);
 
+        // The state objects this function fills with a literal-keyed `set`:
+        // only a `get` on one of them is resolved through the keyed store edge
+        // instead of the receiver's own taint.
+        let keyed_bases = keyed_store_base_names(self.ir);
+
         for &block_id in &block_ids {
             let block = &self.ir.blocks[&block_id];
 
@@ -408,7 +567,7 @@ impl<'a> SvfgBuilder<'a> {
                     // container's other stores and union every property back
                     // together - the exact pollution the allocation lowering
                     // exists to remove.
-                    if self.is_container_identity_use(instr, use_var) {
+                    if self.is_container_identity_use(instr, use_var, &keyed_bases) {
                         continue;
                     }
 
@@ -466,16 +625,25 @@ impl<'a> SvfgBuilder<'a> {
                     args,
                     ..
                 } = instr
-                    && matches!(
-                        method.as_str(),
-                        "append" | "push" | "add" | "extend" | "unshift" | "insert"
-                    )
-                    && let Some(base_def) = self.allocation_def(*base)
+                    && mutates_receiver_object(method)
                 {
-                    for arg in args {
-                        if let Operand::Var(sv) = arg {
-                            self.graph
-                                .add_edge(NodeKey::instr(block_id, idx, *sv), base_def);
+                    // The target is the container's own definition. Literal
+                    // containers (`lst = []`) resolve to their allocation, where
+                    // field-demand walks are designed to stop; a library object
+                    // built by a call (`ConfigParser()`, `StringIO()`) resolves
+                    // to the call's destination. Either way the mutation's
+                    // argument must be reachable from the object, or the reader
+                    // that returns the accumulated state (`get`, `getvalue`)
+                    // walks back into a clean object.
+                    let target = self
+                        .allocation_def(*base)
+                        .or_else(|| self.def_site.get(base).copied());
+                    if let Some(base_def) = target {
+                        for arg in args {
+                            if let Operand::Var(sv) = arg {
+                                self.graph
+                                    .add_edge(NodeKey::instr(block_id, idx, *sv), base_def);
+                            }
                         }
                     }
                 }
@@ -533,6 +701,225 @@ impl<'a> SvfgBuilder<'a> {
         (self.graph, self.def_site)
     }
 
+    /// Resolve literal element reads of a locally built list by POSITION.
+    ///
+    /// `lst = []; lst.append('safe'); lst.append(t); lst.append('more');
+    /// lst.pop(0); bar = lst[1]` reads `'more'`. The generic model records every
+    /// `append` argument under the wildcard field, so a read at one index
+    /// matches the tainted element stored at another and a clean read is
+    /// reported.
+    ///
+    /// A position is claimed only where the shape is provable: every reference
+    /// to the container sits in ONE block, that block cannot run twice, the
+    /// container is freshly allocated inside it, and every mutation is
+    /// positional (`append(x)`, `pop(<literal>)`, `container[<literal>] = x`).
+    /// A loop, an escape to a call, an `insert`/`extend`/`remove`, or a
+    /// variable index leaves the container on the wildcard path, which is the
+    /// conservative direction.
+    fn positional_lists(&self, block_ids: &[BlockId]) -> PositionalLists {
+        let mut out = PositionalLists::default();
+        // Where each variable is mentioned, and which mutation instructions
+        // touch it in a form the shape model does not handle.
+        let mut blocks_of: FxHashMap<VarId, FxHashSet<BlockId>> = FxHashMap::default();
+        let mut mutations: FxHashMap<VarId, Vec<(BlockId, usize)>> = FxHashMap::default();
+        let mut unmodelled: FxHashSet<VarId> = FxHashSet::default();
+
+        for &block_id in block_ids {
+            let Some(block) = self.ir.blocks.get(&block_id) else {
+                continue;
+            };
+            for (idx, instr) in block.instructions.iter().enumerate() {
+                for var in Self::instruction_uses(instr)
+                    .into_iter()
+                    .chain(instr.defs())
+                {
+                    blocks_of.entry(var).or_default().insert(block_id);
+                }
+                let Instruction::CallVirtual {
+                    receiver: Operand::Var(r),
+                    method,
+                    ..
+                } = instr
+                else {
+                    continue;
+                };
+                if !changes_list_shape(method) {
+                    continue;
+                }
+                mutations.entry(*r).or_default().push((block_id, idx));
+                if !matches!(method.as_str(), "append" | "pop") {
+                    unmodelled.insert(*r);
+                }
+            }
+            for var in Self::terminator_uses(&block.terminator) {
+                blocks_of.entry(var).or_default().insert(block_id);
+            }
+        }
+
+        for (base, sites) in mutations {
+            if unmodelled.contains(&base) {
+                continue;
+            }
+            let Some(blocks) = blocks_of.get(&base) else {
+                continue;
+            };
+            // One block means the shape is a straight line: no other block can
+            // append to or read the container.
+            if blocks.len() != 1 {
+                continue;
+            }
+            let Some(&(block_id, _)) = sites.first() else {
+                continue;
+            };
+            if !blocks.contains(&block_id) || self.runs_more_than_once(block_id) {
+                continue;
+            }
+            let created_here = match self.allocation_def(base) {
+                Some(key) => key.block == block_id,
+                None => self.fresh_container_def(base, block_id),
+            };
+            if !created_here {
+                continue;
+            }
+            let Some(block) = self.ir.blocks.get(&block_id) else {
+                continue;
+            };
+
+            // Index -> the store instruction that currently holds it. A `pop`
+            // shifts the entries above it down, so the store answering a read
+            // is resolved at the read's own point in the block, not at the
+            // store's.
+            let mut slots: Vec<Option<(BlockId, usize, VarId)>> = Vec::new();
+            let mut writes: Vec<(BlockId, usize)> = Vec::new();
+            let mut reads: Vec<((BlockId, usize), Option<(BlockId, usize, VarId)>)> = Vec::new();
+            let mut consistent = true;
+            for (idx, instr) in block.instructions.iter().enumerate() {
+                match instr {
+                    Instruction::CallVirtual {
+                        receiver: Operand::Var(r),
+                        method,
+                        args,
+                        ..
+                    } if *r == base => match method.as_str() {
+                        "append" if args.len() == 1 => {
+                            slots.push(match args.first() {
+                                Some(Operand::Var(v)) => Some((block_id, idx, *v)),
+                                _ => None,
+                            });
+                            writes.push((block_id, idx));
+                        }
+                        "pop" => match args.first() {
+                            Some(Operand::IntLiteral(k))
+                                if *k >= 0 && (*k as usize) < slots.len() =>
+                            {
+                                slots.remove(*k as usize);
+                            }
+                            _ => {
+                                consistent = false;
+                                break;
+                            }
+                        },
+                        _ => {}
+                    },
+                    Instruction::StoreElement {
+                        base: b,
+                        index: Operand::IntLiteral(k),
+                        src,
+                        ..
+                    } if *b == base => {
+                        if *k < 0 {
+                            consistent = false;
+                            break;
+                        }
+                        let k = *k as usize;
+                        if slots.len() <= k {
+                            slots.resize(k + 1, None);
+                        }
+                        slots[k] = match src {
+                            Operand::Var(v) => Some((block_id, idx, *v)),
+                            _ => None,
+                        };
+                        writes.push((block_id, idx));
+                    }
+                    Instruction::LoadField { base: b, field, .. } if *b == base => {
+                        if let Ok(k) = field.parse::<usize>() {
+                            reads.push(((block_id, idx), slots.get(k).copied().flatten()));
+                        }
+                    }
+                    Instruction::LoadElement {
+                        base: b,
+                        index: Operand::IntLiteral(k),
+                        ..
+                    } if *b == base && *k >= 0 => {
+                        reads.push(((block_id, idx), slots.get(*k as usize).copied().flatten()));
+                    }
+                    _ => {}
+                }
+            }
+            if !consistent {
+                continue;
+            }
+            out.writes.extend(writes);
+            out.reads.extend(reads);
+        }
+        out
+    }
+
+    /// Is `var` a container this function creates from an empty literal?
+    ///
+    /// `lst = []` lowers to a copy of the lowering's unknown operand (the
+    /// literal itself has no allocation), so its def is an `Assign` from
+    /// `Operand::Unknown` inside the shape block. A formal parameter has no
+    /// local def at all, and a copy of another value copies a `Var`, so
+    /// neither can be mistaken for a container created here.
+    fn fresh_container_def(&self, var: VarId, block: BlockId) -> bool {
+        let Some(key) = self.def_site.get(&var) else {
+            return false;
+        };
+        key.block == block && self.is_fresh_empty_literal(var)
+    }
+
+    /// Is `var` the lowering of an empty container literal?
+    ///
+    /// `lst = []` produces no allocation (an empty literal lowers to the
+    /// unknown operand), so its emptiness is the evidence that a read of it
+    /// holds nothing but what later stores put there.
+    fn is_fresh_empty_literal(&self, var: VarId) -> bool {
+        let Some(key) = self.def_site.get(&var) else {
+            return false;
+        };
+        matches!(
+            key.instruction(self.ir),
+            Some(Instruction::Assign {
+                src: Operand::Unknown,
+                ..
+            })
+        )
+    }
+
+    /// Can this block be entered more than once in one call? A loop body's
+    /// shape is not a straight line: positions computed from a single pass are
+    /// wrong when the block repeats, so the position model is not claimed.
+    fn runs_more_than_once(&self, block: BlockId) -> bool {
+        let Some(data) = self.ir.blocks.get(&block) else {
+            return true;
+        };
+        let mut stack: Vec<BlockId> = data.successors.clone();
+        let mut seen = FxHashSet::default();
+        while let Some(next) = stack.pop() {
+            if next == block {
+                return true;
+            }
+            if !seen.insert(next) {
+                continue;
+            }
+            if let Some(d) = self.ir.blocks.get(&next) {
+                stack.extend(d.successors.iter().copied());
+            }
+        }
+        false
+    }
+
     /// Pass 3: field-sensitive heap edges.
     ///
     /// `StoreField { base, field, src }` writes a value into an object field;
@@ -559,11 +946,20 @@ impl<'a> SvfgBuilder<'a> {
     /// to the later store, and both edges exist (over-approximation, never
     /// under-approximation, sound for taint).
     fn connect_heap_edges(&mut self, block_ids: &[BlockId]) {
+        // Containers whose whole shape is visible: their stores and literal
+        // index reads are resolved by position below instead of by the
+        // wildcard match every other container uses.
+        let positional = self.positional_lists(block_ids);
         // Collect (block, idx, base, field, src_use_key) for every field store.
         let mut stores: Vec<(VarId, String, NodeKey)> = Vec::new();
         for &block_id in block_ids {
             let block = &self.ir.blocks[&block_id];
             for (idx, instr) in block.instructions.iter().enumerate() {
+                // The positional model owns this write: keeping the wildcard
+                // entry here would let a read at another index match it again.
+                if positional.writes.contains(&(block_id, idx)) {
+                    continue;
+                }
                 let (base, field, src) = match instr {
                     Instruction::StoreField {
                         base, field, src, ..
@@ -583,18 +979,30 @@ impl<'a> SvfgBuilder<'a> {
                         method,
                         args,
                         ..
-                    } if matches!(
-                        method.as_str(),
-                        "append" | "push" | "add" | "extend" | "unshift" | "insert"
-                    ) =>
-                    {
-                        for arg in args {
-                            if let Operand::Var(sv) = arg {
-                                stores.push((
-                                    *r,
-                                    "*".to_string(),
-                                    NodeKey::instr(block_id, idx, *sv),
-                                ));
+                    } if mutates_receiver_object(method) => {
+                        // A literal-keyed store (`conf.set('s', 'k', v)`,
+                        // `m.set('k', v)`) records the value under that key
+                        // only: the last argument is what gets stored, and a
+                        // wildcard entry here would let every later read match
+                        // it whatever key it asked for. Without a literal key
+                        // the store stays wildcard, so a variable-key caller
+                        // is not under-approximated.
+                        match keyed_store_field(args) {
+                            Some(field) => {
+                                if let Some(Operand::Var(sv)) = args.last() {
+                                    stores.push((*r, field, NodeKey::instr(block_id, idx, *sv)));
+                                }
+                            }
+                            None => {
+                                for arg in args {
+                                    if let Operand::Var(sv) = arg {
+                                        stores.push((
+                                            *r,
+                                            "*".to_string(),
+                                            NodeKey::instr(block_id, idx, *sv),
+                                        ));
+                                    }
+                                }
                             }
                         }
                         continue;
@@ -606,7 +1014,7 @@ impl<'a> SvfgBuilder<'a> {
                 }
             }
         }
-        if stores.is_empty() {
+        if stores.is_empty() && positional.reads.is_empty() {
             return;
         }
 
@@ -614,6 +1022,23 @@ impl<'a> SvfgBuilder<'a> {
         for &block_id in block_ids {
             let block = &self.ir.blocks[&block_id];
             for (idx, instr) in block.instructions.iter().enumerate() {
+                // A positional read resolves to the one store holding its index
+                // at this point in the block (or to nothing, when the slot is
+                // empty) - never to every value the container ever held.
+                if let Some(answer) = positional.reads.get(&(block_id, idx)) {
+                    if let Some((store_block, store_idx, src_var)) = *answer {
+                        let dest = match instr {
+                            Instruction::LoadField { dest, .. }
+                            | Instruction::LoadElement { dest, .. } => *dest,
+                            _ => continue,
+                        };
+                        self.graph.add_edge(
+                            NodeKey::instr(store_block, store_idx, src_var),
+                            NodeKey::instr(block_id, idx, dest),
+                        );
+                    }
+                    continue;
+                }
                 let (base, field) = match instr {
                     Instruction::LoadField { base, field, .. } => (*base, field.clone()),
                     Instruction::LoadElement { base, index, .. } => (
@@ -623,6 +1048,19 @@ impl<'a> SvfgBuilder<'a> {
                             _ => "*".to_string(),
                         },
                     ),
+                    // `conf.get('s', 'k')` / `m.get('k')` is the keyed read
+                    // paired with the keyed store above. Without literal keys
+                    // there is nothing to match on and the receiver keeps its
+                    // own taint (see the identity-use cut).
+                    Instruction::CallVirtual {
+                        receiver: Operand::Var(r),
+                        method,
+                        args,
+                        ..
+                    } if method == "get" => match keyed_load_field(args) {
+                        Some(field) => (*r, field),
+                        None => continue,
+                    },
                     _ => continue,
                 };
                 let load_dest_key = NodeKey::instr(
@@ -631,7 +1069,10 @@ impl<'a> SvfgBuilder<'a> {
                     match instr {
                         Instruction::LoadField { dest, .. }
                         | Instruction::LoadElement { dest, .. } => *dest,
-                        _ => unreachable!(),
+                        Instruction::CallVirtual {
+                            dest: Some(dest), ..
+                        } => *dest,
+                        _ => continue,
                     },
                 );
                 for (sbase, sfield, src_use_key) in &stores {
@@ -1069,12 +1510,42 @@ impl<'a> SvfgBuilder<'a> {
     /// whose base resolves to a fresh allocation? Such reads must not
     /// climb into the container's definition: their field's value arrives
     /// through the Pass-3 store→load edges only.
-    fn is_container_identity_use(&self, instr: &Instruction, use_var: VarId) -> bool {
-        let base = match instr {
-            Instruction::LoadField { base, .. } | Instruction::LoadElement { base, .. } => *base,
-            _ => return false,
-        };
-        base == use_var && self.resolves_to_allocation(base)
+    fn is_container_identity_use(
+        &self,
+        instr: &Instruction,
+        use_var: VarId,
+        keyed_bases: &FxHashSet<&str>,
+    ) -> bool {
+        match instr {
+            Instruction::LoadField { base, .. } | Instruction::LoadElement { base, .. } => {
+                *base == use_var
+                    && (self.resolves_to_allocation(*base) || self.is_fresh_empty_literal(*base))
+            }
+            // A literal-keyed `get` on an object this function fills with
+            // `set(...)` resolves its value through the Pass-3 keyed store edge
+            // alone. Letting the receiver's own taint flow here would taint
+            // every key of the object, which is the missed-precision case
+            // `set('s', 'kA', param); get('s', 'kB')`. A `get` on any other
+            // receiver (`request.args.get('c')`) keeps its edge: it is a
+            // parameter lookup, not object state.
+            Instruction::CallVirtual {
+                receiver: Operand::Var(r),
+                method,
+                args,
+                ..
+            } => {
+                method == "get"
+                    && *r == use_var
+                    && keyed_load_field(args).is_some()
+                    && self
+                        .ir
+                        .var_metadata
+                        .get(r)
+                        .and_then(|m| m.source_name.as_deref())
+                        .is_some_and(|name| keyed_bases.contains(name))
+            }
+            _ => false,
+        }
     }
 
     /// Does this instruction define a boolean *payload* rather than a
