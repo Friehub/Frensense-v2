@@ -89,6 +89,10 @@ what this crate does.
   `cargo hack check -p frensense-engine --each-feature`: no source warnings
   under any feature combination, and `cargo check --all-features` no longer
   reports the two unused-dependency warnings.
+- **The last dead test helper is gone.** `default_pack_table` had no caller
+  (`seeded_tables` decodes the default pack itself), so it no longer warns in
+  the test build; `default_pack_entries` documents the engine↔packgen byte
+  edge in its place.
 
 ### Fixed
 
