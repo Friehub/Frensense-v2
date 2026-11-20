@@ -140,11 +140,6 @@ impl MemorySummaryRegistry {
         self
     }
 
-    /// Insert or update a summary contract for a function name.
-    pub(crate) fn insert(&mut self, name: String, summary: MemorySummary) {
-        self.summaries.insert(name, summary);
-    }
-
     /// Retrieve summary for a function by exact or short segment name.
     pub(crate) fn get(&self, name: &str) -> Option<&MemorySummary> {
         self.summaries

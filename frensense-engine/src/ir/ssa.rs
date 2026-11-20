@@ -61,16 +61,11 @@ impl SSABuilder {
 
     /// Override the work budget. Tests use a tiny budget to exercise the
     /// degraded path deterministically.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn with_budget(mut self, budget: u64) -> Self {
         self.budget = budget;
         self
-    }
-
-    /// Work units charged against the budget so far. [`Self::build`] takes the builder by value, so this reads 0 on a fresh builder and cannot report the cost of a finished build.
-    #[must_use]
-    pub(crate) fn work_used(&self) -> u64 {
-        self.used
     }
 
     /// Charge `units` against this function's budget.

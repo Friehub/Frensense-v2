@@ -214,6 +214,7 @@ fn uses_var(instr: &Instruction, v: VarId) -> bool {
 /// fires the weak-credential-storage rule. Mechanism only: whether the
 /// wrapped implementation is acceptable is exactly what corpus facts
 /// (wrapper→primitive mappings) refine.
+#[cfg(test)]
 pub(crate) fn check_credentials(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     check_credentials_in(ir, facts, &[])
 }

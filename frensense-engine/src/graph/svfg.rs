@@ -231,17 +231,6 @@ impl Svfg {
         self.nodes.values().map(|n| n.successors.len()).sum()
     }
 
-    /// All nodes whose `kind` matches a predicate.
-    pub(crate) fn nodes_where<F: Fn(&SvfgNode) -> bool>(&self, pred: F) -> Vec<&SvfgNode> {
-        self.nodes.values().filter(|n| pred(n)).collect()
-    }
-
-    /// Every node that is a `FormalParam`, convenient as BFS seeds for
-    /// parameter-taint analysis.
-    pub(crate) fn param_nodes(&self) -> Vec<&SvfgNode> {
-        self.nodes_where(|n| n.kind == NodeKind::FormalParam)
-    }
-
     /// Add a directed edge `from → to`. O(1); dedup via hash set.
     fn add_edge(&mut self, from: NodeKey, to: NodeKey) {
         if let Some(f) = self.nodes.get_mut(&from) {

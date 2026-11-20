@@ -45,6 +45,55 @@ what this crate does.
   `CheckRegistry`, `LoweringContext`, `GuardMap` and `CtxLink`, required by
   the `missing_debug_implementations` lint.
 
+### Changed
+
+#### Build hygiene
+
+- **The crate compiles without unused-import warnings.** Six `pub(crate) use`
+  re-exports in `checks/uaf/mod.rs`, `checks/mod.rs` and `ir/lowering/mod.rs`
+  were leftovers of earlier module splits: every consumer already imported
+  `free_slot`, `must_out`, `FreeSite`, the two walker caps, `LValue`,
+  `CheckRegistry`/`NonDataflowCheck`/`default_registry` from the module that
+  defines them, so the re-exports only existed to be re-exported. Removed; the
+  public surface and every call path are unchanged.
+- **Dead crate-internal helpers are gone.** Twelve `pub(crate)` items that no
+  path reached are removed: `ScopeId`, `BackwardTaintEngine::capture_paths`,
+  `FactTable::label_for_call`, `Value::is_const`,
+  `MemorySummaryRegistry::insert`,
+  `ModuleAliasResolver::build` (the ref-taking `build_from_refs` is the one
+  `ProgramBuilder` calls), `Svfg::nodes_where`/`param_nodes`,
+  `SSABuilder::work_used`, `Cap::recorded`, `CallTarget::External` with its
+  `is_external` gate (nothing ever constructed the variant, so
+  `has_internal` is now just "the site resolved at least one target"), and
+  the `DiagnosticSink` seam with `CheckContext::diag` (the trait documented
+  that no check called it; safety caps already reach `truncations` through
+  `telemetry::Cap`). No analysis code changes: every removal was
+  unreachable from the crate's own entry points.
+- **Test-only helpers are compiled only for tests.** Fifteen crate-internal
+  items the library never calls are now `#[cfg(test)]`: the
+  `without_suppression` analysis mode, `LearnedFactEntry::wire_index`,
+  `FactTable::role_for_call`/`is_sink_call`, `dedup_by_shape`,
+  `check_all`, `check_credentials`,
+  `CheckRegistry::from_slice`/`len`/`is_empty`, `FunctionIR::push_phi`,
+  `SSABuilder::with_budget`, and `PreparedProgram::exports_of` /
+  `module_items_of` / `imports_of`. Their unit tests exercise them exactly as
+  before; the library build no longer carries them. Two doc links that
+  pointed at cfg(test) items became plain code spans so rustdoc stays clean
+  under `-D rustdoc::broken_intra_doc_links`.
+- **Two dependencies the library never used left the library build.**
+  `bincode` was reached only from tests (the library itself needs serde's
+  derives), so it moved to `[dev-dependencies]` and `serialize` is
+  `["dep:serde"]`; `tree-sitter-html` selected a grammar crate
+  `frensense-lang` has no HTML provider for, so the `html` feature remains as
+  an empty compatibility feature instead of pulling it. Measured with
+  `cargo hack check -p frensense-engine --each-feature`: no source warnings
+  under any feature combination, and `cargo check --all-features` no longer
+  reports the two unused-dependency warnings.
+- **The last dead test helper is gone.** `default_pack_table` had no caller
+  (`seeded_tables` decodes the default pack itself), so it no longer warns in
+  the test build; `default_pack_entries` documents the engine↔packgen byte
+  edge in its place.
+
 ### Fixed
 
 - **A sink call whose data argument is a literal is still a recognized sink

@@ -671,15 +671,9 @@ impl<'a> BackwardTaintEngine<'a> {
     /// mode: any caller-side arg→dest edge leaks the walk past sanitizing
     /// callees, so verdicts may be `Vulnerable` where the precise mode says
     /// `Sanitized`). Useful as a sound upper bound.
+    #[cfg(test)]
     pub(crate) fn without_suppression(mut self) -> Self {
         self.honour_suppression = false;
-        self
-    }
-
-    /// Toggle taint-path capture (on by default). Turning it off saves the
-    /// per-root parent map when path reporting is not needed.
-    pub(crate) fn capture_paths(mut self, yes: bool) -> Self {
-        self.capture_paths = yes;
         self
     }
 
