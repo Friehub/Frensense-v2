@@ -71,9 +71,7 @@ use crate::ir::function::FunctionIR;
 use rustc_hash::FxHashSet;
 
 pub use crate::analysis::taint::facts::Provenance;
-pub(crate) use registry::{
-    CheckContext, CheckRegistry, CheckScope, NonDataflowCheck, default_registry,
-};
+pub(crate) use registry::{CheckContext, CheckScope};
 
 /// Last segment of a call reference: everything after the last `.`, then
 /// after the last `::` (Rust/C++ paths), so `security.hash`, `sha2::digest`

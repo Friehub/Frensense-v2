@@ -45,6 +45,18 @@ what this crate does.
   `CheckRegistry`, `LoweringContext`, `GuardMap` and `CtxLink`, required by
   the `missing_debug_implementations` lint.
 
+### Changed
+
+#### Build hygiene
+
+- **The crate compiles without unused-import warnings.** Six `pub(crate) use`
+  re-exports in `checks/uaf/mod.rs`, `checks/mod.rs` and `ir/lowering/mod.rs`
+  were leftovers of earlier module splits: every consumer already imported
+  `free_slot`, `must_out`, `FreeSite`, the two walker caps, `LValue`,
+  `CheckRegistry`/`NonDataflowCheck`/`default_registry` from the module that
+  defines them, so the re-exports only existed to be re-exported. Removed; the
+  public surface and every call path are unchanged.
+
 ### Fixed
 
 - **A sink call whose data argument is a literal is still a recognized sink

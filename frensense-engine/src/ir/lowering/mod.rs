@@ -28,7 +28,6 @@ pub(crate) mod lvalue;
 
 pub(crate) use context::LoopTarget;
 pub use context::LoweringContext;
-pub(crate) use lvalue::LValue;
 
 use crate::ir::function::Operand;
 use frensense_lang::NodeRole;
