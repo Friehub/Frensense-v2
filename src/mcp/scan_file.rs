@@ -222,7 +222,9 @@ pub(crate) fn result_payload_detailed(
             .iter()
             .any(|s| s.reason == "below-confidence" && s.count > 0)
     {
-        Some("no findings; potential finding(s) were dropped below confidence threshold".to_string())
+        Some(
+            "no findings; potential finding(s) were dropped below confidence threshold".to_string(),
+        )
     } else if advisories.is_empty() && !cov.fully_resolved() {
         Some(format!(
             "no findings; {} sink site(s) could not be decided",
