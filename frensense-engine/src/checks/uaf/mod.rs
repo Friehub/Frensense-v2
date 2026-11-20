@@ -33,13 +33,13 @@ use crate::graph::svfg::{NodeKey, Svfg, SvfgBuilder};
 use crate::ir::function::{BlockId, FunctionIR, VarId};
 
 pub(crate) use discovery::{
-    TWO_PHASE_MIN_INSTRS, collect_frees, collect_start_sites, free_of, free_slot, instr_at,
-    may_alias, reverse_cross,
+    TWO_PHASE_MIN_INSTRS, collect_frees, collect_start_sites, free_of, instr_at, may_alias,
+    reverse_cross,
 };
-pub(crate) use must_exec::{callee_always_frees, must_out, must_reach, must_reach_any};
-pub(crate) use types::{CrossCtx, FreeSite, Pair, PairCheck, Violation, finding};
+pub(crate) use must_exec::{callee_always_frees, must_reach, must_reach_any};
+pub(crate) use types::{CrossCtx, Pair, PairCheck, Violation, finding};
 pub(crate) use uninit::check_uninitialized_frees;
-pub(crate) use walker::{MAX_SCAN_NODES, MAX_WALK_NODES, Walker};
+pub(crate) use walker::Walker;
 
 /// Run the UAF / double-free check over one function with an
 /// interprocedural memory summary registry (intraprocedural graph mode: frees of parameters
