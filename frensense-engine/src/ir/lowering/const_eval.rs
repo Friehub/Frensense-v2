@@ -135,7 +135,7 @@ impl<'a> LoweringContext<'a> {
 
     /// Forget `dest`'s constant (compound assignment, destructuring, or a
     /// merged ternary result).
-    pub(super) fn forget_const(&mut self, dest: VarId) {
+    pub(crate) fn forget_const(&mut self, dest: VarId) {
         self.const_values.remove(&dest);
     }
 

@@ -335,6 +335,27 @@ pub(crate) fn is_sanitizer_use(ir: &FunctionIR, config: &TaintConfig, key: &Node
 use crate::analysis::taint::role::SinkRole;
 use frensense_lang::severity::SanitizerKind;
 
+/// String-rewrite methods whose first argument is the subsequence removed.
+///
+/// `value.replace("'", "&apos;")` is the inline escaping idiom for a value
+/// interpolated into a quoted XPath/SQL/HTML string; `replaceAll` is the ES2021
+/// spelling. The method name alone proves nothing (a rewrite may remove
+/// anything), so [`removes_injection_delimiter`] additionally requires the
+/// removed literal to be a guard-denylist token.
+const REWRITE_METHODS: &[&str] = &["replace", "replaceAll"];
+
+/// Is this rewrite removing the delimiter an injection needs?
+///
+/// The vocabulary is the pack's guard-denylist set - the same quote tokens an
+/// early `if "'" in value: return` guard rejects - and the mechanism is the
+/// literal first argument of a string-rewrite method. Removing `'` (or `"`)
+/// from a value that is then interpolated into a delimited string leaves it no
+/// way to break out of the literal, so the check is exact rather than
+/// heuristic: the delimiter is provably absent from the result.
+fn removes_injection_delimiter(args: &[Operand], facts: &FactTable) -> bool {
+    matches!(args.first(), Some(Operand::StringLiteral(s)) if facts.is_guard_denylist(s))
+}
+
 /// Fact-table-aware sanitizer check qualified by the sink's role and label.
 /// Returns true if this node is inside a sanitizer that actually defeats the candidate sink.
 ///
@@ -384,8 +405,23 @@ pub(crate) fn is_sanitizer_effective_for_role(
             false
         }
         Instruction::CallVirtual {
-            method, receiver, ..
+            method,
+            receiver,
+            args,
+            ..
         } => {
+            // Inline delimiter removal neutralizes exactly the delimited-string
+            // sinks: an execution sink (SQL/XPath/command), an XSS sink, or a
+            // response writer. Other roles (path, URL, deserialization) are
+            // not delimiter-sensitive and keep the flow.
+            if matches!(
+                role,
+                SinkRole::Execution | SinkRole::Xss | SinkRole::Response
+            ) && REWRITE_METHODS.contains(&method.as_str())
+                && removes_injection_delimiter(args, facts)
+            {
+                return true;
+            }
             if let Operand::Var(r) = receiver {
                 let path = FactTable::receiver_access_path(ir, *r);
                 if let Some(ref p) = path {

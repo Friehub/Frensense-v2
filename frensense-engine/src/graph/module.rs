@@ -137,12 +137,22 @@ pub(crate) fn resolve_module_path(
     None
 }
 
+/// Maximum recursion depth when resolving re-exports and barrel exports.
+///
+/// Deep barrel chains (e.g. `entry -> barrel1 -> barrel2 -> ... -> target`)
+/// resolve transitively across multiple hops up to this limit. The depth
+/// bound prevents infinite recursion on cyclic re-export topologies.
+pub const MAX_REEXPORT_RESOLVE_DEPTH: usize = 12;
+
 #[derive(Debug, Clone)]
 enum ExportTarget {
     Local(String),
     ReExport { from_file: String, symbol: String },
     Barrel(String),
 }
+
+type FileExportMap = FxHashMap<String, FxHashMap<String, ExportTarget>>;
+type FileBarrelMap = FxHashMap<String, Vec<String>>;
 
 /// The package-import table that applies to `fn_name`: its own file's, or, when
 /// the function's file is untracked and the program has exactly one file's
@@ -208,6 +218,56 @@ impl ModuleAliasResolver {
     /// place each function in its file. Borrows the caller's strings instead
     /// of copying the corpus, so a per-file frontend never duplicates every
     /// source file's text.
+    fn build_export_maps(
+        file_exports: &FxHashMap<String, Vec<Export>>,
+        known_files: &[String],
+        fn_file: &FxHashMap<String, String>,
+    ) -> (FileExportMap, FileBarrelMap) {
+        let mut export_map: FileExportMap = FxHashMap::default();
+        let mut barrel_map: FileBarrelMap = FxHashMap::default();
+
+        for (path, exps) in file_exports {
+            let m = export_map.entry(path.clone()).or_default();
+            for exp in exps {
+                if let Some(from_mod) = &exp.from_module {
+                    if let Some(target_file) = resolve_module_path(path, from_mod, known_files) {
+                        if exp.exported_name == "*" {
+                            m.insert("*".to_string(), ExportTarget::Barrel(target_file.clone()));
+                            let list = barrel_map.entry(path.clone()).or_default();
+                            if !list.contains(&target_file) {
+                                list.push(target_file);
+                            }
+                        } else {
+                            m.insert(
+                                exp.exported_name.clone(),
+                                ExportTarget::ReExport {
+                                    from_file: target_file,
+                                    symbol: exp.local_name.clone(),
+                                },
+                            );
+                        }
+                    }
+                } else {
+                    m.insert(
+                        exp.exported_name.clone(),
+                        ExportTarget::Local(exp.local_name.clone()),
+                    );
+                }
+            }
+        }
+
+        for (func_name, file_path) in fn_file {
+            let bare = func_name.rsplit("::").next().unwrap_or(func_name);
+            export_map
+                .entry(file_path.clone())
+                .or_default()
+                .entry(bare.to_string())
+                .or_insert_with(|| ExportTarget::Local(bare.to_string()));
+        }
+
+        (export_map, barrel_map)
+    }
+
     pub(crate) fn build_from_refs(
         files: &[(&str, &str, &str)], // (path, source, ext)
         ir_names: &FxHashSet<String>,
@@ -238,45 +298,8 @@ impl ModuleAliasResolver {
             file_module_items.insert(path.to_owned(), items);
         }
 
-        // Build per-file export map
-        let mut export_map: FxHashMap<String, FxHashMap<String, ExportTarget>> =
-            FxHashMap::default();
-
-        for (path, exps) in &file_exports {
-            let m = export_map.entry(path.clone()).or_default();
-            for exp in exps {
-                if let Some(from_mod) = &exp.from_module {
-                    if let Some(target_file) = resolve_module_path(path, from_mod, &known_files) {
-                        if exp.exported_name == "*" {
-                            m.insert("*".to_string(), ExportTarget::Barrel(target_file));
-                        } else {
-                            m.insert(
-                                exp.exported_name.clone(),
-                                ExportTarget::ReExport {
-                                    from_file: target_file,
-                                    symbol: exp.local_name.clone(),
-                                },
-                            );
-                        }
-                    }
-                } else {
-                    m.insert(
-                        exp.exported_name.clone(),
-                        ExportTarget::Local(exp.local_name.clone()),
-                    );
-                }
-            }
-        }
-
-        // Add declared IR functions to export map as local exports
-        for (func_name, file_path) in fn_file {
-            let bare = func_name.rsplit("::").next().unwrap_or(func_name);
-            export_map
-                .entry(file_path.clone())
-                .or_default()
-                .entry(bare.to_string())
-                .or_insert_with(|| ExportTarget::Local(bare.to_string()));
-        }
+        let (export_map, barrel_map) =
+            Self::build_export_maps(&file_exports, &known_files, fn_file);
 
         // Resolve imports for each file
         let mut file_aliases: FxHashMap<String, FxHashMap<String, String>> = FxHashMap::default();
@@ -308,9 +331,15 @@ impl ModuleAliasResolver {
                     continue;
                 };
 
-                if let Some(canonical) =
-                    Self::resolve_symbol(&target_file, symbol, &export_map, ir_names, fn_file, 0)
-                {
+                if let Some(canonical) = Self::resolve_symbol(
+                    &target_file,
+                    symbol,
+                    &export_map,
+                    &barrel_map,
+                    ir_names,
+                    fn_file,
+                    0,
+                ) {
                     file_aliases
                         .entry(importer_path.clone())
                         .or_default()
@@ -328,69 +357,82 @@ impl ModuleAliasResolver {
         }
     }
 
+    /// Recursively resolve an imported `symbol` from `file` across re-exports and barrel files.
+    ///
+    /// Resolution order:
+    /// 1. Directly declared local export in `file` (`export function foo()`)
+    /// 2. Explicit named re-export (`export { foo } from "./other"`)
+    /// 3. Wildcard barrel exports (`export * from "./submodule"`), searching all barrels declared in `file`
+    /// 4. Direct match in `ir_names` qualified or bare for the file
+    ///
+    /// The search recurses across multi-hop re-export chains up to [`MAX_REEXPORT_RESOLVE_DEPTH`].
     fn resolve_symbol(
         file: &str,
         symbol: &str,
-        export_map: &FxHashMap<String, FxHashMap<String, ExportTarget>>,
+        export_map: &FileExportMap,
+        barrel_map: &FileBarrelMap,
         ir_names: &FxHashSet<String>,
         fn_file: &FxHashMap<String, String>,
         depth: usize,
     ) -> Option<String> {
-        if depth > 6 {
+        if depth > MAX_REEXPORT_RESOLVE_DEPTH {
             return None;
         }
 
-        if let Some(m) = export_map.get(file) {
-            if let Some(target) = m.get(symbol) {
-                match target {
-                    ExportTarget::Local(local_sym) => {
-                        let qual = concat3(file, "::", local_sym);
-                        if ir_names.contains(&qual) {
-                            return Some(qual);
-                        }
-                        if ir_names.contains(local_sym) {
-                            return Some(local_sym.clone());
-                        }
+        if let Some(target) = export_map.get(file).and_then(|m| m.get(symbol)) {
+            match target {
+                ExportTarget::Local(local_sym) => {
+                    let qual = concat3(file, "::", local_sym);
+                    if ir_names.contains(&qual) {
+                        return Some(qual);
+                    }
+                    if ir_names.contains(local_sym) {
                         return Some(local_sym.clone());
                     }
-                    ExportTarget::ReExport {
+                    return Some(local_sym.clone());
+                }
+                ExportTarget::ReExport {
+                    from_file,
+                    symbol: target_sym,
+                } => {
+                    return Self::resolve_symbol(
                         from_file,
-                        symbol: target_sym,
-                    } => {
-                        return Self::resolve_symbol(
-                            from_file,
-                            target_sym,
-                            export_map,
-                            ir_names,
-                            fn_file,
-                            depth + 1,
-                        );
-                    }
-                    ExportTarget::Barrel(from_file) => {
-                        return Self::resolve_symbol(
-                            from_file,
-                            symbol,
-                            export_map,
-                            ir_names,
-                            fn_file,
-                            depth + 1,
-                        );
-                    }
+                        target_sym,
+                        export_map,
+                        barrel_map,
+                        ir_names,
+                        fn_file,
+                        depth + 1,
+                    );
+                }
+                ExportTarget::Barrel(from_file) => {
+                    return Self::resolve_symbol(
+                        from_file,
+                        symbol,
+                        export_map,
+                        barrel_map,
+                        ir_names,
+                        fn_file,
+                        depth + 1,
+                    );
                 }
             }
+        }
 
-            // Check barrel export fallback
-            if let Some(ExportTarget::Barrel(barrel_file)) = m.get("*")
-                && let Some(resolved) = Self::resolve_symbol(
+        // Check all wildcard barrel exports for this file (multi-barrel support)
+        if let Some(barrels) = barrel_map.get(file) {
+            for barrel_file in barrels {
+                if let Some(resolved) = Self::resolve_symbol(
                     barrel_file,
                     symbol,
                     export_map,
+                    barrel_map,
                     ir_names,
                     fn_file,
                     depth + 1,
-                )
-            {
-                return Some(resolved);
+                ) {
+                    return Some(resolved);
+                }
             }
         }
 
@@ -493,6 +535,60 @@ mod tests {
                 .find(|i| i.name == "internal")
                 .map(|i| i.visibility),
             Some(Visibility::Internal)
+        );
+    }
+
+    #[test]
+    fn multi_hop_reexport_and_multiple_barrel_exports() {
+        let program = files(&[
+            (
+                "src/target.ts",
+                "export function coreHandler() { return 42; }\n",
+                "ts",
+            ),
+            (
+                "src/other.ts",
+                "export function otherHandler() { return 99; }\n",
+                "ts",
+            ),
+            (
+                // Barrel 1: wildcard re-exports target and other
+                "src/barrel1.ts",
+                "export * from \"./target\";\nexport * from \"./other\";\n",
+                "ts",
+            ),
+            (
+                // Barrel 2: intermediate barrel re-exporting barrel 1
+                "src/barrel2.ts",
+                "export * from \"./barrel1\";\n",
+                "ts",
+            ),
+            (
+                // Barrel 3: 3rd hop named re-export
+                "src/barrel3.ts",
+                "export { coreHandler, otherHandler } from \"./barrel2\";\n",
+                "ts",
+            ),
+            (
+                // Importer at 4th hop
+                "src/app.ts",
+                "import { coreHandler, otherHandler } from \"./barrel3\";\ncoreHandler();\notherHandler();\n",
+                "ts",
+            ),
+        ]);
+        let prepared = scan::prepare(&program).expect("prepare");
+
+        let aliases = prepared
+            .file_aliases
+            .get("src/app.ts")
+            .expect("aliases for src/app.ts");
+        assert!(
+            aliases.get("coreHandler").is_some(),
+            "coreHandler must resolve across 4 hops and multiple barrels: {aliases:?}"
+        );
+        assert!(
+            aliases.get("otherHandler").is_some(),
+            "otherHandler from 2nd export * must not be overwritten: {aliases:?}"
         );
     }
 }

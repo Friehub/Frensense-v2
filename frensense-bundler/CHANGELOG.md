@@ -11,6 +11,17 @@ its replay gate, the corpus `lint` checks, and the embedded default-pack asset.
 in *this* file, so a format change - not the root changelog - is what records
 artifact compatibility.
 
+## [0.8.2]
+
+### Changed
+
+- **The embedded default pack was regenerated.** `frensense-packgen` now
+  includes package-scoped vocabulary for Next.js (`next/server`, `next/navigation`,
+  `next/headers`, `next/cache`), Vue 3 & Pinia (`vue-router`, `@vue/router`, `vue`,
+  `pinia`), NestJS (`@nestjs/typeorm`, `@nestjs/mongoose`), and Nuxt 3 / Nitro /
+  ofetch (`h3`, `ofetch`, `nuxt`). No `BUNDLE_VERSION` change: the fact shape
+  is unchanged, only vocabulary entries were added.
+
 ## [0.8.1]
 
 ### Changed
@@ -21,6 +32,11 @@ artifact compatibility.
   `SEVERITY_LABELS`, so a label the CLI and MCP accept cannot fail corpus lint
   (or vice versa). The error code and text are unchanged.
 - **The embedded default pack was regenerated.** `frensense-packgen` now
+  declares the Python `xpath`/`XPath` sink slots (argument 0 is the expression,
+  the rest are query bindings) and the `getvalue` receiver propagator, and drops
+  the receiver-wide `get` rule in favour of the engine's keyed store edge. No
+  `BUNDLE_VERSION` change: the fact shape is unchanged, only the vocabulary
+  entries moved.
   leaves `message` empty on the built-in weak-hash, insecure-config and
   key-size rules; the engine renders those observations from the
   `frensense-lang` templates instead of a second copy in the pack. No

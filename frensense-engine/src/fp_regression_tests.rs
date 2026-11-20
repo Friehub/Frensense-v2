@@ -529,3 +529,289 @@ app.get("/a", async (req, res) => {
             .collect::<Vec<_>>()
     );
 }
+
+// ---------------------------------------------------------------------------
+// Python XPath: keyword bindings, inline delimiter escaping, and library state
+// ---------------------------------------------------------------------------
+
+/// `tree.xpath(expr, name=value)` binds `value` into the expression as an
+/// XPath variable. A tainted *binding* is a parameter channel, not string
+/// concatenation, so only slot 0 is dangerous.
+#[test]
+fn xpath_keyword_binding_is_clean() {
+    let src = r#"
+from flask import request
+import lxml.etree
+
+def h():
+    param = request.args.get("p")
+    root = lxml.etree.parse("x.xml")
+    return root.xpath("/Employees/Employee[@emplid=$id]", id=param)
+"#;
+    let res = run("py", "xbind.py", src);
+    assert!(
+        !vulnerable(&res, "xpath"),
+        "a keyword binding must not be reported as expression injection: {:?}",
+        res.findings
+            .iter()
+            .map(|f| (f.sink.clone(), f.verdict.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// The slot restriction must not silence a concatenated expression.
+#[test]
+fn xpath_concatenated_expression_is_vulnerable() {
+    let src = r#"
+from flask import request
+import lxml.etree
+
+def h():
+    param = request.args.get("p")
+    query = "/Employees/Employee[@emplid='" + param + "']"
+    root = lxml.etree.parse("x.xml")
+    return root.xpath(query)
+"#;
+    let res = run("py", "xexpr.py", src);
+    assert!(vulnerable(&res, "xpath"), "concatenated XPath expression");
+}
+
+/// Escaping the quoting delimiter inline removes the only character an
+/// injection could use to leave the string literal, so the flow is clean.
+#[test]
+fn replace_of_the_quote_delimiter_is_clean() {
+    let src = r#"
+from flask import request
+import lxml.etree
+
+def h():
+    param = request.args.get("p")
+    bar = param.replace("'", "&apos;")
+    query = "/Employees/Employee[@emplid='" + bar + "']"
+    root = lxml.etree.parse("x.xml")
+    return root.xpath(query)
+"#;
+    let res = run("py", "xesc.py", src);
+    assert!(
+        !vulnerable(&res, "xpath"),
+        "an inline `'` escape must be treated as a sanitizer: {:?}",
+        res.findings
+            .iter()
+            .map(|f| (f.sink.clone(), f.verdict.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// `ConfigParser.set(section, key, value)` then `get(section, key)` returns
+/// the stored value: the state object must carry the flow.
+#[test]
+fn configparser_set_then_get_is_vulnerable() {
+    let src = r#"
+from flask import request
+import configparser
+import lxml.etree
+
+def h():
+    param = request.args.get("p")
+    conf = configparser.ConfigParser()
+    conf.add_section("s")
+    conf.set("s", "k", param)
+    bar = conf.get("s", "k")
+    query = "/Employees/Employee[@emplid='" + bar + "']"
+    root = lxml.etree.parse("x.xml")
+    return root.xpath(query)
+"#;
+    let res = run("py", "cfg_same.py", src);
+    assert!(
+        vulnerable(&res, "xpath"),
+        "ConfigParser state must carry the stored value: {:?}",
+        res.findings
+            .iter()
+            .map(|f| (f.sink.clone(), f.verdict.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A read of a *different* key returns the value stored under that key, not
+/// the tainted one, so the object's taint must not leak across keys.
+#[test]
+fn configparser_get_of_another_key_is_clean() {
+    let src = r#"
+from flask import request
+import configparser
+import lxml.etree
+
+def h():
+    param = request.args.get("p")
+    conf = configparser.ConfigParser()
+    conf.add_section("s")
+    conf.set("s", "safe", "a-value")
+    conf.set("s", "tainted", param)
+    bar = conf.get("s", "safe")
+    query = "/Employees/Employee[@emplid='" + bar + "']"
+    root = lxml.etree.parse("x.xml")
+    return root.xpath(query)
+"#;
+    let res = run("py", "cfg_other.py", src);
+    assert!(
+        !vulnerable(&res, "xpath"),
+        "a read of another key must stay clean: {:?}",
+        res.findings
+            .iter()
+            .map(|f| (f.sink.clone(), f.verdict.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// `StringIO.write` accumulates state and `getvalue()` returns all of it, so
+/// the buffer must carry the flow to the reader.
+#[test]
+fn stringio_write_then_getvalue_is_vulnerable() {
+    let src = r#"
+from flask import request
+import io
+import lxml.etree
+
+def h():
+    param = request.args.get("p")
+    buf = io.StringIO()
+    buf.write("/Employees/Employee[@emplid='")
+    buf.write(param)
+    buf.write("']")
+    bar = buf.getvalue()
+    root = lxml.etree.parse("x.xml")
+    return root.xpath(bar)
+"#;
+    let res = run("py", "stringio.py", src);
+    assert!(
+        vulnerable(&res, "xpath"),
+        "StringIO state must carry the written value: {:?}",
+        res.findings
+            .iter()
+            .map(|f| (f.sink.clone(), f.verdict.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A list built by literal appends answers a literal index with the value
+/// stored *at that index*: the read at 2 is the literal, the read at 1 is the
+/// tainted element. The wildcard store every `append` writes made both reads
+/// see both values.
+#[test]
+fn list_index_read_resolves_the_value_at_that_index() {
+    let src = r#"
+from flask import request
+import lxml.etree
+
+def literal_index():
+    p = request.args.get("p")
+    lst = []
+    lst.append("safe")
+    lst.append(p)
+    lst.append("more")
+    root = lxml.etree.parse("x.xml")
+    return root.xpath(lst[2])
+
+def tainted_index():
+    p = request.args.get("p")
+    lst = []
+    lst.append("safe")
+    lst.append(p)
+    lst.append("more")
+    root = lxml.etree.parse("x.xml")
+    return root.xpath(lst[1])
+"#;
+    let res = run("py", "list_index.py", src);
+    let functions = || {
+        res.findings
+            .iter()
+            .map(|f| (f.function.clone(), f.verdict.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        !res.findings
+            .iter()
+            .any(|f| f.function == "literal_index" && f.verdict == BackwardVerdict::Vulnerable),
+        "the literal element at index 2 must stay clean: {:?}",
+        functions()
+    );
+    assert!(
+        res.findings
+            .iter()
+            .any(|f| f.function == "tainted_index" && f.verdict == BackwardVerdict::Vulnerable),
+        "the value appended at index 1 must still reach the sink: {:?}",
+        functions()
+    );
+}
+
+/// `pop(0)` shifts every later element down, so the following read at 0 sees
+/// the previously second element.
+#[test]
+fn list_pop_shifts_the_read_position() {
+    let src = r#"
+from flask import request
+import lxml.etree
+
+def h():
+    p = request.args.get("p")
+    lst = []
+    lst.append("safe")
+    lst.append(p)
+    lst.append("more")
+    lst.pop(0)
+    root = lxml.etree.parse("x.xml")
+    return root.xpath(lst[0])
+"#;
+    let res = run("py", "list_pop.py", src);
+    assert!(
+        vulnerable(&res, "xpath"),
+        "pop must shift the read position"
+    );
+}
+
+/// A list filled inside a loop has no single-pass shape, so its element reads
+/// keep the wildcard model and stay conservative.
+#[test]
+fn list_filled_in_a_loop_keeps_the_wildcard_model() {
+    let src = r#"
+from flask import request
+import lxml.etree
+
+def h():
+    lst = []
+    for item in request.args.get("p"):
+        lst.append(item)
+    root = lxml.etree.parse("x.xml")
+    return root.xpath(lst[0])
+"#;
+    let res = run("py", "list_loop.py", src);
+    assert!(
+        vulnerable(&res, "xpath"),
+        "a loop-built list must keep every stored value reachable"
+    );
+}
+
+/// The raw query string is request input, like `request.args`: reading it and
+/// slicing the parameter out of it must reach the sink.
+#[test]
+fn raw_query_string_is_a_source() {
+    let src = r#"
+import lxml.etree
+
+def h(request):
+    query_string = request.query_string.decode("utf-8")
+    loc = query_string.find("p=")
+    param = query_string[loc + 2:]
+    root = lxml.etree.parse("x.xml")
+    return root.xpath(param)
+"#;
+    let res = run("py", "query_string.py", src);
+    assert!(
+        vulnerable(&res, "xpath"),
+        "request.query_string carries attacker input: {:?}",
+        res.findings
+            .iter()
+            .map(|f| (f.sink.clone(), f.verdict.clone()))
+            .collect::<Vec<_>>()
+    );
+}

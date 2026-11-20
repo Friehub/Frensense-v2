@@ -98,6 +98,13 @@ harness and keeps no changelog.
 
 ### Fixed
 
+- **Dropped findings below confidence threshold correctly reflected in reports.**
+  When findings are suppressed or dropped below the confidence threshold, CLI reports
+  and MCP `scan_file` accurately report `Status: No findings ({N} dropped below confidence threshold)`
+  and gate `clean: false`, avoiding misleading `Status: Clean` reporting on uncertain scans.
+- **Polyglot workspace completion telemetry.** Unsupported files in a polyglot tree
+  no longer cause `telemetry.is_complete()` to mark healthy scans as `Partial` when
+  supported files have been successfully scanned (`input.scanned > 0`).
 - **Sinks the binder and the sink matcher used to drop now report.** A scan
   reaches values it could not bind before - a destructured or rest parameter
   (`function run({ h }: Opts)`), a destructuring assignment (`({ a } = rhs)`),

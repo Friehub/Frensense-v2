@@ -385,6 +385,25 @@ impl<T: JsFamily> LanguageSpec for T {
     fn is_http_route_decorator(&self, decorator_name: &str) -> bool {
         T::DIALECT.http_route_decorator(decorator_name)
     }
+
+    /// JS/TS `for … in` and `for … of` loops expose the iterable via the
+    /// `right` field and the loop binding via the `left` field.
+    ///
+    /// A `for (x in obj)` or `for (x of iterable)` has no meaningful runtime
+    /// iteration sink matching the Python model, but emitting the iterable as
+    /// IR still ensures taint from the `right` expression reaches the loop
+    /// body, which is the conservative-and-correct behaviour.
+    fn for_loop_iterable<'t>(
+        &self,
+        node: tree_sitter::Node<'t>,
+    ) -> Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)> {
+        if !matches!(node.kind(), "for_in_statement" | "for_of_statement") {
+            return None;
+        }
+        let binding = node.child_by_field_name("left")?;
+        let iterable = node.child_by_field_name("right")?;
+        Some((binding, iterable))
+    }
 }
 
 // ── Feature-gated grammars ───────────────────────────────────────────────────

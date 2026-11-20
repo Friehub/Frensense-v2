@@ -96,6 +96,41 @@ what this crate does.
 
 ### Fixed
 
+- **Multi-hop barrel file and re-export resolution depth.** `MAX_REEXPORT_RESOLVE_DEPTH`
+  is increased from 6 to 12, resolving deep barrel chains without cycles. Multi-barrel
+  wildcard exports (`export * from ...`) within the same file now search all declared
+  barrels sequentially via `barrel_map: FxHashMap<String, Vec<String>>` rather than
+  overwriting previous wildcard entries.
+- **Polyglot tree completion telemetry.** In polyglot repositories containing unsupported
+  files alongside supported sources, `telemetry.is_complete()` no longer demotes successful
+  scans to `Partial` when `input.scanned > 0`, and unsupported files are not logged as errors.
+- **Reporting gate exclusion for clean and sanitized outcomes.** In `runner.rs`,
+  `result.located` counts `not_reportable` drops only for `BackwardVerdict::Vulnerable`
+  findings that fail reportability, preventing safe files from incorrectly reporting
+  `{N} dropped at the reporting gate`.
+- **A library object built by a call keeps the state written into it.**
+  `configparser.ConfigParser()` and `io.StringIO()` are constructed by a call,
+  not an `Allocate`, so the container-fill edge had no target and the store was
+  dropped: the value passed to `set(...)`/`write(...)` never reached the object,
+  and the reader that returns the accumulated state (`get`, `getvalue`) walked
+  back into a clean value. The fill edge now falls back to the object's def
+  site, and the mutator set covers `set`/`write` alongside the collection verbs.
+  A literal-keyed store (`conf.set(s, k, v)`, `m.set(k, v)`) records the field
+  its key names, and a literal-keyed read (`conf.get(s, k)`, `m.get(k)`)
+  resolves through that edge alone, so `get(s, kA)` no longer reports the value
+  stored under `kB`: the receiver's blanket pass-through is suppressed for that
+  call, while an unkeyed read (`d.get(variable_key)`) keeps it. Measured on the
+  1,230-case OWASP suite (`benchmark_scorecard.json`): TP **172 → 189**, FN
+  **280 → 263**, FP **32 → 20**, TN **746 → 758**, score **0.339 → 0.392**
+  (TPR 38.1% → 41.8%, FPR 4.1% → 2.6%).
+- **An inline delimiter escape is a sanitizer for the delimited-string sinks.**
+  `value.replace("'", "&apos;")` is the standard way to make a value safe for a
+  quoted XPath/SQL/HTML literal, but `replace` propagated taint and nothing
+  recognised the idiom, so the escaped value still reported expression
+  injection. A `replace`/`replaceAll` whose removed literal is a guard-denylist
+  token now neutralizes Execution, Xss and Response flows only: the delimiter
+  provably cannot appear in the result, while path, URL and deserialization
+  sinks are unaffected because they are not delimiter-sensitive.
 - **A sink call whose data argument is a literal is still a recognized sink
   site.** `os.system("echo hi")` only contributes its receiver triplet to the
   backward walk, and a clean receiver is deliberately not reported, so the

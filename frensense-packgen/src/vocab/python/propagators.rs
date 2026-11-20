@@ -103,6 +103,17 @@ pub(crate) static PYTHON_PROPAGATORS: &[PropagatorRule] = &[
         tainted_arg: Some(0),
         tainted_receiver: false,
     },
+    // ── library object state: readers of accumulated state ──
+    // `StringIO.getvalue()` returns everything written with `write`, so the
+    // receiver's taint is what the call returns. The keyed readers
+    // (`ConfigParser.get`, `dict.get`) are not modeled here: the graph links
+    // a literal-key read to the store for that same key, which keeps a read of
+    // a different key clean.
+    PropagatorRule {
+        call: "getvalue",
+        tainted_arg: None,
+        tainted_receiver: true,
+    },
     // ── json ──
     PropagatorRule {
         call: "loads",

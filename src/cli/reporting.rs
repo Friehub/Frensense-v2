@@ -148,23 +148,45 @@ impl ScanStatus {
 /// `Clean` is reserved for a scan that ran completely, analyzed every file
 /// it found, recognized at least one sink site somewhere, and decided every
 /// site it recognized. Every other combination says what qualified it.
-fn status_label(status: ScanStatus, findings: usize, coverage: Option<&Coverage>) -> String {
+fn status_label(
+    status: ScanStatus,
+    findings: usize,
+    coverage: Option<&Coverage>,
+    telem: Option<&frensense_engine::telemetry::ScanTelemetry>,
+) -> String {
     match status {
         ScanStatus::Failed => "Failed analysis".to_string(),
         ScanStatus::Partial if findings == 0 => "No findings (partial analysis)".to_string(),
         ScanStatus::Partial => format!("Findings reported ({findings}, partial analysis)"),
         ScanStatus::Complete if findings > 0 => "Findings reported".to_string(),
-        ScanStatus::Complete => match coverage {
-            Some(c) if !c.recognized_anything() => "No findings (nothing recognized)".to_string(),
-            Some(c) if c.files_not_analyzed() > 0 => format!(
-                "No findings ({} of {} source files analyzed)",
-                c.files_analyzed, c.files_found
-            ),
-            Some(c) if !c.fully_resolved() => {
-                format!("No findings ({} site(s) undecided)", c.unresolved_sites)
+        ScanStatus::Complete => {
+            if let Some(t) = telem {
+                let below_conf: usize = t
+                    .suppressed
+                    .iter()
+                    .filter(|s| s.reason == "below-confidence")
+                    .map(|s| s.count)
+                    .sum();
+                if below_conf > 0 {
+                    return format!(
+                        "No findings ({below_conf} dropped below confidence threshold)"
+                    );
+                }
             }
-            _ => "Clean".to_string(),
-        },
+            match coverage {
+                Some(c) if !c.recognized_anything() => {
+                    "No findings (nothing recognized)".to_string()
+                }
+                Some(c) if c.files_not_analyzed() > 0 => format!(
+                    "No findings ({} of {} source files analyzed)",
+                    c.files_analyzed, c.files_found
+                ),
+                Some(c) if !c.fully_resolved() => {
+                    format!("No findings ({} site(s) undecided)", c.unresolved_sites)
+                }
+                _ => "Clean".to_string(),
+            }
+        }
     }
 }
 
@@ -277,7 +299,7 @@ pub fn print_scan_summary_detailed_with_coverage(
     println!("Total Findings:     {}", advisories.len());
     println!(
         "Status:             {}",
-        status_label(status, advisories.len(), coverage)
+        status_label(status, advisories.len(), coverage, Some(telem))
     );
     if let Some(out) = output_path {
         println!("Report File:        {}", out.display());
@@ -354,7 +376,24 @@ pub fn print_scan_summary_detailed_with_coverage(
 /// "Analysis Complete: No findings." was printed for every empty result,
 /// including scans that recognized no sink at all. A reader has no way to
 /// tell those apart, so the headline now carries the qualification.
-fn no_findings_headline(status: ScanStatus, coverage: Option<&Coverage>) -> String {
+fn no_findings_headline(
+    status: ScanStatus,
+    coverage: Option<&Coverage>,
+    telem: Option<&frensense_engine::telemetry::ScanTelemetry>,
+) -> String {
+    if let Some(t) = telem {
+        let below_conf: usize = t
+            .suppressed
+            .iter()
+            .filter(|s| s.reason == "below-confidence")
+            .map(|s| s.count)
+            .sum();
+        if below_conf > 0 {
+            return format!(
+                "No findings - {below_conf} potential finding(s) dropped below confidence threshold."
+            );
+        }
+    }
     match (status, coverage) {
         (ScanStatus::Complete, Some(c)) if !c.recognized_anything() => {
             "No findings - no sink site was recognized, so this scan does not show the code is safe."
@@ -435,7 +474,11 @@ pub fn json_report_with_coverage(
     let telem = telemetry.unwrap_or(&empty_telem);
     let status = ScanStatus::compute(telem, incomplete);
     let cov = coverage.cloned().unwrap_or_default();
-    let clean = status.clean(advisories.is_empty(), &cov);
+    let below_confidence = telem
+        .suppressed
+        .iter()
+        .any(|s| s.reason == "below-confidence" && s.count > 0);
+    let clean = status.clean(advisories.is_empty(), &cov) && !below_confidence;
     // Without engine-derived coverage (the compatibility entry points),
     // fall back to the input accounting so the denominator is still honest
     // about unsupported inputs and read failures.
@@ -714,7 +757,7 @@ pub fn print_results_with_coverage(
             let cwd = std::env::current_dir().ok();
             let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
             let status = ScanStatus::compute(telemetry.unwrap_or(&empty_telem), incomplete);
-            let headline = no_findings_headline(status, coverage);
+            let headline = no_findings_headline(status, coverage, telemetry);
             if let Some(out) = output_path {
                 let mut buf = Vec::new();
                 if advisories.is_empty() {
@@ -1915,6 +1958,22 @@ mod scan_status_tests {
         let coverage = clean_coverage();
         assert!(!ScanStatus::Partial.clean(true, &coverage));
         assert!(!ScanStatus::Complete.clean(false, &coverage));
+    }
+
+    #[test]
+    fn status_label_flags_findings_dropped_below_confidence() {
+        use frensense_engine::telemetry::SuppressionCount;
+        let mut telem = ScanTelemetry::default();
+        telem.suppressed.push(SuppressionCount {
+            reason: "below-confidence".to_string(),
+            count: 2,
+        });
+        let coverage = clean_coverage();
+        let label = super::status_label(ScanStatus::Complete, 0, Some(&coverage), Some(&telem));
+        assert!(
+            label.contains("dropped below confidence"),
+            "got label: {label}"
+        );
     }
 
     #[test]

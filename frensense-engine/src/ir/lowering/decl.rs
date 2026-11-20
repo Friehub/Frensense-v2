@@ -275,7 +275,7 @@ impl<'a> LoweringContext<'a> {
     /// body. Uninitialized-free analysis only reports `declared` vars:
     /// vars created at first expression use are file/module/header globals
     /// (initialized elsewhere), never never-assigned locals.
-    pub(super) fn mark_declared(&mut self, var: VarId) {
+    pub(crate) fn mark_declared(&mut self, var: VarId) {
         if self.nonlocal_decl {
             return;
         }

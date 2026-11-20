@@ -116,6 +116,17 @@ impl<'a> ProgramSvfg<'a> {
                     {
                         suppressible.push((recv, r));
                     }
+                    // A literal-keyed library read (`conf.get('s', 'k')`) is
+                    // resolved by the graph's keyed store edge, so the
+                    // default receiver -> return pass-through is suppressed
+                    // for that call alone: it would otherwise return every
+                    // value the object stored under any key.
+                    if let Some(recv) = b.receiver
+                        && let Some(ir) = self.functions.get(fi).map(|f| f.ir)
+                        && crate::graph::svfg::is_keyed_library_read(ir, &recv)
+                    {
+                        suppressible.push((recv, r));
+                    }
                 }
             }
 

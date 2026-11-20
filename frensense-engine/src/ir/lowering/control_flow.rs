@@ -4,6 +4,7 @@
 
 use crate::ir::function::*;
 use crate::ir::lowering::const_eval::{match_arm_body, match_arm_pattern};
+use crate::ir::lowering::lvalue::LValue;
 use crate::ir::lowering::{LoopTarget, LoweringContext};
 use rustc_hash::FxHashMap;
 use tree_sitter::Node;
@@ -40,6 +41,13 @@ impl<'a> LoweringContext<'a> {
             })
             .copied();
 
+        // For `for x in iterable` / `for x of iterable` loops the spec
+        // exposes both the binding and the iterable as separate named fields.
+        // The iterable must be visited in the header block so that taint from
+        // the iterable expression (e.g. a Flask source call) can flow into
+        // the loop variable and from there into any container the body builds.
+        let for_in = self.spec.for_loop_iterable(node);
+
         let loop_header = self.ir.new_block();
         let loop_body = self.ir.new_block();
         let loop_exit = self.ir.new_block();
@@ -53,9 +61,30 @@ impl<'a> LoweringContext<'a> {
 
         // Header (Evaluate Condition)
         self.current_block = loop_header;
-        let cond_op = cond
-            .and_then(|c| self.visit_node(c))
-            .unwrap_or(Operand::Unknown);
+
+        // For `for x in iterable:` / `for x of iterable`: visit the iterable
+        // first to emit its IR (and capture taint), then assign the result to
+        // the loop variable binding so the SVFG carries the taint edge.
+        if let Some((binding, iterable)) = for_in {
+            let iter_op = self.visit_node(iterable).unwrap_or(Operand::Unknown);
+            // Assign the iterable's value to the loop variable so that any
+            // read of the loop variable has a taint path back to the iterable.
+            if let Some(LValue::Variable(dest)) = self.visit_lvalue(binding) {
+                self.mark_declared(dest);
+                self.ir.push_instruction(
+                    self.current_block,
+                    Instruction::Assign { dest, src: iter_op },
+                );
+                self.forget_const(dest);
+            }
+        }
+
+        let cond_op = if for_in.is_some() {
+            Operand::Unknown
+        } else {
+            cond.and_then(|c| self.visit_node(c))
+                .unwrap_or(Operand::Unknown)
+        };
         self.ir.set_terminator(
             self.current_block,
             Terminator::Branch {
