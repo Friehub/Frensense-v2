@@ -5,10 +5,10 @@
 //! The default-pack generator (Phase 6.3a).
 //!
 //! Owns the vocabularies the committed `assets/frensense-default.frc` is
-//! built from: the language-agnostic bootstrap tables ([`data`], moved
+//! built from: the language-agnostic bootstrap tables (`data`, moved
 //! here from the bundler) and the per-language provider vocabularies
-//! ([`vocab`], moved here from `frensense-lang` in 6.3b-6.3d, together
-//! with the vocabulary types and derivations in [`role_map`]). The
+//! (`vocab`, moved here from `frensense-lang` in 6.3b-6.3d, together
+//! with the vocabulary types and derivations in `role_map`). The
 //! bundler embeds the committed asset via `include_bytes!` and only
 //! parses it; this crate is its sole generator, and `packgen --check`
 //! (plus the drift test here) keeps the asset from going stale.
@@ -17,7 +17,9 @@
 //! fully static, and `frensense-lang` keeps only mechanism (grammar,
 //! node classification, the severity ladder/tag). Scan-time readers
 //! (e.g. the lowering harness's route detection) get their vocabulary
-//! from the installed [`FactTable`] sections, never from lang.
+//! from the installed
+//! [`FactTable`](frensense_engine::analysis::taint::facts::FactTable)
+//! sections, never from lang.
 //!
 //! Emission order is the install order `apply_language_entries` expects
 //! and must never change without regenerating the asset: the
@@ -192,7 +194,7 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
 
 /// Serialize [`default_pack_entries`] into the `.frc` envelope (v6, zero
 /// patterns, empty `policy_pack`). Used by the drift/regeneration tests;
-/// production reads the committed asset via [`default_bundle_bytes`].
+/// production reads the committed asset via `default_bundle_bytes`.
 pub fn build_default_bundle() -> Vec<u8> {
     let payload = BundlePayloadV6 {
         patterns: Vec::new(),

@@ -548,7 +548,7 @@ impl From<LearnedFactEntryV5> for LearnedFactEntry {
 }
 
 /// The v5 payload: learned facts plus the authored-policy section.
-/// Kept frozen with [`LearnedFactEntryV5`] so v5 bundles keep loading cleanly.
+/// Kept frozen with `LearnedFactEntryV5` so v5 bundles keep loading cleanly.
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct BundlePayloadV5 {
     pub patterns: Vec<BundlePattern>,

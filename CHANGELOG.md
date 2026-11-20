@@ -84,6 +84,18 @@ harness and keeps no changelog.
   binary (`print_stdout` 2, `print_stderr` 9). No behaviour changed, and no
   baseline number for another crate moved.
 
+- **The last broken intra-doc links are resolved.** Documenting every member
+  with `-D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links`
+  reported eight errors in three crates. `FrensenseFinding::identity` linked
+  `stable_fingerprint`, which is `pub(crate)`; `frensense-bundler`'s `format`
+  module linked `LearnedFactEntry` by bare name (it lives in another crate) and
+  `BundlePayloadV5` linked the private `LearnedFactEntryV5`; `frensense-packgen`
+  linked three private modules (`data`, `vocab`, `role_map`), `FactTable` by
+  bare name and `default_bundle_bytes` from another crate. The two public
+  cross-crate types now carry their full engine path, and private or foreign
+  items read as plain code spans instead of dead links. `cargo doc` for all six
+  members finishes with no errors and no rustdoc warnings.
+
 ### Fixed
 
 - **Sinks the binder and the sink matcher used to drop now report.** A scan
