@@ -67,12 +67,6 @@ impl SSABuilder {
         self
     }
 
-    /// Work units charged against the budget so far. [`Self::build`] takes the builder by value, so this reads 0 on a fresh builder and cannot report the cost of a finished build.
-    #[must_use]
-    pub(crate) fn work_used(&self) -> u64 {
-        self.used
-    }
-
     /// Charge `units` against this function's budget.
     fn charge(&mut self, units: u64) {
         self.used = self.used.saturating_add(units);

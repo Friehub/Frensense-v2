@@ -171,6 +171,7 @@ impl Cap {
 
     /// How many times this cap has fired on the current thread since its
     /// counters were last drained.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn recorded(self) -> u64 {
         CAP_COUNTS.with(|counts| counts.borrow()[self.slot()])

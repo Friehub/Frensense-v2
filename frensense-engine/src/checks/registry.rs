@@ -38,33 +38,6 @@ pub(crate) enum CheckScope {
     Program,
 }
 
-/// Receiver for diagnostics emitted during check execution.
-///
-/// This is an embedder seam, not the truncation accounting path: the default
-/// driver installs [`NoopDiagnosticSink`] and no check calls it today. Safety
-/// caps that affect a reported result must be recorded through
-/// [`crate::telemetry::Cap`] so they reach `truncations`, as the UAF walker
-/// and SSA builder now do. A driver that wants per-check callbacks can supply
-/// its own sink; wiring this trait alone does not make truncations visible.
-pub(crate) trait DiagnosticSink: Sync {
-    /// Report that the check truncated its analysis due to a safety cap or budget.
-    fn truncated(&self, cap: &'static str);
-    /// Report that the check skipped analysis for this subject (e.g. missing callers).
-    fn skipped(&self, reason: &'static str);
-}
-
-/// A no-op diagnostic sink used by default.
-#[derive(Debug)]
-pub(crate) struct NoopDiagnosticSink;
-
-impl DiagnosticSink for NoopDiagnosticSink {
-    fn truncated(&self, _cap: &'static str) {}
-    fn skipped(&self, _reason: &'static str) {}
-}
-
-/// Shared instance of [`NoopDiagnosticSink`].
-pub(crate) static NOOP_DIAGNOSTIC_SINK: NoopDiagnosticSink = NoopDiagnosticSink;
-
 /// Everything a non-dataflow check may consult.
 ///
 /// All fields are shared references owned by the driver for the duration
@@ -85,8 +58,6 @@ pub(crate) struct CheckContext<'a> {
     pub pkg_scope: Option<&'a PackageScope<'a>>,
     /// Interprocedural memory summaries, inferred once per scan.
     pub summaries: &'a MemorySummaryRegistry,
-    /// Non-fatal diagnostic sink (truncations, skips).
-    pub diag: &'a dyn DiagnosticSink,
 }
 
 impl std::fmt::Debug for CheckContext<'_> {
@@ -167,12 +138,14 @@ impl CheckRegistry {
     }
 
     /// Number of registered check classes.
+    #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.checks.len()
     }
 
     /// Whether no check is registered (only constructible by a caller
     /// building its own registry; [`default_registry`] is never empty).
+    #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.checks.is_empty()
     }
@@ -446,7 +419,6 @@ mod tests {
             facts: &facts,
             pkg_scope: None,
             summaries: &summaries,
-            diag: &NOOP_DIAGNOSTIC_SINK,
         };
         let _ = ctx.ir();
     }

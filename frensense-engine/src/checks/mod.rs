@@ -254,7 +254,6 @@ pub(crate) fn check_all_with_registry_and_telemetry<'a>(
         facts,
         pkg_scope,
         summaries: &summaries,
-        diag: &registry::NOOP_DIAGNOSTIC_SINK,
     };
 
     let mut seen: FxHashSet<(String, String, usize)> = FxHashSet::default();
