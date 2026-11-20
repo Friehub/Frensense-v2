@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795178123541,
+  "lastUpdate": 1795212954423,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -2991,6 +2991,55 @@ window.BENCHMARK_DATA = {
           {
             "name": "OWASP Benchmark False Positives (FP)",
             "value": 32,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "be26ab74b2500ae3d647f9fa8105e690de01b723",
+          "message": "Merge pull request #179 from Friehub/feat/framework-scope-and-scan-fixes\n\nfeat: modularize JS/TS framework facts, expand barrel depth, and improve confidence reporting",
+          "timestamp": "2026-11-20T23:14:53+01:00",
+          "tree_id": "125e0866dde301336a3366a74b7d611a7480890b",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/be26ab74b2500ae3d647f9fa8105e690de01b723"
+        },
+        "date": 1795212953509,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 47,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 49.3,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 2.3,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 223,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 18,
             "unit": "cases"
           }
         ]
