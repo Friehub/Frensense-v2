@@ -29,19 +29,14 @@ impl<'a> LoweringContext<'a> {
             .rev()
             .find(|c| {
                 let k = c.kind();
-                k.contains("statement") || k == "block" || k.contains("block")
+                self.spec.is_block_or_statement(k)
             })
             .copied();
         let cond = children
             .iter()
             .find(|c| {
                 let k = c.kind();
-                !k.contains("statement")
-                    && k != "block"
-                    && !k.contains("block")
-                    && !k.contains("declarator")
-                    && !k.contains("update")
-                    && !k.contains("initializer")
+                self.spec.is_loop_condition_node(k)
             })
             .copied();
 
@@ -106,8 +101,7 @@ impl<'a> LoweringContext<'a> {
             .filter(|c| c.is_named())
             .collect();
 
-        let is_body =
-            |k: &str| k.contains("block") || k.contains("statement") || k.ends_with("body");
+        let is_body = |k: &str| self.spec.is_body_node(k);
         let body = node
             .child_by_field_name("body")
             .or_else(|| children.iter().copied().find(|c| is_body(c.kind())));
@@ -123,14 +117,14 @@ impl<'a> LoweringContext<'a> {
             let mut body_cursor = body.walk();
             for clause in body.named_children(&mut body_cursor) {
                 let kind = clause.kind();
-                if !(kind.contains("case") || kind.contains("default")) {
+                if !self.spec.is_case_clause(kind) {
                     continue;
                 }
                 let mut clause_cursor = clause.walk();
                 let kids: Vec<Node> = clause.named_children(&mut clause_cursor).collect();
                 let value_pos = kids.iter().position(|n| {
                     let k = n.kind();
-                    !k.contains("statement") && k != "compound_statement"
+                    !self.spec.is_statement_node(k)
                 });
                 let value = value_pos.map(|i| kids[i]);
                 let stmts: Vec<Node> = kids
@@ -248,7 +242,7 @@ impl<'a> LoweringContext<'a> {
         let mut cursor = node.walk();
         let children: Vec<Node> = node
             .children(&mut cursor)
-            .filter(|c| c.is_named() && c.kind() != "comment")
+            .filter(|c| c.is_named() && !self.spec.is_comment(c.kind()))
             .collect();
         // JS grammar: [condition, consequence, alternative]
         if children.len() != 3 {
@@ -417,11 +411,11 @@ impl<'a> LoweringContext<'a> {
             .collect();
         let body: Vec<Node> = node
             .children(&mut cursor)
-            .filter(|c| c.is_named() && !skip.contains(&c.id()) && c.kind() != "comment")
+            .filter(|c| c.is_named() && !skip.contains(&c.id()) && !self.spec.is_comment(c.kind()))
             .collect();
 
         // `#else` is not a fork of its own: it is the false arm's body.
-        if node.kind() == "preproc_else" {
+        if self.spec.is_preproc_else(node.kind()) {
             for child in body {
                 self.visit_node(child);
             }
@@ -502,11 +496,7 @@ impl<'a> LoweringContext<'a> {
                 .iter()
                 .find(|c| {
                     let k = c.kind();
-                    !k.contains("statement")
-                        && !k.contains("declaration")
-                        && !k.contains("assignment")
-                        && k != "block"
-                        && k != "else_clause"
+                    self.spec.is_branch_condition_node(k) && !self.spec.is_else_clause(k)
                 })
                 .copied()
         });
@@ -515,13 +505,16 @@ impl<'a> LoweringContext<'a> {
                 .iter()
                 .find(|c| {
                     let k = c.kind();
-                    k.contains("statement") || k.contains("block")
+                    self.spec.is_block_or_statement(k)
                 })
                 .copied()
         });
-        let alt_node = node
-            .child_by_field_name("alternative")
-            .or_else(|| children.iter().find(|c| c.kind().contains("else")).copied());
+        let alt_node = node.child_by_field_name("alternative").or_else(|| {
+            children
+                .iter()
+                .find(|c| self.spec.is_else_clause(c.kind()))
+                .copied()
+        });
 
         // An initializer runs on the fall-through path before the test; its
         // bindings must be visible to the condition and both arms.
@@ -532,7 +525,7 @@ impl<'a> LoweringContext<'a> {
         // Go-style switches lower here as a branch; C/JS `switch` goes to
         // `visit_switch`. An unlabeled `break` inside such a branch must
         // exit the switch (jump to the merge), not the enclosing loop.
-        let is_switch = node.kind().contains("switch");
+        let is_switch = self.spec.is_switch_like_node(node.kind());
 
         // A condition whose value is fixed before the program runs selects
         // exactly one arm. Lowering the unreachable arm anyway puts its
@@ -636,7 +629,7 @@ impl<'a> LoweringContext<'a> {
         let mut cursor = node.walk();
         let value: Option<Operand> = node
             .named_children(&mut cursor)
-            .find(|c| c.kind() != "comment")
+            .find(|c| !self.spec.is_comment(c.kind()))
             .and_then(|c| self.visit_node(c));
         self.ir
             .set_terminator(self.current_block, Terminator::Return { src: value });
@@ -650,7 +643,7 @@ impl<'a> LoweringContext<'a> {
             .or_else(|| {
                 let mut c = node.walk();
                 node.named_children(&mut c)
-                    .find(|n| n.kind() == "statement_identifier" || n.kind() == "identifier")
+                    .find(|n| self.spec.is_jump_target_name(n.kind()))
             })
             .map(|n| self.source[n.start_byte()..n.end_byte()].trim().to_string());
 
@@ -665,7 +658,7 @@ impl<'a> LoweringContext<'a> {
     /// `break label;` keeps the generic walk: labels lower as goto targets,
     /// not break targets.
     pub(crate) fn visit_break(&mut self, node: Node) -> Option<Operand> {
-        if has_break_label(node) {
+        if has_break_label(node, self.spec) {
             return None;
         }
         let target = self.loop_stack.last().map(|t| t.break_target)?;
@@ -677,7 +670,7 @@ impl<'a> LoweringContext<'a> {
     /// the rest of the body. Switches on the stack contribute no continue
     /// target, so a `continue` inside a switch still reaches the loop.
     pub(crate) fn visit_continue(&mut self, node: Node) -> Option<Operand> {
-        if has_break_label(node) {
+        if has_break_label(node, self.spec) {
             return None;
         }
         let target = self
@@ -719,7 +712,7 @@ impl<'a> LoweringContext<'a> {
             .or_else(|| {
                 let mut c = node.walk();
                 node.named_children(&mut c)
-                    .find(|n| n.kind() == "statement_identifier" || n.kind() == "identifier")
+                    .find(|n| self.spec.is_jump_target_name(n.kind()))
             })
             .map(|n| self.source[n.start_byte()..n.end_byte()].trim().to_string());
 
@@ -735,9 +728,7 @@ impl<'a> LoweringContext<'a> {
             // (`cleanup: /* ... */ *out = p;`) is the first named child
             // after the label; picking it dropped the statement entirely.
             node.named_children(&mut c).find(|n| {
-                n.kind() != "statement_identifier"
-                    && n.kind() != "identifier"
-                    && n.kind() != "comment"
+                !self.spec.is_jump_target_name(n.kind()) && !self.spec.is_comment(n.kind())
             })
         });
 
@@ -764,7 +755,7 @@ impl<'a> LoweringContext<'a> {
                 children
                     .iter()
                     .copied()
-                    .find(|c| !c.kind().contains("block") && !c.kind().contains("body"))
+                    .find(|c| !self.spec.is_containment_node(c.kind()))
             });
 
         let scrutinee_op = value_node
@@ -775,7 +766,7 @@ impl<'a> LoweringContext<'a> {
             children
                 .iter()
                 .copied()
-                .find(|c| c.kind().contains("block") || c.kind().contains("body"))
+                .find(|c| self.spec.is_containment_node(c.kind()))
         });
 
         let mut arms = Vec::new();
@@ -786,7 +777,7 @@ impl<'a> LoweringContext<'a> {
                     continue;
                 }
                 let kind = arm.kind();
-                if kind.contains("arm") || kind.contains("case") {
+                if self.spec.is_case_alternative(kind) {
                     arms.push(arm);
                 }
             }
@@ -801,7 +792,7 @@ impl<'a> LoweringContext<'a> {
         // Restricted to the statement form: an expression-shaped `match`
         // (Rust) produces a value its caller consumes, which the pruned path
         // does not synthesise.
-        if node.kind() == "match_statement"
+        if self.spec.is_match_statement(node.kind())
             && let Some(subject) = value_node.and_then(|v| self.const_value(v))
             && let Some(selected) = self.select_const_arm(&arms, &subject)
         {
@@ -848,7 +839,7 @@ impl<'a> LoweringContext<'a> {
             self.current_block = arm_blocks[i];
             self.env.push(FxHashMap::default());
 
-            if let Some(pat) = match_arm_pattern(*arm) {
+            if let Some(pat) = match_arm_pattern(*arm, self.spec) {
                 self.bind_match_pattern(pat, &scrutinee_op);
             }
 
@@ -882,7 +873,7 @@ impl<'a> LoweringContext<'a> {
     fn bind_match_pattern(&mut self, pat: Node, scrutinee_op: &Operand) {
         let kind = pat.kind();
         match kind {
-            "identifier" | "identifier_pattern" => {
+            kind if self.spec.is_binding_pattern(kind) => {
                 let name = self.source[pat.start_byte()..pat.end_byte()]
                     .trim()
                     .to_string();
@@ -908,7 +899,7 @@ impl<'a> LoweringContext<'a> {
                     );
                 }
             }
-            "tuple_struct_pattern" | "struct_pattern" => {
+            kind if self.spec.is_structured_pattern(kind) => {
                 let type_node = pat.child_by_field_name("type");
                 let mut c = pat.walk();
                 for child in pat.children(&mut c) {
@@ -931,11 +922,11 @@ impl<'a> LoweringContext<'a> {
 
 /// True for `break label;` / `continue label;` - the optional label is a
 /// named `statement_identifier`/`identifier` child (never present in C).
-fn has_break_label(node: Node) -> bool {
+fn has_break_label(node: Node, spec: &dyn frensense_lang::spec::LanguageSpec) -> bool {
     if node.child_by_field_name("label").is_some() {
         return true;
     }
     let mut cursor = node.walk();
     node.named_children(&mut cursor)
-        .any(|n| matches!(n.kind(), "statement_identifier" | "identifier"))
+        .any(|n| spec.is_jump_target_name(n.kind()))
 }

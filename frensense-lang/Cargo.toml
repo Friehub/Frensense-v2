@@ -6,7 +6,6 @@ description = "Per-language AST specs for the frensense engine - eliminates all 
 license     = "GPL-3.0-only"
 readme      = "../README.md"
 repository  = "https://github.com/Friehub/Frensense-v2"
-homepage    = "https://frensense.friehub.cloud"
 documentation = "https://frensense.friehub.cloud"
 
 # ── Tree-sitter grammars are optional so the crate compiles even when only a

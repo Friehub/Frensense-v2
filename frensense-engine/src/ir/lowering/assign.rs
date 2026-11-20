@@ -20,7 +20,7 @@ impl<'a> LoweringContext<'a> {
     fn compound_operator(&self, node: Node) -> Option<String> {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.is_named() || child.kind() == "comment" {
+            if child.is_named() || self.spec.is_comment(child.kind()) {
                 continue;
             }
             let text = self.source[child.start_byte()..child.end_byte()].trim();
@@ -40,11 +40,8 @@ impl<'a> LoweringContext<'a> {
     }
 
     /// `a, b` on the left of `=` / `:=`: a list of two or more targets.
-    pub(super) fn is_multi_target(node: Node) -> bool {
-        matches!(
-            node.kind(),
-            "expression_list" | "identifier_list" | "pattern_list" | "tuple_pattern"
-        ) && node.named_child_count() > 1
+    pub(super) fn is_multi_target(&self, node: Node) -> bool {
+        self.spec.is_multi_target_node(node.kind()) && node.named_child_count() > 1
     }
 
     /// Bind `rhs` to every plain-variable element of a multi-target list;
@@ -167,7 +164,7 @@ impl<'a> LoweringContext<'a> {
         // single-target path below saw an `expression_list` lvalue and
         // dropped the binding, so every Go `v, err :=` and Python tuple
         // unpack lost its value flow.
-        if compound.is_none() && Self::is_multi_target(left_node) {
+        if compound.is_none() && self.is_multi_target(left_node) {
             self.bind_each_target(left_node, rhs_op.clone());
             return Some(rhs_op);
         }

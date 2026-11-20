@@ -83,13 +83,12 @@ fn classify_python(kind: &str) -> NodeRole {
         },
 
         // ── Control flow ─────────────────────────────────────────────────
-        // `match_statement` is matched below as `NodeRole::Match`, next to
+        // `match_statement` is classified below as `NodeRole::Match`, next to
         // Rust's `match_expression` and Go's switch statements: it dispatches
-        // on one subject and executes exactly one arm. Leaving it in this
-        // Branch arm (a duplicate pattern) made it lower as a plain `if` whose
-        // "consequence" was the whole case block, so every arm executed and
-        // an unreachable tainted arm tainted the join.
-        "if_statement" | "conditional_expression" => NodeRole::Branch,
+        // on one subject and executes exactly one arm. Lowering it as a plain
+        // `if` whose "consequence" was the whole case block made every arm
+        // execute, so an unreachable tainted arm tainted the join.
+        "if_statement" => NodeRole::Branch,
         "for_statement" | "while_statement" => NodeRole::Loop,
         "return_statement" => NodeRole::Return,
         "try_statement" => NodeRole::Try,
@@ -417,6 +416,11 @@ const PYTHON_CALL_QUERY: &str = r#"
 
 // ── PythonSpec ────────────────────────────────────────────────────────────────
 
+/// [`LanguageSpec`] for Python (`.py`, `.pyi`, `.pyw`).
+///
+/// Covers the grammar's `call`/`attribute` node spellings, its annotated,
+/// defaulted and splat parameters, `with … as` context managers and the
+/// statement form of `match`.
 #[derive(Debug)]
 pub struct PythonSpec;
 
@@ -450,6 +454,18 @@ impl LanguageSpec for PythonSpec {
 
     fn is_declaration_assignment(&self, kind: &str) -> bool {
         matches!(kind, "subscript" | "attribute")
+    }
+
+    fn is_function_value(&self, kind: &str) -> bool {
+        kind == "lambda"
+    }
+
+    fn is_match_statement(&self, kind: &str) -> bool {
+        kind == "match_statement"
+    }
+
+    fn is_match_guard(&self, kind: &str) -> bool {
+        kind == "if_clause"
     }
 
     /// Python `with open(path) as f:` - extracts the path argument.

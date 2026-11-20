@@ -200,7 +200,7 @@ impl Advisory {
 
     /// Stable identity key for baseline comparisons: the semantic
     /// fingerprint, which excludes line/column and therefore survives
-    /// line shifts (see [`stable_fingerprint`] in the engine runner for
+    /// line shifts (see `stable_fingerprint` in the engine runner for
     /// what goes into the hash).
     #[must_use]
     pub fn identity(&self) -> &str {

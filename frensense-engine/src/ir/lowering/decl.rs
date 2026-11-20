@@ -24,7 +24,7 @@ impl<'a> LoweringContext<'a> {
         // static storage, not a stack slot.
         let mut cursor = node.walk();
         let nonlocal = node.children(&mut cursor).any(|c| {
-            c.kind() == "storage_class_specifier"
+            self.spec.is_storage_class_specifier(c.kind())
                 && matches!(
                     &self.source[c.start_byte()..c.end_byte()],
                     "static" | "extern"
@@ -76,7 +76,7 @@ impl<'a> LoweringContext<'a> {
                 None
             }
             _ if let Some(list) = node.child_by_field_name(name_field)
-                && Self::is_multi_target(list)
+                && self.is_multi_target(list)
                 && value_node.is_some() =>
             {
                 // `body, err := f(x)`: bind the tuple result to each target.
@@ -206,7 +206,7 @@ impl<'a> LoweringContext<'a> {
             }
             return;
         }
-        let array = pattern.kind() == "array_pattern";
+        let array = self.spec.is_array_pattern(pattern.kind());
         let mut cursor = pattern.walk();
         let parts: Vec<Node> = pattern.named_children(&mut cursor).collect();
         for part in parts {
@@ -217,12 +217,12 @@ impl<'a> LoweringContext<'a> {
                     part.child_by_field_name("value"),
                 ),
                 // `{ a = fallback }` binds `a` from the member `a`.
-                "object_assignment_pattern" => (
+                kind if self.spec.is_assignment_pattern(kind) => (
                     part.child_by_field_name("left"),
                     part.child_by_field_name("left"),
                 ),
                 // `...rest` is not a name: it takes the remaining value.
-                "rest_pattern" => (None, part.named_child(0)),
+                kind if self.spec.is_rest_pattern(kind) => (None, part.named_child(0)),
                 // Shorthand `{ a }` / positional `[a]`: the name is the key.
                 _ => (Some(part), Some(part)),
             };

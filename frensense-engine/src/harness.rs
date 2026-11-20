@@ -15,6 +15,7 @@ use crate::analysis::taint::facts::FactTable;
 use crate::ir::function::*;
 use crate::ir::lowering::LoweringContext;
 use crate::ir::ssa::SSABuilder;
+use frensense_lang::NodeRole;
 
 /// Lower a single source file into a set of SSA'd `FunctionIR`s keyed by
 /// function name.
@@ -106,7 +107,7 @@ pub(crate) fn lower_source_detailed(
         // `method_definition`, Python `function_definition` (+ async),
         // Rust `function_item`, Go `function_declaration` / `method_declaration`.
         if spec.is_function_node(node.kind()) {
-            let name = function_name_of(node, source);
+            let name = function_name_of(node, source, spec);
             // Skip only bindings whose lexical declaration or route
             // registration already lowered this node under its binding
             // name. EVERY other function - including nameless nested ones
@@ -122,10 +123,10 @@ pub(crate) fn lower_source_detailed(
         }
         // Top-level arrow functions bound to consts/lets, the dominant
         // shape for utility libraries (`export const hash = (d) => ...`).
-        if node.kind() == "lexical_declaration" || node.kind() == "variable_declaration" {
+        if spec.is_variable_declaration_statement(node.kind()) {
             let mut dc = node.walk();
             for decl in node.named_children(&mut dc) {
-                if decl.kind() != "variable_declarator" {
+                if !spec.is_variable_declarator(decl.kind()) {
                     continue;
                 }
                 crate::dbg_trace!(
@@ -141,7 +142,7 @@ pub(crate) fn lower_source_detailed(
                     .child_by_field_name("name")
                     .map(|n| source[n.start_byte()..n.end_byte()].to_string())
                     .unwrap_or_else(|| format!("<fn@{}>", decl.start_byte()));
-                if value.kind() == "arrow_function" || value.kind() == "function_expression" {
+                if spec.is_function_value(value.kind()) {
                     bound_fns.insert(value.start_byte());
                     let mut ir = lower_one(&name, value, source, spec, facts);
                     ir.enclosing_fn = enclosing_extracted_name(value, source, path, spec, facts);
@@ -162,10 +163,13 @@ pub(crate) fn lower_source_detailed(
             }
         }
         // Route-registration handlers: `app.get("/", (req, res) => ...)`.
-        if node.kind() == "call_expression"
+        if let NodeRole::Call {
+            callee_field,
+            args_field,
+        } = spec.classify(node.kind())
             && let (Some(callee), Some(args)) = (
-                node.child_by_field_name("function"),
-                node.child_by_field_name("arguments"),
+                node.child_by_field_name(callee_field.as_ref()),
+                node.child_by_field_name(args_field.as_ref()),
             )
         {
             let callee_text = &source[callee.start_byte()..callee.end_byte()];
@@ -173,7 +177,7 @@ pub(crate) fn lower_source_detailed(
                 let mut ac = args.walk();
                 let arg_nodes: Vec<_> = args.named_children(&mut ac).collect();
                 for a in &arg_nodes {
-                    if a.kind() == "arrow_function" || a.kind() == "function_expression" {
+                    if spec.is_function_value(a.kind()) {
                         let name = format!("<{}:handler@{}>", path, a.start_byte());
                         bound_fns.insert(a.start_byte());
                         let mut ir = lower_one(&name, *a, source, spec, facts);
@@ -258,17 +262,17 @@ fn module_scope_skip(
     if spec.is_function_node(kind) || spec.import_node_kinds().contains(&kind) {
         return true;
     }
-    if matches!(kind, "lexical_declaration" | "variable_declaration") {
+    if spec.is_variable_declaration_statement(kind) {
         return true;
     }
     // `export const x = ...` / `export function f` wrap the same nodes; a
     // default export of an expression (`export default runTool(cmd)`) does
     // execute at import time and stays in the module IR.
-    if kind == "export_statement" {
+    if matches!(spec.classify(kind), NodeRole::Export) {
         let mut cursor = node.walk();
         return node.named_children(&mut cursor).any(|child| {
             spec.is_function_node(child.kind())
-                || matches!(child.kind(), "lexical_declaration" | "variable_declaration")
+                || spec.is_variable_declaration_statement(child.kind())
         });
     }
     false
@@ -310,24 +314,14 @@ fn inside_function(node: tree_sitter::Node, spec: &dyn frensense_lang::spec::Lan
 }
 
 /// The declaration-level name of a function node: the `name` field, or the
-/// C-style declarator chain (`function_definition → declarator → ...`).
-fn function_name_of(node: tree_sitter::Node, source: &str) -> Option<String> {
-    node.child_by_field_name("name")
-        .or_else(|| {
-            let mut decl = node.child_by_field_name("declarator");
-            while let Some(d) = decl {
-                if d.kind() == "identifier" {
-                    return Some(d);
-                }
-                if let Some(inner) = d.child_by_field_name("declarator") {
-                    decl = Some(inner);
-                } else {
-                    let mut c = d.walk();
-                    return d.children(&mut c).find(|k| k.kind() == "identifier");
-                }
-            }
-            None
-        })
+/// grammar's declarator chain (`function_definition -> declarator -> ...`),
+/// which the language spec resolves.
+fn function_name_of(
+    node: tree_sitter::Node,
+    source: &str,
+    spec: &dyn frensense_lang::spec::LanguageSpec,
+) -> Option<String> {
+    spec.function_name_node(node)
         .map(|n| source[n.start_byte()..n.end_byte()].to_string())
 }
 
@@ -344,15 +338,15 @@ fn extracted_ancestor_name(
 ) -> Option<String> {
     // Direct declaration name (function_declaration, method_definition,
     // named function expression) - same order as extraction.
-    if let Some(name) = function_name_of(fn_node, source) {
+    if let Some(name) = function_name_of(fn_node, source, spec) {
         return Some(name);
     }
     // Bound to a const/let: the lexical branch extracts it under the
     // binding's name (`const helper = (x) => …`).
     if let Some(parent) = fn_node.parent()
-        && parent.kind() == "variable_declarator"
+        && spec.is_variable_declarator(parent.kind())
         && parent.child_by_field_name("value") == Some(fn_node)
-        && (fn_node.kind() == "arrow_function" || fn_node.kind() == "function_expression")
+        && spec.is_function_value(fn_node.kind())
     {
         let name = parent
             .child_by_field_name("name")
@@ -362,10 +356,10 @@ fn extracted_ancestor_name(
     }
     // Route-registration handler: `app.get("/", handler)`.
     if let Some(args) = fn_node.parent()
-        && args.kind() == "arguments"
+        && matches!(spec.classify(args.kind()), NodeRole::Arguments)
         && let Some(call) = args.parent()
-        && call.kind() == "call_expression"
-        && let Some(callee) = call.child_by_field_name("function")
+        && let NodeRole::Call { callee_field, .. } = spec.classify(call.kind())
+        && let Some(callee) = call.child_by_field_name(callee_field.as_ref())
         && is_route_registration(&source[callee.start_byte()..callee.end_byte()], spec, facts)
     {
         return Some(format!("<{}:handler@{}>", path, fn_node.start_byte()));
@@ -436,18 +430,13 @@ fn lower_one(
 ) -> FunctionIR {
     let mut ctx = LoweringContext::new_with_facts(spec, source, name.to_string(), facts);
 
-    // First try the direct `parameters` field (JS/TS/Python/Rust/Go).
-    // For C, the function_definition has no direct `parameters` field; instead
-    // the shape is: function_definition → declarator (function_declarator) →
-    //   parameters (parameter_list).  Walk that chain as a fallback.
-    let params = fn_node.child_by_field_name("parameters").or_else(|| {
-        fn_node
-            .child_by_field_name("declarator")
-            .and_then(|decl| find_function_declarator(decl))
-            .and_then(|fd| fd.child_by_field_name("parameters"))
-    });
-    if let Some(params) = params {
-        bind_params(&mut ctx, params, source);
+    // The list lives wherever the grammar puts it: a `parameters` field for
+    // most languages, one declarator hop further for C (`function_definition →
+    // declarator → function_declarator → parameters`). `function_params`
+    // follows `NodeRole::Function::params_field` until it reaches a
+    // `Parameters` node, so the engine carries no C-specific walk.
+    if let Some(params) = spec.function_params(fn_node) {
+        bind_params(&mut ctx, spec, params, source);
     }
     if let Some(body) = fn_node.child_by_field_name("body") {
         let has_implicit_ret = spec.implicit_return_node(fn_node, body).is_some();
@@ -474,17 +463,6 @@ fn lower_one(
     ir
 }
 
-/// Walk a declarator chain until we find a `function_declarator` node.
-/// Handles C shapes like: pointer_declarator → function_declarator.
-fn find_function_declarator(node: tree_sitter::Node<'_>) -> Option<tree_sitter::Node<'_>> {
-    if node.kind() == "function_declarator" {
-        return Some(node);
-    }
-    // pointer_declarator, abstract_declarator, etc. may wrap it
-    node.child_by_field_name("declarator")
-        .and_then(find_function_declarator)
-}
-
 /// Lower a top-level non-function initializer (`const x = new Set([...])`,
 /// `const cfg = { ... }`, `const tools = { ... tool({...}) ... }`) into a
 /// pseudo-function IR so non-dataflow checkers can assert policy over
@@ -506,7 +484,7 @@ fn lower_static(
     // module-level name to walk. Record the binding as an assignment, the
     // module-level twin of the `Assign` the declaration path emits inside a
     // function body.
-    if value_node.kind() == "identifier"
+    if matches!(ctx.classify_node(value_node.kind()), NodeRole::Identifier)
         && let Some(Operand::Var(src)) = init
     {
         let dest = ctx.ir.new_var(VarMetadata {
@@ -532,10 +510,15 @@ fn lower_static(
     ir
 }
 
-fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &str) {
+fn bind_params(
+    ctx: &mut LoweringContext,
+    spec: &dyn frensense_lang::spec::LanguageSpec,
+    params: tree_sitter::Node,
+    source: &str,
+) {
     let mut pc = params.walk();
     for p in params.children(&mut pc) {
-        if p.kind() == "self_parameter" {
+        if spec.is_self_parameter(p.kind()) {
             let name = "self".to_string();
             let v = ctx.ir.new_var(VarMetadata {
                 source_name: Some(name.clone()),
@@ -559,7 +542,7 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             .child_by_field_name("type")
             .map(|t| normalize_type_path(&source[t.start_byte()..t.end_byte()]))
             .filter(|t| !t.is_empty());
-        for binding in param_bindings(p) {
+        for binding in spec.param_bindings(p) {
             let name = source[binding.start_byte()..binding.end_byte()].to_string();
             let v = ctx.ir.new_var(VarMetadata {
                 source_name: Some(name.clone()),
@@ -583,105 +566,6 @@ fn bind_params(ctx: &mut LoweringContext, params: tree_sitter::Node, source: &st
             ctx.env.last_mut().unwrap().insert(name, v);
         }
     }
-}
-
-/// The binding identifiers of one parameter node, in declaration order.
-///
-/// - JS/TS: `required_parameter`/`optional_parameter` with a `pattern` field
-/// - Python: plain `identifier` children of `parameters`, plus the
-///   annotated/defaulted wrappers (`x: T`, `x=v`, `x: T = v`, `*x`)
-/// - Rust: `parameter` node wrapping the name identifier as first child
-/// - C: `parameter_declaration` shaped `type declarator`, where the declarator
-///   may be `pointer_declarator` → `identifier` (`char *p`). `child(0)` is the
-///   type specifier, so the `declarator` field is walked to its leaf.
-/// - Go: `parameter_declaration`/`variadic_parameter_declaration` shaped
-///   `name ... type`, with ONE `name` field per grouped name (`a, b string` is
-///   a single declaration). Go has no `declarator` field, so a Go parameter
-///   used to match the C arm and bind nothing: every handler parameter was an
-///   undeclared body name with no type, and the language's parameter
-///   classifier - which keys on `*gin.Context`, `*http.Request` - never saw
-///   one.
-fn param_bindings(p: tree_sitter::Node<'_>) -> Vec<tree_sitter::Node<'_>> {
-    match p.kind() {
-        "required_parameter" | "optional_parameter" | "parameter" | "variadic_parameter" => {
-            param_binding(p).into_iter().collect()
-        }
-        "identifier" => vec![p],
-        "parameter_declaration" | "variadic_parameter_declaration" => {
-            if let Some(decl) = p.child_by_field_name("declarator") {
-                return find_param_identifier(decl).into_iter().collect();
-            }
-            let mut cursor = p.walk();
-            p.children_by_field_name("name", &mut cursor).collect()
-        }
-        "typed_parameter"
-        | "default_parameter"
-        | "typed_default_parameter"
-        | "list_splat_pattern"
-        | "dictionary_splat_pattern" => python_param_binding(p).into_iter().collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// The binding identifier of a wrapper-shaped parameter pattern.
-///
-/// `Query(p)` (and `State(db)`, `Json(body)`) is a *named* pattern: it has a
-/// `type` field naming the wrapper plus one binding inside. The binding - not
-/// the wrapper - is what the body references, so the parameter must be named
-/// after it. Any other pattern (plain `identifier`, a JS object/array
-/// destructuring pattern with no `type` field, `&mut x`) is returned as-is so
-/// existing naming is untouched.
-/// The binding node of a parameter: a plain identifier, or the INNER
-/// identifier of a wrapper-shaped pattern (`Query(p)`, `{ body }`, `&mut x`).
-fn param_binding<'t>(p: tree_sitter::Node<'t>) -> Option<tree_sitter::Node<'t>> {
-    let pattern = p.child_by_field_name("pattern").or_else(|| p.child(0))?;
-    // `...parts` wraps the name: the rest marker is not part of it. Binding
-    // the parameter under the text `...parts` left the body's `parts` an
-    // undeclared name, so a rest parameter's value never reached its uses.
-    if pattern.kind() == "rest_pattern" {
-        return pattern.named_child(0);
-    }
-    Some(extractor_binding(pattern).unwrap_or(pattern))
-}
-
-/// The binding identifier of a Python parameter node.
-///
-/// Python wraps annotated and defaulted parameters: `typed_parameter` has no
-/// `name` field (its first child is the binding), while
-/// `default_parameter`/`typed_default_parameter` expose `name`. A splat
-/// parameter (`*args`, `**kwargs`, with or without an annotation) wraps the
-/// identifier in `list_splat_pattern`/`dictionary_splat_pattern`. Only an
-/// identifier is a binding: a tuple pattern (`def f((a, b))`) has no single
-/// name, and naming the parameter after the pattern text would bind a name
-/// the body never references.
-fn python_param_binding<'t>(p: tree_sitter::Node<'t>) -> Option<tree_sitter::Node<'t>> {
-    let binding = p.child_by_field_name("name").or_else(|| match p.kind() {
-        "list_splat_pattern" | "dictionary_splat_pattern" => p.named_child(0),
-        _ => p.child(0),
-    })?;
-    match binding.kind() {
-        "identifier" => Some(binding),
-        "list_splat_pattern" | "dictionary_splat_pattern" => {
-            let mut cursor = binding.walk();
-            binding
-                .named_children(&mut cursor)
-                .find(|c| c.kind() == "identifier")
-        }
-        _ => None,
-    }
-}
-
-fn extractor_binding<'t>(pattern: tree_sitter::Node<'t>) -> Option<tree_sitter::Node<'t>> {
-    let wrapper = pattern.child_by_field_name("type")?;
-    let mut cursor = pattern.walk();
-    let mut inner = pattern
-        .named_children(&mut cursor)
-        .filter(|c| c.id() != wrapper.id());
-    let first = inner.next()?;
-    if first.kind() != "identifier" || inner.next().is_some() {
-        return None;
-    }
-    Some(first)
 }
 
 /// Normalize a parameter type annotation to its path: strip references and
@@ -713,17 +597,6 @@ fn normalize_type_path(raw: &str) -> String {
         owned
     } else {
         path
-    }
-}
-
-/// Walk a C declarator chain to find the leaf `identifier`.
-/// Handles pointer_declarator, array_declarator, etc.
-fn find_param_identifier(node: tree_sitter::Node<'_>) -> Option<tree_sitter::Node<'_>> {
-    match node.kind() {
-        "identifier" => Some(node),
-        _ => node
-            .child_by_field_name("declarator")
-            .and_then(find_param_identifier),
     }
 }
 

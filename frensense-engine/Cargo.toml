@@ -7,7 +7,6 @@ description = "Frensense engine core - IR lowering, value-flow analysis, interpr
 license = "GPL-3.0-only"
 readme = "../README.md"
 repository = "https://github.com/Friehub/Frensense-v2"
-homepage = "https://frensense.friehub.cloud"
 documentation = "https://frensense.friehub.cloud"
 rust-version = "1.95"
 

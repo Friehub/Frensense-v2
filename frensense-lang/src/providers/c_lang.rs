@@ -138,6 +138,12 @@ fn c_package_category(pkg: &str) -> Option<PackageCategory> {
 
 // ── CSpec ─────────────────────────────────────────────────────────────────────
 
+/// [`LanguageSpec`] for C (`.c`, `.h`).
+///
+/// Classifies the C grammar's declarator-chain shapes (`function_definition`
+/// reaching its parameters and name through `declarator`), its preprocessor
+/// conditionals and its storage-class/pointer expressions, so no consumer
+/// walks a declarator chain by hand.
 #[derive(Debug)]
 pub struct CSpec;
 
@@ -163,6 +169,33 @@ impl LanguageSpec for CSpec {
 
     fn is_cast(&self, kind: &str) -> bool {
         kind == "cast_expression"
+    }
+
+    fn is_storage_class_specifier(&self, kind: &str) -> bool {
+        kind == "storage_class_specifier"
+    }
+
+    fn is_pointer_expression(&self, kind: &str) -> bool {
+        kind == "pointer_expression"
+    }
+
+    fn is_preproc_conditional(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "preproc_if" | "preproc_ifdef" | "preproc_elif" | "preproc_elifdef" | "preproc_else"
+        )
+    }
+
+    fn is_preproc_else(&self, kind: &str) -> bool {
+        kind == "preproc_else"
+    }
+
+    fn is_switch_statement(&self, kind: &str) -> bool {
+        kind == "switch_statement"
+    }
+
+    fn is_case_clause(&self, kind: &str) -> bool {
+        kind == "case_statement"
     }
 
     fn wrap_region(&self, code: &str) -> String {

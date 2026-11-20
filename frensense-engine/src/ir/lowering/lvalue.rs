@@ -42,7 +42,7 @@ impl<'a> LoweringContext<'a> {
                     None
                 }
             }
-            _ if node.kind() == "pointer_expression" => {
+            _ if self.spec.is_pointer_expression(node.kind()) => {
                 let arg = node
                     .child_by_field_name("argument")
                     .or_else(|| node.named_child(0))?;

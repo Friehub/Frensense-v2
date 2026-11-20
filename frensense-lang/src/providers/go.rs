@@ -310,6 +310,11 @@ const GO_CALL_QUERY: &str = r#"
 
 // ── GoSpec ────────────────────────────────────────────────────────────────────
 
+/// [`LanguageSpec`] for Go (`.go`).
+///
+/// Distinguishes `method_declaration` from `function_declaration`, resolves
+/// selector fields through `field_identifier`, and recognizes the language's
+/// error guard (`if err != nil { return … }`) and `:=` declarations.
 #[derive(Debug)]
 pub struct GoSpec;
 
@@ -337,6 +342,10 @@ impl LanguageSpec for GoSpec {
     // `field_identifier`, a named field, not a computed index.
     fn is_property_kind(&self, kind: &str) -> bool {
         kind == "field_identifier"
+    }
+
+    fn is_function_value(&self, kind: &str) -> bool {
+        kind == "func_literal"
     }
 
     /// Go-specific: detect `if err != nil { return … }`.

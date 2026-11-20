@@ -390,6 +390,11 @@ const RUST_CALL_QUERY: &str = r#"
 
 // ── LanguageSpec ────────────────────────────────────────────────────────────────
 
+/// [`LanguageSpec`] for Rust (`.rs`).
+///
+/// Covers `field_expression`/`method_call_expression` property access, the
+/// `?` error-propagation operator, `self_parameter` receivers, match guards
+/// and macro `token_tree` argument lists.
 #[derive(Debug)]
 pub struct RustSpec;
 
@@ -415,6 +420,19 @@ impl LanguageSpec for RustSpec {
 
     fn is_cast(&self, kind: &str) -> bool {
         kind == "type_cast_expression"
+    }
+
+    fn is_function_value(&self, kind: &str) -> bool {
+        kind == "closure_expression"
+    }
+
+    /// `&self` / `&mut self`. The receiver binds the keyword, not its text.
+    fn is_self_parameter(&self, kind: &str) -> bool {
+        kind == "self_parameter"
+    }
+
+    fn is_match_guard(&self, kind: &str) -> bool {
+        kind == "match_guard"
     }
 
     fn implicit_return_node<'a>(&self, _fn_node: Node<'a>, body: Node<'a>) -> Option<Node<'a>> {

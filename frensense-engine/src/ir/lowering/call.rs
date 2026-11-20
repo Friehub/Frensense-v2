@@ -59,8 +59,10 @@ impl<'a> LoweringContext<'a> {
             // walk such a child directly into the argument list and keep
             // the slot at the written position (a name is metadata, not
             // a slot): an earlier omitted optional cannot shift it.
-            if child.kind() == "assignment_expression"
-                && let Some(name_node) = child.child_by_field_name("left")
+            if matches!(
+                self.classify_node(child.kind()),
+                NodeRole::Assignment { .. }
+            ) && let Some(name_node) = child.child_by_field_name("left")
                 && child.child_by_field_name("right").is_some()
             {
                 if let Some(op) = self.visit_node(child.child_by_field_name("right").unwrap()) {

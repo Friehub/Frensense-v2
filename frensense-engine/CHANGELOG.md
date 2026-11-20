@@ -198,6 +198,87 @@ what this crate does.
 
 ### Changed
 
+- **The harness asks the spec for declarations, function values, call fields
+  and names.** The extraction walk tested `lexical_declaration` /
+  `variable_declaration`, `variable_declarator`, `arrow_function` /
+  `function_expression`, `export_statement` and `call_expression` (plus its
+  `function` / `arguments` fields) by name, and `function_name_of` hand-walked
+  C's declarator chain. They now use `is_variable_declaration_statement`,
+  `is_variable_declarator`, `is_function_value`, the `NodeRole::Export` and
+  `NodeRole::Call` roles (field names included), and `function_name_node`.
+  `harness.rs` contains no node-kind comparison, so the crate's grammar
+  knowledge is now entirely behind `LanguageSpec`. No behaviour change; 575
+  engine tests unchanged.
+
+- **Match-arm evaluation asks the spec for patterns and literals.**
+  `const_eval.rs` matched `pat.kind()` against `_`, `case_pattern`,
+  `union_pattern`, `string`, `concatenated_string`, `integer`, `float`, `true`,
+  `false`, `none` and `null`, and scanned for `"pattern"` children and
+  `if_clause` / `match_guard` guards. The two state machines now match on
+  `literal_shape` and the pattern queries (`is_discard_pattern`,
+  `is_pattern_wrapper`, `is_alternative_pattern`, `is_match_pattern_node`,
+  `is_match_guard`). `match_arm_pattern` is a free function, so it takes the
+  spec explicitly. No behaviour change: the foldable literal set, the discard
+  and alternative handling, and the "a guard makes the arm undecidable" rule are
+  the same; 575 engine tests unchanged.
+
+- **CFG construction asks the spec about shape, clauses and jumps.** The 23 node
+  kind comparisons in `control_flow.rs` are gone: loop and branch bodies and
+  conditions (`is_block_or_statement`, `is_loop_condition_node`,
+  `is_branch_condition_node`, `is_containment_node`), switch and match clauses
+  (`is_case_clause`, `is_case_alternative`, `is_match_statement`), the else arm
+  (`is_else_clause`), break-target handling (`is_switch_like_node`,
+  `is_jump_target_name`), preprocessor else (`is_preproc_else`), comment skips
+  (`is_comment`) and the match-arm binder's two pattern shapes
+  (`is_binding_pattern`, `is_structured_pattern`). `has_break_label` takes the
+  spec explicitly because it is a free function. No behaviour change; 575 engine
+  tests and the loop-shape differential test are unchanged.
+
+- **Declaration and assignment lowering ask the spec for pattern and storage
+  vocabulary.** `decl.rs`, `assign.rs`, `lvalue.rs` and `call.rs` named
+  `storage_class_specifier`, `array_pattern`, `object_assignment_pattern`,
+  `rest_pattern`, `pointer_expression` and `assignment_expression` directly.
+  They now use `is_storage_class_specifier`, `is_array_pattern`,
+  `is_assignment_pattern`, `is_rest_pattern`, `is_pointer_expression` and the
+  `NodeRole::Assignment` role; the multi-target list test moved onto the context
+  as `is_multi_target`, backed by `is_multi_target_node`. No node-kind
+  comparison remains in those four files; 575 engine tests unchanged.
+
+- **Expression lowering asks the spec about comments, strings, composites and
+  JSX.** Every `child.kind() == "comment"` skip, the four-part string-folding
+  test in `visit_literal`, the `object` / `array` split that picks
+  `AllocationKind`, the JSX element/opening/children dispatch and the JSX
+  attribute-value test are now `is_comment`, `is_string_expression` (kept behind
+  the learned-facts `is_template_string` wrapper so a bundle can still widen
+  it), `is_object_composite` / `is_array_composite`, `jsx_part` and
+  `is_jsx_attribute_value`. `expr.rs` contains no node-kind comparison.
+  No behaviour change; 575 engine tests unchanged.
+
+- **`visit_node` dispatches on the language spec instead of grammar spellings.**
+  The lowering's fallback arms compared `node.kind()` against
+  `switch_statement`, the five `preproc_*` kinds, the four jump kinds and the
+  three JSX element kinds. They now ask `is_switch_statement`,
+  `is_preproc_conditional`, `jump_kind` and `jsx_part`; the JSX arm deliberately
+  accepts only element, self-closing element and fragment, because an opening
+  element or children run is lowered by its enclosing element and routing it
+  here would duplicate every prop store. No behaviour change; the 575-test
+  suite is unchanged.
+
+- **The harness binds parameters through `frensense-lang`, not its own grammar
+  tables.** `lower_one` read a hardcoded `parameters` field, walked C's
+  `function_definition → declarator → function_declarator` chain by hand, and
+  carried a table naming every grammar's parameter spellings
+  (`required_parameter`, `typed_parameter`, `list_splat_pattern`,
+  `parameter_declaration`, ...), plus a second table for the receiver. It now
+  calls `function_params`, `param_bindings` and `is_self_parameter`; 142 lines
+  of per-grammar vocabulary leave the engine, which no longer knows how any
+  language spells a parameter. No behaviour change: the moved tables are
+  verbatim and the IR-level tests
+  (`go_parameters_are_bound_with_their_declared_types`,
+  `destructured_parameters_bind_the_names_inside_them`) pass unchanged.
+  `ir::lowering::kind_migration_tests` additionally pins every migrated query to
+  the comparison it replaced by walking real parse trees for all five grammars.
+
 - `CutSite` `"passed-through"` sites skip standard-library adapters (`iter`,
   `collect`, `map`, `map_err`, ...): they forward their operands by definition,
   so naming them buried the calls the engine genuinely has no model for.

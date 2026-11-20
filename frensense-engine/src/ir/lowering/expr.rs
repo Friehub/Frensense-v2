@@ -29,7 +29,7 @@ impl<'a> LoweringContext<'a> {
                 }
                 continue;
             }
-            if child.kind() == "comment" {
+            if self.spec.is_comment(child.kind()) {
                 continue;
             }
             if let Some(op) = self.visit_node(child) {
@@ -77,7 +77,7 @@ impl<'a> LoweringContext<'a> {
         let mut operand_node = None;
         let mut op_node = None;
         for child in node.children(&mut cursor) {
-            if child.kind() == "comment" {
+            if self.spec.is_comment(child.kind()) {
                 continue;
             }
             if child.is_named() {
@@ -346,7 +346,7 @@ impl<'a> LoweringContext<'a> {
         let mut cursor = node.walk();
         let children: Vec<Node> = node
             .children(&mut cursor)
-            .filter(|c| c.is_named() && c.kind() != "comment")
+            .filter(|c| c.is_named() && !self.spec.is_comment(c.kind()))
             .collect();
         let mut child_ops: Vec<Operand> = Vec::new();
         let mut pair_keys: Vec<String> = Vec::new();
@@ -377,8 +377,8 @@ impl<'a> LoweringContext<'a> {
             entries.push((key, op));
         }
 
-        let kind_is_object = node.kind() == "object";
-        let kind_is_array = node.kind() == "array";
+        let kind_is_object = self.spec.is_object_composite(node.kind());
+        let kind_is_array = self.spec.is_array_composite(node.kind());
         let byte_range = Some((node.start_byte(), node.end_byte()));
 
         // Structural literals: allocate a fresh container and store each
@@ -486,11 +486,10 @@ impl<'a> LoweringContext<'a> {
     ///
     /// A string that mixes literal text with at least one interpolated or concatenated part is folded into a left-associative `concat` chain, so checks can see a fixed prefix before a tainted part. A string with no such mix yields its last non-fragment child's value, or its source text as a string literal. Any other literal is an integer literal when its text parses as `i64` and its source text as a string literal otherwise.
     pub(crate) fn visit_literal(&mut self, node: Node) -> Option<Operand> {
-        if self.is_template_string(node.kind())
-            || node.kind() == "string"
-            || node.kind() == "binary_expression"
-            || node.kind() == "concatenated_string"
-        {
+        // The learned-facts wrapper first (a bundle may narrow or widen what a
+        // template string is), then the spec's string-folding union: a template
+        // string, a quoted string, an implicit concatenation, or a `+` chain.
+        if self.is_template_string(node.kind()) || self.spec.is_string_expression(node.kind()) {
             // An *interpolated* string (JS template literal, Python f-string,
             // implicit concat with a substitution) carries both literal text
             // and tainted parts. Fold every part - literal fragments AND
@@ -546,7 +545,7 @@ impl<'a> LoweringContext<'a> {
         let mut has_literal = false;
         for child in &children {
             let kind = child.kind();
-            if kind == "comment" {
+            if self.spec.is_comment(kind) {
                 continue;
             }
             // A literal text fragment (JS `string_fragment`, or any node the
@@ -597,7 +596,7 @@ impl<'a> LoweringContext<'a> {
         let mut cursor = node.walk();
         let mut first = None;
         for child in node.children(&mut cursor) {
-            if child.is_named() && child.kind() != "comment" && first.is_none() {
+            if child.is_named() && !self.spec.is_comment(child.kind()) && first.is_none() {
                 first = self.visit_node(child);
             }
         }
@@ -622,15 +621,19 @@ impl<'a> LoweringContext<'a> {
                 kind: AllocationKind::Object,
             },
         );
-        match node.kind() {
-            "jsx_self_closing_element" => self.store_jsx_attributes(node, props),
-            "jsx_fragment" => self.lower_jsx_children(node),
+        match self.spec.jsx_part(node.kind()) {
+            Some(frensense_lang::JsxPart::SelfClosingElement) => {
+                self.store_jsx_attributes(node, props)
+            }
+            Some(frensense_lang::JsxPart::Fragment) => self.lower_jsx_children(node),
             _ => {
                 let mut cursor = node.walk();
                 for child in node.named_children(&mut cursor) {
-                    match child.kind() {
-                        "jsx_opening_element" => self.store_jsx_attributes(child, props),
-                        "jsx_children" => self.lower_jsx_children(child),
+                    match self.spec.jsx_part(child.kind()) {
+                        Some(frensense_lang::JsxPart::OpeningElement) => {
+                            self.store_jsx_attributes(child, props)
+                        }
+                        Some(frensense_lang::JsxPart::Children) => self.lower_jsx_children(child),
                         _ => {}
                     }
                 }
@@ -658,7 +661,7 @@ impl<'a> LoweringContext<'a> {
     fn store_jsx_attributes(&mut self, tag: Node, props: VarId) {
         let mut cursor = tag.walk();
         for attr in tag.named_children(&mut cursor) {
-            if attr.kind() != "jsx_attribute" {
+            if self.spec.jsx_part(attr.kind()) != Some(frensense_lang::JsxPart::Attribute) {
                 self.visit_node(attr);
                 continue;
             }
@@ -666,7 +669,7 @@ impl<'a> LoweringContext<'a> {
             let mut name: Option<String> = None;
             let mut value: Option<Operand> = None;
             for part in attr.named_children(&mut parts) {
-                if name.is_none() && !is_jsx_value(part.kind()) {
+                if name.is_none() && !self.spec.is_jsx_attribute_value(part.kind()) {
                     name = self
                         .source
                         .get(part.start_byte()..part.end_byte())
@@ -685,12 +688,4 @@ impl<'a> LoweringContext<'a> {
             }
         }
     }
-}
-
-/// Node kinds that make up a JSX attribute's value rather than its name.
-fn is_jsx_value(kind: &str) -> bool {
-    matches!(
-        kind,
-        "jsx_expression" | "string" | "jsx_element" | "jsx_self_closing_element" | "jsx_fragment"
-    )
 }

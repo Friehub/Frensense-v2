@@ -34,12 +34,22 @@ pub const SEVERITY_LABELS: [&str; 6] = ["critical", "high", "medium", "warning",
 /// Advisory severity ranking.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Severity {
+    /// Highest rank: a confirmed, exploitable issue (CVSS `critical`/`high`).
     Critical,
+    /// Middle rank: a likely issue or a CVSS `medium` (also `warning`).
     Warning,
+    /// Lowest rank: informational or CVSS `low`.
     Info,
 }
 
 impl Severity {
+    /// Whether this severity is at least as severe as `threshold`.
+    ///
+    /// ```rust
+    /// # use frensense_lang::severity::Severity;
+    /// assert!(Severity::Critical.meets_threshold(Severity::Warning));
+    /// assert!(!Severity::Info.meets_threshold(Severity::Warning));
+    /// ```
     #[must_use]
     pub fn meets_threshold(&self, threshold: Severity) -> bool {
         match (self, threshold) {
@@ -101,6 +111,7 @@ pub enum RuleTier {
 }
 
 impl RuleTier {
+    /// The stable lowercase name used in configuration and reports.
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -111,6 +122,10 @@ impl RuleTier {
         }
     }
 
+    /// Parse a tier name case-insensitively.
+    ///
+    /// Returns `None` for an unknown name, matching
+    /// [`RuleTier::as_str`]'s vocabulary.
     #[must_use]
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
@@ -147,6 +162,10 @@ pub enum Profile {
 }
 
 impl Profile {
+    /// Whether this profile reports findings of `tier`.
+    ///
+    /// `Default` runs `Stable` only, `Recommended` adds `Beta`, and `Strict`
+    /// runs every tier.
     #[must_use]
     pub fn includes_tier(&self, tier: RuleTier) -> bool {
         match self {
@@ -156,6 +175,11 @@ impl Profile {
         }
     }
 
+    /// Parse a profile name case-insensitively.
+    ///
+    /// Unlike the other `parse` helpers this one reports the accepted names,
+    /// because a misspelled profile on a CLI invocation must be an error, not
+    /// a silent fallback to the default scan.
     pub fn parse(s: &str) -> std::result::Result<Self, String> {
         match s.to_ascii_lowercase().as_str() {
             "default" => Ok(Self::Default),
@@ -167,6 +191,7 @@ impl Profile {
         }
     }
 
+    /// The stable lowercase name used in configuration and reports.
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -219,8 +244,8 @@ pub enum SinkRole {
 }
 
 impl SinkRole {
-    /// The default tier for this role: the ladder lives here (D4), not in
-    /// the engine. Consumers map it onto their own reporting policy.
+    /// The default severity for this role: the ladder lives here (D4), not
+    /// in the engine. Consumers map it onto their own reporting policy.
     #[must_use]
     pub fn default_level(&self) -> Severity {
         match self {
@@ -305,6 +330,7 @@ pub enum SanitizerKind {
 }
 
 impl SanitizerKind {
+    /// The serialized slug stored on a sanitizer fact.
     #[must_use]
     pub fn slug(&self) -> &'static str {
         match self {
@@ -318,6 +344,11 @@ impl SanitizerKind {
         }
     }
 
+    /// Parse a fact/bundle slug back into a kind.
+    ///
+    /// Accepts the legacy aliases (`encode`, `allowlist`, `generic`) as
+    /// [`SanitizerKind::Full`] and returns `None` for anything unknown, which
+    /// the role-qualified evaluator treats as "no cut".
     #[must_use]
     pub fn from_slug(slug: &str) -> Option<Self> {
         match slug {
@@ -380,10 +411,15 @@ pub enum TaintClass {
 /// `{line}`, substituted by [`RuleAdvisory::render`].
 #[derive(Debug)]
 pub struct RuleAdvisory {
+    /// Severity this rule reports at.
     pub level: Severity,
+    /// Template for the finding's title (`{function}`, `{file}`, `{line}`).
     pub title: &'static str,
+    /// Template describing why the finding matters.
     pub impact: &'static str,
+    /// Template describing how to fix it.
     pub improvement: &'static str,
+    /// Stable reporting tag (e.g. `"security"`, `"health"`).
     pub tag: &'static str,
 }
 
@@ -416,7 +452,9 @@ impl RuleAdvisory {
 /// One rule id bound to its declared advisory metadata.
 #[derive(Debug)]
 pub struct RuleEntry {
+    /// The rule id this entry declares (the id findings are emitted under).
     pub rule: &'static str,
+    /// Severity and message templates for that rule.
     pub advisory: RuleAdvisory,
 }
 

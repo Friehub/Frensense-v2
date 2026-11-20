@@ -5,8 +5,9 @@
 //! The `.frc` bundle: format envelope + payload types.
 //!
 //! The bundler owns the format end to end. The engine never sees bundle
-//! bytes, it only consumes the decoded [`LearnedFactEntry`] facts, which
-//! live in `frensense_engine::analysis::taint::facts`.
+//! bytes, it only consumes the decoded
+//! [`LearnedFactEntry`](frensense_engine::analysis::taint::facts::LearnedFactEntry)
+//! facts, which live in `frensense_engine::analysis::taint::facts`.
 
 mod default_pack;
 mod frc;

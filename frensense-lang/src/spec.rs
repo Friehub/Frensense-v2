@@ -13,6 +13,35 @@
 //! across nine small traits creates nine places a new language author can
 //! forget to implement one. A single trait with good defaults makes the
 //! "forgot to implement" case a compile error, not a silent empty result.
+//!
+//! # The three layers of grammar knowledge
+//!
+//! A subsystem asks the spec at whichever layer matches its question, from
+//! coarsest to finest:
+//!
+//! 1. **Roles** - [`LanguageSpec::classify`] answers "what is this node?" with a
+//!    [`NodeRole`], field names included. Use it when one answer drives one
+//!    branch (`Call`, `Return`, `Composite`, ...).
+//! 2. **Predicates** - `is_*` queries answer a yes/no question the analysis
+//!    asks about a node it already holds: [`LanguageSpec::is_statement_node`],
+//!    [`LanguageSpec::is_block_node`], [`LanguageSpec::is_case_clause`],
+//!    [`LanguageSpec::is_jump_target_name`],
+//!    [`LanguageSpec::is_function_value`],
+//!    [`LanguageSpec::is_discard_pattern`], and the rest. They exist because a
+//!    role is sometimes too narrow (one grammar spells one concept several
+//!    ways) or too broad, while a lowering site only needs the boolean. Every
+//!    predicate defaults to the cross-language superset, so a provider overrides
+//!    only what its grammar spells differently.
+//! 3. **Tables** - [`LanguageSpec::jump_kind`],
+//!    [`LanguageSpec::literal_shape`] and [`LanguageSpec::param_bindings`] map a
+//!    kind to structured data (which jump, which literal shape, which binding),
+//!    for walkers that dispatch on the answer instead of branching on a
+//!    boolean.
+//!
+//! The rule for contributors: **the engine may not spell a node kind.** When a
+//! decision needs one, add a layer-1/2/3 query here with a default that
+//! reproduces today's behaviour, override it per grammar where the spelling
+//! differs, and pin both in `providers/node_vocabulary_tests.rs`.
 
 use std::borrow::Cow;
 
@@ -45,44 +74,66 @@ pub enum NodeRole {
     },
 
     // ── Assignments / declarations ────────────────────────────────────────
-    /// A variable declaration with an initializer.
-    /// `let x = expr` (JS/Rust), `x := expr` (Go).
+    /// A variable declaration with an initializer: `let x = expr` (JS/Rust),
+    /// `x := expr` (Go), and Python's `x = expr`, which has no separate
+    /// declaration form.
     Declaration {
+        /// Field holding the declared name (or binding pattern).
         name_field: Cow<'static, str>,
+        /// Field holding the initializer expression.
         value_field: Cow<'static, str>,
     },
-    /// A mutation of an existing binding.
-    /// `x = expr` (all languages), `x += expr`.
+    /// A mutation of an existing binding (`x = expr`, `x += expr`).
+    ///
+    /// Only the grammars that spell mutation as its own node kind use this;
+    /// Python's plain `x = expr` is a [`NodeRole::Declaration`].
     Assignment {
+        /// Field holding the assigned target.
         lhs_field: Cow<'static, str>,
+        /// Field holding the assigned value expression.
         rhs_field: Cow<'static, str>,
     },
 
     // ── Calls ─────────────────────────────────────────────────────────────
     /// Any function / method invocation.
     Call {
+        /// Field holding the callee expression.
         callee_field: Cow<'static, str>,
+        /// Field holding the argument list node.
         args_field: Cow<'static, str>,
     },
     /// Member / field access producing a value (not a call).
     /// `obj.field`, `obj->field`, `obj.attribute`.
     MemberAccess {
+        /// Field holding the accessed object.
         object_field: Cow<'static, str>,
+        /// Field holding the accessed property name.
         property_field: Cow<'static, str>,
     },
 
     // ── Control flow ──────────────────────────────────────────────────────
-    Branch, // if / switch / match-arm
+    /// An `if` / `else if` / `else` chain, or a C-style `switch_statement`.
+    ///
+    /// Grammars whose switch/match dispatches on one subject are
+    /// [`NodeRole::Match`] instead, and a ternary expression is
+    /// [`NodeRole::Conditional`].
+    Branch,
     /// Ternary conditional EXPRESSION (`a ? b : c`, Python `a if c else b`).
     /// Separate from Branch: both arms are expressions producing a value,
     /// lowered as branch + Phi, not as a statement-level fork.
     Conditional,
-    Loop,    // for / while / do / loop
-    Return,  // return statement / expression
-    Try,     // try { … }
-    Catch,   // catch / except clause
-    Finally, // finally clause
-    Throw,   // throw / raise
+    /// A loop (`for`, `while`, `do`, `loop`): the CFG adds a back-edge.
+    Loop,
+    /// A `return` statement or expression.
+    Return,
+    /// A `try` block: the exception edge starts here.
+    Try,
+    /// An exception handler (`catch` clause, Python `except` clause).
+    Catch,
+    /// A `finally` block.
+    Finally,
+    /// A `throw` statement or expression (Python `raise`).
+    Throw,
 
     // ── Special language patterns ─────────────────────────────────────────
     /// Go: `if err != nil { return … }` - structurally a Branch but semantically
@@ -95,11 +146,13 @@ pub enum NodeRole {
     /// Rust: the `?` postfix operator - propagates errors, terminates the
     /// current scope if the value is `Err`.
     ErrorPropagation,
-    /// Rust async block, JS/TS `await`, Python `await`.
+    /// An `await` expression (JS/TS, Python, Rust) or Go's `defer` / `go`
+    /// statement, whose work runs outside the current evaluation.
     Await,
 
     // ── Structural ────────────────────────────────────────────────────────
-    Block, // { … } / indented block
+    /// A block of statements (`{ … }`, an indented block).
+    Block,
     /// Value-context composite literal: JS/TS `object` used as a value (not a
     /// statement block), `array`, `object_pattern` in expression position.
     /// Uniformly-keyed objects and arrays lower to an allocation with one
@@ -109,17 +162,24 @@ pub enum NodeRole {
     /// value. Objects with unkeyed children (spreads) keep the legacy
     /// may-analysis union - conservative for taint.
     Composite,
-    Import,     // import / use / require
-    Export,     // export (JS/TS only)
-    Identifier, // bare name reference
-    Literal,    // string / number / bool literal
+    /// An import declaration or call: `import`, `use`, `require`.
+    Import,
+    /// An export declaration (JS/TS only).
+    Export,
+    /// A bare name reference.
+    Identifier,
+    /// A literal value: string, number, boolean or null.
+    Literal,
 
     // ── Supplementary structural roles ────────────────────────────────────
-    /// Parameter list: `formal_parameters` (JS/TS), `parameter_list` (Go),
-    /// `parameters` (Python), `parameter_declaration` (C).
+    /// A parameter list (`formal_parameters` in JS/TS, `parameters` in
+    /// Python, `parameter_list` in Go/C) or one parameter node a grammar
+    /// spells on its own (`parameter`, `parameter_declaration`,
+    /// `typed_parameter`, `default_parameter`, `positional_separator`, ...).
     Parameters,
-    /// Argument list: `arguments` (JS/TS), `argument_list` (Python/Go/C),
-    /// `token_tree` (Rust macros).
+    /// An argument list: `arguments` (JS/TS/Rust), `argument_list`
+    /// (Python/Go/C), Python's `generator_expression`, or a Rust macro's
+    /// `token_tree`.
     Arguments,
     /// A named call argument (`f(secure=False)`): Python `keyword_argument`.
     /// Distinct from a plain expression so the IR can keep the argument's
@@ -143,7 +203,11 @@ pub enum NodeRole {
     Match,
     /// Rust: `unsafe { … }` block.
     Unsafe,
-    /// Rust async block, JS/TS `async function`, Python `async def`.
+    /// An async block (`async { … }` in Rust, Python `async_block`).
+    ///
+    /// A JS/TS `async function` / Python `async def` is still a
+    /// [`NodeRole::Function`]: only a block *without* a function of its own
+    /// gets this role.
     AsyncBlock,
 
     /// Anything the engine does not need to inspect.
@@ -152,33 +216,114 @@ pub enum NodeRole {
 
 impl NodeRole {}
 
+/// A statement that transfers control to a labelled block or out of the
+/// current loop/switch.
+///
+/// Named so the CFG lowering dispatches on the grammar's answer instead of
+/// repeating a grammar's spellings: the default below is the C/JS pair the
+/// lowering has always recognized, and a grammar whose jump nodes are spelled
+/// differently overrides [`LanguageSpec::jump_kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum JumpKind {
+    /// `goto label;`
+    Goto,
+    /// `label:` - the target of a `goto`.
+    Label,
+    /// `break;` / `break label;`
+    Break,
+    /// `continue;` / `continue label;`
+    Continue,
+}
+
+/// The parts of JSX/TSX markup the lowering turns into prop stores.
+///
+/// Only the TypeScript/TSX grammar has these node kinds, so only the JavaScript
+/// family overrides [`LanguageSpec::jsx_part`]; every other language answers
+/// `None`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum JsxPart {
+    /// `<div>…</div>` - holds an opening element and a children run.
+    Element,
+    /// `<div />` - attributes and no children.
+    SelfClosingElement,
+    /// `<>…</>` - children only.
+    Fragment,
+    /// `<div …>` inside an [`JsxPart::Element`].
+    OpeningElement,
+    /// The children run of an [`JsxPart::Element`].
+    Children,
+    /// `name={value}`.
+    Attribute,
+}
+
+/// The literal a node spells, when the lowering can fold it at compile time.
+///
+/// Used by match-arm selection: only a pattern that spells one of these can
+/// be compared against a constant subject without running the program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LiteralShape {
+    /// A quoted string or an implicit concatenation of them.
+    String,
+    /// An integer literal.
+    Integer,
+    /// A floating-point literal.
+    Float,
+    /// `true` / `false`.
+    Boolean(bool),
+    /// `none` / `null`.
+    Null,
+}
+
 /// Broad category for what a package is used for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PackageCategory {
+    /// Web framework (Express, Flask, Django, Actix).
     HttpFramework,
+    /// GraphQL server or client library.
     GraphQL,
+    /// WebSocket server or client library.
     WebSocket,
+    /// Transactional or marketing email service.
     EmailService,
+    /// Relational database driver or ORM (SQL injection risk).
     SqlDatabase,
+    /// Document / key-value store driver (NoSQL injection risk).
     NoSqlDatabase,
+    /// Process or shell command execution library.
     CommandExecution,
+    /// File system API.
     FileSystem,
-    HttpClient,      // SSRF risk
-    TemplateEngine,  // SSTI / XSS
-    Deserialization, // unsafe deserialize
+    /// HTTP client library (SSRF risk).
+    HttpClient,
+    /// Template engine (SSTI / XSS).
+    TemplateEngine,
+    /// Serializer or deserializer (unsafe deserialize).
+    Deserialization,
+    /// Cryptographic primitive.
     Crypto,
+    /// Logging library.
     Logging,
+    /// Test framework or assertion library.
     Testing,
 }
 
 /// Broad origin of tainted data.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum TaintOrigin {
-    UserInput,   // HTTP request body/query/path/header
-    Environment, // process.env / os.environ / std::env
-    FileSystem,  // file read whose path came from user
-    Database,    // query result that may contain injection
-    Network,     // IPC / downstream API response
+    /// HTTP request body, query, path or header.
+    UserInput,
+    /// Process environment (`process.env`, `os.environ`, `std::env`).
+    Environment,
+    /// A file read whose path came from the user.
+    FileSystem,
+    /// A query result that may contain injected data.
+    Database,
+    /// An IPC or downstream API response.
+    Network,
+    /// A caller-defined origin, carried verbatim.
     Custom(String),
 }
 
@@ -239,32 +384,49 @@ pub struct Export {
 /// Written or inferred visibility of a declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Visibility {
+    /// Visible outside the declaring module.
     Public,
+    /// Visible within the crate / package but not outside it.
     Internal,
+    /// Visible only within the declaring item.
     Private,
 }
 
 /// The syntactic or semantic kind of a module-level declaration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ItemKind {
+    /// Function or method.
     Function,
+    /// Compile-time constant.
     Constant,
+    /// Mutable or inferred variable binding.
     Variable,
+    /// Class definition.
     Class,
+    /// Enum definition.
     Enum,
+    /// Interface definition.
     Interface,
+    /// Type alias, `typedef` or associated type.
     Type,
+    /// Module or namespace declaration.
     Module,
+    /// Struct definition.
     Struct,
+    /// Trait definition.
     Trait,
+    /// Anything else the extractor found.
     Other,
 }
 
 /// A top-level item declared in a module.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ModuleItem {
+    /// The declared name, as written in source.
     pub name: String,
+    /// What kind of item it is.
     pub kind: ItemKind,
+    /// Its written or inferred visibility.
     pub visibility: Visibility,
 }
 
@@ -333,7 +495,7 @@ pub trait LanguageSpec: Send + Sync + 'static {
         std::borrow::Cow::Borrowed(source)
     }
 
-    /// The language key theFactTable and learned bundles key this spec's
+    /// The language key the FactTable and learned bundles key this spec's
     /// knowledge under. Defaults to [`name`](Self::name); a container
     /// format delegating to another spec's grammar also delegates its
     /// vocabulary (a Vue SFC's script is TypeScript, so its facts live in
@@ -480,6 +642,316 @@ pub trait LanguageSpec: Send + Sync + 'static {
         false
     }
 
+    // ── Node-kind vocabulary ──────────────────────────────────────────────
+
+    // `classify` answers "what value does this node produce", but a few
+    // grammar decisions are about *placement*: a comment among a statement's
+    // children, the declarator inside a declaration, a JSX attribute, a jump
+    // target. They are named here so no consumer keeps its own copy of a
+    // grammar's spellings. Every default is `false`/`None` (or the one
+    // language-agnostic spelling) so a provider states only what its grammar
+    // actually has.
+
+    /// A comment node. Every supported grammar spells it `comment`; a grammar
+    /// that does not overrides this.
+    fn is_comment(&self, kind: &str) -> bool {
+        kind == "comment"
+    }
+
+    /// A statement that introduces variable declarators (`const x = 1`,
+    /// `var x`). The engine binds the declarators it contains.
+    fn is_variable_declaration_statement(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A single declarator inside a
+    /// [`is_variable_declaration_statement`](Self::is_variable_declaration_statement).
+    fn is_variable_declarator(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A function *value*: a function node that carries no name of its own
+    /// (arrow function, function expression, lambda, closure, func literal).
+    ///
+    /// Distinct from [`is_function_node`](Self::is_function_node), which also
+    /// matches declarations: binding a value to a name is not the same act as
+    /// declaring the function that name refers to.
+    fn is_function_value(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A composite literal that is array-shaped (`[a, b]`) rather than keyed
+    /// (`{ a: 1 }`).
+    fn is_array_composite(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A composite literal that is keyed (`{ a: 1 }`) rather than positional.
+    ///
+    /// The lowering allocates a keyed composite as an object and stores each
+    /// entry under its field, keeping reads field-sensitive; one that is
+    /// neither keyed nor positional (a parenthesized expression, a grammar's
+    /// own composite wrapper) keeps the conservative union lowering. Answering
+    /// `true` here for such a shape would silently make it field-sensitive.
+    fn is_object_composite(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A destructuring pattern that binds by position (`[a, b]`) rather than
+    /// by name (`{ a }`). Only meaningful when
+    /// [`is_destructuring_pattern`](Self::is_destructuring_pattern) is true.
+    fn is_array_pattern(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A destructured binding with a fallback value (`{ a = 1 }`): the name on
+    /// the left of `=` reads the member of the same name, and the right side is
+    /// only used when the member is absent.
+    fn is_assignment_pattern(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A rest element in a pattern (`...rest`, `*rest`): it binds everything
+    /// the pattern did not, and carries no name of its own.
+    fn is_rest_pattern(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A match-arm pattern that binds one name (`case x:`, Rust's `x`).
+    ///
+    /// The default is the union the binder applies to every grammar: a plain
+    /// `identifier` is a binding in Python, JS and Rust alike, and
+    /// `identifier_pattern` is Rust's explicit spelling for the same thing.
+    fn is_binding_pattern(&self, kind: &str) -> bool {
+        matches!(kind, "identifier" | "identifier_pattern")
+    }
+
+    /// A match-arm pattern that destructures a value by type
+    /// (`Point { x, y }`, `Some(v)`): the binding names are its children, so
+    /// the binder recurses into it instead of using its text.
+    fn is_structured_pattern(&self, kind: &str) -> bool {
+        matches!(kind, "tuple_struct_pattern" | "struct_pattern")
+    }
+
+    /// A C-family storage-class specifier (`static`, `extern`).
+    fn is_storage_class_specifier(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A pointer dereference expression (`*p`), which names the value `p`
+    /// points at rather than the pointer itself.
+    fn is_pointer_expression(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A preprocessor conditional branch (`#if`, `#ifdef`, `#elif`, `#else`),
+    /// whose arms are alternative configurations rather than a runtime fork.
+    fn is_preproc_conditional(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// The `#else` branch of a preprocessor conditional - the false arm's
+    /// body, not a fork of its own.
+    fn is_preproc_else(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A statement-form `switch`, which the lowering turns into a condition
+    /// chain (one comparison per case) rather than the coarse
+    /// branch-with-sequential-body.
+    fn is_switch_statement(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A clause of a `switch` (`case`, `default`).
+    fn is_case_clause(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A statement-form `match` whose arms may be pruned when the subject is
+    /// a compile-time constant. The expression form produces a value its
+    /// caller consumes, which the pruned path does not synthesize.
+    fn is_match_statement(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// A guard on a match arm. It turns the arm into a runtime predicate, so
+    /// the arm can never be selected statically.
+    fn is_match_guard(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// The jump statement `kind` is, if any.
+    ///
+    /// The default is the C/JS vocabulary the CFG lowering has always
+    /// handled; a grammar that spells its jumps differently (`break_expression`
+    /// in Rust, for example) overrides it.
+    fn jump_kind(&self, kind: &str) -> Option<JumpKind> {
+        match kind {
+            "goto_statement" => Some(JumpKind::Goto),
+            "labeled_statement" => Some(JumpKind::Label),
+            "break_statement" => Some(JumpKind::Break),
+            "continue_statement" => Some(JumpKind::Continue),
+            _ => None,
+        }
+    }
+
+    /// The JSX/TSX part `kind` is, if any.
+    fn jsx_part(&self, _kind: &str) -> Option<JsxPart> {
+        None
+    }
+
+    /// A node that can be the value half of a JSX attribute: `{expr}`, a
+    /// literal string, or a nested element.
+    fn is_jsx_attribute_value(&self, _kind: &str) -> bool {
+        false
+    }
+
+    // ── Grammar shape ─────────────────────────────────────────────────────
+
+    // The CFG builder discovers a loop's body and condition, a branch's
+    // condition and consequence, and a switch's clauses by *shape* rather than
+    // by field, because the grammars disagree about which fields they expose.
+    // Those shape questions are answered here, so the builder does not spell
+    // out `contains("statement")`-style vocabulary for every language.
+    //
+    // The defaults are the vocabulary the builder applies today to every
+    // grammar. A provider narrows them when its grammar disagrees.
+
+    /// A node that carries statements (`*_statement`).
+    fn is_statement_node(&self, kind: &str) -> bool {
+        kind.contains("statement")
+    }
+
+    /// A node that is a block of statements.
+    fn is_block_node(&self, kind: &str) -> bool {
+        kind == "block" || kind.contains("block")
+    }
+
+    /// A node that can stand in for a statement or a block - a body, a
+    /// branch's consequence, a loop's body.
+    fn is_block_or_statement(&self, kind: &str) -> bool {
+        self.is_statement_node(kind) || self.is_block_node(kind)
+    }
+
+    /// A node that owns a nested body, including the grammars that name it
+    /// `*_body` instead of `*_block`.
+    fn is_body_node(&self, kind: &str) -> bool {
+        self.is_block_or_statement(kind) || kind.ends_with("body")
+    }
+
+    /// A declarator wrapper (`*_declarator`).
+    fn is_declarator_node(&self, kind: &str) -> bool {
+        kind.contains("declarator")
+    }
+
+    /// The update or initializer clause of a `for` header.
+    fn is_loop_update_or_initializer(&self, kind: &str) -> bool {
+        kind.contains("update") || kind.contains("initializer")
+    }
+
+    /// A node that can be the condition operand of a loop: anything that is
+    /// not the body, a declarator, an update or an initializer.
+    fn is_loop_condition_node(&self, kind: &str) -> bool {
+        !self.is_block_or_statement(kind)
+            && !self.is_declarator_node(kind)
+            && !self.is_loop_update_or_initializer(kind)
+    }
+
+    /// A node that can be the condition operand of a branch.
+    fn is_branch_condition_node(&self, kind: &str) -> bool {
+        !self.is_statement_node(kind)
+            && !self.is_block_node(kind)
+            && !kind.contains("declaration")
+            && !kind.contains("assignment")
+    }
+
+    /// A name that can be the target of `break`/`continue`/`goto`:
+    /// `statement_identifier` in Go's labelled statements, a plain identifier
+    /// elsewhere.
+    fn is_jump_target_name(&self, kind: &str) -> bool {
+        kind == "statement_identifier" || kind == "identifier"
+    }
+
+    /// A pattern node of a match arm.
+    fn is_match_pattern_node(&self, kind: &str) -> bool {
+        kind.contains("pattern")
+    }
+
+    /// The discard pattern (`_`), which matches anything and binds nothing.
+    fn is_discard_pattern(&self, kind: &str) -> bool {
+        kind == "_"
+    }
+
+    /// A wrapper a grammar puts around every arm pattern (Python's
+    /// `case_pattern`), transparent for matching.
+    fn is_pattern_wrapper(&self, kind: &str) -> bool {
+        kind == "case_pattern"
+    }
+
+    /// A pattern that is an alternative of others (`case 'a' | 'b':`): the arm
+    /// executes when any alternative matches.
+    fn is_alternative_pattern(&self, kind: &str) -> bool {
+        kind == "union_pattern"
+    }
+
+    /// A left-hand side that lists several assignment targets (`a, b = …`).
+    ///
+    /// The default is the union the lowering has always accepted across the
+    /// grammars (Python's and C's expression lists, JS's pattern lists).
+    fn is_multi_target_node(&self, kind: &str) -> bool {
+        matches!(
+            kind,
+            "expression_list" | "identifier_list" | "pattern_list" | "tuple_pattern"
+        )
+    }
+
+    /// A node that is, or wraps, a body of statements (`*_block`, `*_body`).
+    /// Used where a grammar puts a loop's body behind neither a field nor a
+    /// statement kind.
+    fn is_containment_node(&self, kind: &str) -> bool {
+        self.is_block_node(kind) || kind.contains("body")
+    }
+
+    /// The `else` clause of a conditional (`else_clause`, `else_statement`).
+    fn is_else_clause(&self, kind: &str) -> bool {
+        kind.contains("else")
+    }
+
+    /// A node whose `break` belongs to a `switch` rather than the enclosing
+    /// loop, including the grammars that lower a Go switch as a branch.
+    fn is_switch_like_node(&self, kind: &str) -> bool {
+        kind.contains("switch")
+    }
+
+    /// A clause or arm of a `match`, including the grammars that spell it
+    /// `*_arm` rather than `case`.
+    fn is_case_alternative(&self, kind: &str) -> bool {
+        kind.contains("arm") || kind.contains("case")
+    }
+
+    /// A node whose value may be a string built from literal and interpolated
+    /// parts: a template string, a quoted string, an implicit concatenation,
+    /// or a `+` chain the lowering folds part by part.
+    fn is_string_expression(&self, kind: &str) -> bool {
+        self.is_template_string(kind)
+            || matches!(kind, "string" | "binary_expression" | "concatenated_string")
+    }
+
+    /// The literal `kind` spells, when the lowering can fold it at compile
+    /// time. `None` for anything that needs the program to run.
+    fn literal_shape(&self, kind: &str) -> Option<LiteralShape> {
+        match kind {
+            "string" | "concatenated_string" => Some(LiteralShape::String),
+            "integer" => Some(LiteralShape::Integer),
+            "float" => Some(LiteralShape::Float),
+            "true" => Some(LiteralShape::Boolean(true)),
+            "false" => Some(LiteralShape::Boolean(false)),
+            "none" | "null" => Some(LiteralShape::Null),
+            _ => None,
+        }
+    }
+
     /// If the function body has an implicit return expression (e.g. Rust trailing expression
     /// or JS arrow function expression), return the node producing that return value.
     fn implicit_return_node<'a>(&self, _fn_node: Node<'a>, _body: Node<'a>) -> Option<Node<'a>> {
@@ -520,6 +992,85 @@ pub trait LanguageSpec: Send + Sync + 'static {
             cur = inner;
         }
         cur
+    }
+
+    // ── Parameter binding ─────────────────────────────────────────────────
+
+    /// The parameter-list node of a function definition, when the grammar
+    /// exposes one.
+    ///
+    /// Follows the [`NodeRole::Function`]'s `params_field`, and keeps walking
+    /// while the node it lands on is not a [`NodeRole::Parameters`] list. C
+    /// needs that: its `function_definition` exposes `declarator`, and the
+    /// list sits one hop further, inside `function_declarator`'s `parameters`
+    /// field (`pointer_declarator` may wrap it again). Handling the hop here
+    /// means no consumer carries a C-specific walk.
+    fn function_params<'t>(&self, fn_node: Node<'t>) -> Option<Node<'t>> {
+        let NodeRole::Function { params_field, .. } = self.classify(fn_node.kind()) else {
+            return None;
+        };
+        let mut cur = fn_node.child_by_field_name(params_field.as_ref());
+        while let Some(node) = cur {
+            if matches!(self.classify(node.kind()), NodeRole::Parameters) {
+                return Some(node);
+            }
+            cur = node
+                .child_by_field_name("parameters")
+                .or_else(|| node.child_by_field_name(params_field.as_ref()));
+        }
+        None
+    }
+
+    /// The node that names a function definition.
+    ///
+    /// Follows the [`NodeRole::Function`]'s `name_field` until it reaches an
+    /// [`NodeRole::Identifier`]. A grammar that names the function inside a
+    /// declarator chain (C: `function_definition → declarator →
+    /// function_declarator → identifier`, with `pointer_declarator` in between
+    /// for `void *f(void)`) says so by exposing that chain in `name_field`, so
+    /// no consumer walks it.
+    ///
+    /// `None` for a function that binds no name (arrow function, lambda,
+    /// closure, and a Python `decorated_definition`, whose name belongs to the
+    /// wrapped definition).
+    fn function_name_node<'t>(&self, fn_node: Node<'t>) -> Option<Node<'t>> {
+        let NodeRole::Function { name_field, .. } = self.classify(fn_node.kind()) else {
+            return None;
+        };
+        let field = name_field?;
+        let mut cur = fn_node.child_by_field_name(field.as_ref());
+        while let Some(node) = cur {
+            if matches!(self.classify(node.kind()), NodeRole::Identifier) {
+                return Some(node);
+            }
+            cur = node.child_by_field_name(field.as_ref());
+        }
+        None
+    }
+
+    /// A parameter that binds the receiver of a method (`&self`,
+    /// `&mut self`). Its name is the language keyword, not its text.
+    fn is_self_parameter(&self, _kind: &str) -> bool {
+        false
+    }
+
+    /// The binding identifiers of one parameter node, in declaration order.
+    ///
+    /// Grammars disagree about how many names one parameter node carries and
+    /// where they sit, so this is the one place that knows:
+    ///
+    /// - JS/TS: `required_parameter`/`optional_parameter` with a `pattern`
+    ///   field, and `...rest` as a `rest_pattern` around the name.
+    /// - Python: a plain `identifier`, plus the annotated/defaulted wrappers
+    ///   (`x: T`, `x=v`, `x: T = v`) and the splats (`*x`, `**x`).
+    /// - Rust: a `parameter` node wrapping the name identifier.
+    /// - C: `parameter_declaration` shaped `type declarator`, where the
+    ///   declarator may be `pointer_declarator` → `identifier` (`char *p`).
+    /// - Go: `parameter_declaration`/`variadic_parameter_declaration` shaped
+    ///   `name ... type`, with one `name` field per grouped name (`a, b string`
+    ///   is a single declaration and binds both names).
+    fn param_bindings<'t>(&self, param: Node<'t>) -> Vec<Node<'t>> {
+        param_bindings(param)
     }
 
     // ── Special structural patterns ───────────────────────────────────────
@@ -643,6 +1194,102 @@ pub fn node_text<'s>(node: Node<'_>, source: &'s str) -> &'s str {
 }
 
 // ── Helper: tree walk ─────────────────────────────────────────────────────────
+
+/// The binding identifiers of one parameter node, in declaration order.
+///
+/// Called through [`LanguageSpec::param_bindings`]; see that method for the
+/// per-grammar shapes.
+fn param_bindings<'t>(p: Node<'t>) -> Vec<Node<'t>> {
+    match p.kind() {
+        "required_parameter" | "optional_parameter" | "parameter" | "variadic_parameter" => {
+            param_binding(p).into_iter().collect()
+        }
+        "identifier" => vec![p],
+        "parameter_declaration" | "variadic_parameter_declaration" => {
+            if let Some(decl) = p.child_by_field_name("declarator") {
+                return find_param_identifier(decl).into_iter().collect();
+            }
+            let mut cursor = p.walk();
+            p.children_by_field_name("name", &mut cursor).collect()
+        }
+        "typed_parameter"
+        | "default_parameter"
+        | "typed_default_parameter"
+        | "list_splat_pattern"
+        | "dictionary_splat_pattern" => python_param_binding(p).into_iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The binding node of a parameter: a plain identifier, or the INNER
+/// identifier of a wrapper-shaped pattern (`Query(p)`, `{ body }`, `&mut x`).
+fn param_binding<'t>(p: Node<'t>) -> Option<Node<'t>> {
+    let pattern = p.child_by_field_name("pattern").or_else(|| p.child(0))?;
+    // `...parts` wraps the name: the rest marker is not part of it. Binding
+    // the parameter under the text `...parts` leaves the body's `parts` an
+    // undeclared name, so a rest parameter's value never reaches its uses.
+    if pattern.kind() == "rest_pattern" {
+        return pattern.named_child(0);
+    }
+    Some(extractor_binding(pattern).unwrap_or(pattern))
+}
+
+/// The binding identifier of a Python parameter node.
+///
+/// Python wraps annotated and defaulted parameters: `typed_parameter` has no
+/// `name` field (its first child is the binding), while
+/// `default_parameter`/`typed_default_parameter` expose `name`. A splat
+/// parameter (`*args`, `**kwargs`, with or without an annotation) wraps the
+/// identifier in `list_splat_pattern`/`dictionary_splat_pattern`. Only an
+/// identifier is a binding: a tuple pattern (`def f((a, b))`) has no single
+/// name, and naming the parameter after the pattern text would bind a name the
+/// body never references.
+fn python_param_binding<'t>(p: Node<'t>) -> Option<Node<'t>> {
+    let binding = p.child_by_field_name("name").or_else(|| match p.kind() {
+        "list_splat_pattern" | "dictionary_splat_pattern" => p.named_child(0),
+        _ => p.child(0),
+    })?;
+    match binding.kind() {
+        "identifier" => Some(binding),
+        "list_splat_pattern" | "dictionary_splat_pattern" => {
+            let mut cursor = binding.walk();
+            let splat = binding
+                .named_children(&mut cursor)
+                .find(|c| c.kind() == "identifier");
+            splat
+        }
+        _ => None,
+    }
+}
+
+/// `Query(p)` (and `State(db)`, `Json(body)`) is a *named* pattern: it has a
+/// `type` field naming the wrapper plus one binding inside. The binding - not
+/// the wrapper - is what the body references, so the parameter is named after
+/// it. Any other pattern (plain identifier, a destructuring pattern with no
+/// `type` field, `&mut x`) is left alone.
+fn extractor_binding<'t>(pattern: Node<'t>) -> Option<Node<'t>> {
+    let wrapper = pattern.child_by_field_name("type")?;
+    let mut cursor = pattern.walk();
+    let mut inner = pattern
+        .named_children(&mut cursor)
+        .filter(|c| c.id() != wrapper.id());
+    let first = inner.next()?;
+    if first.kind() != "identifier" || inner.next().is_some() {
+        return None;
+    }
+    Some(first)
+}
+
+/// Walk a C declarator chain to find the leaf `identifier`.
+/// Handles `pointer_declarator`, `array_declarator`, etc.
+fn find_param_identifier<'t>(node: Node<'t>) -> Option<Node<'t>> {
+    match node.kind() {
+        "identifier" => Some(node),
+        _ => node
+            .child_by_field_name("declarator")
+            .and_then(find_param_identifier),
+    }
+}
 
 /// Visit every node of `root`, depth-first and in pre-order (a node before its
 /// children).
