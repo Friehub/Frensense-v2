@@ -203,23 +203,11 @@ pub(crate) struct ModuleResolution {
 pub(crate) struct ModuleAliasResolver;
 
 impl ModuleAliasResolver {
-    /// Resolves the imports and exports of `files` (`(path, source, extension)` rows) against the program's functions `ir_names`, using `fn_file` to place each function in its file.
-    pub(crate) fn build(
-        files: &[(String, String, String)], // (path, source, ext)
-        ir_names: &FxHashSet<String>,
-        fn_file: &FxHashMap<String, String>,
-    ) -> ModuleResolution {
-        // Borrow the caller's strings instead of copying the corpus; the
-        // ref-based form is also what `scan::ProgramBuilder` calls, so a
-        // per-file frontend never duplicates every source file's text.
-        let files: Vec<(&str, &str, &str)> = files
-            .iter()
-            .map(|(path, source, ext)| (path.as_str(), source.as_str(), ext.as_str()))
-            .collect();
-        Self::build_from_refs(&files, ir_names, fn_file)
-    }
-
-    /// [`build`](Self::build) without owning the `(path, source, ext)` rows.
+    /// Resolves the imports and exports of `files` (`(path, source, extension)`
+    /// rows) against the program's functions `ir_names`, using `fn_file` to
+    /// place each function in its file. Borrows the caller's strings instead
+    /// of copying the corpus, so a per-file frontend never duplicates every
+    /// source file's text.
     pub(crate) fn build_from_refs(
         files: &[(&str, &str, &str)], // (path, source, ext)
         ir_names: &FxHashSet<String>,

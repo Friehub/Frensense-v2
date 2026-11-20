@@ -61,9 +61,6 @@ pub(crate) enum CallTarget {
         /// Method name.
         method: String,
     },
-    /// Callee outside the analysed program (library, builtin, unresolved
-    /// indirect). The source/sink fact layer classifies these by name.
-    External(String),
 }
 
 impl CallTarget {
@@ -74,13 +71,7 @@ impl CallTarget {
         match self {
             CallTarget::Function(n) => Some(n.clone()),
             CallTarget::Method { class, method } => Some(method_key(class, method)),
-            CallTarget::External(_) => None,
         }
-    }
-
-    /// Whether the target lies outside the analysed program.
-    pub(crate) fn is_external(&self) -> bool {
-        matches!(self, CallTarget::External(_))
     }
 }
 
@@ -389,7 +380,7 @@ impl<'a> CallGraphBuilder<'a> {
                     targets.sort();
                     targets.dedup();
 
-                    let has_internal = targets.iter().any(|t| !t.is_external());
+                    let has_internal = !targets.is_empty();
                     match (has_internal, external_name) {
                         (true, _) => {
                             graph.sites.insert(site_key, targets);
@@ -628,6 +619,5 @@ mod doc_examples {
             method: "save".into(),
         };
         assert_eq!(t.internal_key().as_deref(), Some("User.save"));
-        assert_eq!(CallTarget::External("fs.open".into()).internal_key(), None);
     }
 }

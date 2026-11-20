@@ -116,11 +116,6 @@ impl FactTable {
         self.role_for_call_scoped(last, receiver_root, None, None)
     }
 
-    /// Semantic label slug for a sink call, receiver-aware.
-    pub(crate) fn label_for_call(&self, last: &str, receiver_root: Option<&str>) -> Option<String> {
-        self.label_for_call_scoped(last, receiver_root, None, None)
-    }
-
     /// Sink signature for a call, package-aware.
     ///
     /// Scoping semantics (zero-FP): a fact installed under `(package, call)`

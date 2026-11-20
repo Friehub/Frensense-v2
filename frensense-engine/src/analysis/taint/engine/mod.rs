@@ -676,13 +676,6 @@ impl<'a> BackwardTaintEngine<'a> {
         self
     }
 
-    /// Toggle taint-path capture (on by default). Turning it off saves the
-    /// per-root parent map when path reporting is not needed.
-    pub(crate) fn capture_paths(mut self, yes: bool) -> Self {
-        self.capture_paths = yes;
-        self
-    }
-
     /// Build the reverse cross-edge index once.
     fn ensure_reverse_index(&mut self) {
         if !self.reverse_cross.is_empty() {

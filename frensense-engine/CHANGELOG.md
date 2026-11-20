@@ -56,6 +56,19 @@ what this crate does.
   `CheckRegistry`/`NonDataflowCheck`/`default_registry` from the module that
   defines them, so the re-exports only existed to be re-exported. Removed; the
   public surface and every call path are unchanged.
+- **Dead crate-internal helpers are gone.** Twelve `pub(crate)` items that no
+  path reached are removed: `ScopeId`, `BackwardTaintEngine::capture_paths`,
+  `FactTable::label_for_call`, `Value::is_const`,
+  `MemorySummaryRegistry::insert`,
+  `ModuleAliasResolver::build` (the ref-taking `build_from_refs` is the one
+  `ProgramBuilder` calls), `Svfg::nodes_where`/`param_nodes`,
+  `SSABuilder::work_used`, `Cap::recorded`, `CallTarget::External` with its
+  `is_external` gate (nothing ever constructed the variant, so
+  `has_internal` is now just "the site resolved at least one target"), and
+  the `DiagnosticSink` seam with `CheckContext::diag` (the trait documented
+  that no check called it; safety caps already reach `truncations` through
+  `telemetry::Cap`). No analysis code changes: every removal was
+  unreachable from the crate's own entry points.
 
 ### Fixed
 
