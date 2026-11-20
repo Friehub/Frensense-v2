@@ -80,6 +80,15 @@ what this crate does.
   before; the library build no longer carries them. Two doc links that
   pointed at cfg(test) items became plain code spans so rustdoc stays clean
   under `-D rustdoc::broken_intra_doc_links`.
+- **Two dependencies the library never used left the library build.**
+  `bincode` was reached only from tests (the library itself needs serde's
+  derives), so it moved to `[dev-dependencies]` and `serialize` is
+  `["dep:serde"]`; `tree-sitter-html` selected a grammar crate
+  `frensense-lang` has no HTML provider for, so the `html` feature remains as
+  an empty compatibility feature instead of pulling it. Measured with
+  `cargo hack check -p frensense-engine --each-feature`: no source warnings
+  under any feature combination, and `cargo check --all-features` no longer
+  reports the two unused-dependency warnings.
 
 ### Fixed
 
