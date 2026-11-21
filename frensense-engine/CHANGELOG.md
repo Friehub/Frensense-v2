@@ -47,6 +47,16 @@ what this crate does.
 
 ### Changed
 
+#### Dependencies
+
+- **Requires `frensense-lang` 0.8.2.** The lowering calls the placement
+  vocabulary that crate added (`LanguageSpec::jump_kind` and the rest of the
+  node-kind queries), but `0.8.1` on crates.io predates it. A `^0.8.1`
+  requirement let `cargo publish` verify this crate's tarball against that
+  older upload, where the build failed with 80 errors and the release stopped
+  before uploading anything. The requirement now names the version that has
+  the API; no engine code changed.
+
 #### Build hygiene
 
 - **The crate compiles without unused-import warnings.** Six `pub(crate) use`
