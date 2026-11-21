@@ -55,6 +55,19 @@ harness and keeps no changelog.
 
 #### Repository & Release Tooling
 
+- **`publish-cargo` publishes from the release commit, not from the tag.**
+  The `v0.9.0` re-run checked out `refs/tags/v0.9.0`, which names the merge
+  before the `frensense-lang` 0.8.2 bump, and published the crates that older
+  tree considered pending: `frensense-lang` was absent from the set (its
+  manifest says 0.8.1 there, which is on crates.io), so
+  `cargo publish -p frensense-engine` resolved the registry's 0.8.1 and the
+  tarball failed verification with 80 errors (`jump_kind`, `LiteralShape`,
+  `function_params` and the rest of the node-kind vocabulary missing). A tag
+  cannot carry the fix - it is cut once and never moves - so this job now
+  checks out the commit `gate` resolved, the same commit the pending matrix
+  runs on, while `build-native`, `publish-npm` and `github-release` keep
+  shipping the tag's artifacts.
+
 - **The clippy debt baseline records what the refactor removed.** Four
   functions the `too_many_lines` lint flagged were split along the seams they
   already had (`Steensgaard::analyze`'s field-representative synthesis,
