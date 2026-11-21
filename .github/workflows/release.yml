@@ -93,7 +93,7 @@ jobs:
           toolchain: stable
 
       - name: Setup Rust Cache
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+        uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2.8.1
         with:
           workspaces: '. -> target'
 
