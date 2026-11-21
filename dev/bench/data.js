@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795243914299,
+  "lastUpdate": 1795246667937,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -3064,6 +3064,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/54af8111098da5ca396a20bfd4db10ffa8954df8"
         },
         "date": 1795243913429,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 47,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 49.3,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 2.3,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 223,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 18,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c84aab644fc4dd17bf09914e91733c419c143ff8",
+          "message": "Merge pull request #182 from Friehub/fix/publish-from-release-commit\n\nfix(release): publish crates from the release commit, not the tag",
+          "timestamp": "2026-11-21T08:36:48+01:00",
+          "tree_id": "9b67b9eebfb2cb465dd5ed7970e4063d80ea4367",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/c84aab644fc4dd17bf09914e91733c419c143ff8"
+        },
+        "date": 1795246666555,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
