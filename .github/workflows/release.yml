@@ -66,11 +66,13 @@ jobs:
       identity: ${{ steps.identity.outputs.identity }}
       pending: ${{ steps.matrix.outputs.pending }}
       pending_count: ${{ steps.matrix.outputs.pending_count }}
-      # A tag that already exists is authoritative for what a release ships,
-      # even when it names a commit other than the branch tip this run was
-      # dispatched from (a tag on a merged PR head is the common case). Every
-      # job that builds or publishes release content checks out this ref, so a
-      # crate-only release (no tag) falls back to the release commit.
+      # A tag that already exists is authoritative for the *binaries* a
+      # release ships, even when it names a commit other than the branch tip
+      # this run was dispatched from (a tag on a merged PR head is the common
+      # case). `build-native`, `publish-npm` and `github-release` check out
+      # this ref; `publish-cargo` deliberately uses the release commit instead,
+      # because a tag is immutable and cannot carry a fix cut after it landed.
+      # A crate-only release (no tag) falls back to the release commit.
       checkout_ref: ${{ steps.check.outputs.checkout_ref }}
     permissions:
       contents: write
@@ -438,7 +440,9 @@ jobs:
     # Deliberately does not wait on build-native: a crate-only release has no
     # new binary to build, and a skipped dependency would silently skip this
     # job - which is exactly the skip we are guarding against.
-    needs: [prepare]
+    # `gate` is a need, not just for ordering: crates publish from the commit
+    # it resolved (see the checkout below).
+    needs: [gate, prepare]
     # Publish exactly when a crate's manifest version is not on crates.io yet.
     # `prepare` decides whether that is the case; the job recomputes the actual
     # pending set on its own checkout, and the post-publish assertion below
@@ -456,10 +460,16 @@ jobs:
           egress-policy: audit
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
         with:
-          # The tag (when there is one) defines what the release ships; the
-          # release commit is the fallback for a crate-only release with no
-          # tag at all.
-          ref: ${{ needs.prepare.outputs.checkout_ref }}
+          # Crates publish from the release commit, never from the tag. A tag is
+          # cut once and never moves, so a fix that lands after it was cut (a
+          # version bump, a dependency requirement) is simply absent from the
+          # tag. On the v0.9.0 re-run this job checked out the tag, which
+          # predates the `frensense-lang` 0.8.2 bump, so the pending set had no
+          # lang release and `cargo publish -p frensense-engine` verified the
+          # engine tarball against the registry's 0.8.1 - the lang crate
+          # without `jump_kind` - and failed with 80 errors. The pending matrix
+          # is computed from the same commit, so the two always agree.
+          ref: ${{ needs.gate.outputs.sha }}
           fetch-depth: 0
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
