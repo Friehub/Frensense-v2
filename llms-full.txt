@@ -2589,6 +2589,19 @@ harness and keeps no changelog.
 
 #### Repository & Release Tooling
 
+* **The docs workflow no longer opens a second Pages deployment.**
+  `docs-deploy` both pushed the built site to `gh-pages` — this repository's
+  Pages source (`build_type: legacy`) — and ran `actions/deploy-pages` over an
+  artifact of the same tree. Every push therefore started GitHub's branch build
+  *and* an Actions deployment for the same site; whichever lost the race failed
+  with `Deployment request failed ... due to in progress deployment`. The
+  `punycode` `DeprecationWarning` printed just above it came from the action's
+  own bundled dependencies and was unrelated to the failure. The artifact
+  upload and the `deploy-pages` job are removed, along with the now-unused
+  `pages: write` / `id-token: write` permissions; the branch push is the
+  deploy. `ci.yml`'s benchmark-dashboard publisher now joins the shared `pages`
+  concurrency group, so the docs and benchmark pushes cannot overlap either.
+
 * **`publish-cargo` publishes from the release commit, not from the tag.**
   The `v0.9.0` re-run checked out `refs/tags/v0.9.0`, which names the merge
   before the `frensense-lang` 0.8.2 bump, and published the crates that older
