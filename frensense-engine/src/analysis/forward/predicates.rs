@@ -469,9 +469,7 @@ pub(crate) fn sanitizer_fact_defeating<'a>(
     sink_name: Option<&str>,
     origin_package: Option<&str>,
 ) -> Option<&'a crate::analysis::taint::facts::SanitizerFact> {
-    let Some(instr) = key.instruction(ir) else {
-        return None;
-    };
+    let instr = key.instruction(ir)?;
     let defeating = |call: &str, fact: &'a crate::analysis::taint::facts::SanitizerFact| -> bool {
         let classes = facts.sanitizer_classes(call, origin_package);
         SanitizerKind::from_slug(&fact.kind)
@@ -484,14 +482,16 @@ pub(crate) fn sanitizer_fact_defeating<'a>(
         Instruction::CallVirtual {
             method, receiver, ..
         } => {
-            if let Operand::Var(r) = receiver {
-                if let Some(path) = FactTable::receiver_access_path(ir, *r) {
-                    // Built without `format!`: the purity ratchet counts prose
-                    // formatting in the engine, and this is a lookup key.
-                    let full = path + "." + method;
-                    if let Some(fact) = facts.sanitizer_fact_scoped(&full, origin_package) {
-                        return defeating(&full, fact).then_some(fact);
-                    }
+            let receiver_path = match receiver {
+                Operand::Var(r) => FactTable::receiver_access_path(ir, *r),
+                _ => None,
+            };
+            if let Some(path) = receiver_path {
+                // Built without `format!`: the purity ratchet counts prose
+                // formatting in the engine, and this is a lookup key.
+                let full = path + "." + method;
+                if let Some(fact) = facts.sanitizer_fact_scoped(&full, origin_package) {
+                    return defeating(&full, fact).then_some(fact);
                 }
             }
             facts

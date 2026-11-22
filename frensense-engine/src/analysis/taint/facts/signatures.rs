@@ -355,8 +355,8 @@ impl FactTable {
     ///
     /// Empty means the fact is unscoped (valid for every class, the legacy
     /// reading). A package-qualified class scope follows the same recall-safe
-    /// rule as [`Self::sanitizer_fact_scoped`]: it only fires once import
-    /// resolution confirms its package.
+    /// rule as `FactTable::sanitizer_fact_scoped` (crate-internal): it only
+    /// fires once import resolution confirms its package.
     pub fn sanitizer_classes(&self, call: &str, origin_package: Option<&str>) -> Vec<String> {
         let mut classes: Vec<String> = Vec::new();
         for ((scope, scoped_call), fact) in &self.scoped_sanitizer_facts {
