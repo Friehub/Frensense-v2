@@ -35,7 +35,7 @@
   "frensense-engine::clippy::print_stderr": 18,
   "frensense-engine::clippy::too_many_arguments": 1,
   "frensense-engine::clippy::too_many_lines": 20,
-  "frensense-engine::clippy::type_complexity": 37,
+  "frensense-engine::clippy::type_complexity": 35,
   "frensense-engine::clippy::unwrap_used": 29,
   "frensense-lang::clippy::exhaustive_enums": 11,
   "frensense-lang::clippy::exhaustive_structs": 13,
@@ -62,8 +62,8 @@
   "frensense::clippy::indexing_slicing": 16,
   "frensense::clippy::missing_errors_doc": 6,
   "frensense::clippy::needless_pass_by_value": 3,
-  "frensense::clippy::print_stderr": 59,
-  "frensense::clippy::print_stdout": 201,
+  "frensense::clippy::print_stderr": 60,
+  "frensense::clippy::print_stdout": 203,
   "frensense::clippy::too_many_lines": 10,
   "frensense::clippy::type_complexity": 10
 }

@@ -23,8 +23,8 @@ and the editor server (`frensense lsp`) are all subcommands of `frensense`.
 Frensense is young and deliberately conservative about what it reports, which
 means it **misses real vulnerabilities**. The current score, the per-class
 breakdown and the cases it does not cover are published from CI on the
-[benchmark record](/architecture/benchmarks). Treat a clean scan as "nothing
-found", not "nothing there".
+[benchmark record](/architecture/benchmarks). Treat a scan that reports nothing
+as "nothing found", not "nothing there".
 :::
 
 ## Choose your path
@@ -101,7 +101,8 @@ GPL-3.0 deterministic dataflow scanner for TypeScript, JavaScript, Python, Go,
 Rust, C and Vue files. It reports taint paths from untrusted sources to
 dangerous calls. It is not a replacement for a full SAST suite: detection
 coverage is limited (see /architecture/benchmarks), so describe results as
-"findings" and a clean scan as "nothing found".
+"findings" and a no-findings scan as "nothing found". Never describe a scan as
+"clean" or the code as "safe": the report itself makes no such claim.
 
 Useful for: CI gates (`frensense . --compare-baseline baseline.json`), scanning
 an unfamiliar repository, checking an AI agent's own edits through MCP

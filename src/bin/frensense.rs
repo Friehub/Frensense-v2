@@ -158,6 +158,41 @@ fn handle_explain_command(args: &[String]) -> ExplainOutcome {
     std::process::exit(2);
 }
 
+/// The `EnvFilter` directive `FRENSENSE_LOG` asks for, or `RUST_LOG`'s when it
+/// is unset.
+///
+/// One pass over the environment rather than one lookup per name, so the
+/// delivery adapter's env read stays a single site.
+fn env_log_directives() -> Option<String> {
+    let mut frensense = None;
+    let mut rust_log = None;
+    for (key, value) in std::env::vars_os() {
+        let Some(value) = value.to_str() else {
+            continue;
+        };
+        if key == "FRENSENSE_LOG" {
+            frensense = Some(value.to_string());
+        } else if key == "RUST_LOG" {
+            rust_log = Some(value.to_string());
+        }
+    }
+    frensense
+        .or(rust_log)
+        .map(|value| filter_directives(&value))
+}
+
+/// The `EnvFilter` directive a `FRENSENSE_LOG`/`RUST_LOG` value describes.
+///
+/// The bare on-spellings (`1`, `true`, `yes`, `on`, empty) mean `info`, so
+/// `FRENSENSE_LOG=1 frensense .` works like a switch; any other value is a
+/// filter directive and is used as written.
+fn filter_directives(value: &str) -> String {
+    match value.trim() {
+        "" | "1" | "true" | "yes" | "on" => "info".to_string(),
+        other => other.to_string(),
+    }
+}
+
 fn print_help() {
     println!("Frensense v{FRENSENSE_VERSION}, deterministic dataflow security scanner.");
     println!();
@@ -259,6 +294,9 @@ fn print_help() {
         "  --config <path>            Project config file (default: .frensense.toml; [rules] disable/only)"
     );
     println!("  --no-progress              Disable real-time scan progress bar and updates");
+    println!(
+        "  --trace                    Print analysis logs to stderr (same as FRENSENSE_LOG=info;\n                             set FRENSENSE_LOG=debug for detail)"
+    );
     println!("  -h, --help                 Print this help");
     println!(
         "  -v, --version              Print version (add --json for machine-readable identity)"
@@ -397,6 +435,7 @@ fn print_bundle_info(bundle_path: &std::path::Path, json: bool) -> std::result::
                 "other": counts.other,
             },
             "authored_policies": loaded.policy_pack.len(),
+            "sanitizers_withheld": loaded.withheld_sanitizers(),
             "vocabulary": loaded.header.vocabulary.map(|v| format!("{v:#018x}")),
             "requires_engine": loaded.header.requires_engine.map(|r| r.to_string()),
             "built_by_engine": loaded.header.built_by_engine,
@@ -452,6 +491,9 @@ fn print_bundle_info(bundle_path: &std::path::Path, json: bool) -> std::result::
     }
     if !loaded.policy_pack.is_empty() {
         println!("Authored Policies:  {}", loaded.policy_pack.len());
+    }
+    if let Some(notice) = loaded.withheld_sanitizers_notice() {
+        println!("Note:               {notice}");
     }
     println!("==========================================================================");
 
@@ -837,12 +879,21 @@ fn main() -> Result<()> {
         }
     };
 
-    if std::env::var("FRENSENSE_LOG").is_ok() || options.trace {
+    // `FRENSENSE_LOG` is the switch and the filter: its value is used as the
+    // `EnvFilter` directive (`FRENSENSE_LOG=debug`, `FRENSENSE_LOG=frensense_engine=trace`),
+    // and the bare on-spellings mean `info`. `--trace` is the flag spelling of
+    // `FRENSENSE_LOG=info`. The subscriber is only installed when one of them
+    // asked for it, so a plain scan stays silent on stderr.
+    let log_filter = env_log_directives().or_else(|| options.trace.then(|| "info".to_string()));
+    if let Some(directives) = log_filter {
+        let filter = tracing_subscriber::EnvFilter::try_new(&directives)
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+        // Diagnostics go to stderr: `--json`/`--sarif` write the report to
+        // stdout, and a log line in front of it is not parseable machine
+        // output.
         let _ = tracing_subscriber::fmt()
-            .with_env_filter(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-            )
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
             .try_init();
     }
 
@@ -992,7 +1043,10 @@ fn main() -> Result<()> {
         }
     }
 
-    let status = frensense::cli::ScanStatus::compute(&telemetry, &incomplete);
+    let mut status = frensense::cli::ScanStatus::compute(&telemetry, &incomplete);
+    if status != frensense::cli::ScanStatus::Failed && coverage.files_not_analyzed() > 0 {
+        status = frensense::cli::ScanStatus::Partial;
+    }
 
     print_results_with_coverage(
         &advisories,
@@ -1034,7 +1088,7 @@ fn main() -> Result<()> {
                 "vulnerable": telemetry.taint.vulnerable,
                 "sanitized": telemetry.taint.sanitized,
                 "unknown": telemetry.taint.unknown,
-                "clean": telemetry.taint.clean,
+                "no_source": telemetry.taint.clean,
             }
         });
         std::fs::write(

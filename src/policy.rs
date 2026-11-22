@@ -186,9 +186,9 @@ pub struct UnresolvedSite {
 ///    as dangerous appeared.
 ///
 /// The second is a statement about the engine, not about the code, and
-/// printing "Clean" for it makes a clean scan unfalsifiable. Both are true at
-/// once on a large corpus: on the OWASP Benchmark for Python, 622 of 1,230
-/// files yield no recognized sink site.
+/// printing one verdict for both makes a no-findings scan unfalsifiable. Both
+/// are true at once on a large corpus: on the OWASP Benchmark for Python, 622
+/// of 1,230 files yield no recognized sink site.
 ///
 /// Every count is derived from data the scan already produces (findings plus
 /// `ScanTelemetry`), so this costs one pass over values the consumer already
@@ -318,7 +318,7 @@ impl Coverage {
     }
 
     /// True when the scan recognized at least one sink site somewhere. A
-    /// scan that recognized nothing has no basis to call anything clean.
+    /// scan that recognized nothing has no basis to describe the code.
     #[must_use]
     pub fn recognized_anything(&self) -> bool {
         self.files_with_sink_sites > 0

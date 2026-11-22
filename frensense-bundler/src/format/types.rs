@@ -635,6 +635,52 @@ pub struct LoadedBundle {
 }
 
 impl LoadedBundle {
+    /// How many sanitizer facts this bundle carries that its trust tier does
+    /// not let it apply.
+    ///
+    /// A bundle built before class scopes existed (v7) carries sanitizers
+    /// with no scope, and a custom bundle may not ship them at all. They are
+    /// withheld, which keeps findings visible, but a user whose false
+    /// positives came back needs to be told why.
+    #[must_use]
+    pub fn withheld_sanitizers(&self) -> usize {
+        let is_san = |e: &LearnedFactEntry| {
+            matches!(
+                e,
+                LearnedFactEntry::Sanitizer { .. } | LearnedFactEntry::LanguageSanitizer { .. }
+            )
+        };
+        let carried = self.learned_facts.iter().filter(|e| is_san(e)).count();
+        let applied = self
+            .effective_learned_facts()
+            .iter()
+            .filter(|e| is_san(e))
+            .count();
+        carried.saturating_sub(applied)
+    }
+
+    /// One-line explanation for [`Self::withheld_sanitizers`], or `None` when
+    /// nothing is withheld.
+    #[must_use]
+    pub fn withheld_sanitizers_notice(&self) -> Option<String> {
+        let n = self.withheld_sanitizers();
+        if n == 0 {
+            return None;
+        }
+        let why = if self.header.version < 8 {
+            format!(
+                "this v{} bundle predates class scopes, so its sanitizers have no class to be limited to",
+                self.header.version
+            )
+        } else {
+            "a bundle of this trust tier may only ship sanitizers scoped to a class and a package"
+                .to_string()
+        };
+        Some(format!(
+            "{n} sanitizer fact(s) in this bundle were not applied: {why}. Findings they would have silenced are reported; rebuild the bundle with `frensense bundle` to restore them."
+        ))
+    }
+
     /// The facts this bundle's trust tier actually permits it to ship.
     ///
     /// Custom bundles are additive-only: sinks, sources and policies, no

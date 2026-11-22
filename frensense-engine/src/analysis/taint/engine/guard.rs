@@ -8,6 +8,35 @@ use super::*;
 // Guard map (task 8.3, minimal form)
 // ---------------------------------------------------------------------------
 
+/// One registered guard: the block it makes safe, the classes it was proven
+/// for (empty = a structural guard valid for every class) and, when a
+/// sanitizer fact registered it, that fact's call name.
+#[derive(Debug)]
+struct GuardEntry {
+    block: BlockId,
+    classes: Vec<String>,
+    call: Option<String>,
+}
+
+impl GuardEntry {
+    /// A guard with no sanitizer fact behind it (direct truthiness or a
+    /// comparison): valid for every class, nothing to name when audited.
+    fn structural(block: BlockId) -> Self {
+        Self {
+            block,
+            classes: Vec::new(),
+            call: None,
+        }
+    }
+}
+
+/// The sanitizer fact behind a guard that cut a walk, for `--show-suppressed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct GuardFact {
+    pub call: String,
+    pub classes: Vec<String>,
+}
+
 /// Per-function guard analysis: which variables are *checked* by a
 /// guard-style call (`.test(x)`, `includes(x)`, allowlist `has(x)`) in which
 /// blocks, plus dominator sets.
@@ -22,7 +51,7 @@ pub(super) struct GuardMap {
     /// var → blocks whose terminator branch is derived from a guard-style
     /// call on that var, together with the classes that guard was proven for
     /// (empty = an unqualified structural guard, valid for every class).
-    guards: FxHashMap<VarId, Vec<(BlockId, Vec<String>)>>,
+    guards: FxHashMap<VarId, Vec<GuardEntry>>,
     /// block → set of blocks that dominate it (reflexive), computed once.
     dominators: FxHashMap<BlockId, FxHashSet<BlockId>>,
 }
@@ -40,7 +69,7 @@ impl GuardMap {
         config: &TaintConfig,
         file_package_imports: Option<&FxHashMap<String, crate::graph::module::PackageImport>>,
     ) -> Self {
-        let mut guards: FxHashMap<VarId, Vec<(BlockId, Vec<String>)>> = FxHashMap::default();
+        let mut guards: FxHashMap<VarId, Vec<GuardEntry>> = FxHashMap::default();
 
         // Walk: cond var → def instruction, up to 3 hops, collecting
         // guard-call vars along the way (handles `!ALLOWED.has(x)`,
@@ -50,7 +79,7 @@ impl GuardMap {
         // guard-style SanitizerFact. The checked var is the first Var arg
         // (predicate on an argument) or the receiver (predicate on the
         // receiver, e.g. `file.includes('..')`).
-        let checked_vars = |instr: &Instruction| -> (Vec<VarId>, Vec<String>) {
+        let checked_vars = |instr: &Instruction| -> (Vec<VarId>, Vec<String>, String) {
             let (method, receiver, args, origin) = match instr {
                 Instruction::CallVirtual {
                     method,
@@ -75,13 +104,13 @@ impl GuardMap {
                         .map(|p| p.package.clone());
                     (func, None, args, origin)
                 }
-                _ => return (Vec::new(), Vec::new()),
+                _ => return (Vec::new(), Vec::new(), String::new()),
             };
             let Some(f) = facts.sanitizer_fact_scoped(method, origin.as_deref()) else {
-                return (Vec::new(), Vec::new());
+                return (Vec::new(), Vec::new(), String::new());
             };
             if !f.guard_style {
-                return (Vec::new(), Vec::new());
+                return (Vec::new(), Vec::new(), String::new());
             }
             let classes = facts.sanitizer_classes(method, origin.as_deref());
             // The call is guard-style; also confirm the method really is one
@@ -117,7 +146,7 @@ impl GuardMap {
                     }
                 }
             }
-            (out, classes)
+            (out, classes, method.clone())
         };
 
         let exits = |bid: BlockId| -> bool {
@@ -166,7 +195,10 @@ impl GuardMap {
                 None
             };
             if let Some(safe) = direct_safe {
-                guards.entry(cond_var).or_default().push((safe, Vec::new()));
+                guards
+                    .entry(cond_var)
+                    .or_default()
+                    .push(GuardEntry::structural(safe));
             }
             // Hop 0..3 up the def chain from the condition, tracking polarity/sense.
             let mut frontier = vec![(cond_var, true)];
@@ -178,7 +210,7 @@ impl GuardMap {
                     };
                     match instr {
                         Instruction::CallStatic { .. } | Instruction::CallVirtual { .. } => {
-                            let (vars, classes) = checked_vars(instr);
+                            let (vars, classes, guard_call) = checked_vars(instr);
                             for cv in vars {
                                 let true_exits = exits(true_block);
                                 let false_exits = exits(false_block);
@@ -189,10 +221,11 @@ impl GuardMap {
                                 } else {
                                     false_block
                                 };
-                                guards
-                                    .entry(cv)
-                                    .or_default()
-                                    .push((safe_block, classes.clone()));
+                                guards.entry(cv).or_default().push(GuardEntry {
+                                    block: safe_block,
+                                    classes: classes.clone(),
+                                    call: Some(guard_call.clone()),
+                                });
                             }
                         }
                         Instruction::UnaryOp {
@@ -208,7 +241,10 @@ impl GuardMap {
                             // `!`-chain member: part of the direct rejection
                             // test, validated on the surviving arm.
                             if let Some(safe) = direct_safe {
-                                guards.entry(*u).or_default().push((safe, Vec::new()));
+                                guards
+                                    .entry(*u)
+                                    .or_default()
+                                    .push(GuardEntry::structural(safe));
                             }
                             next.push((*u, new_sense));
                         }
@@ -256,7 +292,7 @@ impl GuardMap {
                                         guards
                                             .entry(*u)
                                             .or_default()
-                                            .push((safe_block, Vec::new()));
+                                            .push(GuardEntry::structural(safe_block));
                                         if let Some(Instruction::UnaryOp {
                                             op: uop,
                                             src: Operand::Var(inner),
@@ -267,7 +303,7 @@ impl GuardMap {
                                             guards
                                                 .entry(*inner)
                                                 .or_default()
-                                                .push((safe_block, Vec::new()));
+                                                .push(GuardEntry::structural(safe_block));
                                         }
                                     }
                                 }
@@ -296,29 +332,32 @@ impl GuardMap {
         Self { guards, dominators }
     }
 
-    /// Is `var` checked by a guard that dominates `sink_block` and was
-    /// proven for this sink's class?
+    /// The guard that dominates `sink_block` and was proven for this sink's
+    /// class, as `(call, classes)` when a sanitizer fact registered it.
     ///
-    /// A class-scoped guard fact only validates the classes it names: an
-    /// `isURL` guard must not clear a command-injection sink merely because
-    /// its branch dominates the use.
-    pub(super) fn is_guarded(
+    /// The outer `Option` is "is guarded"; the inner one is "which fact":
+    /// a direct-truthiness or comparison guard has no fact behind it, so
+    /// there is nothing to name in `--show-suppressed`.
+    pub(super) fn guard_hit(
         &self,
         var: VarId,
         sink_block: BlockId,
         sink_class: Option<&str>,
-    ) -> bool {
-        let Some(gs) = self.guards.get(&var) else {
-            return false;
-        };
-        let Some(doms) = self.dominators.get(&sink_block) else {
-            return false;
-        };
-        gs.iter().any(|(g, classes)| {
-            doms.contains(g)
-                && (classes.is_empty()
-                    || classes.iter().any(|c| c == "*")
-                    || sink_class.is_some_and(|class| classes.iter().any(|c| c == class)))
-        })
+    ) -> Option<Option<GuardFact>> {
+        let gs = self.guards.get(&var)?;
+        let doms = self.dominators.get(&sink_block)?;
+        gs.iter()
+            .find(|e| {
+                doms.contains(&e.block)
+                    && (e.classes.is_empty()
+                        || e.classes.iter().any(|c| c == "*")
+                        || sink_class.is_some_and(|class| e.classes.iter().any(|c| c == class)))
+            })
+            .map(|e| {
+                e.call.clone().map(|call| GuardFact {
+                    call,
+                    classes: e.classes.clone(),
+                })
+            })
     }
 }

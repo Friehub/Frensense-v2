@@ -38,6 +38,14 @@ what this crate does.
   origin-gated class scope stays inert until import resolution confirms its
   package). `FactTable::sanitizer_fact` keeps its universal-only reading.
 
+### Fixed
+
+- A guard-style sanitizer that silenced a sink now records a
+  `SanitizerSuppression` on the finding, as a call-style sanitizer does, so
+  `--show-suppressed` names the bundle fact behind a guard cut. Before, the
+  guard cut the walk and left no trace, which made a poisoned guard invisible
+  to the audit this release added.
+
 ## [0.9.0]
 
 ### Added

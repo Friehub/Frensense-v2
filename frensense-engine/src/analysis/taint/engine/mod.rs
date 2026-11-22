@@ -55,7 +55,7 @@ mod context;
 mod guard;
 mod walk;
 
-use self::guard::GuardMap;
+use self::guard::{GuardFact, GuardMap};
 
 // ---------------------------------------------------------------------------
 // Verdicts

@@ -14,7 +14,7 @@ use std::path::Path;
 pub fn tool_definition() -> Value {
     json!({
         "name": "frensense_audit",
-        "description": "Run deterministic dataflow analysis on a file or directory. Returns advisories the agent must resolve before code is considered correct. An empty advisories array and clean=true means the code satisfies all invariants.",
+        "description": "Run deterministic dataflow analysis on a file or directory. Returns advisories the agent must resolve before code is considered correct. There is no boolean that means the code is safe: read `advisories` for reported findings and `analysis.coverage` for what the scan recognized, how many source files it analyzed, and which sink sites it could not decide.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -98,7 +98,6 @@ pub fn run_audit_streamed(
         Ok(floor) => floor,
         Err(error) => {
             let result = json!({
-                "clean": false,
                 "advisories": [],
                 "error": error
             });
@@ -109,7 +108,6 @@ pub fn run_audit_streamed(
     let target = Path::new(path);
     if !target.exists() {
         let result = json!({
-            "clean": false,
             "advisories": [],
             "error": format!("path does not exist: {}", path)
         });
@@ -127,7 +125,6 @@ pub fn run_audit_streamed(
         Ok(a) => a,
         Err(e) => {
             let result = json!({
-                "clean": false,
                 "advisories": [],
                 "error": format!("analysis error: {}", e)
             });
@@ -141,8 +138,7 @@ pub fn run_audit_streamed(
     let coverage = engine.take_coverage();
     let telemetry = engine.take_telemetry();
     let incomplete = engine.take_incomplete();
-    let (clean, analysis) =
-        super::scan_file::mcp_analysis(&filtered, &coverage, &telemetry, &incomplete);
+    let analysis = super::scan_file::mcp_analysis(&coverage, &telemetry, &incomplete);
 
     let total = filtered.len();
     write_notification(&json!({
@@ -161,7 +157,6 @@ pub fn run_audit_streamed(
     }
 
     let result = json!({
-        "clean": clean,
         "advisories": serde_json::to_value(&filtered).unwrap_or_default(),
         "unsupported_source_files": crate::cli::skipped_unsupported_json(&skipped),
         "analysis": analysis,
@@ -174,7 +169,6 @@ pub fn run_audit(path: &str, severity_threshold: &str, language: Option<&str>) -
         Ok(floor) => floor,
         Err(error) => {
             return json!({
-                "clean": false,
                 "advisories": [],
                 "error": error
             });
@@ -183,7 +177,6 @@ pub fn run_audit(path: &str, severity_threshold: &str, language: Option<&str>) -
     let target = Path::new(path);
     if !target.exists() {
         return json!({
-            "clean": false,
             "advisories": [],
             "error": format!("path does not exist: {}", path)
         });
@@ -199,7 +192,6 @@ pub fn run_audit(path: &str, severity_threshold: &str, language: Option<&str>) -
         Ok(advisories) => advisories,
         Err(e) => {
             return json!({
-                "clean": false,
                 "advisories": [],
                 "error": format!("analysis error: {}", e)
             });
@@ -211,11 +203,9 @@ pub fn run_audit(path: &str, severity_threshold: &str, language: Option<&str>) -
     let coverage = engine.take_coverage();
     let telemetry = engine.take_telemetry();
     let incomplete = engine.take_incomplete();
-    let (clean, analysis) =
-        super::scan_file::mcp_analysis(&filtered, &coverage, &telemetry, &incomplete);
+    let analysis = super::scan_file::mcp_analysis(&coverage, &telemetry, &incomplete);
 
     json!({
-        "clean": clean,
         "advisories": serde_json::to_value(&filtered).unwrap_or_default(),
         "unsupported_source_files": crate::cli::skipped_unsupported_json(&skipped),
         "analysis": analysis,
@@ -232,7 +222,10 @@ mod tests {
     #[test]
     fn unknown_severity_threshold_is_rejected() {
         let out = run_audit(".", "extra-high", None);
-        assert_eq!(out["clean"], false);
+        assert!(
+            out.get("clean").is_none(),
+            "there is no clean flag to misread: {out}"
+        );
         assert!(
             out["error"]
                 .as_str()

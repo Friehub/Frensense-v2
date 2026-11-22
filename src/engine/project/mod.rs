@@ -33,7 +33,7 @@ pub struct Engine {
     /// When `true` (`--show-flows`), the taint advisory TEXT also embeds
     /// the full source→sink flow. `taint_steps`/SARIF `codeFlows` carry
     /// the path unconditionally now (WI-54); this knob only governs the
-    /// text observation, the debug-grade detail of a clean text report.
+    /// text observation, the debug-grade detail of a terse text report.
     pub(crate) show_flows: bool,
     /// Precision profile governing reportable finding tiers.
     pub(crate) profile: crate::Profile,
@@ -66,7 +66,7 @@ pub struct Engine {
     /// What the most recent `run` covered: source files found versus
     /// analyzed, sink sites inspected, files with none, and sites the walk
     /// left undecided. Surfaced via [`Engine::take_coverage`] so a "no
-    /// findings" report can say whether it means "inspected and clean" or
+    /// findings" report can say whether it means "inspected, no finding" or
     /// "nothing recognized".
     pub(crate) coverage: crate::policy::Coverage,
 }
@@ -215,7 +215,7 @@ impl Engine {
     /// Take what the most recent `run` covered: files found versus analyzed,
     /// sink sites inspected, which files yielded none, and which sites it
     /// left undecided. A consumer that reports "no findings" must consult
-    /// this, or it cannot tell "inspected and clean" from "nothing
+    /// this, or it cannot tell "inspected, no finding" from "nothing
     /// recognized".
     #[must_use]
     pub fn take_coverage(&mut self) -> crate::policy::Coverage {

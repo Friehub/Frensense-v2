@@ -17,8 +17,8 @@ const HIDDEN_SOURCE_DIRS: &[&str] = &[".vitepress"];
 /// Source-language extensions the engine does not implement, mapped to the
 /// language a user recognizes. A directory scan drops these files (there is
 /// no spec to lower them with), so they are collected separately and reported:
-/// silently scanning 3 of 40 files in a polyglot repository reads as "clean"
-/// when it only means "we never looked at 37 of them".
+/// silently scanning 3 of 40 files in a polyglot repository reads as "nothing
+/// found" when it only means "we never looked at 37 of them".
 ///
 /// Deliberately source languages only. Data and asset extensions (`.json`,
 /// `.yaml`, `.md`, images, lockfiles) are not source files and stay ignored.
@@ -345,7 +345,7 @@ mod tests {
 
     /// Regression: an absolute root whose own path contains a `tests`
     /// component (e.g. /ci/tests/app) used to classify every file as a test
-    /// file and report a clean scan. The root is the user's subject, not a
+    /// file and report no findings. The root is the user's subject, not a
     /// test directory relative to something else.
     #[test]
     fn root_under_a_tests_component_is_scanned() {

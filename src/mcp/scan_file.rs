@@ -5,11 +5,10 @@
 //! `frensense_scan_file` - single-file scan tool for the MCP surface.
 //!
 //! Exists because agents working in an editor loop need a *focused*
-//! question answered - "is THIS file clean?" - not a directory audit.
-//! `frensense_audit` answers "is this tree clean" and reports findings
-//! tree-wide; `frensense_scan_file` answers only about the one file and
-//! labels every advisory with it, so the agent can associate fixes with
-//! the buffer it is editing.
+//! question answered - "what did this file report?" - not a directory audit.
+//! `frensense_audit` reports findings tree-wide; `frensense_scan_file`
+//! answers only about the one file and labels every advisory with it, so the
+//! agent can associate fixes with the buffer it is editing.
 //!
 //! Architecture split (same doctrine as the CLI): this module is a thin
 //! delivery adapter. All language knowledge lives in `frensense-lang`
@@ -26,7 +25,7 @@ use std::path::Path;
 pub fn tool_definition() -> Value {
     json!({
         "name": "frensense_scan_file",
-        "description": "Scan ONE source file with deterministic dataflow analysis. Returns advisories found in that file only, each labeled with the file path, line, and column. `clean=true` means no findings were reported, the analysis completed, and every sink site the engine recognized was decided; read `analysis.coverage` for the denominator and `analysis.coverage.sink_sites` to see whether it recognized anything at all (0 means a clean result is a statement about engine vocabulary, not about the code). Use this over frensense_audit when checking a single file you just wrote or edited; it is faster and scoped. Non-source files (or unsupported extensions) return unsupported_file instead of an error.",
+        "description": "Scan ONE source file with deterministic dataflow analysis. Returns advisories found in that file only, each labeled with the file path, line, and column. There is no boolean that means the file is safe: read `advisories` for reported findings and `analysis.coverage` for the denominator, the recognized `sink_sites` (0 means an empty advisory list is a statement about engine vocabulary, not about the code), and the sites it could not decide. Use this over frensense_audit when checking a single file you just wrote or edited; it is faster and scoped. Non-source files (or unsupported extensions) return unsupported_file instead of an error.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -85,9 +84,9 @@ pub fn filter_advisories(
 ///
 /// `advisories` answers "did anything fire?"; `coverage` answers "did the
 /// engine inspect anything at all, and was every file it found actually
-/// analyzed?". The second is what keeps a clean result falsifiable: a file
-/// with no recognized sink is silent for a reason that has nothing to do
-/// with the code being safe.
+/// analyzed?". The second is what keeps an empty advisory list falsifiable:
+/// a file with no recognized sink is silent for a reason that has nothing to
+/// do with the code being safe.
 #[derive(Debug)]
 pub(crate) struct FileScan {
     pub advisories: Vec<Advisory>,
@@ -148,26 +147,20 @@ pub fn result_payload(path: &Path, advisories: &[Advisory]) -> Value {
     result_payload_detailed(path, advisories, None, None, &[])
 }
 
-/// `clean` and the `analysis` object every MCP tool reports.
+/// The `analysis` object every MCP tool reports.
 ///
-/// One implementation for `scan_file`, `audit` and `diff`: an agent that
-/// gates on `clean` must get the same answer from all three, and all three
-/// must expose the coverage behind it. `coverage` travels as an object with
-/// the same field names the CLI writes under `analysis.coverage`, so a
-/// prompt or a script can read one shape everywhere.
+/// One implementation for `scan_file`, `audit` and `diff`: all three expose
+/// the same coverage shape, so a prompt or a script can read one shape
+/// everywhere. There is deliberately no `clean` boolean: an empty
+/// `advisories` array plus `analysis.coverage` is the honest answer, and a
+/// single flag must not stand in for a safety claim.
 pub(crate) fn mcp_analysis(
-    advisories: &[Advisory],
     coverage: &crate::policy::Coverage,
     telemetry: &frensense_engine::telemetry::ScanTelemetry,
     incomplete: &[frensense_engine::scan::IncompleteFunction],
-) -> (bool, Value) {
-    let status = crate::cli::ScanStatus::compute(telemetry, incomplete);
-    let below_confidence = telemetry
-        .suppressed
-        .iter()
-        .any(|s| s.reason == "below-confidence" && s.count > 0);
-    let clean = status.clean(advisories.is_empty(), coverage) && !below_confidence;
-    let block = json!({
+) -> Value {
+    let status = crate::cli::reporting::status_with_coverage(telemetry, incomplete, Some(coverage));
+    json!({
         "status": status,
         "coverage": {
             "files_found": coverage.files_found,
@@ -188,16 +181,15 @@ pub(crate) fn mcp_analysis(
         },
         "functions": telemetry.input.functions,
         "parse_partial": telemetry.input.parse_partial,
-    });
-    (clean, block)
+    })
 }
 
 /// Build the JSON-RPC `tools/call` result payload with coverage.
 ///
-/// `clean` is not "no advisories": it also requires a completed analysis,
-/// no undecided sink site, and no source file left unanalyzed. `analysis`
-/// carries the coverage numbers either way, so an agent can see that a clean
-/// answer came from a file where the engine recognized nothing.
+/// The payload has no `clean` flag. An empty `advisories` array is a fact
+/// about this report, not a safety verdict; `analysis` carries the coverage
+/// numbers either way, so an agent can see when an empty answer came from a
+/// file where the engine recognized nothing or left a site undecided.
 #[must_use]
 pub(crate) fn result_payload_detailed(
     path: &Path,
@@ -209,38 +201,38 @@ pub(crate) fn result_payload_detailed(
     let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
     let telem = telemetry.unwrap_or(&empty_telem);
     let cov = coverage.cloned().unwrap_or_default();
-    let (clean, analysis) = mcp_analysis(advisories, &cov, telem, incomplete);
-    let message = if clean {
-        Some(if cov.recognized_anything() {
-            "no findings".to_string()
-        } else {
-            "no findings; no sink site was recognized in this file, so findings there cannot be ruled out".to_string()
-        })
-    } else if advisories.is_empty()
-        && telem
-            .suppressed
-            .iter()
-            .any(|s| s.reason == "below-confidence" && s.count > 0)
+    let analysis = mcp_analysis(&cov, telem, incomplete);
+    let message = if !advisories.is_empty() {
+        None
+    } else if !cov.recognized_anything() {
+        Some(
+            "no findings reported; no sink site was recognized in this file, so findings there cannot be ruled out"
+                .to_string(),
+        )
+    } else if telem
+        .suppressed
+        .iter()
+        .any(|s| s.reason == "below-confidence" && s.count > 0)
     {
         Some(
-            "no findings; potential finding(s) were dropped below confidence threshold".to_string(),
+            "no findings reported; potential finding(s) were dropped below confidence threshold"
+                .to_string(),
         )
-    } else if advisories.is_empty() && !cov.fully_resolved() {
+    } else if !cov.fully_resolved() {
         Some(format!(
-            "no findings; {} sink site(s) could not be decided",
+            "no findings reported; {} sink site(s) could not be decided",
             cov.unresolved_sites
         ))
-    } else if advisories.is_empty() && cov.files_not_analyzed() > 0 {
+    } else if cov.files_not_analyzed() > 0 {
         Some(format!(
-            "no findings; only {}/{} source file(s) were analyzed, so the rest cannot be ruled out",
+            "no findings reported; only {}/{} source file(s) were analyzed, so the rest cannot be ruled out",
             cov.files_analyzed, cov.files_found
         ))
     } else {
-        None
+        Some("no findings reported".to_string())
     };
 
     let mut payload = json!({
-        "clean": clean,
         "file": path.display().to_string(),
         // Stable IDs (shift-resistant fingerprints) for agents tracking
         // "did I fix THIS finding yet" across edit cycles: ID unchanged
@@ -249,9 +241,9 @@ pub(crate) fn result_payload_detailed(
         "stable_ids": advisories.iter().map(|a| a.stable_id()).collect::<Vec<_>>(),
         "advisories": advisories,
         // What the answer rests on. `coverage.sink_sites == 0` means the
-        // engine found nothing it models as dangerous in this file, so a
-        // clean result is a statement about engine vocabulary, not about the
-        // code.
+        // engine found nothing it models as dangerous in this file, so an
+        // empty advisory list is a statement about engine vocabulary, not
+        // about the code.
         "analysis": analysis,
     });
     if let (Some(msg), Some(map)) = (message, payload.as_object_mut()) {
@@ -268,7 +260,6 @@ pub fn run_scan_file(args: &Value) -> Value {
     let path_str = args.get("path").and_then(Value::as_str).unwrap_or_default();
     if path_str.is_empty() {
         return json!({
-            "clean": false,
             "advisories": [],
             "error": "missing required argument: path"
         });
@@ -277,14 +268,12 @@ pub fn run_scan_file(args: &Value) -> Value {
     let path = Path::new(path_str);
     if !path.exists() {
         return json!({
-            "clean": false,
             "advisories": [],
             "error": format!("file does not exist: {path_str}")
         });
     }
     if !is_supported(path) {
         return json!({
-            "clean": false,
             "advisories": [],
             "file": path_str,
             "unsupported_file": true,
@@ -300,7 +289,6 @@ pub fn run_scan_file(args: &Value) -> Value {
         Ok(floor) => floor,
         Err(error) => {
             return json!({
-                "clean": false,
                 "advisories": [],
                 "error": error
             });
@@ -316,7 +304,6 @@ pub fn run_scan_file(args: &Value) -> Value {
         && !Path::new(bundle).exists()
     {
         return json!({
-            "clean": false,
             "advisories": [],
             "error": format!("corpus bundle does not exist: {bundle}")
         });
@@ -334,7 +321,6 @@ pub fn run_scan_file(args: &Value) -> Value {
             )
         }
         Err(e) => json!({
-            "clean": false,
             "advisories": [],
             "error": format!("analysis error: {e}")
         }),

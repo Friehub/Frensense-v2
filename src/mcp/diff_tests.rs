@@ -4,8 +4,8 @@
 
 //! Tests for the `frensense_diff` MCP tool: patch parsing (hunks, multi
 //! files, no-newline markers), added-line intersection, argument errors,
-//! and end-to-end runs against a real temp git repo (dirty + clean
-//! changes) plus explicit `diff_text` outside git.
+//! and end-to-end runs against a real temp git repo (finding and
+//! no-finding changes) plus explicit `diff_text` outside git.
 
 use super::*;
 use std::path::PathBuf;
@@ -138,7 +138,7 @@ fn unknown_severity_threshold_is_rejected() {
         "diff_text": DIFF,
         "severity_threshold": "extra-high",
     }));
-    assert_eq!(out["clean"], false, "{out}");
+    assert!(out.get("clean").is_none(), "{out}");
     assert!(
         out["error"]
             .as_str()
@@ -181,7 +181,10 @@ index 1111111..2222222 100644
     // The pre-existing md5 finding is on line 5 — NOT on the added line
     // (2) — so the diff gate must drop it: only findings on added lines
     // survive. No added line introduces a finding here.
-    assert!(advisories.is_empty(), "expected clean, got {advisories:?}");
+    assert!(
+        advisories.is_empty(),
+        "expected no findings on the added lines, got {advisories:?}"
+    );
 
     // Now a diff whose added line IS the finding: the weak-hash call
     // re-added on a new line (engine flags it deterministically).

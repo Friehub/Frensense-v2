@@ -33,7 +33,7 @@ pub const FRENSENSE_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// `--format json` / `--format sarif` output. Bump it whenever a field is
 /// renamed, removed, or changes type in any emitted report. The golden
 /// fixtures in `tests/` move with it so a silent shape change fails CI.
-pub const REPORT_SCHEMA_VERSION: u32 = 1;
+pub const REPORT_SCHEMA_VERSION: u32 = 2;
 
 /// Advisory severity ranking - declared in `frensense-lang` alongside the
 /// per-language rule registries; re-exported here so every reporter surface

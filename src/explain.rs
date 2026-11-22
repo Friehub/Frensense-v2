@@ -59,7 +59,7 @@ pub struct ExplainRecord {
     pub line: u32,
     pub sink: String,
     pub arg_slot: usize,
-    /// Short verdict label: `"clean"`, `"sanitized"`, `"unknown"`, or
+    /// Short verdict label: `"no-source"`, `"sanitized"`, `"unknown"`, or
     /// `"safe-channel"` (vulnerable flow into a non-dangerous slot).
     pub verdict: String,
     /// Distinct silent stop sites hit during the walk (`"guard"`,
@@ -116,7 +116,9 @@ fn verdict_label(v: &BackwardVerdict) -> &'static str {
         BackwardVerdict::Vulnerable => "vulnerable",
         BackwardVerdict::Sanitized => "sanitized",
         BackwardVerdict::Unknown => "unknown",
-        BackwardVerdict::Clean => "clean",
+        // The walk found no definition feeding the argument. That is a
+        // statement about the walk, not a claim that the code is safe.
+        BackwardVerdict::Clean => "no-source",
     }
 }
 
@@ -328,15 +330,15 @@ mod explain_tests {
     }
 
     #[test]
-    fn clean_with_cuts_reports_reason() {
+    fn no_source_with_cuts_reports_reason() {
         let l = loc(BackwardVerdict::Clean, None, vec!["guard"]);
         let rec = explain_silent(&l).expect("record");
-        assert_eq!(rec.verdict, "clean");
+        assert_eq!(rec.verdict, "no-source");
         assert!(rec.reason.contains("guard"));
     }
 
     #[test]
-    fn clean_without_cuts_reports_exhausted() {
+    fn no_source_without_cuts_reports_exhausted() {
         let l = loc(BackwardVerdict::Clean, None, Vec::new());
         let rec = explain_silent(&l).expect("record");
         assert!(rec.reason.contains("exhausted"));

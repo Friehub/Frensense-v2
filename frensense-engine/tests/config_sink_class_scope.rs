@@ -93,3 +93,40 @@ fn config_sink_is_class_matched() {
         "a wildcard scope must silence the SQL sink"
     );
 }
+
+/// A guard-style cut must be auditable like a call-style one: the finding
+/// carries the sanitizer fact that silenced it and the classes it was proven
+/// for, so `--show-suppressed` can name it. Before this, a guard silenced the
+/// walk and left no trace, which made a poisoned guard invisible.
+#[test]
+fn guard_cut_records_the_fact_that_made_it() {
+    let facts = table(&["inj.sql"]);
+    let out = frensense_engine::scan::scan(
+        &[("a.ts".to_string(), NEG.to_string(), "ts".to_string())],
+        &config(),
+        &facts,
+    );
+    let suppressions: Vec<_> = out
+        .findings
+        .iter()
+        .flat_map(|f| f.suppressions.iter())
+        .collect();
+    assert!(
+        suppressions
+            .iter()
+            .any(|s| s.call == "isSafeQuery" && s.classes == ["inj.sql"]),
+        "guard suppression not recorded: {suppressions:?}"
+    );
+
+    // A guard proven for another class cuts nothing, so records nothing.
+    let other = table(&["inj.command"]);
+    let out = frensense_engine::scan::scan(
+        &[("a.ts".to_string(), NEG.to_string(), "ts".to_string())],
+        &config(),
+        &other,
+    );
+    assert!(
+        out.findings.iter().all(|f| f.suppressions.is_empty()),
+        "a guard that did not cut must not be reported as suppressing"
+    );
+}
