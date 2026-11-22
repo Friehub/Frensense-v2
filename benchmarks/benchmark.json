@@ -3,9 +3,9 @@
   "match": "conservative",
   "tag_cwe_entries": 2,
   "version": "frensense 0.9.1",
-  "commit": "8cc77b3",
-  "generated_at": "2026-11-22T06:39:44+00:00",
-  "elapsed_s": 2.0,
+  "commit": "97937b0",
+  "generated_at": "2026-11-22T07:08:22+00:00",
+  "elapsed_s": 1.8,
   "workers": 8,
   "bundle": "none (bare engine; `FRENSENSE_CORPUS_BUNDLE` cleared)\n"
  },
