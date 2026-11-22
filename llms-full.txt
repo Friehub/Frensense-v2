@@ -5,13 +5,18 @@ description: What Frensense is, what it scans, and where to go next.
 
 # Frensense overview
 
-Frensense is a static application security testing (SAST) scanner. It reads
-your source code, follows untrusted input through the program, and reports a
-finding only when that input can reach a dangerous call. Every finding shows
-the path it took, with file and line positions, so you can check it yourself.
+Frensense looks through your source code for security mistakes before the code
+ever runs. It follows the information that comes in from users and keeps track
+of where that information ends up. It reports a problem only when such
+information can actually reach something dangerous, such as a database query,
+a shell command or a page that gets written to the browser. Each report shows
+the route the information took, step by step, with the file and line of every
+step, so you can read it and judge for yourself instead of trusting the tool.
 
-It is one binary. Scanning, watch mode, the AI-agent server (`frensense mcp`)
-and the editor server (`frensense lsp`) are all subcommands of `frensense`.
+It is one program that installs once. Scanning a project, watching files as you
+edit them, acting as a helper for an AI coding agent (`frensense mcp`) and
+acting as a helper for your editor (`frensense lsp`) are all commands of the
+same `frensense` program.
 
 ::: warning What to expect
 Frensense is young and deliberately conservative about what it reports, which
