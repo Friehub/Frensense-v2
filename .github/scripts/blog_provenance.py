@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
+# Copyright (c) 2024-2026 Friehub
 """Blog provenance automation.
 
 Every post in docs-site/blog/ must declare which engine version its

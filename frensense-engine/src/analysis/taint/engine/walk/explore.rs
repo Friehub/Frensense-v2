@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2024-2026 Friehub. All rights reserved.
+// Copyright (c) 2024-2026 Friehub
 //! The backward walk itself: node-by-node exploration from a sink
 //! argument to a source, with its cut sites and stop reasons.
 //!

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
+# Copyright (c) 2024-2026 Friehub
 """A repository pinned to one commit: fetch it once, verify the checkout, reuse it.
 
 The rules here are not specific to a suite: a cache hit is verified rather than

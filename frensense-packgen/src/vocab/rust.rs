@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2024-2026 Friehub. All rights reserved.
-// Commercial use requires a separate license: https://friehub.com/licensing
+// Copyright (c) 2024-2026 Friehub
+// Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
 
 //! Rust provider vocabulary, translated verbatim from
 //! `frensense-lang`'s `providers/rust_lang.rs` (Phase 6.3c; lang's copy deleted

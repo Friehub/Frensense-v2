@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2024-2026 Friehub. All rights reserved.
-// Commercial use requires a separate license: https://friehub.com/licensing
+// Copyright (c) 2024-2026 Friehub
+// Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
 
 //! Schema-policy seed mechanisms (R1): policy bugs that live in *tool
 //! schemas*, the LLM-era analogue of config bugs.

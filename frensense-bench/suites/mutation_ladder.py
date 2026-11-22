@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
-# Commercial use requires a separate license: https://friehub.com/licensing
+# Copyright (c) 2024-2026 Friehub
+# Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
 """Mutation-ladder triage for OWASP BenchmarkPython verdicts.
 
 Turns the scorecard's false negatives and false positives into a cause

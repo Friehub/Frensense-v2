@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
+# Copyright (c) 2024-2026 Friehub
 """Tests for scripts/owasp_benchmark.py using a fake engine (no cargo build,
 no network). Run: python3 -m unittest scripts/test_owasp_scorer.py -v
 """

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
+# Copyright (c) 2024-2026 Friehub
 
 """Tests for `docs-site/scripts/check_announcements.py`."""
 

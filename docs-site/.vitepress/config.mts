@@ -95,7 +95,7 @@ function normalizeDate(value: unknown): string {
   return '1970-01-01'
 }
 
-// Machine-readable blog manifest for friehub.com (marketing site proxies it
+// Machine-readable blog manifest for friehub.cloud (marketing site proxies it
 // through its /api/posts Pages Function; GitHub Pages sends no CORS headers,
 // so browsers cannot fetch it cross-origin directly). Emitted to dist/posts.json.
 // Posts without a title are skipped, posts without a date sink to the bottom,

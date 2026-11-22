@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2024-2026 Friehub. All rights reserved.
+// Copyright (c) 2024-2026 Friehub
 
 //! Receiver qualification: a sink declared under a module is a sink only
 //! under that module.

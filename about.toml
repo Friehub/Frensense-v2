@@ -1,0 +1,20 @@
+# Config for `cargo about generate about.hbs > THIRD_PARTY_LICENSES.md`.
+# The accepted list mirrors `deny.toml`: a dependency under any other licence
+# fails the build instead of being shipped without notice.
+accepted = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-3-Clause",
+  "BSD-2-Clause",
+  "ISC",
+  "MPL-2.0",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "BSL-1.0",
+  "Zlib",
+  "GPL-3.0-only",
+]
+ignore-dev-dependencies = true
+ignore-build-dependencies = true
+workarounds = []

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
+# Copyright (c) 2024-2026 Friehub
 """Clippy debt ratchet.
 
 Lints at `deny` in the root Cargo.toml fail the build outright. Lints at

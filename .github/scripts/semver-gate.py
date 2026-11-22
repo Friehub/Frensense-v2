@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
+# Copyright (c) 2024-2026 Friehub
 """Per-crate SemVer gate for the publishable crates of the workspace.
 
 Frensense ships one binary but four registry crates. Each of them has its own

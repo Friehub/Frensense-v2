@@ -117,4 +117,4 @@ Requirements: a recent stable Rust toolchain. The CLI entry point is `src/bin/fr
 
 ## Questions
 
-Open an issue or reach the maintainers at the address listed on https://friehub.com/licensing.
+Open an issue or reach the maintainers at the address listed on https://friehub.cloud/licensing.

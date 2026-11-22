@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
+# Copyright (c) 2024-2026 Friehub
 """Translate the VitePress docs into a locale tree, at build time.
 
 English markdown is the only source of truth. This script walks the pages worth

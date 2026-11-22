@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2024-2026 Friehub. All rights reserved.
-// Commercial use requires a separate license: https://friehub.com/licensing
+// Copyright (c) 2024-2026 Friehub
+// Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
 
 //! Rule cards: the one place a finding's identity, title, CWE and advice
 //! live. Terminal, SARIF, JSON and `explain` all render from here, so the

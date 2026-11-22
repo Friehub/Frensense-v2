@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2024-2026 Friehub. All rights reserved.
-// Commercial use requires a separate license: https://friehub.com/licensing
+// Copyright (c) 2024-2026 Friehub
+// Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
 
 //! Tests for the schema-policy and allowlist-definition seed checks (R1),
 //! including the multi-line span reporting that lets consumers match a

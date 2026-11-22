@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2024-2026 Friehub. All rights reserved.
+// Copyright (c) 2024-2026 Friehub
 //! Sink dispatch: which call is a sink, which slots carry data, and the
 //! per-slot backward walk it starts.
 //!

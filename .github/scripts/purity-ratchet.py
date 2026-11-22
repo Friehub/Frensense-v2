@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
-# Commercial use requires a separate license: https://friehub.com/licensing
+# Copyright (c) 2024-2026 Friehub
+# Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
 """Engine purity debt ratchet (ENGINE_PURITY_REFACTOR.md, Phase 0.1).
 
 Counts the debt classes the refactor targets and fails when any count

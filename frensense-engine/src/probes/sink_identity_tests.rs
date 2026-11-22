@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2024-2026 Friehub. All rights reserved.
+// Copyright (c) 2024-2026 Friehub
 
 //! Regressions for two recall gaps found while re-measuring the framework
 //! matrix against the pre-WI-41/51/56 baseline:
