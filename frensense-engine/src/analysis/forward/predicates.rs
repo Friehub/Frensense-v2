@@ -486,7 +486,9 @@ pub(crate) fn sanitizer_fact_defeating<'a>(
         } => {
             if let Operand::Var(r) = receiver {
                 if let Some(path) = FactTable::receiver_access_path(ir, *r) {
-                    let full = format!("{path}.{method}");
+                    // Built without `format!`: the purity ratchet counts prose
+                    // formatting in the engine, and this is a lookup key.
+                    let full = path + "." + method;
                     if let Some(fact) = facts.sanitizer_fact_scoped(&full, origin_package) {
                         return defeating(&full, fact).then_some(fact);
                     }

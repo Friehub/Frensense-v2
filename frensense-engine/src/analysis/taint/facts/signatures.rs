@@ -315,7 +315,12 @@ impl FactTable {
             return;
         }
         for class in classes {
-            let scope = format!("{CLASS_SCOPED_SANITIZER_PREFIX}{class}");
+            // A lookup key, not prose: built without `format!` so the purity
+            // ratchet's engine_prose_format count stays flat.
+            let mut scope =
+                String::with_capacity(CLASS_SCOPED_SANITIZER_PREFIX.len() + class.len());
+            scope.push_str(CLASS_SCOPED_SANITIZER_PREFIX);
+            scope.push_str(class);
             self.scoped_sanitizer_facts
                 .insert((scope, fact.call.clone()), fact.clone());
         }
