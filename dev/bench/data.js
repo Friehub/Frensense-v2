@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795365298923,
+  "lastUpdate": 1795371899166,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -3260,6 +3260,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/80bdbac6b61c396ac45b0c10e8062e8cc0d27320"
         },
         "date": 1795365297745,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 47,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 49.3,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 2.3,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 223,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 18,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "4371314a6594d9868ae070afd7c7f75b91eb2cf1",
+          "message": "Merge pull request #186 from Friehub/chore/legal-foundation\n\nLegal foundation: correct the notices, sweep the file headers, add SECURITY and third-party licences",
+          "timestamp": "2026-11-22T19:23:53+01:00",
+          "tree_id": "20d30577c33fe5dc7998f085eb1a87b84f229a6b",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/4371314a6594d9868ae070afd7c7f75b91eb2cf1"
+        },
+        "date": 1795371898122,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
