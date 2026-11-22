@@ -25,6 +25,174 @@ Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
 
+## \[0.9.1]
+
+### Added
+
+* `--show-suppressed`: the explain record of a silenced argument names the
+  bundle sanitizer fact that cut it and the classes it was proven for.
+* `--disable-rule <RULE>` and `--only <RULE>` (repeatable), and the `[rules]`
+  table in `.frensense.toml` (`disable` / `only`): report-wide rule selection
+  that leaves the underlying bundle facts installed.
+* `--config <PATH>`: select the config file a run reads instead of the
+  discovered one.
+* A suppression reason in `--explain`, and the CWE split on its own line in
+  the text report.
+* Bundle trust and policy metadata now reach reporting: the runner applies the
+  bundle's sanitizer class scopes to the installed fact table and stamps each
+  learned policy's declared (trust-capped) tier.
+
+## \[0.9.0]
+
+### Added
+
+* **The scan summary lists every stage the scan went through** (parse and
+  lower, graph, checks, taint, report) with what each consumed and produced, so
+  an empty or slow stage is visible without a flag. Each figure is measured:
+  the graph line counts the value-flow nodes, edges and cross-function edges the
+  taint phase walked, and the taint line follows the call sites
+  (`1,889 call(s) -> 17 sink call(s) -> 23 argument(s) walked`). The same
+  numbers are in the JSON report under `analysis.graph` and
+  `analysis.funnel`.
+* **`--explain` names the library calls the walk flowed through.** A flow that
+  ends without a source may have crossed a call the engine has no model for;
+  the backward walk follows such a call into its arguments on the assumption
+  that its result carries them. The report now prints those as
+  `flowed through: \`callee\`\` instead of folding them into the stop sites, and
+  the reason names them, so silence caused by a missing source or propagation
+  entry is traceable to the call that hid it.
+* A method call's receiver reads as `receiver` rather than a 20-digit slot
+  number, in the `--explain` text and as the new `arg` field of
+  `--explain-json`.
+* `--explain` prints the pipeline behind the summary's taint line: how many
+  call sites were skipped before matching (and why), how many matched no sink
+  fact, how many armed a sink, and how many findings each reporting-gate reason
+  dropped. Standard-library adapters (`iter`, `collect`, `map_err`, ...) are no
+  longer named as flowed-through calls, so that list is the library calls the
+  engine really has no model for. The pipeline block also prints the busiest
+  callees that matched no sink fact with their call counts, so `not_a_sink`
+  points at the vocabulary to teach rather than only a number; the same list is
+  under `analysis.funnel.unmatched_callees` in the JSON report.
+
+### Changed
+
+#### Repository & Release Tooling
+
+* **`publish-cargo` publishes from the release commit, not from the tag.**
+  The `v0.9.0` re-run checked out `refs/tags/v0.9.0`, which names the merge
+  before the `frensense-lang` 0.8.2 bump, and published the crates that older
+  tree considered pending: `frensense-lang` was absent from the set (its
+  manifest says 0.8.1 there, which is on crates.io), so
+  `cargo publish -p frensense-engine` resolved the registry's 0.8.1 and the
+  tarball failed verification with 80 errors (`jump_kind`, `LiteralShape`,
+  `function_params` and the rest of the node-kind vocabulary missing). A tag
+  cannot carry the fix - it is cut once and never moves - so this job now
+  checks out the commit `gate` resolved, the same commit the pending matrix
+  runs on, while `build-native`, `publish-npm` and `github-release` keep
+  shipping the tag's artifacts.
+
+* **The clippy debt baseline records what the refactor removed.** Four
+  functions the `too_many_lines` lint flagged were split along the seams they
+  already had (`Steensgaard::analyze`'s field-representative synthesis,
+  `Svfg`'s formal-parameter registration, `ProgramSvfg`'s object-root cache,
+  `LoweringContext::visit_composite`'s child lowering), which took
+  `frensense-engine::clippy::too_many_lines` from 25 to 20 sites and
+  `indexing_slicing` from 177 to 168. `clippy-ratchet.py --update` rewrote
+  `.github/scripts/clippy-baseline.json` with the measured counts (973 sites in
+  62 pairs), so the removed debt cannot creep back in unnoticed. Deleting the
+  forward engine's 1,343 test lines (#147) then took the total to 969
+  (`indexing_slicing` 168 → 164).
+
+* **The workspace manifests stop warning, and `frensense-devtools` joins the
+  lint contract.** Four members (`frensense`, `frensense-lang`,
+  `frensense-engine`, `frensense-bundler`) set `package.homepage` to the same
+  URL as `package.documentation`, which cargo's `cargo::redundant_homepage`
+  lint reported on every build; the key is removed and `documentation` is the
+  one link. `frensense-devtools` was the only member without
+  `[lints] workspace = true` (`cargo::missing_lints_inheritance`), so the deny
+  tier and the clippy budget never applied to the probe binaries; it now
+  inherits the set. That surfaced 42 diagnostics the unpublished harness had
+  never been measured against (`print_stdout` 21, `unwrap_used` 9,
+  `expect_used` 4, `float_arithmetic` 3, `indexing_slicing` 3,
+  `print_stderr` 2), which `.github/scripts/clippy-baseline.json` now records
+  as existing debt rather than rewriting probe code in a metadata commit: the
+  same shape `frensense-packgen`'s baseline already carries for its printing
+  binary (`print_stdout` 2, `print_stderr` 9). No behaviour changed, and no
+  baseline number for another crate moved.
+
+* **The last broken intra-doc links are resolved.** Documenting every member
+  with `-D rustdoc::broken_intra_doc_links -D rustdoc::private_intra_doc_links`
+  reported eight errors in three crates. `FrensenseFinding::identity` linked
+  `stable_fingerprint`, which is `pub(crate)`; `frensense-bundler`'s `format`
+  module linked `LearnedFactEntry` by bare name (it lives in another crate) and
+  `BundlePayloadV5` linked the private `LearnedFactEntryV5`; `frensense-packgen`
+  linked three private modules (`data`, `vocab`, `role_map`), `FactTable` by
+  bare name and `default_bundle_bytes` from another crate. The two public
+  cross-crate types now carry their full engine path, and private or foreign
+  items read as plain code spans instead of dead links. `cargo doc` for all six
+  members finishes with no errors and no rustdoc warnings.
+
+### Fixed
+
+* **Dropped findings below confidence threshold correctly reflected in reports.**
+  When findings are suppressed or dropped below the confidence threshold, CLI reports
+  and MCP `scan_file` accurately report `Status: No findings ({N} dropped below confidence threshold)`
+  and gate `clean: false`, avoiding misleading `Status: Clean` reporting on uncertain scans.
+
+* **Polyglot workspace completion telemetry.** Unsupported files in a polyglot tree
+  no longer cause `telemetry.is_complete()` to mark healthy scans as `Partial` when
+  supported files have been successfully scanned (`input.scanned > 0`).
+
+* **Sinks the binder and the sink matcher used to drop now report.** A scan
+  reaches values it could not bind before - a destructured or rest parameter
+  (`function run({ h }: Opts)`), a destructuring assignment (`({ a } = rhs)`),
+  a nested pattern, and a Go parameter, which was never bound at all, so
+  `*http.Request` never reached the source classifier - and matches a sink
+  written as a property assignment (`el.innerHTML = user`) or a JSX attribute
+  such as `dangerouslySetInnerHTML`, which the sink matcher did not look at.
+  Each shape is **0 -> 1** finding on its reported reproduction, with its
+  static counterpart staying clean; the mechanism and the per-shape
+  measurements are recorded in `frensense-engine/CHANGELOG.md`.
+
+* **`--severity` and the MCP `severity_threshold` accept the same six labels,
+  and reject anything else.** The two surfaces previously had different
+  vocabularies: the CLI hard-errored on `--severity high` while the MCP tools
+  passed unknown strings to a parser that mapped them to `info`, the least
+  restrictive floor, so a client that used a corpus label silently received
+  every finding. The CLI now accepts `critical`, `high`, `medium`, `warning`,
+  `low` and `info` through `frensense-lang`'s one mapping, and
+  `frensense_audit`, `frensense_diff` and `frensense_scan_file` return
+  `{"clean": false, "advisories": [], "error": "unknown severity level ..."}`
+  before scanning. The MCP schemas advertise all six labels.
+
+* **Corpus and bundle severity reach the report.** A checker finding's
+  fact-authored severity now outranks the rule registry's default: a corpus
+  `severity: info` no longer reports as `warning`, a bundle can demote a
+  critical registry rule with `warning`, and `health`'s `low` findings are
+  `info` instead of `warning`. A matched bundle pattern still overlays both.
+  The mechanism is recorded in `frensense-engine/CHANGELOG.md` and the shared
+  vocabulary in `frensense-lang/CHANGELOG.md`.
+
+### Removed
+
+Code in the consumer library with no caller anywhere (verified by search over
+every crate and the binary), plus thin wrappers that only tests reached, so
+that tests now exercise the function production calls:
+
+* `Reporter::to_markdown` and `to_markdown_detailed` (no output format used them).
+* `Reporter::to_sarif`, `to_sarif_detailed` and `describe_path_step`: use
+  `to_sarif_with_coverage` and `describe_step`.
+* `cli::reporting::{print_results, print_results_detailed, print_results_with_skips,
+  print_scan_summary, print_scan_summary_detailed, json_report,
+  json_report_with_telemetry}` and the empty stub `apply_filters`: use
+  `print_results_with_coverage`, `print_scan_summary_detailed_with_coverage`
+  and `json_report_with_coverage`.
+* `cli::options::get_input_path` (use `get_input_paths`).
+* The orphaned `frensense-providers` crate (1,558 lines, not a workspace member
+  and importing engine modules that no longer exist, so it could not compile).
+  It is recoverable from git history; a replacement should be designed against
+  the current engine rather than revived from that tree.
+
 ## \[0.8.2]
 
 ### Added
