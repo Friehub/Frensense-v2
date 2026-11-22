@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795246667937,
+  "lastUpdate": 1795329585922,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -3113,6 +3113,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/c84aab644fc4dd17bf09914e91733c419c143ff8"
         },
         "date": 1795246666555,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 47,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 49.3,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 2.3,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 223,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 18,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "8cc77b3483875e8ca04db421eb1d6b9515176a43",
+          "message": "Merge pull request #183 from Friehub/feat/class-scoped-sanitizers\n\nfeat: class-scoped sanitizers, bundle trust tiers and policy lifecycle",
+          "timestamp": "2026-11-22T07:38:57+01:00",
+          "tree_id": "6dca03006480773aeb40a34e1232d27307366e19",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/8cc77b3483875e8ca04db421eb1d6b9515176a43"
+        },
+        "date": 1795329585078,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
