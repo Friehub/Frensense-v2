@@ -57,10 +57,15 @@
   display: none !important;
 }
 
-/* hero: balanced breathing room below the nav, tight against the strip */
+/* Home page is two blocks: the hero, then the download section. The hero
+   gets clear room under the fixed nav so it never crowds or overlaps it,
+   and the download section follows after its own gap. */
 .VPHomeHero {
-  padding-top: 88px !important;
-  padding-bottom: 12px !important;
+  /* top offset = announcement bar (if shown) + fixed nav + 64px of air */
+  padding-top: calc(
+    var(--vp-layout-top-height, 0px) + var(--vp-nav-height, 64px) + 64px
+  ) !important;
+  padding-bottom: 72px !important;
 }
 .VPHomeHero .name,
 .VPHomeHero .text {
@@ -152,18 +157,19 @@
   background: var(--vp-c-brand-soft);
 }
 
-/* homepage download strip: registry cards + weekly download counts */
+/* homepage download section: registry cards + weekly download counts */
 .download-strip {
   max-width: 960px;
   margin: 0 auto;
-  padding: 0 24px 8px;
+  padding: 40px 24px 8px;
+  border-top: 1px solid var(--vp-c-divider);
   text-align: left;
 }
-/* the strip lives in the home markdown container; zero its default
-   paddings so hero -> strip -> features spacing is deliberate */
+/* the strip lives in the home markdown container; zero its default top
+   padding so the hero -> download gap is the one set above */
 .VPHome > .vp-doc.container {
   padding-top: 0 !important;
-  padding-bottom: 24px !important;
+  padding-bottom: 64px !important;
 }
 .download-strip__head {
   text-align: center;
@@ -173,6 +179,11 @@
   font-size: 2rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+  /* the doc-page h2 rule adds its own divider and top padding; the
+     section already has one divider, so drop both here */
+  border-top: 0;
+  padding-top: 0;
+  margin-top: 0;
   margin-bottom: 8px;
 }
 .download-strip__head p {
@@ -258,11 +269,11 @@
   font-size: 0.85em;
 }
 
-/* Place the download strip directly after the hero header and before
-   the features grid: VitePress renders hero -> features -> markdown
-   content in DOM order, so reorder them in the flex column of .VPHome.
-   The markdown content wrapper is `.vp-doc container` (there is no
-   VPHomeContent class on the rendered element). */
+/* VitePress renders hero -> features -> markdown content in DOM order.
+   The home page has no feature grid, so only the markdown wrapper needs
+   ordering: the download section comes right after the hero.
+   The wrapper is `.vp-doc container` (there is no VPHomeContent class
+   on the rendered element). */
 .VPHome {
   display: flex;
   flex-direction: column;
@@ -272,9 +283,6 @@
 }
 .VPHome > .vp-doc.container {
   order: 2;
-}
-.VPHome > .VPFeatures {
-  order: 3;
 }
 
 /* High contrast, legible typography across docs and tables (no faint mint green text) */
