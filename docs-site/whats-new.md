@@ -9,17 +9,19 @@ A quick look at what changed in each release, written for everyone (no compiler 
 
 ---
 
-## 0.9.1 - Sanitizers That Know What They Sanitize
+## 0.9.1 - Learned Sanitizers Know What They Sanitize
 
-**A sanitizer now only clears the kind of risk it was actually proven to handle, so "sanitized" can no longer hide a different bug.**
+**A sanitizer learned from a bundle now clears only the kind of risk it was proven for, so "sanitized" can no longer hide a different bug.**
 
-A sanitizer is code that makes a value safe — a SQL escaper, a URL validator, an allow-list checker. Until now, a sanitizer that showed up anywhere on a value's path counted as safe for *every* kind of sink. A helper written to stop SQL injection could therefore silence a command-injection warning about the same value. This release ties each sanitizer to the vulnerability classes it was proven to defeat.
+A sanitizer is code that makes a value safe — a SQL escaper, a URL validator, an allow-list checker. When a corpus bundle teaches Frensense a new sanitizer, that fact now records the vulnerability classes it was proven to defeat, instead of counting as safe against every kind of sink. A helper proven to stop SQL injection can therefore no longer silence a command-injection warning about the same value.
 
-- **One sanitizer, one kind of risk.** A fact learned as "this makes SQL safe" clears SQL findings only; a URL check no longer validates a shell command, and an allow-list guard no longer covers an unrelated sink reached on the same branch. Under the hood each fact carries the class it was proven for and the engine matches the sink's class against it.
+The built-in vocabulary is unchanged. The sanitizers Frensense already ships carry no class information, so they keep clearing every class exactly as before; nothing about them gets stricter in this release.
+
+- **One learned sanitizer, one kind of risk.** A fact a bundle learned as "this makes SQL safe" clears SQL findings only: a bundled helper proven for SQL no longer silences a command-injection finding on the same value, and a bundled guard proven for URL checks no longer covers an unrelated sink reached on the same branch. The bundle's own families have to prove the scope, and a fact that silences another class's corpus family fails the bundle build.
 - **Bundles say how much they should be trusted.** A bundle is now `certified`, `community` or `custom`. A custom bundle may add sinks, sources and policies but never sanitizers. A community bundle may ship a sanitizer only when it names both the class it defeats and the package it belongs to. Anything weaker is filtered out at load, so a thinly-evidenced community bundle cannot silence your findings.
 - **Policies can be retired without breaking anyone.** A bundle can mark a rule `deprecated` — it still fires, but is announced as deprecated and kept out of the default report — or `removed`, which drops it entirely. No more silently deleting a rule id that a pinned bundle still refers to.
 - **New ways to see and steer what is hidden.** `--show-suppressed` names the bundle sanitizer that silenced an argument and the classes it was proven for; `--disable-rule` and `--only` (also `[rules]` in `.frensense.toml`) choose which rules a run reports; `--config` points the run at a specific config file.
-- **Nothing to migrate.** Existing bundles keep loading with the old, unscoped reading of their sanitizers. Rebuild one as a v8 bundle and its sanitizers gain the class scope.
+- **Nothing to migrate.** Existing bundles keep loading, and their sanitizers keep the old, unscoped reading until the bundle is rebuilt; a rebuilt v8 bundle is the one that carries the class scope.
 
 ---
 

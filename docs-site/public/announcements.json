@@ -5,7 +5,7 @@
       "display": "bar",
       "tone": "brand",
       "title": "Frensense v0.9.1 is out",
-      "message": "A sanitizer now only clears the kind of risk it was actually proven to handle, so \"sanitized\" can no longer hide a different bug.",
+      "message": "A sanitizer learned from a bundle now clears only the kind of risk it was proven for, so \"sanitized\" can no longer hide a different bug.",
       "link": { "text": "See what's new", "href": "/whats-new" }
     }
   ]
