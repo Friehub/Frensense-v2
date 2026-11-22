@@ -32,9 +32,9 @@ pub type DiffScanOutcome = (BTreeMap<String, Vec<AddedRange>>, Vec<Advisory>, us
 /// A diff scan plus how far the analysis behind it could see.
 ///
 /// Coverage travels with the findings because a diff gate is the one place
-/// where "clean" is consumed as a decision: an agent that reads `clean:
-/// true` from a file the engine recognized nothing in has been told the
-/// wrong thing.
+/// where an empty advisory list is consumed as a decision: an agent that
+/// treats "no advisories" from a file the engine recognized nothing in as a
+/// pass has been told the wrong thing.
 #[derive(Debug)]
 pub struct DiffScan {
     pub ranges: BTreeMap<String, Vec<AddedRange>>,
@@ -50,7 +50,7 @@ pub struct DiffScan {
 pub fn tool_definition() -> Value {
     json!({
         "name": "frensense_diff",
-        "description": "Scan files touched by a unified diff (git diff/patch format) and report ONLY findings whose line falls inside the diff's added-line ranges. Use this to gate a change: pre-existing findings elsewhere in the touched files are filtered out, so the result answers 'does MY change introduce findings?'. Empty advisories with clean=true means the added lines introduce no findings, every touched file was analyzed, and every sink site the engine recognized was decided; read analysis.coverage to see the denominator (files_analyzed/files_found) and sink_sites (0 means the gate cannot vouch for the change). Pass either a diff text (diff_text) or a repo path whose working tree is scanned (repo).",
+        "description": "Scan files touched by a unified diff (git diff/patch format) and report ONLY findings whose line falls inside the diff's added-line ranges. Use this to gate a change: pre-existing findings elsewhere in the touched files are filtered out, so the result answers 'does MY change introduce findings?'. There is no boolean that means the change is safe: an empty `advisories` array means this report found nothing on the added lines, and `analysis.coverage` gives the denominator (files_analyzed/files_found), the recognized `sink_sites` (0 means the gate cannot vouch for the change), and the sites it could not decide. Pass either a diff text (diff_text) or a repo path whose working tree is scanned (repo).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -453,7 +453,7 @@ pub(crate) fn result_payload_detailed(
     let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
     let telem = telemetry.unwrap_or(&empty_telem);
     let cov = coverage.cloned().unwrap_or_default();
-    let (clean, analysis) = super::scan_file::mcp_analysis(advisories, &cov, telem, incomplete);
+    let analysis = super::scan_file::mcp_analysis(&cov, telem, incomplete);
     let files: Vec<Value> = ranges
         .iter()
         .map(|(f, rs)| {
@@ -466,7 +466,6 @@ pub(crate) fn result_payload_detailed(
         })
         .collect();
     json!({
-        "clean": clean,
         "files_touched": files.len(),
         "files_scanned": scanned,
         "added_ranges": files,
@@ -497,7 +496,6 @@ pub fn run_diff_tool(args: &Value) -> Value {
     let repo = Path::new(repo_str);
     if !repo.exists() {
         return json!({
-            "clean": false,
             "advisories": [],
             "error": format!("repo path does not exist: {repo_str}")
         });
@@ -510,7 +508,6 @@ pub fn run_diff_tool(args: &Value) -> Value {
         .unwrap_or("info");
     if let Err(error) = crate::policy::severity_from_label(severity_threshold) {
         return json!({
-            "clean": false,
             "advisories": [],
             "error": error
         });
@@ -525,7 +522,6 @@ pub fn run_diff_tool(args: &Value) -> Value {
         && !Path::new(bundle).exists()
     {
         return json!({
-            "clean": false,
             "advisories": [],
             "error": format!("corpus bundle does not exist: {bundle}")
         });
@@ -541,14 +537,12 @@ pub fn run_diff_tool(args: &Value) -> Value {
         match probe {
             Ok(o) if String::from_utf8_lossy(&o.stdout).trim() != "true" => {
                 return json!({
-                    "clean": false,
                     "advisories": [],
                     "error": "not a git repository: pass diff_text or run inside a repo"
                 });
             }
             Err(_) => {
                 return json!({
-                    "clean": false,
                     "advisories": [],
                     "error": "git unavailable: pass diff_text explicitly"
                 });
@@ -573,7 +567,6 @@ pub fn run_diff_tool(args: &Value) -> Value {
             &outcome.incomplete,
         ),
         Err(e) => json!({
-            "clean": false,
             "advisories": [],
             "error": format!("analysis error: {e}")
         }),

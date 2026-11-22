@@ -87,7 +87,8 @@ impl Reporter {
         let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
         let telem = telemetry.unwrap_or(&empty_telem);
         let cov = coverage.cloned().unwrap_or_default();
-        let is_complete = telem.is_complete() && incomplete.is_empty();
+        let is_complete =
+            telem.is_complete() && incomplete.is_empty() && cov.files_not_analyzed() == 0;
 
         let mut notifications = Vec::new();
         // Coverage gaps are notifications, not results: they say how far the
@@ -148,7 +149,7 @@ impl Reporter {
                 "message": {
                     "text": format!(
                         "{} sink site(s) were reached but not decided (the backward walk \
-                         could not resolve a value); an undecided site is not a clean one",
+                         could not resolve a value); an undecided site is not evidence of safety",
                         cov.unresolved_sites
                     )
                 },

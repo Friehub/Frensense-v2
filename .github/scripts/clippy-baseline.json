@@ -63,7 +63,7 @@
   "frensense::clippy::missing_errors_doc": 6,
   "frensense::clippy::needless_pass_by_value": 3,
   "frensense::clippy::print_stderr": 59,
-  "frensense::clippy::print_stdout": 201,
+  "frensense::clippy::print_stdout": 202,
   "frensense::clippy::too_many_lines": 10,
   "frensense::clippy::type_complexity": 10
 }

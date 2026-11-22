@@ -847,7 +847,7 @@ fn advisory_from_finding(
     // are the flow-path default (WI-54), carried in the JSON/SARIF finding
     // (`taint_steps` / SARIF `codeFlows`) so agents act on the trace. The
     // TEXT observation embeds the path only under `--show-flows`, keeping
-    // the clean text report terse.
+    // the text report terse.
     let rendered_path = f.path.compacted();
     let flow_summary = format!("`{src}` flows to `{}` (argument {}).", f.sink, f.arg_slot);
     let observation = if show_flows {

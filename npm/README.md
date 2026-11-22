@@ -26,7 +26,7 @@ output.
 > The current OWASP Benchmark for Python score, the per-class breakdown and the
 > cases it does not cover are published from CI in
 > [Benchmarks](https://frensense.friehub.cloud/architecture/benchmarks). Treat
-> a clean scan as "nothing found", not "nothing there".
+> a scan that reports nothing as "nothing found", not "nothing there".
 
 ## Install
 

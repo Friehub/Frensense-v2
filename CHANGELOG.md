@@ -19,6 +19,40 @@ Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
 
+## [0.9.2]
+
+### Changed
+
+- **The report no longer says "clean".** A static analysis can show what it
+  found and what it covered; it cannot show that code is safe, and a single
+  verdict for both invited exactly that reading. The `clean` boolean is gone
+  from the JSON envelope and from `analysis`, the MCP tools no longer return
+  `clean`, and `analysis.taint.clean` is now `analysis.taint.no_source` (the
+  same count: sink arguments whose backward walk found no source, which is a
+  statement about the walk). `ScanStatus::clean` stays unchanged for source
+  compatibility, but no report surface calls it; the run's status is computed
+  from the scan and its coverage. The summary's
+  no-findings label is `No findings reported`, qualified as before when
+  nothing was recognized, a file was not analyzed, a site stayed undecided, or
+  findings were dropped below the confidence threshold. Read `advisories` and
+  `analysis.coverage` instead. The removed and renamed keys move
+  `REPORT_SCHEMA_VERSION` to 2; no public Rust item changed shape, so this is a
+  patch release.
+- **A file the scan did not analyze makes the status `partial`.** Previously a
+  scan could report `complete` while the walk had skipped source files in
+  languages the engine cannot read or files that failed to lower; that gap now
+  shows up in the status itself, not only in `analysis.coverage`.
+
+### Fixed
+
+- **`analysis.verdicts.clean` is now `analysis.verdicts.no_source`**, and the
+  top-level `clean` and `analysis.clean` keys are removed.
+- **`FRENSENSE_LOG` selects the filter.** Setting it installed a subscriber
+  that still read `RUST_LOG` for its directives, so `FRENSENSE_LOG=debug` had
+  no effect. The variable's value is now used as the `EnvFilter` directive,
+  the bare on-spellings (`1`, `true`, empty) mean `info`, and `--trace` is the
+  same as `FRENSENSE_LOG=info`. `--trace` is listed in `--help`.
+
 ## [0.9.1]
 
 ### Added
@@ -874,9 +908,9 @@ The engine computes `ScanTelemetry`, `ScanStatus` and per-check outcomes;
   failed inputs, and degraded functions. Standalone scan errors are also
   reported in that invocation notification list.
 - **`--fail-on-incomplete` flag**: exits with code `2` when the scan status is
-  `Partial` or `Failed`, allowing CI to distinguish a clean scan (0), a scan
-  with findings (1), and an incomplete scan (2). Default is off to preserve
-  backward compatibility.
+  `Partial` or `Failed`, allowing CI to distinguish a no-findings scan (0), a
+  scan with findings (1), and an incomplete scan (2). Default is off to
+  preserve backward compatibility.
 - **`--profile-output <path>` / `--profile-out <path>` flags**: writes the full
   `ScanTelemetry` as pretty-printed JSON to the specified path. Also accepted
   as `--profile <path.json>` when the argument ends in `.json`, so the existing

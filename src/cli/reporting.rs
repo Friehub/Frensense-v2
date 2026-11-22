@@ -93,7 +93,7 @@ pub fn print_scan_banner(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ScanStatus {
-    /// Every file parsed cleanly, no checks panicked, no safety caps hit.
+    /// Every file parsed without error, no checks panicked, no safety caps hit.
     Complete,
     /// Scan completed with caveats: caps fired, syntax parse partial, or degraded functions.
     Partial,
@@ -102,6 +102,11 @@ pub enum ScanStatus {
 }
 
 impl ScanStatus {
+    /// Overall outcome of the scan.
+    ///
+    /// Without coverage this cannot tell that the walk skipped a file, so a
+    /// partial tree can still read `Complete`; the rendering entry points add
+    /// the walk's accounting through [`status_with_coverage`].
     #[must_use]
     pub fn compute(
         telemetry: &frensense_engine::telemetry::ScanTelemetry,
@@ -123,17 +128,11 @@ impl ScanStatus {
 
     /// The report's answer to "is this clean?".
     ///
-    /// `true` only when nothing was reported, the machinery completed, every
-    /// file the walk found was analyzed, and every sink site the scan
-    /// recognized was decided. An *undecided* site makes a scan unclean: "I
-    /// could not decide" is not "clean". So does a file the engine never
-    /// looked at - a clean verdict over an unanalyzed tree is the one thing a
-    /// clean verdict must never mean.
-    ///
-    /// A coverage gap (an analyzed file where no sink site was recognized)
-    /// does not by itself make the scan unclean, because [`Coverage`] reports
-    /// it separately - forcing every utility module to look like a failure
-    /// would train readers to ignore the status.
+    /// A scan cannot certify code safe: this reduces findings, machinery and
+    /// coverage to one boolean, which is the claim the reports no longer make.
+    /// No report surface calls it; read the advisories and `analysis.coverage`
+    /// instead. It stays unchanged because marking it deprecated is itself a
+    /// breaking change for the crate's consumers.
     #[must_use]
     pub fn clean(self, advisories_empty: bool, coverage: &Coverage) -> bool {
         advisories_empty
@@ -143,11 +142,33 @@ impl ScanStatus {
     }
 }
 
+/// Overall outcome of the scan, with the walk's coverage taken into account.
+///
+/// A scan that left any source file unanalyzed is [`ScanStatus::Partial`],
+/// even when every file it did submit parsed without error: "the machinery
+/// finished" and "the report covers the tree" are different claims, and a
+/// report may only make the second when it is true. `Failed` still wins: a
+/// scan that analyzed nothing is not merely partial.
+#[must_use]
+pub(crate) fn status_with_coverage(
+    telemetry: &frensense_engine::telemetry::ScanTelemetry,
+    incomplete: &[frensense_engine::scan::IncompleteFunction],
+    coverage: Option<&Coverage>,
+) -> ScanStatus {
+    let status = ScanStatus::compute(telemetry, incomplete);
+    if status != ScanStatus::Failed && coverage.is_some_and(|c| c.files_not_analyzed() > 0) {
+        ScanStatus::Partial
+    } else {
+        status
+    }
+}
+
 /// The one-line answer the summary prints.
 ///
-/// `Clean` is reserved for a scan that ran completely, analyzed every file
-/// it found, recognized at least one sink site somewhere, and decided every
-/// site it recognized. Every other combination says what qualified it.
+/// There is no "clean" label. A no-finding scan states only that no finding
+/// was reported, plus whatever qualified it (nothing recognized, files not
+/// analyzed, sites undecided). A static analysis cannot certify code safe, so
+/// the report does not offer a word that says it did.
 fn status_label(
     status: ScanStatus,
     findings: usize,
@@ -184,7 +205,7 @@ fn status_label(
                 Some(c) if !c.fully_resolved() => {
                     format!("No findings ({} site(s) undecided)", c.unresolved_sites)
                 }
-                _ => "Clean".to_string(),
+                _ => "No findings reported".to_string(),
             }
         }
     }
@@ -218,7 +239,7 @@ pub fn print_scan_summary_detailed_with_coverage(
 
     let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
     let telem = telemetry.unwrap_or(&empty_telem);
-    let status = ScanStatus::compute(telem, incomplete);
+    let status = status_with_coverage(telem, incomplete, coverage);
 
     println!("============================= Scan Summary =============================");
     println!("Target:             {}", input_path.display());
@@ -262,8 +283,8 @@ pub fn print_scan_summary_detailed_with_coverage(
         _ => {}
     }
     // The denominator behind "no findings". Without it, a scan that
-    // recognized nothing is indistinguishable from a clean one; with it, a
-    // reader can falsify the verdict themselves.
+    // recognized nothing is indistinguishable from one that inspected the
+    // code; with it, a reader can falsify the verdict themselves.
     // CWE coverage split: dataflow rules and structural policies are not the
     // same claim. Counting them together let cheap policy rules inflate the
     // CWE total, so the summary states each contribution separately.
@@ -429,7 +450,7 @@ fn no_findings_headline(
                 c.unresolved_sites
             )
         }
-        (ScanStatus::Complete, _) => "Analysis Complete: No findings.".to_string(),
+        (ScanStatus::Complete, _) => "No findings reported.".to_string(),
         (ScanStatus::Partial, _) => "No findings (analysis incomplete).".to_string(),
         (ScanStatus::Failed, _) => "Analysis failed.".to_string(),
     }
@@ -479,9 +500,10 @@ fn funnel_json(f: &frensense_engine::telemetry::TaintFunnel) -> serde_json::Valu
 
 /// [`json_report_with_skips`] plus what the scan actually covered.
 ///
-/// Adds `analysis.clean` and the recognition/denominator fields under
-/// `analysis.coverage`, so a consumer that reads only `status` cannot mistake
-/// "we recognized nothing" for "we inspected and found nothing".
+/// Adds the recognition/denominator fields under `analysis.coverage`, so a
+/// consumer that reads only `status` cannot mistake "we recognized nothing"
+/// for "we inspected and found nothing". There is deliberately no `clean`
+/// boolean: no single flag may stand in for a safety claim.
 #[must_use]
 pub fn json_report_with_coverage(
     advisories: &[Advisory],
@@ -492,13 +514,8 @@ pub fn json_report_with_coverage(
 ) -> serde_json::Value {
     let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
     let telem = telemetry.unwrap_or(&empty_telem);
-    let status = ScanStatus::compute(telem, incomplete);
+    let status = status_with_coverage(telem, incomplete, coverage);
     let cov = coverage.cloned().unwrap_or_default();
-    let below_confidence = telem
-        .suppressed
-        .iter()
-        .any(|s| s.reason == "below-confidence" && s.count > 0);
-    let clean = status.clean(advisories.is_empty(), &cov) && !below_confidence;
     // Without engine-derived coverage (the compatibility entry points),
     // fall back to the input accounting so the denominator is still honest
     // about unsupported inputs and read failures.
@@ -517,7 +534,6 @@ pub fn json_report_with_coverage(
 
     let analysis_obj = serde_json::json!({
         "status": status,
-        "clean": clean,
         "coverage": {
             "files_found": files_found,
             "files_submitted": telem.input.submitted,
@@ -534,7 +550,7 @@ pub fn json_report_with_coverage(
             // What the scan recognized: the denominator behind "no
             // findings". `files_without_sink_sites` names the files where
             // the engine found nothing it models as dangerous, so a reader
-            // can tell "inspected and clean" from "nothing recognized".
+            // can tell "inspected and no finding" from "nothing recognized".
             "sink_sites": cov.sink_sites,
             "files_with_sink_sites": cov.files_with_sink_sites,
             "files_without_sink_sites": cov.files_without_sink_sites,
@@ -555,7 +571,10 @@ pub fn json_report_with_coverage(
             "vulnerable": telem.taint.vulnerable,
             "sanitized": telem.taint.sanitized,
             "unknown": telem.taint.unknown,
-            "clean": telem.taint.clean,
+            // No "clean" verdict: this counts sink arguments whose backward
+            // walk found no source, which is a statement about the walk, not
+            // about the code.
+            "no_source": telem.taint.clean,
         },
         // The sizes and call-site accounting behind the summary's graph and
         // taint lines, so a JSON consumer sees the same numbers.
@@ -598,7 +617,6 @@ pub fn json_report_with_coverage(
     serde_json::json!({
         "schema_version": crate::REPORT_SCHEMA_VERSION,
         "producer": crate::identity::producer(),
-        "clean": clean,
         "advisory_count": advisories.len(),
         "analysis_incomplete": incomplete
             .iter()
@@ -615,8 +633,9 @@ pub fn json_report_with_coverage(
 /// Prints the findings and the scan summary, including what the scan could recognize.
 ///
 /// `coverage` is the denominator behind "no findings": a report that prints
-/// "Clean" without it cannot be falsified, because a scan that recognized no
-/// sink at all looks exactly like an inspected-clean one.
+/// A no-findings headline without coverage cannot be falsified, because a scan
+/// that recognized no sink at all looks exactly like one that inspected the
+/// code and found nothing.
 #[allow(clippy::too_many_arguments)]
 pub fn print_results_with_coverage(
     advisories: &[Advisory],
@@ -776,7 +795,8 @@ pub fn print_results_with_coverage(
         _ => {
             let cwd = std::env::current_dir().ok();
             let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
-            let status = ScanStatus::compute(telemetry.unwrap_or(&empty_telem), incomplete);
+            let status =
+                status_with_coverage(telemetry.unwrap_or(&empty_telem), incomplete, coverage);
             let headline = no_findings_headline(status, coverage, telemetry);
             if let Some(out) = output_path {
                 let mut buf = Vec::new();
@@ -1734,7 +1754,10 @@ mod json_report_schema_tests {
     fn envelope_carries_schema_version_and_producer() {
         let report = json_report_with_coverage(&[adv()], &[], None, &[], None);
         assert_eq!(report["schema_version"], crate::REPORT_SCHEMA_VERSION);
-        assert_eq!(report["clean"], false);
+        assert!(
+            report.get("clean").is_none(),
+            "the report must not expose a clean verdict: {report}"
+        );
         assert_eq!(report["advisory_count"], 1);
         assert_eq!(report["advisories"].as_array().unwrap().len(), 1);
 
@@ -1748,9 +1771,9 @@ mod json_report_schema_tests {
     }
 
     #[test]
-    fn clean_report_still_has_the_envelope() {
+    fn empty_report_still_has_the_envelope() {
         let report = json_report_with_coverage(&[], &[], None, &[], None);
-        assert_eq!(report["clean"], true);
+        assert!(report.get("clean").is_none(), "{report}");
         assert_eq!(report["advisory_count"], 0);
         // The producer block is present even with no findings - a consumer
         // can always attribute the report.
@@ -1896,7 +1919,7 @@ mod json_report_schema_tests {
     }
 
     #[test]
-    fn coverage_denominator_counts_unsupported_sources_and_blocks_clean() {
+    fn coverage_denominator_counts_unsupported_sources_and_marks_partial() {
         let mut telem = frensense_engine::telemetry::ScanTelemetry::default();
         telem.input.submitted = 1;
         telem.input.scanned = 1;
@@ -1918,8 +1941,12 @@ mod json_report_schema_tests {
         assert_eq!(c["files_not_analyzed"], 1, "{report}");
         assert_eq!(c["files_unsupported"], 1, "{report}");
         assert_eq!(
-            report["analysis"]["clean"], false,
-            "a source file left unanalyzed is not clean: {report}"
+            report["analysis"]["status"], "partial",
+            "a source file left unanalyzed makes the scan partial: {report}"
+        );
+        assert!(
+            report.get("clean").is_none() && report["analysis"].get("clean").is_none(),
+            "no clean verdict on any surface: {report}"
         );
     }
 }
@@ -1937,12 +1964,12 @@ mod scan_status_tests {
     }
 
     #[test]
-    fn complete_on_clean_zero_files() {
+    fn complete_on_zero_files() {
         let telem = ScanTelemetry::default();
         assert_eq!(ScanStatus::compute(&telem, &[]), ScanStatus::Complete);
     }
 
-    fn clean_coverage() -> crate::policy::Coverage {
+    fn complete_coverage() -> crate::policy::Coverage {
         crate::policy::Coverage {
             files_found: 1,
             files_analyzed: 1,
@@ -1953,32 +1980,28 @@ mod scan_status_tests {
     }
 
     #[test]
-    fn clean_requires_every_recognized_site_decided() {
-        let mut coverage = clean_coverage();
-        assert!(ScanStatus::Complete.clean(true, &coverage));
-        coverage.unresolved_sites = 1;
-        assert!(
-            !ScanStatus::Complete.clean(true, &coverage),
-            "an undecided sink site is not clean"
+    fn coverage_gap_makes_status_partial() {
+        let telem = ScanTelemetry::default();
+        let mut coverage = complete_coverage();
+        assert_eq!(
+            crate::cli::reporting::status_with_coverage(&telem, &[], Some(&coverage)),
+            ScanStatus::Complete
         );
-    }
-
-    #[test]
-    fn clean_requires_every_found_file_analyzed() {
-        let mut coverage = clean_coverage();
         coverage.files_found = 2;
         coverage.files_unsupported = 1;
-        assert!(
-            !ScanStatus::Complete.clean(true, &coverage),
-            "a file never analyzed is not clean"
+        assert_eq!(
+            crate::cli::reporting::status_with_coverage(&telem, &[], Some(&coverage)),
+            ScanStatus::Partial,
+            "a file never analyzed makes the scan partial"
         );
     }
 
     #[test]
-    fn clean_still_requires_no_findings_and_a_complete_status() {
-        let coverage = clean_coverage();
-        assert!(!ScanStatus::Partial.clean(true, &coverage));
-        assert!(!ScanStatus::Complete.clean(false, &coverage));
+    fn status_label_never_asserts_clean() {
+        let coverage = complete_coverage();
+        let label = super::status_label(ScanStatus::Complete, 0, Some(&coverage), None);
+        assert_eq!(label, "No findings reported");
+        assert!(!label.to_ascii_lowercase().contains("clean"), "{label}");
     }
 
     #[test]
@@ -1989,7 +2012,7 @@ mod scan_status_tests {
             reason: "below-confidence".to_string(),
             count: 2,
         });
-        let coverage = clean_coverage();
+        let coverage = complete_coverage();
         let label = super::status_label(ScanStatus::Complete, 0, Some(&coverage), Some(&telem));
         assert!(
             label.contains("dropped below confidence"),
