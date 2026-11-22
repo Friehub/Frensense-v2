@@ -9,6 +9,20 @@ A quick look at what changed in each release, written for everyone (no compiler 
 
 ---
 
+## 0.9.1 - Sanitizers That Know What They Sanitize
+
+**A sanitizer now only clears the kind of risk it was actually proven to handle, so "sanitized" can no longer hide a different bug.**
+
+A sanitizer is code that makes a value safe — a SQL escaper, a URL validator, an allow-list checker. Until now, a sanitizer that showed up anywhere on a value's path counted as safe for *every* kind of sink. A helper written to stop SQL injection could therefore silence a command-injection warning about the same value. This release ties each sanitizer to the vulnerability classes it was proven to defeat.
+
+- **One sanitizer, one kind of risk.** A fact learned as "this makes SQL safe" clears SQL findings only; a URL check no longer validates a shell command, and an allow-list guard no longer covers an unrelated sink reached on the same branch. Under the hood each fact carries the class it was proven for and the engine matches the sink's class against it.
+- **Bundles say how much they should be trusted.** A bundle is now `certified`, `community` or `custom`. A custom bundle may add sinks, sources and policies but never sanitizers. A community bundle may ship a sanitizer only when it names both the class it defeats and the package it belongs to. Anything weaker is filtered out at load, so a thinly-evidenced community bundle cannot silence your findings.
+- **Policies can be retired without breaking anyone.** A bundle can mark a rule `deprecated` — it still fires, but is announced as deprecated and kept out of the default report — or `removed`, which drops it entirely. No more silently deleting a rule id that a pinned bundle still refers to.
+- **New ways to see and steer what is hidden.** `--show-suppressed` names the bundle sanitizer that silenced an argument and the classes it was proven for; `--disable-rule` and `--only` (also `[rules]` in `.frensense.toml`) choose which rules a run reports; `--config` points the run at a specific config file.
+- **Nothing to migrate.** Existing bundles keep loading with the old, unscoped reading of their sanitizers. Rebuild one as a v8 bundle and its sanitizers gain the class scope.
+
+---
+
 ## 0.9.0 - Explainable Scans and Sharper Sinks
 
 **A scan now shows its work at every stage, and more dangerous operations are recognized.**
