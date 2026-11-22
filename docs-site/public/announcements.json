@@ -1,13 +1,12 @@
 {
   "announcements": [
     {
-      "id": "release-v0.8.0",
+      "id": "release-v0.9.0",
       "display": "bar",
-      "title": "Frensense v0.8.0 is out",
-      "message": "The v0.8.0 release ships the engine purity refactor, scoped package-level facts, and a rebuilt corpus pipeline.",
-      "level": "info",
-      "link": { "text": "Read the changelog", "href": "/changelog" },
-      "iconColor": "#3b82f6"
+      "tone": "brand",
+      "title": "Frensense v0.9.0 is out",
+      "message": "v0.9.0 makes every scan explain itself: stage-by-stage summaries, call-level --explain output, and a wider set of recognized sinks.",
+      "link": { "text": "See what's new", "href": "/whats-new" }
     }
   ]
 }

@@ -47,7 +47,7 @@ terminal and a silent scan there would be a bug, not an ambiguity.
 | --- | --- |
 | `-b`, `--bundle <file>` | Load a `.frc` [bundle](/bundles) for this scan. `--corpus-bundle` is an older spelling of the same flag. |
 | `-l`, `--language <lang>` | Scan one language only: `c`, `go`, `javascript`, `python`, `rust`, `typescript`, `vue`. |
-| `-s`, `--severity <level>` | Lowest severity to report: `critical`, `warning` or `info`. Default `warning`, so `info` findings are hidden unless you ask. |
+| `-s`, `--severity <level>` | Lowest severity to report: `critical`, `high`, `medium`, `warning`, `low` or `info`. Default `warning`, so `low` and `info` findings are hidden unless you ask. |
 | `-p`, `--profile <name>` | `default`, `recommended` or `strict`. `strict` also reports hygiene rules such as function complexity. |
 | `--hygiene` | Report hygiene rules (for example, function complexity) under any profile. |
 | `--max-complexity <n>` | Complexity ceiling before a function is reported (default 25). |
@@ -75,7 +75,7 @@ will most often use:
 | --- | --- |
 | `advisory_count` | Number of findings. |
 | `advisories` | The findings. Each has `rule_id`, `severity`, `title`, `file_path`, `line`, `column`, `fingerprint` and `taint_steps`. |
-| `clean` | `true` when there are no findings. |
+| `clean` | `true` when the scan found nothing, read every file it found, decided every sink site it recognized, and dropped no finding below the confidence threshold. |
 | `analysis_incomplete` | Reasons the scan may have missed things (unsupported or partly parsed files, safety limits). Check this before you trust a clean result. |
 | `schema_version` | Version of this report format. |
 

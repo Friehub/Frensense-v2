@@ -73,6 +73,15 @@ class MaskingTests(unittest.TestCase):
         self.assertEqual(unit.text, "FZ0FZ and FZ1FZ and FZ2FZ")
         self.assertEqual(unit.tokens, ["`a`", "`b`", "`c`"])
 
+    def test_multiline_html_comment_is_masked_whole(self):
+        # An HTML comment may span lines. The whole span has to be masked, or
+        # its body reaches the translator and the closing `-->` is orphaned.
+        text = "before\n<!-- keep\nthis secret -->\nafter"
+        unit = td.mask(text)
+        self.assertEqual(unit.text, "before\nFZ0FZ\nafter")
+        self.assertEqual(unit.tokens, ["<!-- keep\nthis secret -->"])
+        self.assertEqual(td.unmask(unit.text, unit.tokens), text)
+
     def test_a_dropped_token_fails_the_build(self):
         with self.assertRaises(td.TranslationError):
             td.unmask("FZ0FZ only", ["`a`", "`b`"])

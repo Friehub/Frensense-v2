@@ -9,6 +9,22 @@ A quick look at what changed in each release, written for everyone (no compiler 
 
 ---
 
+## 0.9.0 - Explainable Scans and Sharper Sinks
+
+**A scan now shows its work at every stage, and more dangerous operations are recognized.**
+
+Frensense has always been able to say "clean" or "vulnerable"; 0.9.0 makes it easier to see *why* it reached that answer, and closes a set of gaps where a real sink was never matched.
+
+- **The summary accounts for every stage.** The scan summary now has one line per phase — parse and lower, graph, checks, taint, report — showing what each phase consumed and produced. A stage that read nothing or took too long is visible without a flag. The graph line counts the value-flow nodes and edges the taint phase walked, and the taint line follows the calls (`1,889 call(s) -> 17 sink call(s) -> 23 argument(s) walked`). The same numbers are in the JSON report under `analysis.graph` and `analysis.funnel`.
+- **`--explain` names the calls it flowed through.** When a backward walk crosses a library call the engine has no model for, it now prints `flowed through: callee` instead of hiding that assumption in the stop sites. The explanation also prints the pipeline behind the taint line — call sites skipped and why, calls that matched no sink, sinks armed, and findings each reporting-gate reason dropped — plus the busiest callees that matched no sink, so a large `not_a_sink` points at vocabulary you can teach rather than only a number. `--explain-json` gains an `arg` field, and a method receiver now reads as `receiver` instead of a slot number.
+- **More sinks and sources are recognized.** Property assignments (`el.innerHTML = user`, `el.outerHTML`) and JSX attributes such as `dangerouslySetInnerHTML` now report, and the finding points at the write itself. Destructured, rest and nested parameters, destructuring assignments, and Go parameters are bound so their values reach the sink. Quoted subscripts (`cmds['a']`) resolve to the same field as `cmds.a`, library objects that accumulate state (`ConfigParser`, `StringIO`) keep what was stored into them, inline delimiter escapes (`value.replace("'", "&apos;")`) act as sanitizers for the sinks they protect, and multi-hop barrel re-exports resolve deeper. Measured on the OWASP Python suite, the score moved from **0.339 to 0.392** (false positives 32 → 20).
+- **"Clean" means the scan decided.** When findings are suppressed or fall below the confidence threshold, the report now says `Status: No findings (N dropped below confidence threshold)` and sets `clean: false`, instead of reporting a clean scan. Unsupported files in a mixed-language tree no longer mark an otherwise complete scan as partial.
+- **Severity is one vocabulary everywhere.** The CLI `--severity` flag and the MCP `severity_threshold` now accept the same six labels — `critical`, `high`, `medium`, `warning`, `low`, `info` — and reject anything else before scanning. A severity authored in a corpus family or bundle now reaches the report instead of being overridden by the rule registry's default.
+- **The default pack knows more frameworks.** The shipped vocabulary now includes package-scoped facts for Next.js (`next/server`, `next/navigation`, `next/headers`, `next/cache`), Vue 3 and Pinia, NestJS (TypeORM and Mongoose), and Nuxt 3 / Nitro / ofetch.
+- **Truncation is no longer silent.** Safety caps that stop a use-after-free walk, a callee scan, or an SSA budget now record themselves in `truncations`, so an incomplete analysis cannot look clean. `FRENSdbg_CAPS` prints each cap firing during a debug run.
+
+---
+
 ## 0.8.2 - Honest Coverage
 
 **"Clean" never means "not analyzed": Frensense no longer reports clean when it couldn't scan a codebase.**
