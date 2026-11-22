@@ -2,9 +2,9 @@
 // Copyright (c) 2024-2026 Friehub. All rights reserved.
 // Commercial use requires a separate license: https://friehub.com/licensing
 
-use crate::builder::build_facts_bundle;
+use crate::builder::build_facts_bundle_with_trust;
 use crate::fact_extract::LearnedFact;
-use crate::format::load_bundle;
+use crate::format::{load_bundle, BundleTrust};
 use frensense_engine::analysis::taint::facts::LearnedFactEntry;
 use std::path::Path;
 
@@ -104,12 +104,23 @@ fn print_published_facts(facts: &[LearnedFact]) {
 
 /// Compile a corpus directory into an .frc facts bundle.
 pub fn run_facts_pipeline(corpus_dir: &Path, output_path: &Path) -> Result<(), String> {
-    let (bytes, facts) = build_facts_bundle(corpus_dir)?;
+    run_facts_pipeline_with_trust(corpus_dir, output_path, BundleTrust::Certified)
+}
+
+/// [`run_facts_pipeline`] with an explicit trust tier recorded in the header.
+pub fn run_facts_pipeline_with_trust(
+    corpus_dir: &Path,
+    output_path: &Path,
+    trust: BundleTrust,
+) -> Result<(), String> {
+    let (bytes, facts) = build_facts_bundle_with_trust(corpus_dir, trust)?;
 
     let loaded = load_bundle(&bytes)?;
     eprintln!(
-        "[facts] round-trip OK: {} learned facts in bundle",
-        loaded.learned_facts.len()
+        "[facts] round-trip OK: {} learned facts in bundle ({} effective at this trust tier, {} sanitizer scopes)",
+        loaded.learned_facts.len(),
+        loaded.effective_learned_facts().len(),
+        loaded.effective_sanitizer_scopes().len()
     );
 
     print_published_facts(&facts);

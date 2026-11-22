@@ -137,6 +137,7 @@ fn extract_facts_with(
                     call,
                     package,
                     guard,
+                    ..
                 } => match package {
                     Some(p) => format!("san:{p}:{call}:{guard}"),
                     None => format!("san:{call}:{guard}"),
@@ -567,6 +568,33 @@ fn extract_facts_with(
                 }
             }
         }
+        // Sanitizer scope is mandatory: a fact with no class scope cannot be
+        // safely applied (the engine would fall back to the legacy
+        // cross-class cut), and a bare ubiquitous name is rejected unless the
+        // family supplied a package/receiver scope.
+        if reject.is_none() {
+            if let Candidate::Sanitizer {
+                call,
+                package,
+                classes,
+                ..
+            } = &cand
+            {
+                if classes.is_empty() {
+                    reject = Some(
+                        "sanitizer candidate has no class scope: the family must declare `class:`"
+                            .to_string(),
+                    );
+                } else if package.is_none()
+                    && crate::lint::UBIQUITOUS_SANITIZERS
+                        .contains(&call.to_ascii_lowercase().as_str())
+                {
+                    reject = Some(format!(
+                        "sanitizer `{call}` is a ubiquitous name with no package/receiver scope"
+                    ));
+                }
+            }
+        }
         if let Some(reason) = reject {
             if std::env::var("FXDBG").is_ok() {
                 eprintln!("[gate] REJECT key={key} support={support} reason={reason}");
@@ -599,10 +627,28 @@ fn extract_facts_with(
                 .find(|f| &f.id == id)
                 .and_then(|f| f.language())
         });
+        // A learned sanitizer is scoped to the classes its voting families
+        // declare. Union (deduplicated, sorted) so a fact proven by two
+        // families covers both; the family on the wire is the first voter,
+        // for `--show-suppressed` provenance.
+        let mut classes: Vec<String> = fams
+            .iter()
+            .filter_map(|id| {
+                families
+                    .iter()
+                    .find(|f| &f.id == id)
+                    .and_then(|f| f.metadata.class.clone())
+            })
+            .collect();
+        classes.sort();
+        classes.dedup();
+        let family = fams.first().cloned();
         let entry = cand.to_learned_entry_scoped(lang);
 
         published.push(LearnedFact {
             entry,
+            classes,
+            family,
             support,
             status: if support >= 2 {
                 "confirmed"

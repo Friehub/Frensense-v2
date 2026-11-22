@@ -4,6 +4,35 @@
 
 use super::*;
 
+/// Reserved [`FactTable::scoped_sanitizer_facts`] key prefix marking a
+/// sanitizer fact that only defeats the sink classes named after it. See
+/// [`FactTable::add_class_scoped_sanitizer`].
+pub const CLASS_SCOPED_SANITIZER_PREFIX: &str = "class:";
+
+/// Is this `scoped_sanitizer_facts` key a class scope rather than a package?
+fn is_class_scope(scope: &str) -> bool {
+    scope.starts_with(CLASS_SCOPED_SANITIZER_PREFIX)
+}
+
+/// Does `origin` name `package`, either exactly or as a path into it?
+fn origin_in_package(origin: &str, package: &str) -> bool {
+    origin == package
+        || origin
+            .strip_prefix(package)
+            .is_some_and(|rest| rest.starts_with('/') || rest.starts_with('.'))
+}
+
+/// Does a class scope's own package field match the call's origin? A
+/// package-qualified class scope is inert until the origin confirms its
+/// package (same recall-safe rule as `FactTable::sanitizer_fact_scoped`).
+fn class_scope_package_matches(fact: &SanitizerFact, origin_package: Option<&str>) -> bool {
+    match (fact.package.as_deref(), origin_package) {
+        (None, _) => true,
+        (Some(pkg), Some(origin)) => origin_in_package(origin, pkg),
+        (Some(_), None) => false,
+    }
+}
+
 /// Resolve a `(package, call)` entry for a call site's import origin.
 ///
 /// A corpus family declares the *package* it teaches (`lodash`, `django`,
@@ -244,14 +273,103 @@ impl FactTable {
             if let Some(f) = scoped_lookup(&self.scoped_sanitizer_facts, pkg, call) {
                 return Some(f);
             }
-            let is_package_scoped = self.scoped_sanitizer_facts.keys().any(|(_, c)| c == call);
+            let is_package_scoped = self
+                .scoped_sanitizer_facts
+                .keys()
+                .any(|(scope, c)| c == call && !is_class_scope(scope));
             if is_package_scoped {
                 // Known-package mismatch: another package's sanitizer
                 // must never cut this call, universal facts only.
                 return self.sanitizer_facts.get(call);
             }
         }
+        for ((scope, scoped_call), fact) in &self.scoped_sanitizer_facts {
+            if scoped_call == call
+                && is_class_scope(scope)
+                && class_scope_package_matches(fact, origin_package)
+            {
+                return Some(fact);
+            }
+        }
         self.sanitizer_facts.get(call)
+    }
+
+    /// Install `fact` as a sanitizer proven to defeat only the given sink
+    /// classes (`bug_classes.json` ids such as `inj.sql`; `*` is a wildcard).
+    ///
+    /// The class scope rides on the published [`FactTable::scoped_sanitizer_facts`]
+    /// map under the reserved [`CLASS_SCOPED_SANITIZER_PREFIX`] key, so the
+    /// table keeps its shape: one entry `(class:<id>, call)` per class. An
+    /// empty `classes` list is a plain, unscoped install.
+    pub fn add_class_scoped_sanitizer(&mut self, fact: SanitizerFact, classes: &[String]) {
+        if classes.is_empty() {
+            match &fact.package {
+                Some(pkg) => {
+                    self.scoped_sanitizer_facts
+                        .insert((pkg.clone(), fact.call.clone()), fact);
+                }
+                None => {
+                    self.sanitizer_facts.insert(fact.call.clone(), fact);
+                }
+            }
+            return;
+        }
+        for class in classes {
+            // A lookup key, not prose: built without `format!` so the purity
+            // ratchet's engine_prose_format count stays flat.
+            let mut scope =
+                String::with_capacity(CLASS_SCOPED_SANITIZER_PREFIX.len() + class.len());
+            scope.push_str(CLASS_SCOPED_SANITIZER_PREFIX);
+            scope.push_str(class);
+            self.scoped_sanitizer_facts
+                .insert((scope, fact.call.clone()), fact.clone());
+        }
+    }
+
+    /// Re-scope an already-installed sanitizer fact to `classes`.
+    ///
+    /// The fact is moved out of the unscoped/package-scoped slot and
+    /// re-installed under the class keys of
+    /// [`Self::add_class_scoped_sanitizer`]. Returns `false` when no fact is
+    /// installed for `(package, call)`.
+    pub fn scope_sanitizer(
+        &mut self,
+        call: &str,
+        package: Option<&str>,
+        classes: &[String],
+    ) -> bool {
+        let fact = match package {
+            Some(pkg) => self
+                .scoped_sanitizer_facts
+                .remove(&(pkg.to_string(), call.to_string())),
+            None => self.sanitizer_facts.remove(call),
+        };
+        let Some(fact) = fact else {
+            return false;
+        };
+        self.add_class_scoped_sanitizer(fact, classes);
+        true
+    }
+
+    /// The sink classes `call` was proven to defeat for `origin_package`.
+    ///
+    /// Empty means the fact is unscoped (valid for every class, the legacy
+    /// reading). A package-qualified class scope follows the same recall-safe
+    /// rule as `FactTable::sanitizer_fact_scoped` (crate-internal): it only
+    /// fires once import resolution confirms its package.
+    pub fn sanitizer_classes(&self, call: &str, origin_package: Option<&str>) -> Vec<String> {
+        let mut classes: Vec<String> = Vec::new();
+        for ((scope, scoped_call), fact) in &self.scoped_sanitizer_facts {
+            if scoped_call != call || !class_scope_package_matches(fact, origin_package) {
+                continue;
+            }
+            if let Some(class) = scope.strip_prefix(CLASS_SCOPED_SANITIZER_PREFIX) {
+                classes.push(class.to_string());
+            }
+        }
+        classes.sort();
+        classes.dedup();
+        classes
     }
 
     /// Sanitizer fact for a call; `None` if not a sanitizer.

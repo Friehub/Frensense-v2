@@ -194,8 +194,8 @@ impl<'a> BackwardTaintEngine<'a> {
         // value-flow cannot see this: the guard is a sibling use, not a link
         // in the chain.
         if let Some(gm) = self.guard_maps.get(&cf)
-            && (gm.is_guarded(key.var, use_block)
-                || (cf == fi && gm.is_guarded(key.var, root_block)))
+            && (gm.is_guarded(key.var, use_block, state.sink_class.as_deref())
+                || (cf == fi && gm.is_guarded(key.var, root_block, state.sink_class.as_deref())))
         {
             state.saw_sanitized_root_only = true;
             record_cut(&mut state.cuts, "guard");
@@ -243,9 +243,29 @@ impl<'a> BackwardTaintEngine<'a> {
             &key,
             state.sink_role,
             state.sink_label.as_deref(),
+            Some(state.sink_name.as_str()),
             san_origin.as_deref(),
         ) {
             state.saw_sanitized_root_only = true;
+            if let Some(fact) = crate::analysis::forward::sanitizer_fact_defeating(
+                ir,
+                &self.facts,
+                &key,
+                state.sink_role,
+                state.sink_label.as_deref(),
+                Some(state.sink_name.as_str()),
+                san_origin.as_deref(),
+            ) {
+                let suppression = SanitizerSuppression {
+                    call: fact.call.clone(),
+                    classes: self
+                        .facts
+                        .sanitizer_classes(&fact.call, san_origin.as_deref()),
+                };
+                if !state.suppressions.contains(&suppression) {
+                    state.suppressions.push(suppression);
+                }
+            }
             record_cut(&mut state.cuts, "sanitizer");
             return true;
         }

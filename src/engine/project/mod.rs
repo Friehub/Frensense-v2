@@ -26,6 +26,10 @@ pub struct Engine {
     /// did NOT become an advisory (see [`crate::explain::ExplainRecord`]),
     /// surfaced via [`Engine::take_explain`] under `--explain`.
     pub(crate) explain: bool,
+    /// When `true` (`--show-suppressed`), also record flows silenced by a
+    /// bundle sanitizer fact, with its family and class provenance, even
+    /// without `--explain`.
+    pub(crate) show_suppressed: bool,
     /// When `true` (`--show-flows`), the taint advisory TEXT also embeds
     /// the full source→sink flow. `taint_steps`/SARIF `codeFlows` carry
     /// the path unconditionally now (WI-54); this knob only governs the
@@ -38,6 +42,10 @@ pub struct Engine {
     pub(crate) enable_hygiene: bool,
     /// Optional cyclomatic complexity limit override (`--max-complexity`).
     pub(crate) max_complexity: Option<usize>,
+    /// Rule ids suppressed by `--disable-rule` or `[rules] disable`.
+    pub(crate) disabled_rules: std::collections::BTreeSet<String>,
+    /// When set, only these rule ids are reported (`--only`).
+    pub(crate) only_rules: Option<std::collections::BTreeSet<String>>,
     /// Silent-finding records from the most recent `run` (when `explain`).
     pub(crate) explain_records: Vec<crate::explain::ExplainRecord>,
     /// Functions the per-function work budget pushed into the degraded
@@ -73,10 +81,13 @@ impl Engine {
             language_filter: None,
             min_confidence: 0.0,
             explain: false,
+            show_suppressed: false,
             show_flows: false,
             profile: crate::Profile::Default,
             enable_hygiene: false,
             max_complexity: None,
+            disabled_rules: std::collections::BTreeSet::new(),
+            only_rules: None,
             explain_records: Vec::new(),
             analysis_incomplete: Vec::new(),
             skipped_unsupported: Vec::new(),
@@ -114,6 +125,22 @@ impl Engine {
     /// [`Engine::take_explain`].
     pub fn set_explain(&mut self, on: bool) {
         self.explain = on;
+    }
+
+    /// Set the user's rule filters (`--disable-rule`, `--only`, config).
+    pub fn set_rule_filters(&mut self, disable: Vec<String>, only: Vec<String>) {
+        self.disabled_rules = disable.into_iter().collect();
+        if only.is_empty() {
+            self.only_rules = None;
+        } else {
+            self.only_rules = Some(only.into_iter().collect());
+        }
+    }
+
+    /// Enable `--show-suppressed`: record flows a bundle sanitizer fact
+    /// silenced, naming the fact, family and class.
+    pub fn set_show_suppressed(&mut self, on: bool) {
+        self.show_suppressed = on;
     }
 
     /// Enable `--show-flows`: taint advisories embed the full source→sink

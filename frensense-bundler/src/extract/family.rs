@@ -11,6 +11,13 @@ use std::path::Path;
 pub struct LearnedFact {
     /// The fact itself, bundle-ready.
     pub entry: LearnedFactEntry,
+    /// Sanitizer class scope (`bug_classes.json` ids) the voting families
+    /// proved. Published in the payload's `sanitizer_scopes` table, not
+    /// inside the fact, so the engine's `SanitizerFact` keeps its published
+    /// shape. Empty for every non-sanitizer fact.
+    pub classes: Vec<String>,
+    /// Corpus family that taught the fact, for suppression provenance.
+    pub family: Option<String>,
     /// Number of corpus variants that voted for this fact.
     pub support: u32,
     /// `confirmed` (support >= 2) or `provisional` (support = 1).
@@ -69,6 +76,30 @@ pub struct FamilyMetadata {
     /// synthesis: authors state the discriminator instead of hoping the
     /// twin diff collides with it (the Date-guard coincidence class).
     pub require_arg_keys: Vec<(usize, String)>,
+    /// Declared vulnerability class (`class:`), a `bug_classes.json` id such
+    /// as `inj.sql` or `net.ssrf`. This is the class a learned sanitizer is
+    /// scoped to: `isURL` in an SSRF family may not clear a command sink.
+    pub class: Option<String>,
+    /// Declared purpose (`purpose:`): `knowledge`, `precision` or `anchor`.
+    pub purpose: Option<String>,
+    /// Declared reporting tier for its authored policy (`tier:`): `stable`,
+    /// `beta`, `hygiene` or `experimental`. Only certified corpus bundles can
+    /// ship a `stable` policy; the loader caps every other trust tier at
+    /// `hygiene`. Absent = the consumer's registry default.
+    pub tier: Option<String>,
+    /// Declared lifecycle for its authored policy (`status:`): `active`,
+    /// `deprecated` or `removed`. `deprecated` loads hidden by default and
+    /// announces itself when enabled; `removed` is dropped at load.
+    pub status: Option<String>,
+    /// `policy: authored` marks a family whose Check/Policy facts are
+    /// explicitly authored. Policies are never inferred from a family diff:
+    /// without this declaration (or an explicit `guard:` / `require-arg-key:`
+    /// requirement) the proposal stage emits no policy fact.
+    pub policy_authored: bool,
+    /// Explicitly declared sanitizer calls (`sanitizer: name[, name...]`).
+    /// An explicit declaration is what the lint can scope-check; automatic
+    /// delta sanitizers are linted against their family's `class:` instead.
+    pub sanitizers: Vec<String>,
 }
 
 impl FamilyMetadata {
@@ -141,6 +172,23 @@ impl FamilyMetadata {
                     meta.unbounded_product = value.eq_ignore_ascii_case("true");
                 }
                 "package" => meta.package = Some(value.to_string()),
+                "class" => meta.class = Some(value.to_string()),
+                "purpose" => meta.purpose = Some(value.to_string()),
+                "tier" => meta.tier = Some(value.to_ascii_lowercase()),
+                "status" => meta.status = Some(value.to_ascii_lowercase()),
+                "policy" => {
+                    meta.policy_authored = matches!(
+                        value.to_ascii_lowercase().as_str(),
+                        "authored" | "true" | "yes"
+                    );
+                }
+                "sanitizer" => {
+                    for name in split_csv_keys(value) {
+                        if !meta.sanitizers.contains(&name) {
+                            meta.sanitizers.push(name);
+                        }
+                    }
+                }
                 "guard" => {
                     for g in split_csv_keys(value) {
                         if !meta.guards.contains(&g) {

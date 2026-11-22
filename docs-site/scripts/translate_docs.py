@@ -112,7 +112,7 @@ SLOT = re.compile(r"\x00(\d+)\x00")
 # Inline constructs whose contents must not reach the translator.
 MASKED = (
     re.compile(r"(`+)(?:(?!\1).)*?\1"),          # inline code
-    re.compile(r"<!--.*?-->"),                    # html comment
+    re.compile(r"<!--[\s\S]*?-->"),               # html comment (may span lines)
     re.compile(r"</?[A-Za-z][^>]*>"),             # html / Vue component
     re.compile(r"\]\([^)\s]*(?:\s+\"[^\"]*\")?\)"),  # the target half of a link
     re.compile(r"https?://[^\s)\]]+"),            # bare url

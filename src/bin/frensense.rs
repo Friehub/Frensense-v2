@@ -246,6 +246,18 @@ fn print_help() {
     println!(
         "  --explain-json <file>      Write every silent sink argument, with the value the engine could not resolve, as JSON (implies --explain)"
     );
+    println!(
+        "  --show-suppressed          Show flows silenced by a bundle sanitizer fact, naming the fact, family and class"
+    );
+    println!(
+        "  --disable-rule <id>        Suppress a rule id (repeatable or comma-separated); per bundle/rule"
+    );
+    println!(
+        "  --only <id[,id]>           Report only these rule ids (repeatable or comma-separated)"
+    );
+    println!(
+        "  --config <path>            Project config file (default: .frensense.toml; [rules] disable/only)"
+    );
     println!("  --no-progress              Disable real-time scan progress bar and updates");
     println!("  -h, --help                 Print this help");
     println!(
@@ -867,6 +879,8 @@ fn main() -> Result<()> {
     engine.set_enable_hygiene(options.enable_hygiene);
     engine.set_max_complexity(options.max_complexity);
     engine.set_explain(options.explain);
+    engine.set_show_suppressed(options.show_suppressed);
+    engine.set_rule_filters(options.disable_rules.clone(), options.only_rules.clone());
     engine.set_show_flows(options.show_flows);
 
     let show_progress = !options.no_progress;
@@ -907,13 +921,15 @@ fn main() -> Result<()> {
                 e2.set_enable_hygiene(options.enable_hygiene);
                 e2.set_max_complexity(options.max_complexity);
                 e2.set_explain(options.explain);
+                e2.set_show_suppressed(options.show_suppressed);
+                e2.set_rule_filters(options.disable_rules.clone(), options.only_rules.clone());
                 e2.set_show_flows(options.show_flows);
                 all.extend(e2.run_observed(f, &mut progress)?);
                 incomplete.extend(e2.take_incomplete());
                 skipped_unsupported.extend(e2.take_skipped_unsupported());
                 telemetry.merge(e2.take_telemetry());
                 coverage.merge(e2.take_coverage());
-                if options.explain {
+                if options.explain || options.show_suppressed {
                     explain_records.extend(e2.take_explain());
                     for (tier, count) in e2.take_hidden_by_tier() {
                         *hidden_by_tier.entry(tier).or_insert(0) += count;
@@ -943,7 +959,7 @@ fn main() -> Result<()> {
             skipped_unsupported.extend(engine.take_skipped_unsupported());
             telemetry.merge(engine.take_telemetry());
             coverage.merge(engine.take_coverage());
-            if options.explain {
+            if options.explain || options.show_suppressed {
                 explain_records.extend(engine.take_explain());
                 for (tier, count) in engine.take_hidden_by_tier() {
                     *hidden_by_tier.entry(tier).or_insert(0) += count;
@@ -961,7 +977,7 @@ fn main() -> Result<()> {
     skipped_unsupported.sort();
     skipped_unsupported.dedup();
 
-    if options.explain {
+    if options.explain || options.show_suppressed {
         print_explain(&explain_records, &hidden_by_tier);
         print_explain_coverage(&coverage, &skipped_unsupported, Some(&telemetry));
     }

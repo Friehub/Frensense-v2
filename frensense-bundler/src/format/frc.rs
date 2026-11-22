@@ -42,7 +42,7 @@ use std::fmt;
 /// or the fact-entry vocabulary requires a bump here. The engine's
 /// `FACT_VOCABULARY_FINGERPRINT` ratchet catches vocabulary movement; this
 /// number catches layout movement. `docs/FORMATS.md` records both.
-pub const BUNDLE_VERSION: u32 = 7;
+pub const BUNDLE_VERSION: u32 = 8;
 
 pub const BUNDLE_MAGIC: &[u8; 4] = b"FRC1";
 
@@ -135,6 +135,79 @@ pub struct BundleHeader {
     /// Engine version string at write time. Diagnostics only.
     #[serde(default)]
     pub built_by_engine: Option<String>,
+    /// Where this bundle came from and what it may ship (v8+).
+    #[serde(default)]
+    pub trust: BundleTrust,
+}
+
+/// Where a bundle came from, and therefore which fact kinds it may ship.
+///
+/// - [`Certified`](Self::Certified): first-party, replay-gated; may ship
+///   sanitizers and Stable policies.
+/// - [`Community`](Self::Community): third-party; may ship sanitizers only
+///   when they are class-scoped and name-scoped, and policies only at the
+///   Hygiene tier.
+/// - [`Custom`](Self::Custom): locally assembled or remotely fetched; may
+///   only add sinks, sources and policies, never sanitizers.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BundleTrust {
+    /// First-party, replay-gated corpus bundle.
+    Certified,
+    /// Third-party community bundle.
+    #[default]
+    Community,
+    /// Locally assembled or remotely fetched bundle.
+    Custom,
+}
+
+impl BundleTrust {
+    /// Does this tier permit shipping sanitizer facts at all?
+    #[must_use]
+    pub fn may_ship_sanitizers(self) -> bool {
+        !matches!(self, Self::Custom)
+    }
+
+    /// May a sanitizer of this scope ship under this tier?
+    #[must_use]
+    pub fn may_ship_sanitizer(self, classes: &[String], package: Option<&str>) -> bool {
+        match self {
+            Self::Certified => true,
+            // Community: class-scoped and name-scoped (package/receiver).
+            Self::Community => !classes.is_empty() && package.is_some(),
+            Self::Custom => false,
+        }
+    }
+
+    /// May a policy of this tier ship at `tier`? Only certified bundles may
+    /// publish default-on Stable policies; the others are capped at Hygiene.
+    #[must_use]
+    pub fn may_ship_policy_tier(self, tier: &str) -> bool {
+        match self {
+            Self::Certified => true,
+            Self::Community | Self::Custom => tier.eq_ignore_ascii_case("hygiene"),
+        }
+    }
+}
+
+/// The v7 header, kept so v7 bundles keep loading after the v8 trust field
+/// widened the shape. Do not use for new writes.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct BundleHeaderV7 {
+    #[allow(dead_code)]
+    magic: [u8; 4],
+    #[allow(dead_code)]
+    version: u32,
+    #[allow(dead_code)]
+    pattern_count: u32,
+    #[allow(dead_code)]
+    checksum: [u8; 32],
+    #[allow(dead_code)]
+    vocabulary: Option<u64>,
+    #[allow(dead_code)]
+    requires_engine: Option<EngineRequirement>,
+    #[allow(dead_code)]
+    built_by_engine: Option<String>,
 }
 
 /// The v6 header, kept only so old bundles keep loading. Do not use for new
@@ -156,8 +229,8 @@ struct BundleHeaderV6 {
 }
 
 impl BundleHeader {
-    /// Header for a v7 write, recording the current vocabulary fingerprint and
-    /// the engine that built it.
+    /// Header for a v8 write, recording the current vocabulary fingerprint,
+    /// the engine that built it, and the certified trust tier.
     #[must_use]
     pub fn current(pattern_count: u32, checksum: [u8; 32]) -> Self {
         Self {
@@ -168,6 +241,7 @@ impl BundleHeader {
             vocabulary: Some(frensense_engine::analysis::taint::facts::FACT_VOCABULARY_FINGERPRINT),
             requires_engine: None,
             built_by_engine: Some(frensense_engine::VERSION.to_string()),
+            trust: BundleTrust::Certified,
         }
     }
 
@@ -183,6 +257,7 @@ impl BundleHeader {
             vocabulary: None,
             requires_engine: None,
             built_by_engine: None,
+            trust: BundleTrust::Community,
         }
     }
 
@@ -214,8 +289,26 @@ pub fn write_bundle_pinned<T: serde::Serialize>(
     pattern_count: u32,
     requires_engine: EngineRequirement,
 ) -> Result<Vec<u8>, String> {
+    write_bundle_pinned_with_trust(
+        payload,
+        pattern_count,
+        requires_engine,
+        BundleTrust::Certified,
+    )
+}
+
+/// [`write_bundle_pinned`] with an explicit trust tier. A `Community` bundle
+/// is subject to the loader's tier rules (class- and name-scoped sanitizers,
+/// policies capped at Hygiene).
+pub fn write_bundle_pinned_with_trust<T: serde::Serialize>(
+    payload: &T,
+    pattern_count: u32,
+    requires_engine: EngineRequirement,
+    trust: BundleTrust,
+) -> Result<Vec<u8>, String> {
     let mut header = BundleHeader::current(pattern_count, [0; 32]);
     header.requires_engine = Some(requires_engine);
+    header.trust = trust;
     write_bundle_with_header(payload, header)
 }
 
@@ -303,7 +396,22 @@ pub fn read_bundle_parts(bytes: &[u8]) -> Result<(BundleHeader, &[u8]), String> 
         ));
     }
 
-    let header: BundleHeader = if version < BUNDLE_VERSION {
+    let header: BundleHeader = if version == 7 {
+        // v7 layout: the pre-trust shape, widened with the conservative
+        // community default (no bundle written before v8 was certified).
+        let legacy: BundleHeaderV7 =
+            bincode::deserialize(header_data).map_err(|e| e.to_string())?;
+        BundleHeader {
+            magic: legacy.magic,
+            version: legacy.version,
+            pattern_count: legacy.pattern_count,
+            checksum: legacy.checksum,
+            vocabulary: legacy.vocabulary,
+            requires_engine: legacy.requires_engine,
+            built_by_engine: legacy.built_by_engine,
+            trust: BundleTrust::Community,
+        }
+    } else if version < 7 {
         // v6-and-earlier layout: decode the frozen shape, then widen it.
         let legacy: BundleHeaderV6 =
             bincode::deserialize(header_data).map_err(|e| e.to_string())?;
@@ -315,6 +423,7 @@ pub fn read_bundle_parts(bytes: &[u8]) -> Result<(BundleHeader, &[u8]), String> 
             vocabulary: None,
             requires_engine: None,
             built_by_engine: None,
+            trust: BundleTrust::Community,
         }
     } else {
         bincode::deserialize(header_data).map_err(|e| e.to_string())?
@@ -464,7 +573,7 @@ mod tests {
     /// The prefix peek agrees with the decoded header for every shape.
     #[test]
     fn version_prefix_matches_decoded_header() {
-        for version in [6u32, 7] {
+        for version in [6u32, 8] {
             let header = if version == 6 {
                 BundleHeader::legacy(3, [0; 32])
             } else {

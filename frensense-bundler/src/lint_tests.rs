@@ -567,8 +567,9 @@ fn path_block() -> String {
      // improvement: Require the configured path predicate to run before the write\n\
      // cwe: CWE-22\n\
      // severity: high\n\
-     // class: path.traversal\n\
+     // class: file.traversal\n\
      // purpose: precision\n\
+     // policy: authored\n\
      // shape: policy, guard call\n\
      // check-call: isSafePath\n\
      // source: synthetic: lint teachability test\n"

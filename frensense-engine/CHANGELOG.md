@@ -10,6 +10,34 @@ Built-in vocabulary tables live in `frensense-packgen`; the `.frc` envelope
 lives in `frensense-bundler`. Their changes appear here only when they alter
 what this crate does.
 
+## [0.9.1]
+
+### Added
+
+- Class-scoped sanitizers. A sanitizer fact can be scoped to the sink classes
+  it was proven to defeat (`inj.sql`, `net.ssrf`, — `*` is a wildcard), and it
+  then only clears taint for a sink of one of those classes. `SinkFinding`
+  gains `suppressions` (`SanitizerSuppression`): the bundle fact that silenced
+  each argument and the classes it was proven for, so `--show-suppressed` can
+  audit what hid a finding.
+- `FactTable::add_class_scoped_sanitizer`, `FactTable::scope_sanitizer`,
+  `FactTable::sanitizer_classes` and `CLASS_SCOPED_SANITIZER_PREFIX`: class
+  scope is installed on the published `scoped_sanitizer_facts` map under the
+  reserved `class:<id>` key, so the published fact types (`SanitizerFact`,
+  `PolicyFact`, `LearnedFactEntry`) keep their existing shape and no wire
+  variant was added.
+- Guard-style sanitizers are class-aware: a guard proven for `net.ssrf` no
+  longer validates an `inj.command` sink reached on the guarded branch.
+- Config-declared sinks (`TaintConfig::sinks`) resolve their class from the
+  call name when no vocabulary label exists, so class matching also covers
+  sinks a consumer declared itself.
+
+### Changed
+
+- `FactTable::sanitizer_fact_scoped` also resolves class-scoped facts (an
+  origin-gated class scope stays inert until import resolution confirms its
+  package). `FactTable::sanitizer_fact` keeps its universal-only reading.
+
 ## [0.9.0]
 
 ### Added

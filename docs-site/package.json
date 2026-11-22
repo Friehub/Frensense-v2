@@ -3,9 +3,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vitepress dev",
-    "prebuild": "python3 ../.github/scripts/blog_provenance.py check && python3 scripts/check_announcements.py",
-    "build": "vitepress build",
+    "dev": "python3 scripts/sync_announcements.py && vitepress dev",
+    "prebuild": "python3 ../.github/scripts/blog_provenance.py check",
+    "build": "python3 scripts/sync_announcements.py && python3 scripts/check_announcements.py && vitepress build",
     "preview": "vitepress preview"
   },
   "devDependencies": {

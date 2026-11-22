@@ -11,7 +11,7 @@
 
 use frensense_engine::analysis::taint::facts::{AuthoredPolicyEntry, LearnedFactEntry};
 
-use super::frc::{read_bundle_parts, BundleHeader};
+use super::frc::{read_bundle_parts, BundleHeader, BundleTrust};
 
 /// Per-family advisory metadata.
 ///
@@ -569,8 +569,56 @@ pub struct BundlePayloadV6 {
     pub policy_pack: Vec<AuthoredPolicyEntry>,
 }
 
+/// Class scope published for a sanitizer fact with the same `(call,
+/// package)` in the same payload.
+///
+/// v8 moved this out of `LearnedFactEntry::Sanitizer` and out of the engine's
+/// `SanitizerFact`, whose published shape must not change: the fact stays a
+/// plain sanitizer, and the consumer applies the scope with
+/// [`frensense_engine::analysis::taint::facts::FactTable::scope_sanitizer`].
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct SanitizerScope {
+    /// Sanitizing call name the scope applies to.
+    pub call: String,
+    /// Package qualification the scope applies to (`None` = unscoped).
+    pub package: Option<String>,
+    /// Vulnerability classes the sanitizer defeats (`*` = wildcard).
+    pub classes: Vec<String>,
+    /// Corpus family that taught the sanitizer, for suppression provenance.
+    pub family: Option<String>,
+}
+
+/// Reporting metadata published for a policy fact with the same `rule` in the
+/// same payload: its precision tier and lifecycle state.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct PolicyMeta {
+    /// Rule id of the policy this decorates.
+    pub rule: String,
+    /// Reporting tier (`stable`, `beta`, `hygiene`, `experimental`).
+    pub tier: String,
+    /// Lifecycle: `active` (default), `deprecated` or `removed`.
+    pub status: String,
+}
+
+/// The v8 payload: v6 facts plus the metadata tables that the engine's
+/// published fact types cannot carry.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct BundlePayloadV8 {
+    pub patterns: Vec<BundlePattern>,
+    #[serde(default)]
+    pub learned_facts: Vec<LearnedFactEntry>,
+    #[serde(default)]
+    pub policy_pack: Vec<AuthoredPolicyEntry>,
+    /// Class scope for sanitizer facts in `learned_facts`.
+    #[serde(default)]
+    pub sanitizer_scopes: Vec<SanitizerScope>,
+    /// Tier/lifecycle for policy facts in `learned_facts`.
+    #[serde(default)]
+    pub policy_meta: Vec<PolicyMeta>,
+}
+
 /// Alias for the latest bundle payload.
-pub type BundlePayload = BundlePayloadV6;
+pub type BundlePayload = BundlePayloadV8;
 
 #[derive(Debug, Clone)]
 pub struct LoadedBundle {
@@ -580,6 +628,131 @@ pub struct LoadedBundle {
     pub learned_facts: Vec<LearnedFactEntry>,
     /// Authored policy entries (empty for v4 and legacy bundles).
     pub policy_pack: Vec<AuthoredPolicyEntry>,
+    /// Sanitizer class scopes (empty before v8).
+    pub sanitizer_scopes: Vec<SanitizerScope>,
+    /// Policy tier/lifecycle metadata (empty before v8).
+    pub policy_meta: Vec<PolicyMeta>,
+}
+
+impl LoadedBundle {
+    /// The facts this bundle's trust tier actually permits it to ship.
+    ///
+    /// Custom bundles are additive-only: sinks, sources and policies, no
+    /// sanitizers. Community bundles may ship a sanitizer only when it is
+    /// both class-scoped and name-scoped (package/receiver). Certified
+    /// bundles ship everything. This is the single filtering point every
+    /// consumer must use; reading `learned_facts` directly would re-open the
+    /// cross-class blind spot the tier exists to close.
+    #[must_use]
+    pub fn effective_learned_facts(&self) -> Vec<LearnedFactEntry> {
+        let trust = self.header.trust;
+        let mut out = Vec::with_capacity(self.learned_facts.len());
+        for entry in &self.learned_facts {
+            match entry {
+                LearnedFactEntry::Sanitizer { call, package, .. }
+                | LearnedFactEntry::LanguageSanitizer { call, package, .. } => {
+                    let classes = self
+                        .sanitizer_scopes
+                        .iter()
+                        .find(|s| &s.call == call && &s.package == package)
+                        .map(|s| s.classes.as_slice())
+                        .unwrap_or(&[]);
+                    if trust.may_ship_sanitizer(classes, package.as_deref()) {
+                        out.push(entry.clone());
+                    }
+                }
+                LearnedFactEntry::Policy { rule, .. }
+                | LearnedFactEntry::PolicyScoped { rule, .. } => {
+                    // Lifecycle rides in the payload's `policy_meta` table:
+                    // `removed` drops the rule, while `deprecated` still loads
+                    // (a pinned bundle keeps its behaviour) but is announced
+                    // and demoted to Info so the default severity floor hides
+                    // it.
+                    let status = self
+                        .policy_meta
+                        .iter()
+                        .find(|m| &m.rule == rule)
+                        .map(|m| m.status.as_str())
+                        .unwrap_or("");
+                    if status.eq_ignore_ascii_case("removed") {
+                        continue;
+                    }
+                    let mut kept = entry.clone();
+                    if status.eq_ignore_ascii_case("deprecated") {
+                        match &mut kept {
+                            LearnedFactEntry::Policy {
+                                message, severity, ..
+                            }
+                            | LearnedFactEntry::PolicyScoped {
+                                message, severity, ..
+                            } => {
+                                *message = format!("[deprecated] {message}");
+                                *severity = "info".to_string();
+                            }
+                            _ => {}
+                        }
+                    }
+                    out.push(kept);
+                }
+                _ => out.push(entry.clone()),
+            }
+        }
+        out
+    }
+
+    /// The sanitizer class scopes this bundle's trust tier permits it to ship.
+    ///
+    /// One entry per sanitizer fact that survived
+    /// [`Self::effective_learned_facts`]. A consumer installs the fact from
+    /// the entry list, then applies the scope with
+    /// [`frensense_engine::analysis::taint::facts::FactTable::scope_sanitizer`].
+    #[must_use]
+    pub fn effective_sanitizer_scopes(&self) -> Vec<&SanitizerScope> {
+        self.sanitizer_scopes
+            .iter()
+            .filter(|scope| {
+                self.header
+                    .trust
+                    .may_ship_sanitizer(&scope.classes, scope.package.as_deref())
+                    && self.learned_facts.iter().any(|entry| {
+                        matches!(
+                            entry,
+                            LearnedFactEntry::Sanitizer { call, package, .. }
+                                | LearnedFactEntry::LanguageSanitizer { call, package, .. }
+                                if call == &scope.call && package == &scope.package
+                        )
+                    })
+            })
+            .collect()
+    }
+
+    /// Reporting tier this bundle declares for `rule`, already capped by the
+    /// bundle's trust tier. `None` means the consumer's rule registry decides
+    /// (a certified bundle declared nothing).
+    #[must_use]
+    pub fn policy_tier(&self, rule: &str) -> Option<&str> {
+        if let Some(meta) = self.policy_meta.iter().find(|m| m.rule == rule) {
+            if meta.status.eq_ignore_ascii_case("removed") {
+                return None;
+            }
+            if !meta.tier.is_empty() {
+                // Tier cap: only certified bundles may ship default-on Stable
+                // policies; community and custom bundles are capped at
+                // Hygiene so they cannot add noisy default-on findings.
+                return Some(if self.header.trust.may_ship_policy_tier(&meta.tier) {
+                    meta.tier.as_str()
+                } else {
+                    "hygiene"
+                });
+            }
+        }
+        // No declared tier: the registry default is Stable, which only a
+        // certified bundle may ship.
+        match self.header.trust {
+            BundleTrust::Certified => None,
+            _ => Some("hygiene"),
+        }
+    }
 }
 
 pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
@@ -591,49 +764,70 @@ pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
     // - == 5: frozen v5 payload with LearnedFactEntryV5 converted to modern entries
     // - == 4: frozen v4 payload with V4Pattern and LearnedFactEntryV5 converted to modern entries
     // - < 4: legacy pattern vector
-    let (patterns, learned_facts, policy_pack) = if header.version >= 6 {
-        let payload: BundlePayloadV6 = bincode::deserialize(payload_bytes)
-            .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
-        (payload.patterns, payload.learned_facts, payload.policy_pack)
-    } else if header.version == 5 {
-        let payload: BundlePayloadV5 = bincode::deserialize(payload_bytes)
-            .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
-        (
-            payload.patterns,
-            payload
-                .learned_facts
-                .into_iter()
-                .map(LearnedFactEntry::from)
-                .collect(),
-            payload.policy_pack,
-        )
-    } else {
-        match bincode::deserialize::<V4Payload>(payload_bytes) {
-            Ok(payload) => (
-                payload
-                    .patterns
-                    .into_iter()
-                    .map(BundlePattern::from)
-                    .collect(),
+    let (patterns, learned_facts, policy_pack, sanitizer_scopes, policy_meta) =
+        if header.version >= 8 {
+            let payload: BundlePayloadV8 = bincode::deserialize(payload_bytes)
+                .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
+            (
+                payload.patterns,
+                payload.learned_facts,
+                payload.policy_pack,
+                payload.sanitizer_scopes,
+                payload.policy_meta,
+            )
+        } else if header.version >= 6 {
+            let payload: BundlePayloadV6 = bincode::deserialize(payload_bytes)
+                .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
+            (
+                payload.patterns,
+                payload.learned_facts,
+                payload.policy_pack,
+                Vec::new(),
+                Vec::new(),
+            )
+        } else if header.version == 5 {
+            let payload: BundlePayloadV5 = bincode::deserialize(payload_bytes)
+                .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
+            (
+                payload.patterns,
                 payload
                     .learned_facts
                     .into_iter()
                     .map(LearnedFactEntry::from)
                     .collect(),
+                payload.policy_pack,
                 Vec::new(),
-            ),
-            Err(e) => match bincode::deserialize::<Vec<LegacyPattern>>(payload_bytes) {
-                Ok(_) => {
-                    tracing::warn!(
-                        "legacy fingerprint bundle loaded (version {}); no facts available",
-                        header.version
-                    );
-                    (Vec::new(), Vec::new(), Vec::new())
-                }
-                Err(_) => return Err(format!("Failed to deserialize bundle: {}", e)),
-            },
-        }
-    };
+                Vec::new(),
+            )
+        } else {
+            match bincode::deserialize::<V4Payload>(payload_bytes) {
+                Ok(payload) => (
+                    payload
+                        .patterns
+                        .into_iter()
+                        .map(BundlePattern::from)
+                        .collect(),
+                    payload
+                        .learned_facts
+                        .into_iter()
+                        .map(LearnedFactEntry::from)
+                        .collect(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                ),
+                Err(e) => match bincode::deserialize::<Vec<LegacyPattern>>(payload_bytes) {
+                    Ok(_) => {
+                        tracing::warn!(
+                            "legacy fingerprint bundle loaded (version {}); no facts available",
+                            header.version
+                        );
+                        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
+                    }
+                    Err(_) => return Err(format!("Failed to deserialize bundle: {}", e)),
+                },
+            }
+        };
 
     if patterns.len() < header.pattern_count as usize {
         tracing::warn!(
@@ -648,6 +842,8 @@ pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
         patterns,
         learned_facts,
         policy_pack,
+        sanitizer_scopes,
+        policy_meta,
     })
 }
 
@@ -756,10 +952,10 @@ mod tests {
         assert_eq!(*package, None, "v5 facts convert with package: None");
     }
 
-    /// v6 round-trip preserves package metadata and policy pack.
+    /// A payload round-trip preserves package metadata and policy pack.
     #[test]
     fn v6_round_trip_preserves_package_and_policy_pack() {
-        let payload = BundlePayloadV6 {
+        let payload = BundlePayloadV8 {
             patterns: vec![],
             learned_facts: vec![LearnedFactEntry::Sink {
                 call: "query".to_string(),
@@ -776,9 +972,11 @@ mod tests {
                 severity: "critical".to_string(),
                 package: Some("checkout-lib".to_string()),
             })],
+            sanitizer_scopes: Vec::new(),
+            policy_meta: Vec::new(),
         };
-        // `write_bundle` always stamps the current envelope version; a v6
-        // payload is a valid *payload* under it (v7 only widens the header).
+        // `write_bundle` always stamps the current envelope version, so the
+        // payload must be the current layout.
         let bytes = write_bundle(&payload, 0).expect("write");
         let loaded = load_bundle(&bytes).expect("bundle loads");
         assert_eq!(loaded.header.version, crate::format::BUNDLE_VERSION);

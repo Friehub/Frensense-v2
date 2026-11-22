@@ -142,6 +142,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 path: TaintPath::default(),
                 cut_reasons: vec!["value-const"],
                 cut_sites: Vec::new(),
+                suppressions: Vec::new(),
                 sink_span: call_dest.and_then(|d| ir.var_span(d)),
             });
         }
@@ -635,6 +636,13 @@ impl<'a> BackwardTaintEngine<'a> {
             let mut state = ExploreState {
                 sink_role: site.role,
                 sink_label: site.label.map(str::to_string),
+                sink_name: site.name.to_string(),
+                sink_class: frensense_lang::severity::resolved_sink_class(
+                    site.role,
+                    site.label,
+                    Some(site.name),
+                )
+                .map(str::to_string),
                 ..Default::default()
             };
             state.seen_nodes.insert((fi, arg_node));
@@ -724,6 +732,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 path,
                 cut_reasons: state.cuts.clone(),
                 cut_sites: state.cut_sites.clone(),
+                suppressions: state.suppressions.clone(),
                 // Span of the SINK CALL itself, not the tainted operand's
                 // definition: reports must point at the line the user fixes.
                 // (Reporting the operand's def site put `search.ts` SQLi at

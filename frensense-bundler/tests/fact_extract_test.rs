@@ -51,42 +51,32 @@ fn test_group_families_from_directory() {
 
 #[test]
 fn test_extract_sanitizer_fact_from_healthy_pair() {
-    // Positive: tainted value flows straight into a sink (alerts at baseline).
-    // Negative: same flow but guarded by a `.test()` allowlist, engine
-    // doesn't know `test` yet → negative alerts (FP). The family proposes
-    // `test` as a guard sanitizer; the replay gate verifies the family
-    // separates with it and the fact is published.
-    // The family declares its class: the replay gate scores a taint finding
-    // only when it names one, because that is what a consumer reports.
+    // Positive: a request value flows into a config-declared SQL sink (alerts
+    // at baseline). Negative: the same flow is guarded by an allowlist
+    // predicate the engine does not know yet, so the negative alerts (FP).
+    // The family proposes `isSafeQuery` scoped to `inj.sql`; the replay gate
+    // must separate the family with it and publish the fact. Config sinks
+    // carry no vocabulary label, so this also checks the name->class fallback.
     let pos = r#"
 // [frensense]
-// observation: A request field is evaluated as code
-// impact: An attacker can run arbitrary code in the process
-// improvement: Validate the value against an allowlist before evaluating it
-// cwe: CWE-94
+// observation: A request field is concatenated into a SQL query
+// impact: An attacker can change the query's logic
+// improvement: Use a bound parameter instead of concatenation
+// cwe: CWE-89
 // severity: high
-// class: inj.code
-import express from "express";
-const router = express.Router();
-router.post("/p", (req: any, res: any) => {
+// class: inj.sql
+function handler(req: any) {
     const id = req.body.id;
-    eval(id);
-    res.json({});
-});
-export default router;
+    db.query(id);
+}
 "#;
     let neg = r#"
-import express from "express";
-const router = express.Router();
-const SAFE = /^[a-z0-9]+$/;
-router.post("/p", (req: any, res: any) => {
+function handler(req: any) {
     const id = req.body.id;
-    if (SAFE.test(id)) {
-        eval(id);
+    if (isSafeQuery(id)) {
+        db.query(id);
     }
-    res.json({});
-});
-export default router;
+}
 "#;
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("fam_guard_positive.ts"), pos).unwrap();
@@ -96,26 +86,38 @@ export default router;
     let cfg = config();
     let builtin = FactTable::from_config(&cfg);
 
-    // Baseline: positive alerts, but negative ALSO alerts (unknown sanitizer).
-    let base = frensense_engine::scan::scan(&fams[0].positives, &cfg, &builtin);
-    assert!(alerts(&base), "positive must alert at baseline");
-    let base_neg = frensense_engine::scan::scan(&fams[0].negatives, &cfg, &builtin);
     assert!(
-        alerts(&base_neg),
-        "negative alerts at baseline (test unknown), this is the FP the fact should fix"
+        alerts(&frensense_engine::scan::scan(
+            &fams[0].positives,
+            &cfg,
+            &builtin
+        )),
+        "positive must alert at baseline"
+    );
+    assert!(
+        alerts(&frensense_engine::scan::scan(
+            &fams[0].negatives,
+            &cfg,
+            &builtin
+        )),
+        "negative alerts at baseline (isSafeQuery unknown), this is the FP the fact should fix"
     );
 
     let (learned, published) = extract_facts_with_tables(&fams, &cfg, &builtin);
-    let has_test = published.iter().any(
-        |f| matches!(&f.entry, LearnedFactEntry::Sanitizer { call, guard_style: true, .. } | LearnedFactEntry::LanguageSanitizer { call, guard_style: true, .. } if call == "test"),
-    );
+    let has_guard = published.iter().any(|f| {
+        matches!(
+            &f.entry,
+            LearnedFactEntry::Sanitizer { call, guard_style: true, .. }
+                | LearnedFactEntry::LanguageSanitizer { call, guard_style: true, .. }
+                if call == "isSafeQuery"
+        )
+    });
     assert!(
-        has_test,
-        "expected a `test` guard fact; published: {:?}",
+        has_guard,
+        "expected an `isSafeQuery` guard fact; published: {:?}",
         published.iter().map(|f| &f.entry).collect::<Vec<_>>()
     );
 
-    // The learned table must now separate the family.
     let after = frensense_engine::scan::scan(&fams[0].negatives, &cfg, &learned);
     assert!(
         !alerts(&after),
@@ -124,7 +126,6 @@ export default router;
     );
 }
 
-#[test]
 fn test_extract_memory_contract_fact_from_positive_and_negative_pair() {
     // 1. Training Corpus:
     // Defines custom wrapper `my_free` in both positive and negative variants.
@@ -294,7 +295,11 @@ export function createSession(host: string) {
             "ts".to_string(),
         )],
         declared_check_call: None,
-        metadata: FamilyMetadata::default(),
+        metadata: FamilyMetadata {
+            policy_authored: true,
+            class: Some("net.tls_verify".to_string()),
+            ..FamilyMetadata::default()
+        },
     };
 
     // 2. Extract facts via the bundler replay gate:
@@ -512,7 +517,11 @@ export function isAllowedUrl(targetUrl: string, allowedHost: string) {
             "ts".to_string(),
         )],
         declared_check_call: None,
-        metadata: FamilyMetadata::default(),
+        metadata: FamilyMetadata {
+            policy_authored: true,
+            class: Some("net.open_redirect".to_string()),
+            ..FamilyMetadata::default()
+        },
     };
 
     // 2. Extract facts via the bundler replay gate:

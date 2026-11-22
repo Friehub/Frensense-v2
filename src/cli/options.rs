@@ -36,6 +36,9 @@ pub struct CliOptions {
     pub diff_only: bool,
     /// Record every silent sink argument (why the engine stayed quiet).
     pub explain: bool,
+    /// Show flows silenced by a bundle sanitizer fact, with the fact's
+    /// family and class provenance (`--show-suppressed`).
+    pub show_suppressed: bool,
     /// Write the `--explain` records as JSON to this file (implies `--explain`).
     pub explain_json_path: Option<PathBuf>,
     /// Include the taint-path flow (source→sink SSA steps) in the text
@@ -58,6 +61,12 @@ pub struct CliOptions {
     pub trace: bool,
     /// Disable real-time progress bar and updates.
     pub no_progress: bool,
+    /// Rule ids to suppress (`--disable-rule`, repeatable or comma-separated).
+    pub disable_rules: Vec<String>,
+    /// When non-empty, report only these rule ids (`--only`).
+    pub only_rules: Vec<String>,
+    /// Project config file (`--config`); defaults to `.frensense.toml` in cwd.
+    pub config_path: Option<PathBuf>,
 }
 
 /// Parse CLI arguments into structured scan options.
@@ -74,6 +83,7 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
         compare_baseline_path: None,
         diff_only: false,
         explain: false,
+        show_suppressed: false,
         explain_json_path: None,
         show_flows: false,
         profile: crate::Profile::Default,
@@ -83,6 +93,9 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
         profile_output: None,
         trace: false,
         no_progress: false,
+        disable_rules: Vec::new(),
+        only_rules: Vec::new(),
+        config_path: None,
     };
 
     let mut i = 1;
@@ -120,6 +133,32 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
             "--strict" => options.is_strict = true,
             "--diff-only" => options.diff_only = true,
             "--explain" => options.explain = true,
+            "--show-suppressed" => options.show_suppressed = true,
+            "--disable-rule" => {
+                let val = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                for id in val.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    options.disable_rules.push(id.to_string());
+                }
+                i += 1;
+            }
+            "--only" => {
+                let val = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                for id in val.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    options.only_rules.push(id.to_string());
+                }
+                i += 1;
+            }
+            "--config" => {
+                let val = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                options.config_path = Some(PathBuf::from(val));
+                i += 1;
+            }
             "--explain-json" => {
                 let val = args
                     .get(i + 1)
@@ -218,7 +257,73 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
         options.paths.push(PathBuf::from("."));
     }
 
+    // Project rule config: `[rules] disable = [...]` / `only = [...]`.
+    // An explicit `--config` must exist; the implicit `.frensense.toml` is
+    // optional and silently absent outside a configured project.
+    let explicit = options.config_path.is_some();
+    let config_path = options.config_path.clone().or_else(|| {
+        let default = PathBuf::from(".frensense.toml");
+        default.exists().then_some(default)
+    });
+    if let Some(path) = config_path {
+        let (disable, only) = read_rule_config(&path).map_err(|e| {
+            if explicit {
+                e
+            } else {
+                format!("failed to read {}: {e}", path.display())
+            }
+        })?;
+        options.disable_rules.extend(disable);
+        options.only_rules.extend(only);
+    }
+
     Ok(options)
+}
+
+/// Read the `[rules]` section of a project config file.
+///
+/// Deliberately a small, dependency-free reader: the file is a list of rule
+/// ids, and a full TOML parser adds a dependency for one section. Accepts
+/// both `disable = ["a", "b"]` and a bare comma-separated value.
+pub fn read_rule_config(
+    path: &std::path::Path,
+) -> std::result::Result<(Vec<String>, Vec<String>), String> {
+    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let mut in_rules = false;
+    let mut disable = Vec::new();
+    let mut only = Vec::new();
+    for line in text.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') {
+            in_rules = line.trim_matches(['[', ']', ' '].as_slice()) == "rules";
+            continue;
+        }
+        if !in_rules {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let target = match key.trim() {
+            "disable" => &mut disable,
+            "only" => &mut only,
+            _ => continue,
+        };
+        let value = value.trim().trim_matches(['[', ']'].as_slice());
+        for id in value
+            .split(',')
+            .map(str::trim)
+            .map(|s| s.trim_matches(['"', '\''].as_slice()))
+        {
+            if !id.is_empty() && !target.iter().any(|x: &String| x == id) {
+                target.push(id.to_string());
+            }
+        }
+    }
+    Ok((disable, only))
 }
 
 /// All positional input paths: extracted from parsed options.
@@ -326,6 +431,23 @@ mod tests {
     fn unknown_flag_rejected() {
         let err = parse_options(&to_args(&["--unknown"])).expect_err("should reject");
         assert!(err.contains("unknown flag: --unknown"));
+    }
+
+    #[test]
+    fn rule_filter_flags_parse() {
+        let opts = parse_options(&to_args(&["--disable-rule", "a", "--disable-rule", "b,c"]))
+            .expect("parse");
+        assert_eq!(opts.disable_rules, vec!["a", "b", "c"]);
+        let opts = parse_options(&to_args(&["--only", "x,y"])).expect("parse");
+        assert_eq!(opts.only_rules, vec!["x", "y"]);
+    }
+
+    #[test]
+    fn show_suppressed_flag_parses() {
+        let opts = parse_options(&to_args(&["--show-suppressed"])).expect("parse");
+        assert!(opts.show_suppressed);
+        let opts = parse_options(&to_args(&["Cargo.toml"])).expect("parse");
+        assert!(!opts.show_suppressed, "show_suppressed defaults off");
     }
 
     #[test]

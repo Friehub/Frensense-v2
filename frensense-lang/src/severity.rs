@@ -329,6 +329,106 @@ pub enum SanitizerKind {
     PathNormalize,
 }
 
+/// The vulnerability class (`bug_classes.json` id) a sink belongs to, from
+/// its reporting label and otherwise its role.
+///
+/// This is the join between a sanitizer's proven class scope and the sink it
+/// is asked to silence. `None` means the sink names no class the corpus
+/// registry knows; a class-scoped sanitizer then never cuts it (the
+/// recall-safe direction).
+#[must_use]
+pub fn sink_class(role: SinkRole, label: Option<&str>) -> Option<&'static str> {
+    // An unlabeled sink falls back to its role only where the role names a
+    // single class: `Execution` without a label is code execution (eval,
+    // dynamic import), and `Xss` is browser-context execution. Every other
+    // label-less role stays `None` - a class-scoped sanitizer must not cut a
+    // sink whose class cannot be established (recall-safe direction).
+    let Some(label) = label else {
+        return match role {
+            SinkRole::Execution => Some("inj.code"),
+            SinkRole::Xss => Some("web.xss"),
+            _ => None,
+        };
+    };
+    let class = match label {
+        "sql" => "inj.sql",
+        "nosql" => "inj.nosql",
+        "command" => "inj.command",
+        // `execution` is the rule-card slug CWE-94 classifies to; it names
+        // the same class the engine's own `code` label does.
+        "code" | "execution" => "inj.code",
+        "template" => "inj.ssti",
+        "ldap" => "inj.ldap",
+        "xpath" => "inj.xpath",
+        "xxe" => "inj.xxe",
+        "header" => "inj.header",
+        "log" => "inj.log",
+        "graphql" => "inj.graphql",
+        "traversal" | "path" => "file.traversal",
+        "filename" | "name_control" => "file.name_control",
+        "upload" => "file.upload",
+        "ssrf" => "net.ssrf",
+        "redirect" | "open_redirect" => "net.open_redirect",
+        "tls" | "tls_verify" => "net.tls_verify",
+        "xss" => "web.xss",
+        "csrf" => "web.csrf",
+        "cookie" | "cookie_flags" => "web.cookie_flags",
+        "deserialize" | "deserialization" => "data.deserialization",
+        "prototype" | "proto_pollution" => "data.proto_pollution",
+        "mass_assignment" => "data.mass_assignment",
+        "input_validation" => "data.input_validation",
+        "regex" | "redos" => "dos.redos",
+        "resource_limits" => "dos.resource_limits",
+        "recursion" => "dos.recursion",
+        "sensitive_log" => "info.sensitive_log",
+        "debug" | "debug_exposure" => "info.debug_exposure",
+        "weak_hash" => "crypto.weak_hash",
+        "weak_cipher" => "crypto.weak_cipher",
+        "weak_random" => "crypto.weak_random",
+        "idor" => "authz.idor",
+        _ => return None,
+    };
+    Some(class)
+}
+
+/// The class a sink *name* implies, for sinks declared only by name in a
+/// scan config (`sinks: [query, exec, eval]`), which carry no vocabulary
+/// label at taint time.
+///
+/// Deliberately conservative: only names that have one unambiguous class are
+/// mapped. An ambiguous verb (`execute`, `open`, `write`) stays `None`, so a
+/// class-scoped sanitizer will not cut a sink whose class the engine cannot
+/// establish (recall-safe direction). The last dotted segment is used, so
+/// `db.query` and `query` resolve alike.
+#[must_use]
+pub fn sink_name_class(name: &str) -> Option<&'static str> {
+    let last = name.rsplit('.').next().unwrap_or(name).to_ascii_lowercase();
+    Some(match last.as_str() {
+        "query" | "sqlquery" | "rawquery" | "sequelizequery" | "prepare" => "inj.sql",
+        "nosql" => "inj.nosql",
+        "exec" | "execsync" | "spawn" | "spawnsync" | "system" | "popen" | "execcommand" => {
+            "inj.command"
+        }
+        "eval" | "execscript" | "evaluate" => "inj.code",
+        "redirect" | "sendredirect" => "net.open_redirect",
+        "innerhtml" | "insertadjacenthtml" | "outerhtml" => "web.xss",
+        _ => return None,
+    })
+}
+
+/// The sink's class from its vocabulary label, falling back to the class its
+/// call name implies. This is the single resolution used for class matching,
+/// so a learned sanitizer behaves the same for built-in and config-declared
+/// sinks.
+#[must_use]
+pub fn resolved_sink_class(
+    role: SinkRole,
+    label: Option<&str>,
+    sink_name: Option<&str>,
+) -> Option<&'static str> {
+    sink_class(role, label).or_else(|| sink_name.and_then(sink_name_class))
+}
+
 impl SanitizerKind {
     /// The serialized slug stored on a sanitizer fact.
     #[must_use]
@@ -373,6 +473,54 @@ impl SanitizerKind {
             "path_normalize" => Some(Self::PathNormalize),
             _ => None,
         }
+    }
+
+    /// Does this sanitizer defeat a sink of `classes`?
+    ///
+    /// An empty scope is the legacy universal fact (built-in table and
+    /// pre-v8 bundles): it keeps the old role/label qualification. A
+    /// non-empty scope is authoritative: the sink's class must be listed
+    /// (or the list must carry `*`), so an `isURL` sanitizer proven for SSRF
+    /// can never clear a command-injection sink.
+    #[must_use]
+    pub fn defeats_classes(&self, role: SinkRole, label: Option<&str>, classes: &[String]) -> bool {
+        if classes.is_empty() {
+            return self.defeats_role_and_label(role, label);
+        }
+        if !self.defeats_role_and_label(role, label) {
+            return false;
+        }
+        if classes.iter().any(|c| c == "*") {
+            return true;
+        }
+        match sink_class(role, label) {
+            Some(class) => classes.iter().any(|c| c == class),
+            None => false,
+        }
+    }
+
+    /// [`Self::defeats_classes`] with a fallback to the class implied by the
+    /// sink's call name. Config-declared sinks carry no vocabulary label, so
+    /// without this a class-scoped fact could never clear them.
+    #[must_use]
+    pub fn defeats_sink(
+        &self,
+        role: SinkRole,
+        label: Option<&str>,
+        sink_name: Option<&str>,
+        classes: &[String],
+    ) -> bool {
+        if classes.is_empty() {
+            return self.defeats_role_and_label(role, label);
+        }
+        if !self.defeats_role_and_label(role, label) {
+            return false;
+        }
+        if classes.iter().any(|c| c == "*") {
+            return true;
+        }
+        resolved_sink_class(role, label, sink_name)
+            .is_some_and(|class| classes.iter().any(|c| c == class))
     }
 
     /// Determines whether this sanitizer defeats a sink with the specified role and optional label.
