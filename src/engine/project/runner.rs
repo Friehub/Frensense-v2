@@ -114,6 +114,13 @@ impl Engine {
                                 .or_insert_with(|| pattern.clone());
                         }
                     }
+                    if let Some(notice) = loaded.withheld_sanitizers_notice() {
+                        // stderr, not tracing: tracing is off unless the user
+                        // opts in, and this is the one message that explains
+                        // why a bundle's false-positive fixes stopped working.
+                        // stdout stays clean for JSON/SARIF consumers.
+                        eprintln!("note: {notice}");
+                    }
                     loaded_bundle = Some(loaded);
                 }
                 Err(e) => {

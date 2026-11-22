@@ -52,6 +52,23 @@ harness and keeps no changelog.
   no effect. The variable's value is now used as the `EnvFilter` directive,
   the bare on-spellings (`1`, `true`, empty) mean `info`, and `--trace` is the
   same as `FRENSENSE_LOG=info`. `--trace` is listed in `--help`.
+- **A bundle that withholds sanitizers now says so.** A bundle whose sanitizers
+  are withheld at load (a pre-class-scope v7 bundle, or a trust tier that may
+  not ship them) now says so on stderr: "N sanitizer fact(s) in this bundle
+  were not applied: ...". Withholding keeps findings visible but returned
+  false positives with no explanation. `bundle info` prints the same note and
+  `--json` gains `sanitizers_withheld`.
+- **A guard-style sanitizer is audited like a call-style one.** A guard that
+  silences a sink now records a `SanitizerSuppression` on the finding, so
+  `--show-suppressed` names the bundle fact behind the cut instead of leaving
+  it invisible.
+- **`corpus lint` C007 flags a class the engine never resolves.** A family
+  whose class id is not one the engine resolves for a sink is warned about,
+  with a nearest-class hint (`redirect.open` -> `net.open_redirect`), because a
+  sanitizer learned from such a family is scoped to a class that never matches
+  and can never cut.
+- Clippy ratchet baseline: `print_stdout` 201 to 203 and `print_stderr` 59 to
+  60 for the new user-facing lines; engine `type_complexity` 37 to 35.
 
 ## [0.9.1]
 

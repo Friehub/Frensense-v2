@@ -463,6 +463,89 @@ fn call_set(source: &str, ext: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// The class ids the engine resolves for a sink (`frensense_lang::severity::
+/// sink_class`). A learned sanitizer is scoped to its family's class and cuts
+/// only a sink whose resolved class is in that scope, so a family whose class
+/// is not in this list teaches a sanitizer that can never cut anything.
+///
+/// Kept beside the lint because the registry (`bug_classes.json`) is
+/// corpus-owned: a corpus can define any id it likes, and nothing else checks
+/// that the engine agrees with it. The `engine_class_ids_match_the_engine`
+/// test pins this list to `sink_class`.
+pub const ENGINE_CLASS_IDS: &[&str] = &[
+    "inj.sql",
+    "inj.nosql",
+    "inj.command",
+    "inj.code",
+    "inj.ssti",
+    "inj.ldap",
+    "inj.xpath",
+    "inj.xxe",
+    "inj.header",
+    "inj.log",
+    "inj.graphql",
+    "file.traversal",
+    "file.name_control",
+    "file.upload",
+    "net.ssrf",
+    "net.open_redirect",
+    "net.tls_verify",
+    "web.xss",
+    "web.csrf",
+    "web.cookie_flags",
+    "data.deserialization",
+    "data.proto_pollution",
+    "data.mass_assignment",
+    "data.input_validation",
+    "dos.redos",
+    "dos.resource_limits",
+    "dos.recursion",
+    "info.sensitive_log",
+    "info.debug_exposure",
+    "crypto.weak_hash",
+    "crypto.weak_cipher",
+    "crypto.weak_random",
+    "authz.idor",
+];
+
+/// The engine class id closest to a corpus class id, by shared name tokens
+/// (`redirect.open` -> `net.open_redirect`, `inj.cmd` -> `inj.command`).
+fn nearest_engine_class(id: &str) -> Option<&'static str> {
+    fn tokens(s: &str) -> BTreeSet<String> {
+        s.split(['.', '_', '-'])
+            // The namespace (`inj`, `net`, ...) says nothing about which class
+            // is meant: `inj.format` is not `inj.command`.
+            .filter(|t| {
+                !t.is_empty()
+                    && !matches!(
+                        *t,
+                        "inj"
+                            | "net"
+                            | "file"
+                            | "web"
+                            | "data"
+                            | "dos"
+                            | "info"
+                            | "crypto"
+                            | "authz"
+                            | "memory"
+                    )
+            })
+            .map(|t| match t {
+                "cmd" => "command".to_string(),
+                other => other.to_ascii_lowercase(),
+            })
+            .collect()
+    }
+    let want = tokens(id);
+    ENGINE_CLASS_IDS
+        .iter()
+        .map(|c| (*c, tokens(c).intersection(&want).count()))
+        .filter(|(_, n)| *n > 0)
+        .max_by_key(|(c, n)| (*n, std::cmp::Reverse(edit_distance(id, c))))
+        .map(|(c, _)| c)
+}
+
 fn edit_distance(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
@@ -829,6 +912,26 @@ pub fn run(corpus: &Path, opts: &Options) -> Result<Report, String> {
                     &mut shapes,
                     advisories.as_ref(),
                 );
+                // Once per family. A class the registry defines but the engine
+                // never resolves scopes a learned sanitizer to nothing: the
+                // fact is rejected (the safe direction) and the family
+                // teaches nothing, with no message saying why.
+                if let Some(id) = class_id
+                    .as_deref()
+                    .filter(|id| !ENGINE_CLASS_IDS.contains(id))
+                {
+                    let hint = nearest_engine_class(id)
+                        .map(|c| format!("; did you mean `{c}`?"))
+                        .unwrap_or_default();
+                    cx.warn(
+                        "C007",
+                        file,
+                        format!(
+                            "class `{id}` is not one the engine resolves for a sink, so a sanitizer learned from this family is scoped to it and can never cut{hint} (engine classes: {})",
+                            ENGINE_CLASS_IDS.join(", ")
+                        ),
+                    );
+                }
                 first_cwe = b.get("cwe").map(|c| c.trim().to_ascii_uppercase());
                 first_file = Some(v.rel.clone());
             } else {

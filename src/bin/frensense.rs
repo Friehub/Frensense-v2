@@ -435,6 +435,7 @@ fn print_bundle_info(bundle_path: &std::path::Path, json: bool) -> std::result::
                 "other": counts.other,
             },
             "authored_policies": loaded.policy_pack.len(),
+            "sanitizers_withheld": loaded.withheld_sanitizers(),
             "vocabulary": loaded.header.vocabulary.map(|v| format!("{v:#018x}")),
             "requires_engine": loaded.header.requires_engine.map(|r| r.to_string()),
             "built_by_engine": loaded.header.built_by_engine,
@@ -490,6 +491,9 @@ fn print_bundle_info(bundle_path: &std::path::Path, json: bool) -> std::result::
     }
     if !loaded.policy_pack.is_empty() {
         println!("Authored Policies:  {}", loaded.policy_pack.len());
+    }
+    if let Some(notice) = loaded.withheld_sanitizers_notice() {
+        println!("Note:               {notice}");
     }
     println!("==========================================================================");
 

@@ -193,10 +193,23 @@ impl<'a> BackwardTaintEngine<'a> {
         // every path reaching here, sanitized (task 8.3 guard map). Pure
         // value-flow cannot see this: the guard is a sibling use, not a link
         // in the chain.
-        if let Some(gm) = self.guard_maps.get(&cf)
-            && (gm.is_guarded(key.var, use_block, state.sink_class.as_deref())
-                || (cf == fi && gm.is_guarded(key.var, root_block, state.sink_class.as_deref())))
-        {
+        let guard_hit = self.guard_maps.get(&cf).and_then(|gm| {
+            let class = state.sink_class.as_deref();
+            gm.guard_hit(key.var, use_block, class).or_else(|| {
+                (cf == fi)
+                    .then(|| gm.guard_hit(key.var, root_block, class))
+                    .flatten()
+            })
+        });
+        if let Some(hit) = guard_hit {
+            // Name the fact behind the guard so `--show-suppressed` audits a
+            // guard-style cut the way it audits a call-style one.
+            if let Some(GuardFact { call, classes }) = hit {
+                let suppression = SanitizerSuppression { call, classes };
+                if !state.suppressions.contains(&suppression) {
+                    state.suppressions.push(suppression);
+                }
+            }
             state.saw_sanitized_root_only = true;
             record_cut(&mut state.cuts, "guard");
             return true;

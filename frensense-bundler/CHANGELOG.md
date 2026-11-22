@@ -48,6 +48,15 @@ artifact compatibility.
   the filtered class scopes and reporting tiers a consumer installs and
   reports, including the `removed` (dropped) and `deprecated` (loaded, demoted
   to Info, announced) policy lifecycles.
+- `corpus lint` check **C007**: a family whose class id is not one the engine
+  resolves for a sink (`ENGINE_CLASS_IDS`) is warned about, with a nearest-class
+  hint (`redirect.open` -> `net.open_redirect`). A sanitizer learned from such
+  a family is scoped to a class that never matches, so it can never cut and the
+  family teaches nothing, with no message saying why. A test pins the list to
+  `frensense_lang::severity::sink_class`.
+- `LoadedBundle::withheld_sanitizers` and `withheld_sanitizers_notice`: how many
+  sanitizer facts the bundle's trust tier or missing class scope withholds, and
+  the one-line explanation the CLI prints.
 
 ## [0.8.2]
 

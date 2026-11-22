@@ -609,3 +609,97 @@ fn precision_family_that_teaches_a_guard_is_not_flagged() {
         render_text(&r)
     );
 }
+
+#[test]
+fn engine_class_ids_match_the_engine() {
+    // Every vocabulary label the engine maps to a class, taken from
+    // `frensense_lang::severity::sink_class`. The lint list must be exactly
+    // the set of classes those labels resolve to.
+    let labels = [
+        "sql",
+        "nosql",
+        "command",
+        "code",
+        "execution",
+        "template",
+        "ldap",
+        "xpath",
+        "xxe",
+        "header",
+        "log",
+        "graphql",
+        "traversal",
+        "path",
+        "filename",
+        "name_control",
+        "upload",
+        "ssrf",
+        "redirect",
+        "open_redirect",
+        "tls",
+        "tls_verify",
+        "xss",
+        "csrf",
+        "cookie",
+        "cookie_flags",
+        "deserialize",
+        "deserialization",
+        "prototype",
+        "proto_pollution",
+        "mass_assignment",
+        "input_validation",
+        "regex",
+        "redos",
+        "resource_limits",
+        "recursion",
+        "sensitive_log",
+        "debug",
+        "debug_exposure",
+        "weak_hash",
+        "weak_cipher",
+        "weak_random",
+        "idor",
+    ];
+    let resolved: std::collections::BTreeSet<&str> = labels
+        .iter()
+        .map(|l| {
+            frensense_lang::severity::sink_class(frensense_lang::severity::SinkRole::Other, Some(l))
+                .unwrap_or_else(|| panic!("label `{l}` resolves to no class"))
+        })
+        .collect();
+    let listed: std::collections::BTreeSet<&str> =
+        crate::lint::ENGINE_CLASS_IDS.iter().copied().collect();
+    assert_eq!(listed, resolved);
+}
+
+#[test]
+fn class_the_engine_never_resolves_is_flagged_with_a_hint() {
+    let reg = r#"{"version":1,"class":[{"id":"redirect.open","name":"Open redirect","cwe":"CWE-601","related_cwe":[]}]}"#;
+    let d = tempfile::tempdir().unwrap();
+    fs::write(d.path().join("bug_classes.json"), reg).unwrap();
+    let block = good_block()
+        .replace("CWE-89", "CWE-601")
+        .replace("inj.sql", "redirect.open");
+    full_family(&d, "x", &block);
+    let r = lint(&d, false);
+    let i = r.issues.iter().find(|i| i.code == "C007").expect("C007");
+    assert!(i.message.contains("net.open_redirect"), "{}", i.message);
+    // An engine class id raises nothing.
+    let d = corpus();
+    full_family(&d, "x", &good_block());
+    assert!(!codes(&lint(&d, false)).contains(&"C007"));
+}
+
+#[test]
+fn namespace_alone_gives_no_class_hint() {
+    let reg = r#"{"version":1,"class":[{"id":"inj.format","name":"Format string","cwe":"CWE-134","related_cwe":[]}]}"#;
+    let d = tempfile::tempdir().unwrap();
+    fs::write(d.path().join("bug_classes.json"), reg).unwrap();
+    let block = good_block()
+        .replace("CWE-89", "CWE-134")
+        .replace("inj.sql", "inj.format");
+    full_family(&d, "x", &block);
+    let r = lint(&d, false);
+    let i = r.issues.iter().find(|i| i.code == "C007").expect("C007");
+    assert!(!i.message.contains("did you mean"), "{}", i.message);
+}
