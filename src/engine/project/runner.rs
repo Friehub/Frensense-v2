@@ -185,13 +185,18 @@ impl Engine {
             let scanned_langs = languages_for_exts(group.iter().map(|(_, _, ext)| ext.as_str()));
             apply_language_entries(&mut config, &mut facts, pack_entries, &scanned_langs);
             if let Some(loaded) = &loaded_bundle {
-                apply_language_entries(
-                    &mut config,
-                    &mut facts,
-                    &loaded.learned_facts,
-                    &scanned_langs,
-                );
-                facts.merge(&fact_table_from_entries(&loaded.learned_facts));
+                // The trust tier filters here, once, for every consumer: a
+                // custom bundle may not ship sanitizers and a community one
+                // only class- and name-scoped sanitizers.
+                let permitted = loaded.effective_learned_facts();
+                apply_language_entries(&mut config, &mut facts, &permitted, &scanned_langs);
+                facts.merge(&fact_table_from_entries(&permitted));
+                // Class scopes ride beside the facts in the payload (v8+), so
+                // the installed fact keeps the engine's published shape and
+                // is re-scoped here to the classes its family proved.
+                for scope in loaded.effective_sanitizer_scopes() {
+                    facts.scope_sanitizer(&scope.call, scope.package.as_deref(), &scope.classes);
+                }
             }
             // Bundle-learned source patterns widen the taint config.
             for pattern in facts.source_patterns() {
@@ -291,6 +296,21 @@ impl Engine {
                 for loc in &mut part.located {
                     if let Some(cwe) = cwe_by_rule.get(&loc.finding.sink) {
                         loc.finding.classify_from_cwe(cwe);
+                    }
+                }
+            }
+            // A policy's reporting tier and lifecycle ride in the bundle's
+            // `policy_meta` table (v8+), not in the engine's `PolicyFact`: the
+            // runner stamps the tier the consumer's advisory path reads.
+            if let Some(loaded) = &loaded_bundle {
+                for c in &mut part.checker {
+                    if let Some(tier) = loaded.policy_tier(&c.rule) {
+                        c.params.push(("policy_tier", tier.to_string()));
+                    }
+                }
+                for loc in &mut part.located_checker {
+                    if let Some(tier) = loaded.policy_tier(&loc.finding.rule) {
+                        loc.finding.params.push(("policy_tier", tier.to_string()));
                     }
                 }
             }
@@ -419,6 +439,10 @@ impl Engine {
                     && let Some(rec) = crate::explain::explain_silent(loc)
                 {
                     self.explain_records.push(rec);
+                } else if self.show_suppressed
+                    && let Some(rec) = crate::explain::explain_suppressed(loc)
+                {
+                    self.explain_records.push(rec);
                 }
                 continue;
             }
@@ -461,6 +485,29 @@ impl Engine {
                 self.profile,
                 self.enable_hygiene,
             );
+        // User rule control, applied after the reporting floor so it can
+        // drop one noisy rule without dropping the bundle (or the scan).
+        let mut surviving = surviving;
+        let before_rules = surviving.len();
+        surviving.retain(|a| {
+            let id = a.rule_id();
+            if self.disabled_rules.contains(&id) {
+                return false;
+            }
+            self.only_rules
+                .as_ref()
+                .is_none_or(|only| only.contains(&id))
+        });
+        let rule_filtered = before_rules.saturating_sub(surviving.len());
+        if rule_filtered > 0 {
+            result
+                .telemetry
+                .suppressed
+                .push(frensense_engine::telemetry::SuppressionCount {
+                    reason: "rule-disabled".into(),
+                    count: rule_filtered,
+                });
+        }
         for (tier, count) in hidden {
             *self.hidden_by_tier.entry(tier).or_insert(0) += count;
             result
@@ -703,7 +750,15 @@ fn advisory_from_checker(
     } else {
         sanitize_corpus_provenance(&observation)
     };
-    let tier = frensense_lang::severity::checker_rule_tier(&c.rule);
+    // A policy fact may declare its tier (community/custom bundles are
+    // capped at Hygiene at load time). Empty tier falls back to the rule
+    // registry, the pre-tier behaviour.
+    let tier = c
+        .params
+        .iter()
+        .find(|(k, _)| *k == "policy_tier")
+        .and_then(|(_, v)| frensense_lang::RuleTier::parse(v))
+        .unwrap_or_else(|| frensense_lang::severity::checker_rule_tier(&c.rule));
     let mut advisory = Advisory::bare(title, severity, file_id, path, observation)
         .with_tier(tier)
         .with_confidence(1.0)
@@ -1136,7 +1191,7 @@ mod bundle_pattern_tests {
     use super::{advisory_from_checker, apply_bundle_pattern};
     use crate::Severity;
     use crate::engine::Engine;
-    use frensense_bundler::format::{BundlePattern, BundlePayloadV6, write_bundle};
+    use frensense_bundler::format::{BundlePattern, BundlePayloadV8, write_bundle};
     use frensense_engine::analysis::taint::facts::Provenance;
     use frensense_engine::checks::CheckerFinding;
 
@@ -1335,10 +1390,12 @@ mod bundle_pattern_tests {
     /// the load -> index -> advisory path.
     #[test]
     fn bundle_loaded_pattern_reaches_scan_advisories() {
-        let payload = BundlePayloadV6 {
+        let payload = BundlePayloadV8 {
             patterns: vec![pattern(&["weak_hash"])],
             learned_facts: vec![],
             policy_pack: vec![],
+            sanitizer_scopes: vec![],
+            policy_meta: vec![],
         };
         let bytes: &'static [u8] = Box::leak(
             write_bundle(&payload, 1)

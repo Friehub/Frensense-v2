@@ -264,6 +264,26 @@ pub fn print_scan_summary_detailed_with_coverage(
     // The denominator behind "no findings". Without it, a scan that
     // recognized nothing is indistinguishable from a clean one; with it, a
     // reader can falsify the verdict themselves.
+    // CWE coverage split: dataflow rules and structural policies are not the
+    // same claim. Counting them together let cheap policy rules inflate the
+    // CWE total, so the summary states each contribution separately.
+    let mut dataflow_cwes: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut policy_cwes: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for a in advisories {
+        let target = if a.rule_id().starts_with("taint.") {
+            &mut dataflow_cwes
+        } else {
+            &mut policy_cwes
+        };
+        target.extend(a.cwe().iter().map(|c| c.to_string()));
+    }
+    if !dataflow_cwes.is_empty() || !policy_cwes.is_empty() {
+        println!(
+            "CWE Coverage:       {} via dataflow · {} via structural policies",
+            dataflow_cwes.len(),
+            policy_cwes.len()
+        );
+    }
     if let Some(c) = coverage {
         println!(
             "Sink Sites:         {} recognized in {} file(s)",
@@ -1464,6 +1484,7 @@ pub fn explain_learned_rule(
                     scope,
                     message,
                     severity,
+                    ..
                 }
                 | E::PolicyScoped {
                     rule,
@@ -2051,7 +2072,10 @@ mod explain_learned_rule_tests {
                 vocabulary: None,
                 requires_engine: None,
                 built_by_engine: None,
+                trust: frensense_bundler::format::BundleTrust::Community,
             },
+            sanitizer_scopes: Vec::new(),
+            policy_meta: Vec::new(),
             patterns: vec![frensense_bundler::format::BundlePattern {
                 id: "family-sqli".to_string(),
                 observation: Some("raw query string reaches the driver".to_string()),

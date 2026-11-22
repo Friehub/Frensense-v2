@@ -11,6 +11,44 @@ its replay gate, the corpus `lint` checks, and the embedded default-pack asset.
 in *this* file, so a format change - not the root changelog - is what records
 artifact compatibility.
 
+## [0.9.0]
+
+### Breaking
+
+- **`BUNDLE_VERSION` is now 8.** A v8 payload carries two metadata tables
+  beside `learned_facts`: `sanitizer_scopes` (the sink classes a learned
+  sanitizer was proven to defeat, plus the teaching family) and `policy_meta`
+  (a policy's reporting tier and lifecycle state). A binary that speaks an
+  older version refuses a v8 bundle at the version gate rather than failing
+  inside serde; v6 and v7 bundles still load unchanged, with empty tables and
+  the legacy unscoped reading.
+- `LoadedBundle` gains `sanitizer_scopes` and `policy_meta`, and
+  `effective_learned_facts` now filters sanitizers through the scope table.
+  The engine's published fact types must keep their shape, so class scope and
+  policy metadata are no longer carried by `LearnedFactEntry` variants:
+  consumers apply them with the new `effective_sanitizer_scopes` and
+  `policy_tier`.
+- `LearnedFact` (extraction output) gains `classes` and `family`, the source
+  of the published scope table.
+
+### Added
+
+- `BundleTrust` (`Certified`, `Community`, `Custom`) recorded in the bundle
+  header, and `--trust` on the bundler CLI. A custom bundle ships no
+  sanitizers; a community bundle ships only sanitizers that are both
+  class-scoped and name-scoped (package/receiver). `LoadedBundle` is the
+  single enforcement point, so every consumer sees the same filtered set.
+- Cross-class counter-probe gate: a learned sanitizer is published only if
+  every corpus family whose class it does not cover keeps alerting with the
+  fact installed, so a cross-class fact fails the build instead of silencing
+  another class in the field.
+- Authored-policy gate and lints S020–S024 for sanitizer and policy scope
+  hygiene.
+- `LoadedBundle::effective_sanitizer_scopes` and `LoadedBundle::policy_tier`:
+  the filtered class scopes and reporting tiers a consumer installs and
+  reports, including the `removed` (dropped) and `deprecated` (loaded, demoted
+  to Info, announced) policy lifecycles.
+
 ## [0.8.2]
 
 ### Changed

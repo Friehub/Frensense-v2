@@ -370,6 +370,7 @@ pub(crate) fn is_sanitizer_effective_for_role(
     key: &NodeKey,
     role: SinkRole,
     label: Option<&str>,
+    sink_name: Option<&str>,
     origin_package: Option<&str>,
 ) -> bool {
     // `config` is retained for API stability with callers; the legacy
@@ -392,7 +393,8 @@ pub(crate) fn is_sanitizer_effective_for_role(
             }
             if let Some(fact) = facts.sanitizer_fact_scoped(func, origin_package) {
                 if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
-                    return kind.defeats_role_and_label(role, label);
+                    let classes = facts.sanitizer_classes(func, origin_package);
+                    return kind.defeats_sink(role, label, sink_name, &classes);
                 }
                 // Unknown kind slug: do NOT cut sink-agnostically. The
                 // previous `return true` fallback let any unrecognized
@@ -428,7 +430,8 @@ pub(crate) fn is_sanitizer_effective_for_role(
                     let full = format!("{p}.{method}");
                     if let Some(fact) = facts.sanitizer_fact_scoped(&full, origin_package) {
                         if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
-                            return kind.defeats_role_and_label(role, label);
+                            let classes = facts.sanitizer_classes(&full, origin_package);
+                            return kind.defeats_sink(role, label, sink_name, &classes);
                         }
                         return false;
                     }
@@ -439,13 +442,61 @@ pub(crate) fn is_sanitizer_effective_for_role(
             }
             if let Some(fact) = facts.sanitizer_fact_scoped(method, origin_package) {
                 if let Some(kind) = SanitizerKind::from_slug(&fact.kind) {
-                    return kind.defeats_role_and_label(role, label);
+                    let classes = facts.sanitizer_classes(method, origin_package);
+                    return kind.defeats_sink(role, label, sink_name, &classes);
                 }
                 return false;
             }
             false
         }
         _ => false,
+    }
+}
+
+/// The sanitizer fact that cuts this node for a sink of `(role, label)`, when
+/// one does.
+///
+/// The boolean [`is_sanitizer_effective_for_role`] is the mechanism's answer;
+/// this variant also names *which bundle fact* silenced the flow, so
+/// `--show-suppressed` can report `suppressed by bundle sanitizer X (class
+/// Z)` on a real project.
+pub(crate) fn sanitizer_fact_defeating<'a>(
+    ir: &FunctionIR,
+    facts: &'a FactTable,
+    key: &NodeKey,
+    role: SinkRole,
+    label: Option<&str>,
+    sink_name: Option<&str>,
+    origin_package: Option<&str>,
+) -> Option<&'a crate::analysis::taint::facts::SanitizerFact> {
+    let Some(instr) = key.instruction(ir) else {
+        return None;
+    };
+    let defeating = |call: &str, fact: &'a crate::analysis::taint::facts::SanitizerFact| -> bool {
+        let classes = facts.sanitizer_classes(call, origin_package);
+        SanitizerKind::from_slug(&fact.kind)
+            .is_some_and(|kind| kind.defeats_sink(role, label, sink_name, &classes))
+    };
+    match instr {
+        Instruction::CallStatic { func, .. } => facts
+            .sanitizer_fact_scoped(func, origin_package)
+            .filter(|f| defeating(func, f)),
+        Instruction::CallVirtual {
+            method, receiver, ..
+        } => {
+            if let Operand::Var(r) = receiver {
+                if let Some(path) = FactTable::receiver_access_path(ir, *r) {
+                    let full = format!("{path}.{method}");
+                    if let Some(fact) = facts.sanitizer_fact_scoped(&full, origin_package) {
+                        return defeating(&full, fact).then_some(fact);
+                    }
+                }
+            }
+            facts
+                .sanitizer_fact_scoped(method, origin_package)
+                .filter(|f| defeating(method, f))
+        }
+        _ => None,
     }
 }
 

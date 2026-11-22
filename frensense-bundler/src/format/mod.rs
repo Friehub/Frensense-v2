@@ -18,8 +18,10 @@ pub use default_pack::{
 };
 pub use frc::{
     check_engine_compatibility, read_bundle, read_bundle_parts, write_bundle, write_bundle_pinned,
-    BundleHeader, EngineRequirement, BUNDLE_MAGIC, BUNDLE_VERSION, MIN_SUPPORTED_VERSION,
+    write_bundle_pinned_with_trust, BundleHeader, BundleTrust, EngineRequirement, BUNDLE_MAGIC,
+    BUNDLE_VERSION, MIN_SUPPORTED_VERSION,
 };
 pub use types::{
-    load_bundle, BundlePattern, BundlePayload, BundlePayloadV5, BundlePayloadV6, LoadedBundle,
+    load_bundle, BundlePattern, BundlePayload, BundlePayloadV5, BundlePayloadV6, BundlePayloadV8,
+    LoadedBundle, PolicyMeta, SanitizerScope,
 };

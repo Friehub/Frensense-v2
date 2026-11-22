@@ -16,4 +16,4 @@ pub mod format;
 pub mod lint;
 pub mod pipeline;
 
-pub use pipeline::run_facts_pipeline;
+pub use pipeline::{run_facts_pipeline, run_facts_pipeline_with_trust};

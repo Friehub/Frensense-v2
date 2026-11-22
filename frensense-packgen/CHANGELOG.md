@@ -39,6 +39,15 @@ There is no semver contract here (nothing is published, and
     `navigateTo` (`nuxt`); request extractors for `getQuery`, `readBody`, etc.
   - `core.rs`: Generic DOM, Node.js, and core JavaScript/TypeScript APIs.
 
+### Changed
+
+- **The embedded default pack was regenerated** for `frensense-engine` 0.9.1:
+  a sanitizer vocabulary entry no longer carries the class/family fields the
+  engine's published `SanitizerFact` does not have, so
+  `frensense-bundler/assets/frensense-default.frc` moved. Class scope for
+  learned sanitizers is now bundle metadata (`sanitizer_scopes`), not part of
+  the per-language vocabulary.
+
 ## [0.8.1]
 
 ### Added

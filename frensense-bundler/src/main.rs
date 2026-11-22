@@ -17,12 +17,20 @@ Usage: frensense-bundler [<corpus_dir>] [<output.frc>] [options]
 Options:
   -c, --corpus <dir>   Corpus directory (default: <workspace>/corpus/targets)
   -o, --output <file>  Output bundle path (default: <workspace>/frensense-corpus.frc)
+      --trust <tier>   Trust tier recorded in the header: certified (default),
+                       community or custom. Community bundles ship only
+                       class- and name-scoped sanitizers and cap policies at
+                       Hygiene.
   -h, --help           Print this help";
 
 #[derive(Debug)]
 enum Parsed {
     Help,
-    Paths { corpus: PathBuf, output: PathBuf },
+    Paths {
+        corpus: PathBuf,
+        output: PathBuf,
+        trust: frensense_bundler::format::BundleTrust,
+    },
 }
 
 /// Parse bundler CLI arguments: positional args fill the corpus and output
@@ -37,6 +45,7 @@ fn parse_args(
 ) -> Result<Parsed, String> {
     let mut corpus: Option<PathBuf> = None;
     let mut output: Option<PathBuf> = None;
+    let mut trust = frensense_bundler::format::BundleTrust::Certified;
     let mut it = args.iter().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -59,6 +68,21 @@ fn parse_args(
                     .ok_or_else(|| format!("missing value for {arg}"))?;
                 output = Some(PathBuf::from(value));
             }
+            "--trust" => {
+                let value = it
+                    .next()
+                    .ok_or_else(|| "missing value for --trust".to_string())?;
+                trust = match value.to_ascii_lowercase().as_str() {
+                    "certified" => frensense_bundler::format::BundleTrust::Certified,
+                    "community" => frensense_bundler::format::BundleTrust::Community,
+                    "custom" => frensense_bundler::format::BundleTrust::Custom,
+                    other => {
+                        return Err(format!(
+                            "unknown --trust tier '{other}' (certified, community, custom)"
+                        ))
+                    }
+                };
+            }
             other if other.starts_with('-') => {
                 return Err(format!("unknown flag: {other}"));
             }
@@ -76,6 +100,7 @@ fn parse_args(
     Ok(Parsed::Paths {
         corpus: corpus.unwrap_or(default_corpus),
         output: output.unwrap_or(default_output),
+        trust,
     })
 }
 
@@ -88,7 +113,7 @@ fn main() {
     if args.get(1).map(String::as_str) == Some("lint") {
         std::process::exit(frensense_bundler::lint::cli(&args[2..]));
     }
-    let (corpus_dir, output_path) = match parse_args(
+    let (corpus_dir, output_path, trust) = match parse_args(
         &args,
         workspace_root.join("corpus").join("targets"),
         workspace_root.join("frensense-corpus.frc"),
@@ -97,7 +122,11 @@ fn main() {
             println!("{USAGE}");
             return;
         }
-        Ok(Parsed::Paths { corpus, output }) => (corpus, output),
+        Ok(Parsed::Paths {
+            corpus,
+            output,
+            trust,
+        }) => (corpus, output, trust),
         Err(e) => {
             eprintln!("Error: {e}");
             eprintln!("{USAGE}");
@@ -105,7 +134,9 @@ fn main() {
         }
     };
 
-    if let Err(e) = frensense_bundler::run_facts_pipeline(&corpus_dir, &output_path) {
+    if let Err(e) =
+        frensense_bundler::run_facts_pipeline_with_trust(&corpus_dir, &output_path, trust)
+    {
         eprintln!("Error in facts pipeline: {e}");
         std::process::exit(1);
     }
@@ -130,7 +161,7 @@ mod tests {
 
     fn paths(parsed: Result<Parsed, String>) -> (PathBuf, PathBuf) {
         match parsed.expect("parse") {
-            Parsed::Paths { corpus, output } => (corpus, output),
+            Parsed::Paths { corpus, output, .. } => (corpus, output),
             Parsed::Help => panic!("expected paths, got help"),
         }
     }

@@ -23,6 +23,29 @@ pub(crate) fn slot_label(slot: usize) -> String {
     }
 }
 
+/// One bundle sanitizer fact that suppressed a flow, as shown by
+/// `--show-suppressed`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuppressedFact {
+    /// Sanitizing call name the walk met.
+    pub call: String,
+    /// Classes the fact was proven for (empty = legacy universal).
+    pub classes: Vec<String>,
+}
+
+impl SuppressedFact {
+    /// One-line audit form: `X (class Z)`.
+    #[must_use]
+    pub fn describe(&self) -> String {
+        let class = if self.classes.is_empty() {
+            "all classes (legacy unscoped)".to_string()
+        } else {
+            self.classes.join(", ")
+        };
+        format!("{} (class {class})", self.call)
+    }
+}
+
 /// One explored sink argument that did NOT become an advisory, with the
 /// reason the engine stayed silent. Collected under `--explain` so users
 /// can see *where* analysis stopped - the "engine limitation" map.
@@ -54,6 +77,8 @@ pub struct ExplainRecord {
     /// of the `unresolvable` reason): callee, parameter or global, with its
     /// file and line.
     pub cut_sites: Vec<LocatedCutSite>,
+    /// Bundle sanitizer facts that suppressed this flow, with provenance.
+    pub suppressed_by: Vec<SuppressedFact>,
 }
 
 impl ExplainRecord {
@@ -77,6 +102,10 @@ impl ExplainRecord {
                 "detail": c.detail,
                 "file": c.file,
                 "line": c.line,
+            })).collect::<Vec<_>>(),
+            "suppressed_by": self.suppressed_by.iter().map(|s| serde_json::json!({
+                "sanitizer": s.call,
+                "classes": s.classes,
             })).collect::<Vec<_>>(),
         })
     }
@@ -161,6 +190,26 @@ pub fn explain_silent(loc: &LocatedFinding) -> Option<ExplainRecord> {
             passed.join(", ")
         )
     };
+    let suppressed_by: Vec<SuppressedFact> = f
+        .suppressions
+        .iter()
+        .map(|s| SuppressedFact {
+            call: s.call.clone(),
+            classes: s.classes.clone(),
+        })
+        .collect();
+    let reason = if suppressed_by.is_empty() {
+        reason
+    } else {
+        format!(
+            "{reason}; suppressed by bundle sanitizer {}",
+            suppressed_by
+                .iter()
+                .map(SuppressedFact::describe)
+                .collect::<Vec<_>>()
+                .join("; ")
+        )
+    };
     Some(ExplainRecord {
         file: loc.file.clone(),
         line: loc.line,
@@ -172,7 +221,19 @@ pub fn explain_silent(loc: &LocatedFinding) -> Option<ExplainRecord> {
         source_desc: f.source_desc.clone(),
         function: f.function.clone(),
         cut_sites: loc.cut_sites.clone(),
+        suppressed_by,
     })
+}
+
+/// Build the `--show-suppressed` record for a finding whose flow was silenced
+/// by a bundle sanitizer fact. Returns `None` for findings with no such fact,
+/// so the switch never adds ordinary silent-sink noise.
+#[must_use]
+pub fn explain_suppressed(loc: &LocatedFinding) -> Option<ExplainRecord> {
+    if loc.finding.suppressions.is_empty() {
+        return None;
+    }
+    explain_silent(loc)
 }
 
 #[cfg(test)]

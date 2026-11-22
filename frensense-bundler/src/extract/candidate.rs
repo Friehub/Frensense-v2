@@ -30,6 +30,11 @@ pub enum Candidate {
         call: String,
         package: Option<String>,
         guard: bool,
+        /// Declared corpus class scope (`bug_classes.json` ids). The bundler
+        /// fills this from the voting family's `class:` automatically.
+        classes: Vec<String>,
+        /// First family that taught the fact, for suppression provenance.
+        family: Option<String>,
     },
     /// Call is a policy violation per a corpus-verified non-dataflow rule
     /// (positive contains the call and alerts-or-should; negative lacks it,
@@ -92,6 +97,12 @@ impl Candidate {
         self.to_learned_entry_scoped(None)
     }
 
+    /// Lower a candidate into its wire entry.
+    ///
+    /// Class scope and teaching family are not part of the fact: they are
+    /// published in the payload's `sanitizer_scopes` table (see
+    /// [`crate::fact_extract::LearnedFact`]), so the engine's
+    /// `SanitizerFact` keeps its published shape.
     pub fn to_learned_entry_scoped(&self, language: Option<&str>) -> LearnedFactEntry {
         if let Some(lang) = language {
             match self {
@@ -110,6 +121,7 @@ impl Candidate {
                     call,
                     package,
                     guard,
+                    ..
                 } => LearnedFactEntry::LanguageSanitizer {
                     language: lang.to_string(),
                     call: call.clone(),
@@ -144,6 +156,7 @@ impl Candidate {
                 call,
                 package,
                 guard,
+                ..
             } => LearnedFactEntry::Sanitizer {
                 call: call.clone(),
                 package: package.clone(),
@@ -306,6 +319,8 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
             call,
             package,
             guard,
+            classes,
+            family: _,
         } => {
             let fact = SanitizerFact {
                 call: call.clone(),
@@ -318,15 +333,13 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
                 sanitizes_args: Default::default(),
                 guard_style: *guard,
             };
+            // The trial table replays exactly the shape a consumer installs:
+            // the fact in its package slot, then re-scoped to the classes the
+            // families proved (`FactTable::scope_sanitizer`). Installing it
+            // unscoped here would let the gate approve a fact that cuts
+            // another class once loaded.
             match package {
                 Some(pkg) => {
-                    // Package-scoped sanitizer: install ONLY under
-                    // (package, call), mirroring the engine's load path
-                    // (`apply_language_entries`). The gate must replay
-                    // exactly the origin-gated semantics consumers get —
-                    // a universal alias here would let the trial table
-                    // cut any receiver and approve a fact that no longer
-                    // cuts (or wrongly cuts) once loaded strictly.
                     table
                         .scoped_sanitizer_facts
                         .insert((pkg.clone(), call.clone()), fact);
@@ -335,6 +348,7 @@ pub fn apply_candidate(table: &mut FactTable, c: &Candidate) {
                     table.sanitizer_facts.insert(call.clone(), fact);
                 }
             }
+            table.scope_sanitizer(call, package.as_deref(), classes);
         }
         Candidate::Check {
             rule,

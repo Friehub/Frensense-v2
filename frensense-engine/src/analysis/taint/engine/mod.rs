@@ -112,6 +112,19 @@ pub struct CutSite {
     pub span: Option<(usize, usize)>,
 }
 
+/// One bundle sanitizer fact that silenced a sink argument.
+///
+/// Carried on a finding so `--show-suppressed` can name the fact and the
+/// classes it was proven for. A poisoned or over-broad fact is then auditable
+/// on a real project instead of silently hiding findings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SanitizerSuppression {
+    /// Sanitizing call name the walk met.
+    pub call: String,
+    /// Classes the fact was proven to defeat (empty = legacy universal).
+    pub classes: Vec<String>,
+}
+
 /// One explored sink argument with its verdict.
 ///
 /// `#[non_exhaustive]`: this is an evolving output DTO. New diagnostic fields
@@ -202,6 +215,9 @@ pub struct SinkFinding {
     /// reason (deduplicated, capped), so a blind spot names *what* the
     /// engine could not see. Empty when the walk was never cut that way.
     pub(crate) cut_sites: Vec<CutSite>,
+    /// Bundle sanitizer facts that silenced this argument, with family and
+    /// class provenance. Empty when no fact cut the flow.
+    pub suppressions: Vec<SanitizerSuppression>,
 }
 
 impl SinkFinding {
@@ -254,6 +270,7 @@ impl SinkFinding {
             path: TaintPath::default(),
             cut_reasons: Vec::new(),
             cut_sites: Vec::new(),
+            suppressions: Vec::new(),
         }
     }
 }
@@ -278,6 +295,7 @@ pub struct SinkFindingBuilder {
     path: TaintPath,
     cut_reasons: Vec<&'static str>,
     cut_sites: Vec<CutSite>,
+    suppressions: Vec<SanitizerSuppression>,
 }
 
 impl SinkFindingBuilder {
@@ -346,6 +364,11 @@ impl SinkFindingBuilder {
         self.cut_sites = v;
         self
     }
+    /// Set the bundle sanitizer facts that silenced this argument.
+    pub fn suppressions(mut self, v: Vec<SanitizerSuppression>) -> Self {
+        self.suppressions = v;
+        self
+    }
     /// Finish, returning the [`SinkFinding`].
     pub fn build(self) -> SinkFinding {
         SinkFinding {
@@ -362,6 +385,7 @@ impl SinkFindingBuilder {
             path: self.path,
             cut_reasons: self.cut_reasons,
             cut_sites: self.cut_sites,
+            suppressions: self.suppressions,
         }
     }
 }
@@ -486,6 +510,12 @@ pub struct BackwardTaintEngine<'a> {
 struct ExploreState {
     sink_role: crate::analysis::taint::role::SinkRole,
     sink_label: Option<String>,
+    /// Sink call name as configured/declared. Config-declared sinks carry no
+    /// label, so this is the fallback that gives them a class.
+    sink_name: String,
+    /// Resolved class for this sink (vocabulary label first, then call
+    /// name); class-scoped sanitizer and guard matching use it.
+    sink_class: Option<String>,
     saw_source: bool,
     /// The first source node reached (for path reconstruction).
     source_node: Option<(usize, NodeKey)>,
@@ -517,6 +547,8 @@ struct ExploreState {
     cuts: Vec<&'static str>,
     /// Concrete unresolvable stop sites behind the `"unresolvable"` cut.
     cut_sites: Vec<CutSite>,
+    /// Bundle sanitizer facts that cut this root's exploration.
+    suppressions: Vec<SanitizerSuppression>,
 }
 
 /// Human-readable description of the taint origin at a source node:

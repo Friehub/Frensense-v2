@@ -53,6 +53,15 @@ pub fn propose_with_trace(
     // present, automatic guard/co-occurrence synthesis must not also mint
     // requirements for the same family - the author stated the intent.
     let meta_explicit = !family.metadata.require_arg_keys.is_empty();
+    // Policies are authored, never inferred. A family may only teach a
+    // Check/Policy fact when it explicitly declared one (`policy: authored`,
+    // `check-call:`, `guard:` or `require-arg-key:`). Delta inference of
+    // policies is what produced the junk `policy_choice` / `policy_range`
+    // facts; it is disabled here at the source.
+    let policy_authored = family.metadata.policy_authored
+        || family.declared_check_call.is_some()
+        || !family.metadata.guards.is_empty()
+        || !family.metadata.require_arg_keys.is_empty();
 
     // Memory allocation / deallocation wrapper discovery from corpus examples:
     let mut family_irs = Vec::new();
@@ -166,6 +175,8 @@ pub fn propose_with_trace(
             call: call.clone(),
             package,
             guard: *shape == CallShape::Predicate,
+            classes: family.metadata.class.iter().cloned().collect::<Vec<_>>(),
+            family: Some(family.id.clone()),
         });
     }
 
@@ -310,16 +321,18 @@ pub fn propose_with_trace(
             // shape; a synthesized guard would weaken or contradict them.
             continue;
         }
-        candidates.push(Candidate::Check {
-            rule,
-            call: call.clone(),
-            message,
-            unless_guard,
-            unless_range_check,
-            // Family-declared package scopes the learned check so its
-            // generic trigger cannot collide on other bundle families.
-            package: package_for_call(family, call, false),
-        });
+        if policy_authored {
+            candidates.push(Candidate::Check {
+                rule,
+                call: call.clone(),
+                message,
+                unless_guard,
+                unless_range_check,
+                // Family-declared package scopes the learned check so its
+                // generic trigger cannot collide on other bundle families.
+                package: package_for_call(family, call, false),
+            });
+        }
     }
 
     // Generalized co-occurrence policies: the two family shapes the legacy
@@ -335,7 +348,11 @@ pub fn propose_with_trace(
     //     the engine's Module scope accepts a sibling definition as
     //     evidence. Detected when a variant declares a function whose name
     //     matches a guard-style call in the OTHER variant.
-    if let Some(trigger) = family.declared_check_call.clone() {
+    if let Some(trigger) = family
+        .declared_check_call
+        .clone()
+        .filter(|_| policy_authored)
+    {
         if pos_calls.contains_key(&trigger)
             && neg_calls.contains_key(&trigger)
             && builtin
@@ -519,7 +536,11 @@ pub fn propose_with_trace(
     }
 
     // Non-taint policy proposals: argument literal constraints & weak crypto
-    let pos_arg_literals = extract_call_arg_literals(&pos_irs);
+    let pos_arg_literals = if policy_authored {
+        extract_call_arg_literals(&pos_irs)
+    } else {
+        Default::default()
+    };
     let neg_arg_literals = extract_call_arg_literals(&neg_irs);
     for ((call, slot), pos_vals) in &pos_arg_literals {
         for pos_val in pos_vals {
@@ -1073,6 +1094,7 @@ fn candidate_keys(candidates: &[Candidate]) -> String {
                 call,
                 package,
                 guard,
+                ..
             } => {
                 let g = if *guard { "guard" } else { "fn" };
                 match package {

@@ -48,10 +48,12 @@ fn main() {
             binding_args_safe: false,
         },
     ];
-    let payload = frensense_bundler::format::BundlePayloadV6 {
+    let payload = frensense_bundler::format::BundlePayloadV8 {
         patterns: vec![],
         learned_facts: facts,
         policy_pack: vec![],
+        sanitizer_scopes: vec![],
+        policy_meta: vec![],
     };
     let bytes = frensense_bundler::format::write_bundle(&payload, 0).expect("write");
     std::fs::write("/tmp/cwe-bundle.frc", &bytes).expect("write file");

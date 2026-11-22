@@ -52,6 +52,8 @@ pub const KNOWN_KEYS: &[&str] = &[
     "shape",
     "source",
     "expect",
+    "sanitizer",
+    "policy",
 ];
 
 /// Keys every training positive must carry.
@@ -62,6 +64,34 @@ const PURPOSES: &[&str] = &["knowledge", "precision", "anchor"];
 const SUPPORTED_EXTS: &[&str] = &[
     "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "vue", "py", "go", "rs", "c", "cpp", "h",
     "hpp",
+];
+
+/// Sanitizer names too common to be safe without a package or receiver
+/// scope. `isURL`, `quote` and `escape` mean different things in different
+/// libraries; an unscoped fact keyed on one of them silences unrelated code.
+pub(crate) const UBIQUITOUS_SANITIZERS: &[&str] = &[
+    "isurl",
+    "is_url",
+    "quote",
+    "escape",
+    "encode",
+    "encodeuri",
+    "encode_uri",
+    "sanitize",
+    "validate",
+    "check",
+    "clean",
+    "filter",
+    "test",
+    "parse",
+    "format",
+    "normalize",
+    "purify",
+    "strip",
+    "trim",
+    "replace",
+    "decode",
+    "unquote",
 ];
 
 /// Calls that are everyday method names. A fact keyed on one of these without
@@ -640,6 +670,42 @@ pub fn run(corpus: &Path, opts: &Options) -> Result<Report, String> {
         }
     }
 
+    // A sanitizer name declared in more than one language is a bare,
+    // ubiquitous name by definition: the same spelling means different
+    // things in different ecosystems, so it needs an explicit package
+    // scope per language (or a language-qualified name).
+    let mut sanitizer_langs: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for g in groups.values() {
+        if let Some(v) = g.variants.iter().find(|v| v.kind == Kind::Positive) {
+            if let Some(block) = &v.block {
+                if let Some(value) = block.get("sanitizer") {
+                    for name in value
+                        .split([',', ' '])
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        sanitizer_langs
+                            .entry(name.to_ascii_lowercase())
+                            .or_default()
+                            .insert(g.lang.clone());
+                    }
+                }
+            }
+        }
+    }
+    for (name, langs) in sanitizer_langs.iter().filter(|(_, l)| l.len() > 1) {
+        report.issues.push(Issue {
+            code: "S023",
+            level: Level::Error,
+            family: name.clone(),
+            file: None,
+            message: format!(
+                "sanitizer `{name}` is declared across languages ({}): a bare name that spans ecosystems needs a package/receiver scope",
+                langs.iter().cloned().collect::<Vec<_>>().join(", ")
+            ),
+        });
+    }
+
     let advisories = match &opts.advisories {
         Some(p) => Some(load_advisories(p)?),
         None => None,
@@ -1215,6 +1281,88 @@ fn lint_metadata(
                     format!("purpose `{p}` is not one of {}", PURPOSES.join(", ")),
                 );
             }
+        }
+    }
+
+    // Sanitizer scope: a declared sanitizer must carry a package/receiver
+    // scope when its bare name is a common word, and a class scope is
+    // mandatory on every learned sanitizer (the engine only clears a sink of
+    // a matching class, so a classless declaration teaches nothing safely).
+    if let Some(value) = b.get("sanitizer") {
+        let scoped = b.get("package").is_some() || b.get("source").is_some();
+        for name in value
+            .split([',', ' '])
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let lower = name.to_ascii_lowercase();
+            if !scoped
+                && (UBIQUITOUS_SANITIZERS.contains(&lower.as_str())
+                    || GENERIC_VERBS.contains(&lower.as_str()))
+            {
+                cx.err(
+                    "S020",
+                    file,
+                    format!(
+                        "sanitizer `{name}` is a ubiquitous name and has no package/receiver scope; \
+                         declare `package:` (e.g. validator) or use the qualified name"
+                    ),
+                );
+            }
+        }
+    }
+
+    // Policies are authored, never inferred. A policy whose trigger is a
+    // common call name needs a package scope for the same reason a sink does.
+    if b.get("policy").is_some() {
+        let authored = b.get("policy").is_some_and(|v| {
+            matches!(v.to_ascii_lowercase().as_str(), "authored" | "true" | "yes")
+        });
+        if !authored {
+            cx.err(
+                "S021",
+                file,
+                "`policy:` must be `authored`; policies are never inferred from a family diff",
+            );
+        }
+        let trigger = b.get("check-call").map(|s| s.trim().to_ascii_lowercase());
+        if let Some(trigger) = trigger {
+            if GENERIC_VERBS.contains(&trigger.as_str()) && b.get("package").is_none() {
+                cx.err(
+                    "S022",
+                    file,
+                    format!(
+                        "policy trigger `{trigger}` is a common call name and has no `package:` scope"
+                    ),
+                );
+            }
+        }
+    }
+
+    // Policy tier and lifecycle must be from the known vocabularies: the
+    // loader caps tiers per trust level but must not have to guess what an
+    // unknown string meant, and a typo in `status:` could silently keep a
+    // retired rule firing.
+    const TIERS: &[&str] = &["stable", "beta", "experimental", "hygiene"];
+    const STATUSES: &[&str] = &["active", "deprecated", "removed"];
+    if let Some(tier) = b.get("tier") {
+        let tier = tier.trim().to_ascii_lowercase();
+        if !TIERS.contains(&tier.as_str()) {
+            cx.err(
+                "S024",
+                file,
+                format!("tier `{tier}` is not one of {}", TIERS.join(", ")),
+            );
+        }
+    }
+    if let Some(status) = b.get("status") {
+        let status = status.trim().to_ascii_lowercase();
+        if !STATUSES.contains(&status.as_str()) {
+            cx.err(
+                "S024",
+                file,
+                format!("status `{status}` is not one of {}", STATUSES.join(", ")),
+            );
         }
     }
 

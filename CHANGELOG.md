@@ -19,6 +19,23 @@ Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
 
+## [0.9.1]
+
+### Added
+
+- `--show-suppressed`: the explain record of a silenced argument names the
+  bundle sanitizer fact that cut it and the classes it was proven for.
+- `--disable-rule <RULE>` and `--only <RULE>` (repeatable), and the `[rules]`
+  table in `.frensense.toml` (`disable` / `only`): report-wide rule selection
+  that leaves the underlying bundle facts installed.
+- `--config <PATH>`: select the config file a run reads instead of the
+  discovered one.
+- A suppression reason in `--explain`, and the CWE split on its own line in
+  the text report.
+- Bundle trust and policy metadata now reach reporting: the runner applies the
+  bundle's sanitizer class scopes to the installed fact table and stamps each
+  learned policy's declared (trust-capped) tier.
+
 ## [0.9.0]
 
 ### Added
@@ -124,10 +141,10 @@ harness and keeps no changelog.
   a nested pattern, and a Go parameter, which was never bound at all, so
   `*http.Request` never reached the source classifier - and matches a sink
   written as a property assignment (`el.innerHTML = user`) or a JSX attribute
-  (`<div dangerouslySetInnerHTML={{ __html: user }} />`), which the sink matcher
-  did not look at. Each shape is **0 -> 1** finding on its reported
-  reproduction, with its static counterpart staying clean; the mechanism and
-  the per-shape measurements are recorded in `frensense-engine/CHANGELOG.md`.
+  such as `dangerouslySetInnerHTML`, which the sink matcher did not look at.
+  Each shape is **0 -> 1** finding on its reported reproduction, with its
+  static counterpart staying clean; the mechanism and the per-shape
+  measurements are recorded in `frensense-engine/CHANGELOG.md`.
 
 - **`--severity` and the MCP `severity_threshold` accept the same six labels,
   and reject anything else.** The two surfaces previously had different

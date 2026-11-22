@@ -30,7 +30,7 @@ mod data;
 mod role_map;
 mod vocab;
 
-use frensense_bundler::format::{write_bundle, BundlePayloadV6};
+use frensense_bundler::format::{write_bundle, BundlePayloadV8};
 use frensense_engine::analysis::taint::facts::{
     AllocCapacity, GuardBypassFact, HintKind, LearnedFactEntry, SchemaPolicyFact,
 };
@@ -192,14 +192,17 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
     entries
 }
 
-/// Serialize [`default_pack_entries`] into the `.frc` envelope (v6, zero
-/// patterns, empty `policy_pack`). Used by the drift/regeneration tests;
-/// production reads the committed asset via `default_bundle_bytes`.
+/// Serialize [`default_pack_entries`] into the `.frc` envelope (zero patterns,
+/// empty `policy_pack` and empty v8 metadata tables - the built-in vocabulary
+/// carries no class scope and no policy tier). Used by the drift/regeneration
+/// tests; production reads the committed asset via `default_bundle_bytes`.
 pub fn build_default_bundle() -> Vec<u8> {
-    let payload = BundlePayloadV6 {
+    let payload = BundlePayloadV8 {
         patterns: Vec::new(),
         learned_facts: default_pack_entries(),
         policy_pack: Vec::new(),
+        sanitizer_scopes: Vec::new(),
+        policy_meta: Vec::new(),
     };
     write_bundle(&payload, 0).unwrap_or_else(|e| panic!("default pack serialization failed: {e}"))
 }

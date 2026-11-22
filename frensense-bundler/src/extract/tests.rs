@@ -463,6 +463,7 @@ mod policy_proposal_tests {
             concat!(
                 "// [frensense]\n",
                 "// package: toolkit-internal\n",
+                "// policy: authored\n",
                 "\n",
                 "import { exportRecord, verifyExportPolicy } from 'toolkit-internal';\n",
                 "function handle(uid: string): void {\n",
@@ -1136,22 +1137,37 @@ mod scoped_candidate_install_tests {
                 call: "scrub".into(),
                 package: Some("@acme/sanitize".into()),
                 guard: false,
+                classes: vec!["inj.sql".into()],
+                family: Some("fixture".into()),
             },
         );
         assert!(
             table
                 .scoped_sanitizer_facts
-                .contains_key(&("@acme/sanitize".to_string(), "scrub".to_string())),
-            "the scoped entry must be installed under (package, call)"
+                .contains_key(&("class:inj.sql".to_string(), "scrub".to_string())),
+            "the class-scoped entry must be installed under its class key"
+        );
+        assert!(
+            table
+                .scoped_sanitizer_facts
+                .get(&("class:inj.sql".to_string(), "scrub".to_string()))
+                .is_some_and(|fact| fact.package.as_deref() == Some("@acme/sanitize")),
+            "the fact keeps its package qualification inside the class scope"
         );
         assert!(
             table.sanitizer_facts.get("scrub").is_none(),
             "a package-scoped sanitizer must not install a universal alias: \n             consumers load it origin-gated, so the gate must replay the same semantics"
         );
+        assert!(
+            !table
+                .scoped_sanitizer_facts
+                .contains_key(&("@acme/sanitize".to_string(), "scrub".to_string())),
+            "the package slot is replaced by the class scope, not duplicated"
+        );
     }
 
     #[test]
-    fn unscoped_sanitizer_candidate_stays_universal() {
+    fn unscoped_sanitizer_candidate_keeps_its_class_scope() {
         let mut table = FactTable::default();
         apply_candidate(
             &mut table,
@@ -1159,15 +1175,19 @@ mod scoped_candidate_install_tests {
                 call: "scrub".into(),
                 package: None,
                 guard: false,
+                classes: vec!["inj.sql".into()],
+                family: Some("fixture".into()),
             },
         );
         assert!(
-            table.sanitizer_facts.contains_key("scrub"),
-            "an unpackage-qualified sanitizer must stay universal"
+            table.sanitizer_facts.get("scrub").is_none(),
+            "a class-scoped sanitizer must not stay universal"
         );
         assert!(
-            table.scoped_sanitizer_facts.is_empty(),
-            "an unpackage-qualified sanitizer must not create a scoped entry"
+            table
+                .scoped_sanitizer_facts
+                .contains_key(&("class:inj.sql".to_string(), "scrub".to_string())),
+            "an unpackage-qualified sanitizer keeps its class scope"
         );
     }
 }
