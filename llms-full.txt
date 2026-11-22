@@ -17,8 +17,8 @@ and the editor server (`frensense lsp`) are all subcommands of `frensense`.
 Frensense is young and deliberately conservative about what it reports, which
 means it **misses real vulnerabilities**. The current score, the per-class
 breakdown and the cases it does not cover are published from CI on the
-[benchmark record](/architecture/benchmarks). Treat a clean scan as "nothing
-found", not "nothing there".
+[benchmark record](/architecture/benchmarks). Treat a scan that reports nothing
+as "nothing found", not "nothing there".
 :::
 
 ## Choose your path
@@ -93,7 +93,8 @@ GPL-3.0 deterministic dataflow scanner for TypeScript, JavaScript, Python, Go,
 Rust, C and Vue files. It reports taint paths from untrusted sources to
 dangerous calls. It is not a replacement for a full SAST suite: detection
 coverage is limited (see /architecture/benchmarks), so describe results as
-"findings" and a clean scan as "nothing found".
+"findings" and a no-findings scan as "nothing found". Never describe a scan as
+"clean" or the code as "safe": the report itself makes no such claim.
 
 Useful for: CI gates (`frensense . --compare-baseline baseline.json`), scanning
 an unfamiliar repository, checking an AI agent's own edits through MCP
@@ -416,8 +417,8 @@ will most often use:
 | --- | --- |
 | `advisory_count` | Number of findings. |
 | `advisories` | The findings. Each has `rule_id`, `severity`, `title`, `file_path`, `line`, `column`, `fingerprint` and `taint_steps`. |
-| `clean` | `true` when the scan found nothing, read every file it found, decided every sink site it recognized, and dropped no finding below the confidence threshold. |
-| `analysis_incomplete` | Reasons the scan may have missed things (unsupported or partly parsed files, safety limits). Check this before you trust a clean result. |
+| `analysis` | How far the scan got: `status` (`complete`, `partial` or `failed`), `coverage` (files found, analyzed, unsupported and failed; `sink_sites`; `files_without_sink_sites`; `unresolved_sites`) and `verdicts` (`vulnerable`, `sanitized`, `unknown`, `no_source`). There is no `clean` field: a scan can show what it inspected and what reached it, not that the code is safe. |
+| `analysis_incomplete` | Reasons the scan may have missed things (unsupported or partly parsed files, safety limits). Check this before you read a no-findings result as reassuring. |
 | `schema_version` | Version of this report format. |
 
 ## Gating options
@@ -447,6 +448,7 @@ See [CI and agent gating](/guide/github-actions).
 | Variable | Meaning |
 | --- | --- |
 | `FRENSENSE_CORPUS_BUNDLE` | Default `.frc` bundle for the MCP and LSP servers. The CLI scan uses `-b` instead. |
+| `FRENSENSE_LOG` | Print analysis logs to stderr and select how much: `FRENSENSE_LOG=debug`, `FRENSENSE_LOG=frensense_engine=trace`, or `1`/`true`/empty for `info`. `--trace` is the same as `FRENSENSE_LOG=info`. `RUST_LOG` is honoured when `FRENSENSE_LOG` is unset. |
 
 A file named `frensense-corpus.frc` in the folder being scanned is loaded
 automatically when no `-b` is given.
@@ -2291,8 +2293,8 @@ the program graph built from that IR, never on source text.
    built-in pack and any [bundle](/bundles). They are data, not code.
 4. **Run the checkers.** Taint analysis starts from each sink argument and walks
    the value-flow graph backward: what could feed this value? It stops at a
-   source (report a finding), at a sanitizer (clean), or at a value the engine
-   cannot see into (stay quiet and record it for `frensense --explain`). Other
+   source (report a finding), at a sanitizer (treat it as handled), or at a
+   value the engine cannot see into (stay quiet and record it for `frensense --explain`). Other
    checkers handle memory safety, policy and hygiene. A finding is an exact
    source-to-sink path.
 
@@ -2311,7 +2313,7 @@ level of call-site context.
 
 ## What it does not do yet
 
-Worth knowing when you read a clean scan:
+Worth knowing when you read a scan that reported nothing:
 
 * **Top-level code** that is not inside a function (a script's own body, for
   instance) is not analysed.
@@ -2535,6 +2537,57 @@ independently:
 Sections below `0.8.0` predate that split and are the combined release
 narrative of the tagged binaries. `frensense-devtools` is an unpublished
 harness and keeps no changelog.
+
+## \[0.9.2]
+
+### Changed
+
+* **The report no longer says "clean".** A static analysis can show what it
+  found and what it covered; it cannot show that code is safe, and a single
+  verdict for both invited exactly that reading. The `clean` boolean is gone
+  from the JSON envelope and from `analysis`, the MCP tools no longer return
+  `clean`, and `analysis.taint.clean` is now `analysis.taint.no_source` (the
+  same count: sink arguments whose backward walk found no source, which is a
+  statement about the walk). `ScanStatus::clean` stays unchanged for source
+  compatibility, but no report surface calls it; the run's status is computed
+  from the scan and its coverage. The summary's
+  no-findings label is `No findings reported`, qualified as before when
+  nothing was recognized, a file was not analyzed, a site stayed undecided, or
+  findings were dropped below the confidence threshold. Read `advisories` and
+  `analysis.coverage` instead. The removed and renamed keys move
+  `REPORT_SCHEMA_VERSION` to 2; no public Rust item changed shape, so this is a
+  patch release.
+* **A file the scan did not analyze makes the status `partial`.** Previously a
+  scan could report `complete` while the walk had skipped source files in
+  languages the engine cannot read or files that failed to lower; that gap now
+  shows up in the status itself, not only in `analysis.coverage`.
+
+### Fixed
+
+* **`analysis.verdicts.clean` is now `analysis.verdicts.no_source`**, and the
+  top-level `clean` and `analysis.clean` keys are removed.
+* **`FRENSENSE_LOG` selects the filter.** Setting it installed a subscriber
+  that still read `RUST_LOG` for its directives, so `FRENSENSE_LOG=debug` had
+  no effect. The variable's value is now used as the `EnvFilter` directive,
+  the bare on-spellings (`1`, `true`, empty) mean `info`, and `--trace` is the
+  same as `FRENSENSE_LOG=info`. `--trace` is listed in `--help`.
+* **A bundle that withholds sanitizers now says so.** A bundle whose sanitizers
+  are withheld at load (a pre-class-scope v7 bundle, or a trust tier that may
+  not ship them) now says so on stderr: "N sanitizer fact(s) in this bundle
+  were not applied: ...". Withholding keeps findings visible but returned
+  false positives with no explanation. `bundle info` prints the same note and
+  `--json` gains `sanitizers_withheld`.
+* **A guard-style sanitizer is audited like a call-style one.** A guard that
+  silences a sink now records a `SanitizerSuppression` on the finding, so
+  `--show-suppressed` names the bundle fact behind the cut instead of leaving
+  it invisible.
+* **`corpus lint` C007 flags a class the engine never resolves.** A family
+  whose class id is not one the engine resolves for a sink is warned about,
+  with a nearest-class hint (`redirect.open` -> `net.open_redirect`), because a
+  sanitizer learned from such a family is scoped to a class that never matches
+  and can never cut.
+* Clippy ratchet baseline: `print_stdout` 201 to 203 and `print_stderr` 59 to
+  60 for the new user-facing lines; engine `type_complexity` 37 to 35.
 
 ## \[0.9.1]
 
@@ -3420,9 +3473,9 @@ The engine computes `ScanTelemetry`, `ScanStatus` and per-check outcomes;
   failed inputs, and degraded functions. Standalone scan errors are also
   reported in that invocation notification list.
 * **`--fail-on-incomplete` flag**: exits with code `2` when the scan status is
-  `Partial` or `Failed`, allowing CI to distinguish a clean scan (0), a scan
-  with findings (1), and an incomplete scan (2). Default is off to preserve
-  backward compatibility.
+  `Partial` or `Failed`, allowing CI to distinguish a no-findings scan (0), a
+  scan with findings (1), and an incomplete scan (2). Default is off to
+  preserve backward compatibility.
 * **`--profile-output <path>` / `--profile-out <path>` flags**: writes the full
   `ScanTelemetry` as pretty-printed JSON to the specified path. Also accepted
   as `--profile <path.json>` when the argument ends in `.json`, so the existing
@@ -3948,6 +4001,21 @@ description: A plain-language summary of what each Frensense version added.
 # What's New in Frensense
 
 A quick look at what changed in each release, written for everyone (no compiler knowledge required).
+
+***
+
+## 0.9.2 - Frensense Stops Calling Your Code Clean
+
+**A scan now reports what it found and what it covered, and never calls your code clean.**
+
+A static analysis can show which dangerous calls it inspected and what reached them. It cannot show that code is safe: it only knows the patterns it has been taught. Frensense used to reduce both answers to one word, "clean", and that word was read as a guarantee it could not make. It is gone, and the report now says plainly what it did.
+
+* **No more "clean" anywhere.** The one-line result reads `No findings reported`, and the JSON report and the AI-agent tools no longer carry a `clean` true/false field. What a scan can show lives in the findings and in the coverage numbers beside them — how many files were read, how many dangerous calls were recognized, and how many the analysis could not decide.
+* **A file that was never read now shows up in the result itself.** If the scan skipped files — a language it cannot read, or a file it could not parse — the status says the analysis is partial instead of reporting a finished scan.
+* **Silent sink arguments got a more accurate name.** In the JSON report the count previously labelled `clean` under `analysis.verdicts` is now `no_source`: it counts the calls whose arguments had nothing feeding them, which describes the analysis, not your code.
+* **Better logs when you want them.** `FRENSENSE_LOG` now actually selects how much analysis logging you get (`FRENSENSE_LOG=debug`, or `--trace` for the short form) and writes it to stderr, so it never mixes into JSON output. Previously the variable switched logging on but its value was ignored, and the lines landed on stdout.
+
+Nothing to migrate beyond the JSON keys: the top-level `clean` and `analysis.clean` fields are removed, and `analysis.verdicts.clean` is now `analysis.verdicts.no_source`. The report schema version is now 2. Read `analysis.coverage` for the denominator behind a no-findings result.
 
 ***
 

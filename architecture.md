@@ -26,8 +26,8 @@ the program graph built from that IR, never on source text.
    built-in pack and any [bundle](/bundles). They are data, not code.
 4. **Run the checkers.** Taint analysis starts from each sink argument and walks
    the value-flow graph backward: what could feed this value? It stops at a
-   source (report a finding), at a sanitizer (clean), or at a value the engine
-   cannot see into (stay quiet and record it for `frensense --explain`). Other
+   source (report a finding), at a sanitizer (treat it as handled), or at a
+   value the engine cannot see into (stay quiet and record it for `frensense --explain`). Other
    checkers handle memory safety, policy and hygiene. A finding is an exact
    source-to-sink path.
 
@@ -46,7 +46,7 @@ level of call-site context.
 
 ## What it does not do yet
 
-Worth knowing when you read a clean scan:
+Worth knowing when you read a scan that reported nothing:
 
 * **Top-level code** that is not inside a function (a script's own body, for
   instance) is not analysed.

@@ -1,11 +1,11 @@
 {
   "announcements": [
     {
-      "id": "release-v0.9.1",
+      "id": "release-v0.9.2",
       "display": "bar",
       "tone": "brand",
-      "title": "Frensense v0.9.1 is out",
-      "message": "A sanitizer learned from a bundle now clears only the kind of risk it was proven for, so \"sanitized\" can no longer hide a different bug.",
+      "title": "Frensense v0.9.2 is out",
+      "message": "A scan now reports what it found and what it covered, and never calls your code clean.",
       "link": { "text": "See what's new", "href": "/whats-new" }
     }
   ]

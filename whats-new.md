@@ -9,6 +9,21 @@ A quick look at what changed in each release, written for everyone (no compiler 
 
 ***
 
+## 0.9.2 - Frensense Stops Calling Your Code Clean
+
+**A scan now reports what it found and what it covered, and never calls your code clean.**
+
+A static analysis can show which dangerous calls it inspected and what reached them. It cannot show that code is safe: it only knows the patterns it has been taught. Frensense used to reduce both answers to one word, "clean", and that word was read as a guarantee it could not make. It is gone, and the report now says plainly what it did.
+
+* **No more "clean" anywhere.** The one-line result reads `No findings reported`, and the JSON report and the AI-agent tools no longer carry a `clean` true/false field. What a scan can show lives in the findings and in the coverage numbers beside them — how many files were read, how many dangerous calls were recognized, and how many the analysis could not decide.
+* **A file that was never read now shows up in the result itself.** If the scan skipped files — a language it cannot read, or a file it could not parse — the status says the analysis is partial instead of reporting a finished scan.
+* **Silent sink arguments got a more accurate name.** In the JSON report the count previously labelled `clean` under `analysis.verdicts` is now `no_source`: it counts the calls whose arguments had nothing feeding them, which describes the analysis, not your code.
+* **Better logs when you want them.** `FRENSENSE_LOG` now actually selects how much analysis logging you get (`FRENSENSE_LOG=debug`, or `--trace` for the short form) and writes it to stderr, so it never mixes into JSON output. Previously the variable switched logging on but its value was ignored, and the lines landed on stdout.
+
+Nothing to migrate beyond the JSON keys: the top-level `clean` and `analysis.clean` fields are removed, and `analysis.verdicts.clean` is now `analysis.verdicts.no_source`. The report schema version is now 2. Read `analysis.coverage` for the denominator behind a no-findings result.
+
+***
+
 ## 0.9.1 - Learned Sanitizers Know What They Sanitize
 
 **A sanitizer learned from a bundle now clears only the kind of risk it was proven for, so "sanitized" can no longer hide a different bug.**

@@ -75,8 +75,8 @@ will most often use:
 | --- | --- |
 | `advisory_count` | Number of findings. |
 | `advisories` | The findings. Each has `rule_id`, `severity`, `title`, `file_path`, `line`, `column`, `fingerprint` and `taint_steps`. |
-| `clean` | `true` when the scan found nothing, read every file it found, decided every sink site it recognized, and dropped no finding below the confidence threshold. |
-| `analysis_incomplete` | Reasons the scan may have missed things (unsupported or partly parsed files, safety limits). Check this before you trust a clean result. |
+| `analysis` | How far the scan got: `status` (`complete`, `partial` or `failed`), `coverage` (files found, analyzed, unsupported and failed; `sink_sites`; `files_without_sink_sites`; `unresolved_sites`) and `verdicts` (`vulnerable`, `sanitized`, `unknown`, `no_source`). There is no `clean` field: a scan can show what it inspected and what reached it, not that the code is safe. |
+| `analysis_incomplete` | Reasons the scan may have missed things (unsupported or partly parsed files, safety limits). Check this before you read a no-findings result as reassuring. |
 | `schema_version` | Version of this report format. |
 
 ## Gating options
@@ -106,6 +106,7 @@ See [CI and agent gating](/guide/github-actions).
 | Variable | Meaning |
 | --- | --- |
 | `FRENSENSE_CORPUS_BUNDLE` | Default `.frc` bundle for the MCP and LSP servers. The CLI scan uses `-b` instead. |
+| `FRENSENSE_LOG` | Print analysis logs to stderr and select how much: `FRENSENSE_LOG=debug`, `FRENSENSE_LOG=frensense_engine=trace`, or `1`/`true`/empty for `info`. `--trace` is the same as `FRENSENSE_LOG=info`. `RUST_LOG` is honoured when `FRENSENSE_LOG` is unset. |
 
 A file named `frensense-corpus.frc` in the folder being scanned is loaded
 automatically when no `-b` is given.
