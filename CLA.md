@@ -2,7 +2,7 @@
 
 This agreement applies to every contribution (pull request, patch, or other
 material) that you submit to the Frensense repository
-(https://github.com/Friehub/Frensense).
+(https://github.com/Friehub/Frensense-v2).
 
 **You keep your copyright.** This is a licence, not a copyright assignment.
 
@@ -11,9 +11,12 @@ material) that you submit to the Frensense repository
 - **"Contribution"**: any original work of authorship you submit to the project,
   including code, documentation, and tests, that is intentionally submitted for
   inclusion in Frensense.
-- **"Friehub"**: the Frensense project maintainers, and any legal entity that
-  later assumes ownership or stewardship of the Frensense project (including a
-  company or other organisation formed by the current maintainers).
+- **"Friehub"**: the Frensense project maintainers (the individual or
+  individuals who own the project and trade as Friehub), and any legal entity
+  that later assumes ownership or stewardship of the Frensense project,
+  including a company or other organisation formed by the current maintainers.
+  Until such an entity exists, "Friehub" means those individuals; once it
+  exists, "Friehub" means that entity as their successor.
 
 ## 2. Licence grant
 
@@ -22,6 +25,11 @@ irrevocable (except as stated in §5) licence to use, reproduce, modify,
 distribute, sublicense, and otherwise exploit your Contribution, **including
 licensing it to third parties on terms other than GPL-3.0** (for example, in
 commercial licences and paid `.frc` knowledge bundles).
+
+**Transfer to a successor.** Friehub may assign this agreement, and every
+licence granted under it, in whole to a successor that takes over the Frensense
+project (for example a company the maintainers incorporate). The assignee takes
+the licence on exactly these terms, including §3.
 
 ## 3. Open-source grant
 

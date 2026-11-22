@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
-# Commercial use requires a separate license: https://friehub.com/licensing
+# Copyright (c) 2024-2026 Friehub
+# Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
 """A deliberately small notes service used by examples/README.md.
 
 Every handler below is intentionally broken. Read the comments marked BUG to

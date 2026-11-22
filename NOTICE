@@ -1,0 +1,39 @@
+Frensense
+Copyright (c) 2024-2026 Friehub (https://friehub.cloud)
+
+LICENCE
+Frensense is free software, licensed under the GNU General Public License,
+version 3 only (GPL-3.0-only). The full licence text is in the LICENSE file.
+Commercial use of Frensense under the GPL does not require anything further.
+
+COMMERCIAL LICENSING
+Use of Frensense inside a proprietary product, without the obligations the GPL
+places on redistribution, needs a separate licence from Friehub:
+https://friehub.cloud/licensing
+
+RULE BUNDLES (.frc)
+The engine loads .frc rule bundles. A bundle is a separate work distributed
+under the terms stated with that bundle. Loading a bundle does not make the
+bundle part of the GPL-licensed engine, and the GPL does not grant any right
+to a bundle by itself.
+
+CWE
+Rule cards and bundle coverage views reference entries of the Common Weakness
+Enumeration (CWE), used under the MITRE CWE Terms of Use
+(https://cwe.mitre.org/about/termsofuse.html).
+
+Copyright © 2006–2026, The MITRE Corporation.
+CWE, CWSS, CWRAF, and the CWE logo are trademarks of The MITRE Corporation.
+
+Frensense is not endorsed by, and is not claimed to be compatible with or
+certified by, The MITRE Corporation.
+
+NAMES
+"Frensense" and "Friehub" are names used by Friehub to identify this project
+and its publisher. Friehub reserves the rights it has in these names. The GPL
+does not license their use, except as needed to say where the software came
+from.
+
+THIRD-PARTY SOFTWARE
+Frensense includes and links third-party open-source components under their own
+licences. Their notices are in THIRD_PARTY_LICENSES.md.

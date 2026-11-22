@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
+# Copyright (c) 2024-2026 Friehub
 """One implementation of "run a scan under a time limit and record its peak memory".
 
 Every suite that shells out to `frensense` needs the same three things, and

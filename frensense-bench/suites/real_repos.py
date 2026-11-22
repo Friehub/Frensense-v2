@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
+# Copyright (c) 2024-2026 Friehub
 """Real-repository benchmark: run the scanner over pinned open-source projects.
 
 Motivation: the corpus benchmarks measure what the engine was taught. This

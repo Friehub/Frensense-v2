@@ -128,6 +128,8 @@ docs-site/.vitepress/cache/
 !CLA.md
 !/AGENTS.md
 !/frensense-*/AGENTS.md
+!SECURITY.md
+!THIRD_PARTY_LICENSES.md
 !docs/BENCHMARKING.md
 !docs/MCP_USAGE.md
 !docs/LSP_USAGE.md

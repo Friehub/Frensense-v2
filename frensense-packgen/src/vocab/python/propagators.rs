@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Copyright (c) 2024-2026 Friehub. All rights reserved.
-// Commercial use requires a separate license: https://friehub.com/licensing
+// Copyright (c) 2024-2026 Friehub
+// Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
 
 //! Python propagator rules: (call, tainted_arg-slot, tainted_receiver).
 //! Travels taint from arguments/receiver to the return value, enabling

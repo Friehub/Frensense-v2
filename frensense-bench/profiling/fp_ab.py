@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
+# Copyright (c) 2024-2026 Friehub
 """A/B two Frensense binaries over real repositories and diff their findings.
 
 The OWASP Benchmark answers "did recall or precision move on labelled

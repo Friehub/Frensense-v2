@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-only
-# Copyright (c) 2024-2026 Friehub. All rights reserved.
+# Copyright (c) 2024-2026 Friehub
 """Read `frensense-bench/repos.toml`: the one place the real-repository benchmark lists its pins.
 
 The suite asks for the entries and gets plain dicts back, so a new repo is a
