@@ -15,7 +15,7 @@
 //! answer makes a language-specific decision look language-independent.
 
 use crate::registry::spec_for_ext;
-use crate::spec::{JsxPart, JumpKind, LanguageSpec, LiteralShape};
+use crate::spec::{JsxPart, JumpKind, LanguageSpec, LiteralShape, NodeRole};
 use tree_sitter::Node;
 
 fn spec(ext: &str) -> &'static dyn LanguageSpec {
@@ -434,6 +434,40 @@ fn target_clause_and_switch_vocabulary() {
         assert!(s.is_containment_node("statement_block"), "{ext}");
         assert!(s.is_containment_node("function_body"), "{ext}");
         assert!(!s.is_containment_node("identifier"), "{ext}");
+    }
+}
+
+/// JavaScript spells its receiver with the `this` keyword rather than a
+/// parameter, so `this` is a name the lowering can resolve and a method
+/// declares the receiver it binds.
+#[test]
+fn the_javascript_family_binds_this_as_an_implicit_receiver() {
+    for ext in ["ts", "js", "vue"] {
+        let s = spec(ext);
+        assert_eq!(
+            s.classify("this"),
+            NodeRole::Identifier,
+            "{ext}: `this` is a name"
+        );
+        assert_eq!(
+            s.implicit_receiver_name("method_definition"),
+            Some("this"),
+            "{ext}: a method binds this"
+        );
+        // An arrow function inherits `this` from its enclosing scope.
+        assert_eq!(s.implicit_receiver_name("arrow_function"), None, "{ext}");
+        assert_eq!(
+            s.implicit_receiver_name("function_declaration"),
+            None,
+            "{ext}"
+        );
+    }
+    for ext in ["py", "rs", "go", "c"] {
+        assert_eq!(
+            spec(ext).implicit_receiver_name("method_definition"),
+            None,
+            "{ext} spells its receiver in the parameter list"
+        );
     }
 }
 

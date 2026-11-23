@@ -383,6 +383,7 @@ pub mod rule_card;
 pub mod rules;
 pub mod severity;
 pub mod spec;
+mod spec_params;
 
 // Convenient re-exports
 pub use intrinsics::is_container_verb;

@@ -96,7 +96,10 @@ pub(super) fn classify_js(kind: &str) -> NodeRole {
         "object" | "array" | "parenthesized_expression" => NodeRole::Composite,
         "import_statement" => NodeRole::Import,
         "export_statement" => NodeRole::Export,
-        "identifier" | "property_identifier" | "shorthand_property_identifier" => {
+        // `this` is the implicit receiver. Without a role it fell to `Other`,
+        // so `this.h` lowered to a member access on nothing and every read of
+        // a field the method stored on the receiver was dropped.
+        "identifier" | "property_identifier" | "shorthand_property_identifier" | "this" => {
             NodeRole::Identifier
         }
         "string" | "template_string" | "number" | "true" | "false" | "null" | "undefined"
@@ -112,6 +115,15 @@ pub(super) fn classify_js(kind: &str) -> NodeRole {
 
         _ => NodeRole::Other,
     }
+}
+
+/// A function form that carries an implicit `this` receiver.
+///
+/// `method_definition` covers class methods, object-literal methods,
+/// getters/setters and constructors. Arrow functions inherit `this` from the
+/// enclosing scope, so they do not bind one.
+pub(super) fn is_js_method(kind: &str) -> bool {
+    kind == "method_definition"
 }
 
 pub(super) fn is_js_cast(kind: &str) -> bool {

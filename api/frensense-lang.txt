@@ -35,6 +35,7 @@ pub fn frensense_lang::providers::c_lang::CSpec::fact_language(&self) -> &'stati
 pub fn frensense_lang::providers::c_lang::CSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::providers::c_lang::CSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::providers::c_lang::CSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::providers::c_lang::CSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::providers::c_lang::CSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::providers::c_lang::CSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::providers::c_lang::CSpec::is_alternative_pattern(&self, &str) -> bool
@@ -119,6 +120,7 @@ pub fn frensense_lang::providers::go::GoSpec::fact_language(&self) -> &'static s
 pub fn frensense_lang::providers::go::GoSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::providers::go::GoSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::providers::go::GoSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::providers::go::GoSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::providers::go::GoSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::providers::go::GoSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::providers::go::GoSpec::is_alternative_pattern(&self, &str) -> bool
@@ -232,6 +234,7 @@ pub fn frensense_lang::providers::python::PythonSpec::fact_language(&self) -> &'
 pub fn frensense_lang::providers::python::PythonSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::providers::python::PythonSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::providers::python::PythonSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::providers::python::PythonSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::providers::python::PythonSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::providers::python::PythonSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::providers::python::PythonSpec::is_alternative_pattern(&self, &str) -> bool
@@ -316,6 +319,7 @@ pub fn frensense_lang::providers::rust_lang::RustSpec::fact_language(&self) -> &
 pub fn frensense_lang::providers::rust_lang::RustSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::providers::rust_lang::RustSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::providers::rust_lang::RustSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::providers::rust_lang::RustSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::providers::rust_lang::RustSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::providers::rust_lang::RustSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::providers::rust_lang::RustSpec::is_alternative_pattern(&self, &str) -> bool
@@ -647,6 +651,7 @@ pub fn frensense_lang::spec::LanguageSpec::fact_language(&self) -> &'static str
 pub fn frensense_lang::spec::LanguageSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::spec::LanguageSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::spec::LanguageSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::spec::LanguageSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::spec::LanguageSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::spec::LanguageSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::spec::LanguageSpec::is_alternative_pattern(&self, &str) -> bool
@@ -729,6 +734,7 @@ pub fn frensense_lang::providers::c_lang::CSpec::fact_language(&self) -> &'stati
 pub fn frensense_lang::providers::c_lang::CSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::providers::c_lang::CSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::providers::c_lang::CSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::providers::c_lang::CSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::providers::c_lang::CSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::providers::c_lang::CSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::providers::c_lang::CSpec::is_alternative_pattern(&self, &str) -> bool
@@ -811,6 +817,7 @@ pub fn frensense_lang::providers::go::GoSpec::fact_language(&self) -> &'static s
 pub fn frensense_lang::providers::go::GoSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::providers::go::GoSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::providers::go::GoSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::providers::go::GoSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::providers::go::GoSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::providers::go::GoSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::providers::go::GoSpec::is_alternative_pattern(&self, &str) -> bool
@@ -893,6 +900,7 @@ pub fn frensense_lang::providers::python::PythonSpec::fact_language(&self) -> &'
 pub fn frensense_lang::providers::python::PythonSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::providers::python::PythonSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::providers::python::PythonSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::providers::python::PythonSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::providers::python::PythonSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::providers::python::PythonSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::providers::python::PythonSpec::is_alternative_pattern(&self, &str) -> bool
@@ -975,6 +983,7 @@ pub fn frensense_lang::providers::rust_lang::RustSpec::fact_language(&self) -> &
 pub fn frensense_lang::providers::rust_lang::RustSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::providers::rust_lang::RustSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::providers::rust_lang::RustSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::providers::rust_lang::RustSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::providers::rust_lang::RustSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::providers::rust_lang::RustSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::providers::rust_lang::RustSpec::is_alternative_pattern(&self, &str) -> bool
@@ -1057,6 +1066,7 @@ pub fn T::fact_language(&self) -> &'static str
 pub fn T::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn T::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn T::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn T::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn T::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn T::import_node_kinds(&self) -> &'static [&'static str]
 pub fn T::is_alternative_pattern(&self, &str) -> bool
@@ -1316,6 +1326,7 @@ pub fn frensense_lang::LanguageSpec::fact_language(&self) -> &'static str
 pub fn frensense_lang::LanguageSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::LanguageSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::LanguageSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::LanguageSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::LanguageSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::LanguageSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::LanguageSpec::is_alternative_pattern(&self, &str) -> bool
@@ -1398,6 +1409,7 @@ pub fn frensense_lang::providers::c_lang::CSpec::fact_language(&self) -> &'stati
 pub fn frensense_lang::providers::c_lang::CSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::providers::c_lang::CSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::providers::c_lang::CSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::providers::c_lang::CSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::providers::c_lang::CSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::providers::c_lang::CSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::providers::c_lang::CSpec::is_alternative_pattern(&self, &str) -> bool
@@ -1480,6 +1492,7 @@ pub fn frensense_lang::providers::go::GoSpec::fact_language(&self) -> &'static s
 pub fn frensense_lang::providers::go::GoSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::providers::go::GoSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::providers::go::GoSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::providers::go::GoSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::providers::go::GoSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::providers::go::GoSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::providers::go::GoSpec::is_alternative_pattern(&self, &str) -> bool
@@ -1562,6 +1575,7 @@ pub fn frensense_lang::providers::python::PythonSpec::fact_language(&self) -> &'
 pub fn frensense_lang::providers::python::PythonSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::providers::python::PythonSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::providers::python::PythonSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::providers::python::PythonSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::providers::python::PythonSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::providers::python::PythonSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::providers::python::PythonSpec::is_alternative_pattern(&self, &str) -> bool
@@ -1644,6 +1658,7 @@ pub fn frensense_lang::providers::rust_lang::RustSpec::fact_language(&self) -> &
 pub fn frensense_lang::providers::rust_lang::RustSpec::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn frensense_lang::providers::rust_lang::RustSpec::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn frensense_lang::providers::rust_lang::RustSpec::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn frensense_lang::providers::rust_lang::RustSpec::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn frensense_lang::providers::rust_lang::RustSpec::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn frensense_lang::providers::rust_lang::RustSpec::import_node_kinds(&self) -> &'static [&'static str]
 pub fn frensense_lang::providers::rust_lang::RustSpec::is_alternative_pattern(&self, &str) -> bool
@@ -1726,6 +1741,7 @@ pub fn T::fact_language(&self) -> &'static str
 pub fn T::for_loop_iterable<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<(tree_sitter::Node<'t>, tree_sitter::Node<'t>)>
 pub fn T::function_name_node<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
 pub fn T::function_params<'t>(&self, tree_sitter::Node<'t>) -> core::option::Option<tree_sitter::Node<'t>>
+pub fn T::implicit_receiver_name(&self, &str) -> core::option::Option<&'static str>
 pub fn T::implicit_return_node<'a>(&self, tree_sitter::Node<'a>, tree_sitter::Node<'a>) -> core::option::Option<tree_sitter::Node<'a>>
 pub fn T::import_node_kinds(&self) -> &'static [&'static str]
 pub fn T::is_alternative_pattern(&self, &str) -> bool

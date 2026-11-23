@@ -25,6 +25,8 @@ pub mod decl;
 pub mod expr;
 /// Classification of assignment targets.
 pub(crate) mod lvalue;
+/// Binding of a function's parameters and its implicit receiver.
+pub(crate) mod params;
 
 pub(crate) use context::LoopTarget;
 pub use context::LoweringContext;
