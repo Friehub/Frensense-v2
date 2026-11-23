@@ -55,6 +55,7 @@ npm install -g @friehub/frensense    # prebuilt binary, no Rust needed
 - [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions.md): Fail pull requests on new findings, annotate them, and gate AI agents.
 - [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp.md): Run Frensense as an MCP server so AI coding agents can check their own changes.
 - [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp.md): Run Frensense as a language server so findings appear as editor diagnostics.
+- [Language crate](https://frensense.friehub.cloud/guide/library.md): Use frensense-lang on its own — parse with the right grammar and classify nodes without the engine.
 
 ### Teach the engine
 
@@ -82,6 +83,7 @@ npm install -g @friehub/frensense    # prebuilt binary, no Rust needed
 - [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions.md): Fail pull requests on new findings, annotate them, and gate AI agents.
 - [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp.md): Run Frensense as an MCP server so AI coding agents can check their own changes.
 - [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp.md): Run Frensense as a language server so findings appear as editor diagnostics.
+- [Language crate](https://frensense.friehub.cloud/guide/library.md): Use frensense-lang on its own — parse with the right grammar and classify nodes without the engine.
 
 ### Teach the engine
 
@@ -109,6 +111,7 @@ npm install -g @friehub/frensense    # prebuilt binary, no Rust needed
 - [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions.md): Fail pull requests on new findings, annotate them, and gate AI agents.
 - [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp.md): Run Frensense as an MCP server so AI coding agents can check their own changes.
 - [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp.md): Run Frensense as a language server so findings appear as editor diagnostics.
+- [Language crate](https://frensense.friehub.cloud/guide/library.md): Use frensense-lang on its own — parse with the right grammar and classify nodes without the engine.
 
 ### Teach the engine
 
@@ -136,6 +139,7 @@ npm install -g @friehub/frensense    # prebuilt binary, no Rust needed
 - [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions.md): Fail pull requests on new findings, annotate them, and gate AI agents.
 - [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp.md): Run Frensense as an MCP server so AI coding agents can check their own changes.
 - [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp.md): Run Frensense as a language server so findings appear as editor diagnostics.
+- [Language crate](https://frensense.friehub.cloud/guide/library.md): Use frensense-lang on its own — parse with the right grammar and classify nodes without the engine.
 
 ### Teach the engine
 
@@ -163,6 +167,7 @@ npm install -g @friehub/frensense    # prebuilt binary, no Rust needed
 - [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions.md): Fail pull requests on new findings, annotate them, and gate AI agents.
 - [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp.md): Run Frensense as an MCP server so AI coding agents can check their own changes.
 - [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp.md): Run Frensense as a language server so findings appear as editor diagnostics.
+- [Language crate](https://frensense.friehub.cloud/guide/library.md): Use frensense-lang on its own — parse with the right grammar and classify nodes without the engine.
 
 ### Teach the engine
 
@@ -190,6 +195,7 @@ npm install -g @friehub/frensense    # prebuilt binary, no Rust needed
 - [CI and agent gating](https://frensense.friehub.cloud/guide/github-actions.md): Fail pull requests on new findings, annotate them, and gate AI agents.
 - [AI agents (MCP)](https://frensense.friehub.cloud/guide/mcp.md): Run Frensense as an MCP server so AI coding agents can check their own changes.
 - [Editors (LSP)](https://frensense.friehub.cloud/guide/lsp.md): Run Frensense as a language server so findings appear as editor diagnostics.
+- [Language crate](https://frensense.friehub.cloud/guide/library.md): Use frensense-lang on its own — parse with the right grammar and classify nodes without the engine.
 
 ### Teach the engine
 

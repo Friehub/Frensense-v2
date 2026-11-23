@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"mod":["intrinsics","providers","registry","rule_card","rules","severity","spec"]};
+window.SIDEBAR_ITEMS = {"mod":["intrinsics","parse","providers","registry","rule_card","rules","severity","spec"]};

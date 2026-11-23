@@ -35,6 +35,7 @@ as "nothing found", not "nothing there".
 | Let an AI coding agent check its own changes | [AI agents (MCP)](/guide/mcp) |
 | See findings in my editor | [Editors (LSP)](/guide/lsp) |
 | Look up a flag or an exit code | [CLI reference](/guide/cli) |
+| Use the language knowledge in my own Rust project | [Language crate](/guide/library) |
 | Add knowledge about my framework | [Bundles](/bundles), then [How teaching works](/guide/teachability) |
 
 ## What it scans

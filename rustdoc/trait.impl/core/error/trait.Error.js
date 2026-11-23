@@ -1,9 +1,9 @@
 (function() {
-    const implementors = Object.fromEntries([["frensense",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/error/trait.Error.html\" title=\"trait core::error::Error\">Error</a> for <a class=\"enum\" href=\"frensense/enum.FrensenseError.html\" title=\"enum frensense::FrensenseError\">FrensenseError</a>",0]]]]);
+    const implementors = Object.fromEntries([["frensense",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/error/trait.Error.html\" title=\"trait core::error::Error\">Error</a> for <a class=\"enum\" href=\"frensense/enum.FrensenseError.html\" title=\"enum frensense::FrensenseError\">FrensenseError</a>",0]]],["frensense_lang",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/error/trait.Error.html\" title=\"trait core::error::Error\">Error</a> for <a class=\"enum\" href=\"frensense_lang/parse/enum.ParseError.html\" title=\"enum frensense_lang::parse::ParseError\">ParseError</a>",0]]]]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {
         window.pending_implementors = implementors;
     }
 })()
-//{"start":59,"fragment_lengths":[287]}
+//{"start":59,"fragment_lengths":[287,304]}
