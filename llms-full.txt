@@ -163,6 +163,11 @@ attaches one binary per platform, named after its Rust target:
 | macOS Apple Silicon | `frensense-aarch64-apple-darwin` |
 | Windows x64 | `frensense-x86_64-pc-windows-msvc.exe` |
 
+The Linux binary is built on Ubuntu 24.04 and linked against its glibc, so it
+needs glibc 2.39 or newer. It will not run on musl-only systems such as Alpine,
+or on older distributions; use `cargo install frensense` there, or
+`npx @friehub/frensense` if Node is installed.
+
 There is no Linux arm64 build yet. On Linux x64:
 
 ```bash
