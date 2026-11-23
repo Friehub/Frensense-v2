@@ -15,11 +15,36 @@
 //! // spec is &dyn LanguageSpec - call any trait method
 //! ```
 //!
+//! ## Building your own registry
+//!
+//! [`LanguageRegistry::global`] is a convenience for the common case: every
+//! language enabled through Cargo features. A consumer that needs a different
+//! set - its own grammar, a subset of the built-ins, or both - owns a
+//! registry instead:
+//!
+//! ```text
+//! use std::sync::Arc;
+//! use frensense_lang::registry::LanguageRegistry;
+//! use frensense_lang::spec::LanguageSpec;
+//!
+//! // Every built-in language the crate's features enable.
+//! let mut reg = LanguageRegistry::with_default_specs();
+//! // ... or start from nothing and register only what you handle.
+//! let mut only_mine = LanguageRegistry::new();
+//!
+//! reg.register(Arc::new(MySpec));
+//! only_mine.register(Arc::new(MySpec));
+//! let spec: &dyn LanguageSpec = only_mine.for_extension("myext").unwrap();
+//! ```
+//!
+//! A registry you own is independent of the global one: registering into it
+//! never changes what [`LanguageRegistry::global`] answers.
+//!
 //! ## Adding a new language
 //!
 //! 1. Create a new file in `src/providers/` implementing `LanguageSpec`.
 //! 2. Call `registry.register(Arc::new(YourProvider))` inside
-//!    `LanguageRegistry::build_default()`.
+//!    [`LanguageRegistry::with_default_specs`].
 //! 3. Done.  Every engine subsystem picks it up automatically.
 
 use std::sync::{Arc, OnceLock};
@@ -57,49 +82,65 @@ impl LanguageRegistry {
     /// Returns the process-wide default registry, constructed once on first call.
     ///
     /// The default registry includes every language enabled via Cargo features.
-    /// See the private `build_default`.
+    /// It is immutable: to register languages of your own, build a registry
+    /// with [`with_default_specs`](Self::with_default_specs) or
+    /// [`new`](Self::new) and keep it.
     pub fn global() -> &'static Self {
         static INSTANCE: OnceLock<LanguageRegistry> = OnceLock::new();
-        INSTANCE.get_or_init(Self::build_default)
+        INSTANCE.get_or_init(Self::with_default_specs)
     }
 
     // ── Construction ─────────────────────────────────────────────────────
 
-    /// Build the default registry from all feature-gated providers.
-    fn build_default() -> Self {
-        let mut reg = Self {
+    /// An empty registry.
+    ///
+    /// Use it when you handle your own languages only: register exactly the
+    /// specs you want and every other extension answers `None`.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
             by_ext: FxHashMap::default(),
             by_name: FxHashMap::default(),
-        };
+        }
+    }
 
-        #[cfg(feature = "typescript")]
-        reg.register(Arc::new(crate::providers::javascript::TypeScriptSpec));
+    /// The built-in languages this crate's features enable.
+    ///
+    /// Same contents as [`global`](Self::global), but owned, so you can
+    /// [`register`](Self::register) a provider of your own on top.
+    #[must_use]
+    pub fn with_default_specs() -> Self {
+        // The list is empty when every grammar feature is off.
+        let specs: Vec<Arc<dyn LanguageSpec>> = vec![
+            #[cfg(feature = "typescript")]
+            Arc::new(crate::providers::javascript::TypeScriptSpec),
+            #[cfg(feature = "typescript")]
+            Arc::new(crate::providers::javascript::VueSpec),
+            #[cfg(feature = "javascript")]
+            Arc::new(crate::providers::javascript::JavaScriptSpec),
+            #[cfg(feature = "go")]
+            Arc::new(crate::providers::go::GoSpec),
+            #[cfg(feature = "python")]
+            Arc::new(crate::providers::python::PythonSpec),
+            #[cfg(feature = "rust-grammar")]
+            Arc::new(crate::providers::rust_lang::RustSpec),
+            #[cfg(feature = "c-grammar")]
+            Arc::new(crate::providers::c_lang::CSpec),
+        ];
 
-        #[cfg(feature = "typescript")]
-        reg.register(Arc::new(crate::providers::javascript::VueSpec));
-
-        #[cfg(feature = "javascript")]
-        reg.register(Arc::new(crate::providers::javascript::JavaScriptSpec));
-
-        #[cfg(feature = "go")]
-        reg.register(Arc::new(crate::providers::go::GoSpec));
-
-        #[cfg(feature = "python")]
-        reg.register(Arc::new(crate::providers::python::PythonSpec));
-
-        #[cfg(feature = "rust-grammar")]
-        reg.register(Arc::new(crate::providers::rust_lang::RustSpec));
-
-        #[cfg(feature = "c-grammar")]
-        reg.register(Arc::new(crate::providers::c_lang::CSpec));
-
+        let mut reg = Self::new();
+        for spec in specs {
+            reg.register(spec);
+        }
         reg
     }
 
-    /// Register a [`LanguageSpec`] for all extensions it declares.
+    /// Register a [`LanguageSpec`] for every extension and name it declares.
     ///
-    /// Call this before [`global`](Self::global) is first accessed if you need
-    /// to add custom providers (e.g. in tests or downstream crates).
+    /// Works on any registry you own - one from [`new`](Self::new) or
+    /// [`with_default_specs`](Self::with_default_specs). When two specs claim
+    /// the same extension the later registration wins, which is how a
+    /// consumer overrides a built-in for one file type.
     pub fn register(&mut self, spec: Arc<dyn LanguageSpec>) {
         for &ext in spec.extensions() {
             self.by_ext.insert(ext, Arc::clone(&spec));
@@ -160,4 +201,132 @@ pub fn spec_for_path(path: &std::path::Path) -> Option<&'static dyn LanguageSpec
 #[inline]
 pub fn all_specs() -> impl Iterator<Item = &'static dyn LanguageSpec> {
     LanguageRegistry::global().all_specs()
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+// The toy spec answers with the TypeScript grammar so the tests need no
+// grammar crate of their own; that is why they are feature-gated on it.
+#[cfg(all(test, feature = "typescript"))]
+mod tests {
+    use std::sync::Arc;
+
+    use tree_sitter::Node;
+
+    use super::LanguageRegistry;
+    use crate::spec::{Import, LanguageSpec, NodeRole, PackageCategory, TaintOrigin};
+
+    /// A downstream provider: a language this crate has never heard of.
+    struct ToySpec;
+
+    impl LanguageSpec for ToySpec {
+        fn name(&self) -> &'static str {
+            "toy"
+        }
+
+        fn extensions(&self) -> &'static [&'static str] {
+            &["toy"]
+        }
+
+        fn tree_sitter_language(&self) -> tree_sitter::Language {
+            tree_sitter_typescript::LANGUAGE_TSX.into()
+        }
+
+        fn classify(&self, _kind: &str) -> NodeRole {
+            NodeRole::Other
+        }
+
+        fn wrap_region(&self, code: &str) -> String {
+            code.to_owned()
+        }
+
+        fn import_node_kinds(&self) -> &'static [&'static str] {
+            &[]
+        }
+
+        fn extract_imports(&self, _root: Node<'_>, _source: &str) -> Vec<Import> {
+            Vec::new()
+        }
+
+        fn package_category(&self, _package: &str) -> Option<PackageCategory> {
+            None
+        }
+
+        fn classify_param_taint(
+            &self,
+            _name: Option<&str>,
+            _type_annotation: Option<&str>,
+        ) -> Option<TaintOrigin> {
+            None
+        }
+    }
+
+    #[test]
+    fn a_new_registry_is_empty() {
+        let reg = LanguageRegistry::new();
+        assert!(reg.for_extension("ts").is_none());
+        assert!(reg.for_name("typescript").is_none());
+        assert_eq!(reg.all_specs().count(), 0);
+    }
+
+    #[test]
+    fn an_owned_registry_takes_a_downstream_spec() {
+        let mut reg = LanguageRegistry::new();
+        reg.register(Arc::new(ToySpec));
+
+        assert_eq!(
+            reg.for_extension("toy").map(|spec| spec.name()),
+            Some("toy")
+        );
+        assert_eq!(reg.for_name("toy").map(|spec| spec.name()), Some("toy"));
+        assert!(
+            reg.for_extension("ts").is_none(),
+            "only what was registered"
+        );
+        assert_eq!(reg.all_specs().count(), 1);
+    }
+
+    #[test]
+    fn the_built_in_set_can_be_extended() {
+        let mut reg = LanguageRegistry::with_default_specs();
+        let built_in = reg.for_extension("ts").is_some();
+        assert!(built_in, "the default specs are present");
+
+        reg.register(Arc::new(ToySpec));
+        assert!(reg.for_extension("toy").is_some());
+        assert!(reg.for_extension("ts").is_some(), "built-ins survive");
+    }
+
+    #[test]
+    fn a_local_registry_does_not_change_the_global_one() {
+        let mut reg = LanguageRegistry::with_default_specs();
+        reg.register(Arc::new(ToySpec));
+
+        assert!(reg.for_extension("toy").is_some());
+        assert!(
+            LanguageRegistry::global().for_extension("toy").is_none(),
+            "the global registry is immutable and unaffected"
+        );
+    }
+
+    #[test]
+    fn the_global_registry_is_the_feature_gated_default_set() {
+        let global = LanguageRegistry::global();
+        let owned = LanguageRegistry::with_default_specs();
+        assert_eq!(
+            global.all_specs().count(),
+            owned.all_specs().count(),
+            "global() is with_default_specs() built once"
+        );
+    }
+
+    #[test]
+    fn for_path_reads_a_file_extension() {
+        let reg = LanguageRegistry::with_default_specs();
+        let spec = reg
+            .for_path(std::path::Path::new("src/main.ts"))
+            .expect("ts is registered");
+        assert_eq!(spec.name(), "typescript");
+        assert!(reg.for_path(std::path::Path::new("Makefile")).is_none());
+    }
 }

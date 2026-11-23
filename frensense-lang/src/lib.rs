@@ -332,7 +332,51 @@
 //! `ir/lowering/kind_migration_tests.rs` pins each query against the comparison
 //! it replaced by walking real parse trees, so an empty walk cannot pass.
 
+//! ## Using this crate from another project
+//!
+//! Nothing here is specific to the frensense engine: the crate depends on
+//! tree-sitter grammars, not on the engine, so another project can use the
+//! language knowledge directly. The whole entry sequence is three calls.
+//!
+//! ```rust
+//! use frensense_lang::{parse, spec_for_ext, NodeRole};
+//!
+//! // 1. Which language is this file? (extension -> spec, or build your own
+//! //    registry with `LanguageRegistry::new()` for languages you supply)
+//! let spec = spec_for_ext("py").expect("python is registered");
+//!
+//! // 2. Parse: the spec's grammar and its preprocessing, applied for you.
+//! let parsed = parse(spec, "def handler(request):\n    return request.args['q']\n")
+//!     .expect("parses");
+//!
+//! // 3. Ask the spec, never the grammar's node-kind strings.
+//! let mut stack = vec![parsed.root_node()];
+//! while let Some(node) = stack.pop() {
+//!     match spec.classify(node.kind()) {
+//!         NodeRole::Function { name_field, .. } => {
+//!             let name = name_field
+//!                 .as_deref()
+//!                 .and_then(|f| node.child_by_field_name(f));
+//!             // …
+//!         }
+//!         NodeRole::Call { callee_field, .. } => { /* … */ }
+//!         _ => {}
+//!     }
+//!     // … push children …
+//! }
+//! ```
+//!
+//! `parse` is in [`mod@parse`]; the extension lookup, an ownable registry and the
+//! free functions are in [`registry`]. `parsed.has_errors()` says whether the
+//! grammar produced an incomplete tree, so a caller can report "partially
+//! analyzed" instead of clean.
+//!
+//! Rule cards, severities and CWEs ([`rule_card`], [`severity`], [`rules`]) are
+//! usable without parsing at all, for a project that wants one vocabulary for
+//! its own findings.
+
 pub mod intrinsics;
+pub mod parse;
 pub mod providers;
 pub mod registry;
 pub mod rule_card;
@@ -342,6 +386,7 @@ pub mod spec;
 
 // Convenient re-exports
 pub use intrinsics::is_container_verb;
+pub use parse::{parse, ParseError, ParsedSource};
 pub use registry::{all_specs, spec_for_ext, spec_for_path, LanguageRegistry};
 pub use severity::{
     checker_rule_tier, Profile, RuleTier, SanitizerKind, Severity, SinkRole, SEVERITY_LABELS,

@@ -104,7 +104,7 @@ Used by:
 - [frensense 0.9.2](https://github.com/Friehub/Frensense-v2)
 - [frensense-bundler 0.9.0](https://github.com/Friehub/Frensense-v2)
 - [frensense-engine 0.9.1](https://github.com/Friehub/Frensense-v2)
-- [frensense-lang 0.8.3](https://github.com/Friehub/Frensense-v2)
+- [frensense-lang 0.8.4](https://github.com/Friehub/Frensense-v2)
 
 ```text
 GNU GENERAL PUBLIC LICENSE
@@ -991,5 +991,4 @@ dealings in these Data Files or Software without prior written
 authorization of the copyright holder.
 
 ```
-
 

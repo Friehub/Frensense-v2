@@ -218,7 +218,8 @@ const DOCS_SIDEBAR = [
     items: [
       { text: 'CI and agent gating', link: '/guide/github-actions' },
       { text: 'AI agents (MCP)', link: '/guide/mcp' },
-      { text: 'Editors (LSP)', link: '/guide/lsp' }
+      { text: 'Editors (LSP)', link: '/guide/lsp' },
+      { text: 'Language crate (Rust)', link: '/guide/library' }
     ]
   },
   {
@@ -246,9 +247,9 @@ export default defineConfig({
   title: 'Frensense',
   description:
     'Frensense v2, a compiler-mode static analysis engine that lowers every file to a program graph and reports exact source-to-sink taint paths.',
-  // The v1 archive is copied in after the build, so VitePress cannot see it. Every other
-  // dead link now fails the build instead of shipping.
-  ignoreDeadLinks: [/^\/v1(\/|$)/],
+  // The v1 archive and the rustdoc tree are copied in after the build, so VitePress
+  // cannot see them. Every other dead link now fails the build instead of shipping.
+  ignoreDeadLinks: [/^\/v1(\/|$)/, /^\/rustdoc(\/|$)/],
   sitemap: {
     hostname: SITE_ORIGIN
   },
