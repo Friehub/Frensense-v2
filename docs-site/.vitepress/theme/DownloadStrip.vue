@@ -57,10 +57,6 @@ async function refresh() {
 
 onMounted(refresh)
 
-// Install commands, shown and copied exactly as written. One list drives the
-// cards, so what a card displays is always what its button copies.
-const RELEASE_CMD =
-  'curl -L -o frensense https://github.com/Friehub/frensense-v2/releases/latest/download/frensense-x86_64-unknown-linux-gnu && chmod +x frensense'
 const copied = ref<string | null>(null)
 let resetTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -89,6 +85,51 @@ async function copy(id: string, text: string) {
   clearTimeout(resetTimer)
   resetTimer = setTimeout(() => (copied.value = null), 1800)
 }
+
+// One release asset per platform, named after its Rust target. A single
+// "releases" card hid the fact that the download differs by device, so each
+// platform gets its own card and its own file.
+interface Platform {
+  id: string
+  name: string
+  detail: string
+  asset: string
+}
+
+const RELEASES = 'https://github.com/Friehub/frensense-v2/releases'
+const platforms: Platform[] = [
+  {
+    id: 'linux-x64',
+    name: 'Linux',
+    detail: 'x64 · glibc 2.39+',
+    asset: 'frensense-x86_64-unknown-linux-gnu'
+  },
+  {
+    id: 'macos-arm64',
+    name: 'macOS',
+    detail: 'Apple Silicon · arm64',
+    asset: 'frensense-aarch64-apple-darwin'
+  },
+  {
+    id: 'macos-x64',
+    name: 'macOS',
+    detail: 'Intel · x64',
+    asset: 'frensense-x86_64-apple-darwin'
+  },
+  {
+    id: 'windows-x64',
+    name: 'Windows',
+    detail: 'x64 · .exe',
+    asset: 'frensense-x86_64-pc-windows-msvc.exe'
+  }
+]
+
+function assetUrl(asset: string): string {
+  return `${RELEASES}/latest/download/${asset}`
+}
+
+const CARGO_CMD = 'cargo install frensense'
+const NPM_CMD = 'npm i -g @friehub/frensense'
 </script>
 
 <template>
@@ -103,24 +144,20 @@ async function copy(id: string, text: string) {
 
     <div class="download-strip__grid">
       <div class="dl-card">
-        <a
-          class="dl-card__registry"
-          href="https://crates.io/crates/frensense"
-          target="_blank"
-          rel="noopener"
-          >crates.io</a
-        >
-        <span v-if="cratesWeekly !== null" class="dl-card__stat">
-          {{ fmt(cratesWeekly) }}<em>downloads / week</em>
-        </span>
+        <div class="dl-card__top">
+          <span class="dl-card__registry">crates.io</span>
+          <span v-if="cratesWeekly !== null" class="dl-card__stat">
+            {{ fmt(cratesWeekly) }}<em>downloads / week</em>
+          </span>
+        </div>
         <div class="dl-card__cmdrow">
-          <code class="dl-card__cmd">cargo install frensense</code>
+          <code class="dl-card__cmd">{{ CARGO_CMD }}</code>
           <button
             type="button"
             class="dl-card__copy"
             :class="{ 'dl-card__copy--done': copied === 'cargo' }"
-            aria-label="Copy command: cargo install frensense"
-            @click="copy('cargo', 'cargo install frensense')"
+            :aria-label="`Copy command: ${CARGO_CMD}`"
+            @click="copy('cargo', CARGO_CMD)"
           >
             {{ copied === 'cargo' ? 'Copied' : 'Copy' }}
           </button>
@@ -135,24 +172,20 @@ async function copy(id: string, text: string) {
       </div>
 
       <div class="dl-card">
-        <a
-          class="dl-card__registry"
-          href="https://www.npmjs.com/package/@friehub/frensense"
-          target="_blank"
-          rel="noopener"
-          >npm</a
-        >
-        <span v-if="npmWeekly !== null" class="dl-card__stat">
-          {{ fmt(npmWeekly) }}<em>downloads / week</em>
-        </span>
+        <div class="dl-card__top">
+          <span class="dl-card__registry">npm</span>
+          <span v-if="npmWeekly !== null" class="dl-card__stat">
+            {{ fmt(npmWeekly) }}<em>downloads / week</em>
+          </span>
+        </div>
         <div class="dl-card__cmdrow">
-          <code class="dl-card__cmd">npm i -g @friehub/frensense</code>
+          <code class="dl-card__cmd">{{ NPM_CMD }}</code>
           <button
             type="button"
             class="dl-card__copy"
             :class="{ 'dl-card__copy--done': copied === 'npm' }"
-            aria-label="Copy command: npm i -g @friehub/frensense"
-            @click="copy('npm', 'npm i -g @friehub/frensense')"
+            :aria-label="`Copy command: ${NPM_CMD}`"
+            @click="copy('npm', NPM_CMD)"
           >
             {{ copied === 'npm' ? 'Copied' : 'Copy' }}
           </button>
@@ -165,51 +198,45 @@ async function copy(id: string, text: string) {
           >View on npm &rarr;</a
         >
       </div>
+    </div>
 
-      <div class="dl-card">
-        <a
-          class="dl-card__registry"
-          href="https://github.com/Friehub/frensense-v2/releases"
-          target="_blank"
-          rel="noopener"
-          >GitHub Releases</a
-        >
-        <span class="dl-card__stat dl-card__stat--muted"
-          >Prebuilt binaries<em>Linux, macOS, Windows</em></span
-        >
-        <div class="dl-card__cmdrow">
-          <code class="dl-card__cmd">{{ RELEASE_CMD }}</code>
-          <button
-            type="button"
-            class="dl-card__copy"
-            :class="{ 'dl-card__copy--done': copied === 'release' }"
-            aria-label="Copy command: download the Linux x64 binary"
-            @click="copy('release', RELEASE_CMD)"
-          >
-            {{ copied === 'release' ? 'Copied' : 'Copy' }}
-          </button>
+    <h3 class="download-strip__subhead">Prebuilt binaries</h3>
+
+    <div class="download-strip__grid download-strip__grid--binaries">
+      <div v-for="p in platforms" :key="p.id" class="dl-card dl-card--binary">
+        <div class="dl-card__top">
+          <span class="dl-card__registry">{{ p.name }}</span>
         </div>
-        <p class="dl-card__note">Linux x64 shown; other platforms are on the releases page.</p>
+        <p class="dl-card__platform-detail">{{ p.detail }}</p>
         <a
           class="dl-card__cta"
-          href="https://github.com/Friehub/frensense-v2/releases"
+          :href="assetUrl(p.asset)"
           target="_blank"
           rel="noopener"
-          >All releases &rarr;</a
+          >Download &rarr;</a
         >
       </div>
     </div>
 
+    <p class="download-strip__note">
+      The Linux build is linked against glibc from Ubuntu 24.04, so it needs
+      glibc 2.39 or newer: it will not run on musl-only systems such as Alpine,
+      or on older distributions. Use <code>cargo install frensense</code>
+      there, or <code>npx @friehub/frensense</code> with Node installed.
+    </p>
+
+    <p class="download-strip__foot">
+      Other platforms are on the
+      <a :href="RELEASES" target="_blank" rel="noopener">releases page</a>. No
+      install needed - run <code>npx @friehub/frensense .</code>. Every surface
+      shares one engine and one finding-ID scheme. Full options in the
+      <a href="/guide/installation">installation guide</a>. Building on the
+      crates? Browse the
+      <a href="/rustdoc/" target="_blank" rel="noopener">Rust API docs</a>.
+    </p>
+
     <span class="visually-hidden" role="status" aria-live="polite">{{
       copied ? 'Command copied to clipboard' : ''
     }}</span>
-
-    <p class="download-strip__foot">
-      No install needed - run <code>npx @friehub/frensense .</code>.
-      Every surface shares one engine and one finding-ID scheme. Full options
-      in the <a href="/guide/installation">installation guide</a>. Building on
-      the crates? Browse the
-      <a href="/rustdoc/" target="_blank" rel="noopener">Rust API docs</a>.
-    </p>
   </div>
 </template>

@@ -1,14 +1,24 @@
 /* frensense v2 docs - v1-matched theme (green brand, Urbanist/Inter, glow bg) */
 /* Fonts are loaded asynchronously via non-blocking <link rel="preload"> in config.mts */
 
+/* Readability: the theme's 16px base reads small across the wide layout, so
+   the site runs one step larger. Prose gets a little more still. */
+html,
+body {
+  font-size: 17px;
+}
+
 :root {
   --vp-font-family-base: "Urbanist", "Inter", "Geist", "SF Pro Display",
     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
-  /* v1 brand: green */
-  --vp-c-brand-1: #1cc858;
-  --vp-c-brand-2: #1ab44f;
-  --vp-c-brand-3: #17a046;
+  /* v1 brand: green. Text and borders need a deeper green than the button
+     fill: #1cc858 on white is only 2.2:1, far below the 4.5:1 that body text
+     needs, so brand-1 is the dark green here and the bright green is kept for
+     surfaces (buttons below, dark mode, glows). */
+  --vp-c-brand-1: #0b7031; /* 6.2:1 on white */
+  --vp-c-brand-2: #085b28; /* 8.3:1, hover */
+  --vp-c-brand-3: #064420; /* 11.3:1, pressed */
   --vp-c-brand-soft: rgba(28, 200, 88, 0.14);
 
   --vp-button-brand-border: transparent;
@@ -19,13 +29,21 @@
   --vp-button-brand-hover-text: #04120a;
   --vp-button-brand-active-text: #04120a;
 
-  /* hero name: v1 green gradient */
+  /* hero name: v1 green gradient, deepened for legibility on the light page
+     (every stop clears 3:1 for large text) */
   --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: linear-gradient(120deg, #1cc858, #7ee2a4);
+  --vp-home-hero-name-background: linear-gradient(120deg, #0b7031, #14853a);
 }
 
 /* v1 dark palette */
 .dark {
+  /* on the near-black page the bright green is legible (8.9:1), so dark mode
+     keeps the v1 colour and the light-mode deepening does not apply */
+  --vp-c-brand-1: #35d873; /* 10.6:1 */
+  --vp-c-brand-2: #1cc858;
+  --vp-c-brand-3: #17a046;
+  --vp-home-hero-name-background: linear-gradient(120deg, #1cc858, #7ee2a4);
+
   --vp-c-bg: #0a0a0a;
   --vp-c-bg-alt: #111111;
   --vp-c-bg-elv: #161616;
@@ -159,10 +177,9 @@
 
 /* homepage download section: registry cards + weekly download counts */
 .download-strip {
-  max-width: 960px;
+  max-width: 1080px;
   margin: 0 auto;
   padding: 40px 24px 8px;
-  border-top: 1px solid var(--vp-c-divider);
   text-align: left;
 }
 /* the strip lives in the home markdown container; zero its default top
@@ -173,10 +190,10 @@
 }
 .download-strip__head {
   text-align: center;
-  margin-bottom: 28px;
+  margin-bottom: 36px;
 }
 .download-strip__head h2 {
-  font-size: 2rem;
+  font-size: 2.2rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   /* the doc-page h2 rule adds its own divider and top padding; the
@@ -188,18 +205,48 @@
 }
 .download-strip__head p {
   color: var(--vp-c-text-2);
-  font-size: 1.05rem;
+  font-size: 1.1rem;
+  line-height: 1.6;
+  max-width: 620px;
+  margin: 0 auto;
 }
 .download-strip__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+  align-items: stretch;
+}
+/* one card per platform: narrower than the registry cards, and all four fit
+   on one row at the strip's width so the choice reads as a set */
+.download-strip__grid--binaries {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
+}
+.download-strip__subhead {
+  margin: 44px 0 18px;
+  padding: 0;
+  border-top: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.dl-card--binary {
+  gap: 10px;
+  padding: 20px 22px;
+}
+/* out-specifies the `.vp-doc p` prose rule, which would otherwise give this
+   one line doc-sized type and 16px margins */
+.vp-doc .dl-card__platform-detail {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--vp-c-text-2);
 }
 .dl-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 20px 22px;
+  gap: 18px;
+  padding: 26px 28px 24px;
   border: 1px solid var(--vp-c-bg-soft);
   border-radius: 12px;
   background-color: var(--vp-c-bg-soft);
@@ -212,31 +259,44 @@
 .dl-card:hover {
   border-color: var(--vp-c-brand-1);
 }
+/* name and download count share the top row so the card body holds only the
+   command, leaving each card one clear block instead of a stack of lines */
+.dl-card__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
 .dl-card__registry {
   font-weight: 700;
-  font-size: 1rem;
+  font-size: 1.2rem;
+  line-height: 1.3;
   color: var(--vp-c-text-1);
   text-decoration: none;
 }
-.dl-card__registry:hover {
-  color: var(--vp-c-brand-1);
-}
 .dl-card__stat {
+  margin-left: auto;
+  text-align: right;
   font-size: 1.7rem;
   font-weight: 800;
   letter-spacing: -0.02em;
   color: var(--vp-c-text-1);
-  line-height: 1.1;
+  line-height: 1.15;
 }
 .dl-card__stat em {
   display: block;
   font-style: normal;
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   font-weight: 500;
   color: var(--vp-c-text-2);
-  margin-top: 2px;
+  margin-top: 4px;
 }
 .dl-card__stat--muted {
+  max-width: 15rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.4;
   color: var(--vp-c-text-1);
 }
 /* the command gets the full card width; Copy sits under it, right-aligned */
@@ -244,7 +304,7 @@
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
 }
 .dl-card__cmdrow .dl-card__cmd {
@@ -252,12 +312,12 @@
 }
 .dl-card__copy {
   align-self: flex-end;
-  padding: 3px 12px;
+  padding: 5px 16px;
   border: 1px solid var(--vp-c-divider);
   border-radius: 8px;
   background-color: var(--vp-c-bg);
   color: var(--vp-c-text-1);
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
   transition: border-color 0.2s, color 0.2s;
@@ -268,9 +328,6 @@
 }
 .dl-card__copy--done {
   border-color: var(--vp-c-brand-1);
-  color: var(--vp-c-brand-3);
-}
-.dark .dl-card__copy--done {
   color: var(--vp-c-brand-1);
 }
 .visually-hidden {
@@ -287,28 +344,28 @@
 .vp-doc .dl-card__note,
 .dl-card__note {
   margin: 0;
-  line-height: 1.4;
-  font-size: 0.78rem;
+  line-height: 1.55;
+  font-size: 0.85rem;
   color: var(--vp-c-text-2);
 }
+/* long commands wrap onto their own lines rather than hiding behind a
+   horizontal scroll, which would also hide the Copy button's context */
 .dl-card__cmd {
+  display: block;
   font-family: var(--vp-font-family-mono, monospace);
-  font-size: 0.72rem;
-  padding: 7px 9px;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  padding: 12px 14px;
   border-radius: 8px;
   background-color: var(--vp-c-bg);
   border: 1px solid var(--vp-c-divider);
   color: var(--vp-c-text-1);
-  overflow-x: auto;
-  white-space: nowrap;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.dl-card__cmd::-webkit-scrollbar {
-  display: none;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 .dl-card__cta {
-  font-size: 0.9rem;
+  margin-top: auto;
+  font-size: 0.95rem;
   font-weight: 600;
   color: #0969da;
   text-decoration: none;
@@ -316,10 +373,20 @@
 .dark .dl-card__cta {
   color: #58a6ff;
 }
+.vp-doc .download-strip__note {
+  margin: 16px 0 0;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--vp-c-text-2);
+}
+.download-strip__note code {
+  font-size: 0.85em;
+}
 .download-strip__foot {
-  margin-top: 20px;
+  margin-top: 32px;
   text-align: center;
-  font-size: 0.95rem;
+  line-height: 1.7;
+  font-size: 1rem;
   color: var(--vp-c-text-2);
 }
 .download-strip__foot code {
@@ -345,6 +412,32 @@
 /* High contrast, legible typography across docs and tables (no faint mint green text) */
 .vp-doc {
   color: var(--vp-c-text-1);
+  font-size: 17px;
+}
+
+/* prose one step above the theme default (16px / 28px line) */
+.vp-doc p,
+.vp-doc li,
+.vp-doc summary,
+.vp-doc td,
+.vp-doc th,
+.vp-doc blockquote,
+.vp-doc dt,
+.vp-doc dd {
+  font-size: 17.5px;
+  line-height: 1.75;
+}
+
+/* navigation and sidebar match the larger base */
+.VPNavBarMenuLink,
+.VPNavBarMenuGroup .text {
+  font-size: 15px;
+}
+.VPSidebarItem .text {
+  font-size: 16px;
+}
+.VPDocAsideOutline .outline-link {
+  font-size: 15px;
 }
 
 .vp-doc a {
@@ -369,6 +462,17 @@
   color: #79c0ff;
 }
 
+/* Inline code that is part of a link takes the link's colour and drops the
+   grey chip fill. A grey block around the words hid them among the other
+   code chips and stopped them reading as links at all. */
+.vp-doc a > code,
+.vp-doc a code {
+  background-color: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: 0.95em;
+}
+
 /* Accessible tables with distinct borders and headers */
 .vp-doc table {
   width: 100%;
@@ -386,19 +490,18 @@
   color: var(--vp-c-text-1) !important;
 }
 
-/* Download-strip cards are anchors for click targets, not links:
-   they must not inherit the doc-link color, underline or weight.
+/* Download-strip cards are containers, not links: only the explicit CTA at
+   the foot of each card goes anywhere. The registry name is plain text, so a
+   tap anywhere in the card body does nothing instead of opening a registry.
    (These selectors out-specify the `.vp-doc a` rule above.) */
-.vp-doc a.dl-card__registry,
 .vp-doc .dl-card {
   color: inherit;
   font-weight: inherit;
   text-decoration: none;
 }
-.vp-doc a.dl-card__registry {
+.vp-doc .dl-card__registry {
+  color: var(--vp-c-text-1);
   font-weight: 700;
-}
-.vp-doc a.dl-card:hover {
   text-decoration: none;
 }
 .vp-doc a.dl-card__cta {
