@@ -2,6 +2,22 @@
 pub mod frensense_lang
 pub mod frensense_lang::intrinsics
 pub fn frensense_lang::intrinsics::is_container_verb(&str) -> bool
+pub mod frensense_lang::parse
+#[non_exhaustive] pub enum frensense_lang::parse::ParseError
+pub frensense_lang::parse::ParseError::Cancelled
+pub frensense_lang::parse::ParseError::Grammar(tree_sitter::LanguageError)
+impl core::convert::From<tree_sitter::LanguageError> for frensense_lang::parse::ParseError
+pub fn frensense_lang::parse::ParseError::from(tree_sitter::LanguageError) -> Self
+impl core::error::Error for frensense_lang::parse::ParseError
+pub fn frensense_lang::parse::ParseError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for frensense_lang::parse::ParseError
+pub fn frensense_lang::parse::ParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct frensense_lang::parse::ParsedSource<'a>
+impl frensense_lang::parse::ParsedSource<'_>
+pub fn frensense_lang::parse::ParsedSource<'_>::has_errors(&self) -> bool
+pub fn frensense_lang::parse::ParsedSource<'_>::root_node(&self) -> tree_sitter::Node<'_>
+pub fn frensense_lang::parse::ParsedSource<'_>::text(&self) -> &str
+pub fn frensense_lang::parse::parse<'a>(&dyn frensense_lang::spec::LanguageSpec, &'a str) -> core::result::Result<frensense_lang::parse::ParsedSource<'a>, frensense_lang::parse::ParseError>
 pub mod frensense_lang::providers
 pub mod frensense_lang::providers::c_lang
 pub struct frensense_lang::providers::c_lang::CSpec
@@ -377,7 +393,9 @@ pub fn frensense_lang::registry::LanguageRegistry::for_name(&self, &str) -> core
 pub fn frensense_lang::registry::LanguageRegistry::for_path(&self, &std::path::Path) -> core::option::Option<&dyn frensense_lang::spec::LanguageSpec>
 pub fn frensense_lang::registry::LanguageRegistry::global() -> &'static Self
 pub fn frensense_lang::registry::LanguageRegistry::language_names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &'static str> + '_
+pub fn frensense_lang::registry::LanguageRegistry::new() -> Self
 pub fn frensense_lang::registry::LanguageRegistry::register(&mut self, alloc::sync::Arc<dyn frensense_lang::spec::LanguageSpec>)
+pub fn frensense_lang::registry::LanguageRegistry::with_default_specs() -> Self
 impl core::fmt::Debug for frensense_lang::registry::LanguageRegistry
 pub fn frensense_lang::registry::LanguageRegistry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn frensense_lang::registry::all_specs() -> impl core::iter::traits::iterator::Iterator<Item = &'static dyn frensense_lang::spec::LanguageSpec>
@@ -1190,6 +1208,15 @@ pub frensense_lang::PackageCategory::SqlDatabase
 pub frensense_lang::PackageCategory::TemplateEngine
 pub frensense_lang::PackageCategory::Testing
 pub frensense_lang::PackageCategory::WebSocket
+#[non_exhaustive] pub enum frensense_lang::ParseError
+pub frensense_lang::ParseError::Cancelled
+pub frensense_lang::ParseError::Grammar(tree_sitter::LanguageError)
+impl core::convert::From<tree_sitter::LanguageError> for frensense_lang::parse::ParseError
+pub fn frensense_lang::parse::ParseError::from(tree_sitter::LanguageError) -> Self
+impl core::error::Error for frensense_lang::parse::ParseError
+pub fn frensense_lang::parse::ParseError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Display for frensense_lang::parse::ParseError
+pub fn frensense_lang::parse::ParseError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub enum frensense_lang::Profile
 pub frensense_lang::Profile::Default
 pub frensense_lang::Profile::Recommended
@@ -1264,9 +1291,16 @@ pub fn frensense_lang::registry::LanguageRegistry::for_name(&self, &str) -> core
 pub fn frensense_lang::registry::LanguageRegistry::for_path(&self, &std::path::Path) -> core::option::Option<&dyn frensense_lang::spec::LanguageSpec>
 pub fn frensense_lang::registry::LanguageRegistry::global() -> &'static Self
 pub fn frensense_lang::registry::LanguageRegistry::language_names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &'static str> + '_
+pub fn frensense_lang::registry::LanguageRegistry::new() -> Self
 pub fn frensense_lang::registry::LanguageRegistry::register(&mut self, alloc::sync::Arc<dyn frensense_lang::spec::LanguageSpec>)
+pub fn frensense_lang::registry::LanguageRegistry::with_default_specs() -> Self
 impl core::fmt::Debug for frensense_lang::registry::LanguageRegistry
 pub fn frensense_lang::registry::LanguageRegistry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct frensense_lang::ParsedSource<'a>
+impl frensense_lang::parse::ParsedSource<'_>
+pub fn frensense_lang::parse::ParsedSource<'_>::has_errors(&self) -> bool
+pub fn frensense_lang::parse::ParsedSource<'_>::root_node(&self) -> tree_sitter::Node<'_>
+pub fn frensense_lang::parse::ParsedSource<'_>::text(&self) -> &str
 pub const frensense_lang::SEVERITY_LABELS: [&str; 6]
 pub trait frensense_lang::LanguageSpec: core::marker::Send + core::marker::Sync + 'static
 pub fn frensense_lang::LanguageSpec::call_query(&self) -> core::option::Option<&'static str>
@@ -1763,5 +1797,6 @@ pub fn T::wrap_region(&self, &str) -> alloc::string::String
 pub fn frensense_lang::all_specs() -> impl core::iter::traits::iterator::Iterator<Item = &'static dyn frensense_lang::spec::LanguageSpec>
 pub fn frensense_lang::checker_rule_tier(&str) -> frensense_lang::severity::RuleTier
 pub fn frensense_lang::is_container_verb(&str) -> bool
+pub fn frensense_lang::parse<'a>(&dyn frensense_lang::spec::LanguageSpec, &'a str) -> core::result::Result<frensense_lang::parse::ParsedSource<'a>, frensense_lang::parse::ParseError>
 pub fn frensense_lang::spec_for_ext(&str) -> core::option::Option<&'static dyn frensense_lang::spec::LanguageSpec>
 pub fn frensense_lang::spec_for_path(&std::path::Path) -> core::option::Option<&'static dyn frensense_lang::spec::LanguageSpec>
