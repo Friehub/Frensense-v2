@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["prepare","prepare_with_facts","scan","scan_file","scan_prepared"],"struct":["FileReport","IncompleteFunction","LocatedChecker","LocatedCutSite","LocatedFinding","PreparedProgram","ProgramBuilder","ScanResult"]};

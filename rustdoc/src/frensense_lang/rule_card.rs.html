@@ -1,0 +1,501 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `frensense-lang/src/rule_card.rs`."><title>rule_card.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="frensense_lang" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="../../static.files/src-script-813739b1.js"></script><script defer src="../../src-files.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">frensense_lang/</div>rule_card.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="comment">// SPDX-License-Identifier: GPL-3.0-only
+<a href=#2 id=2 data-nosnippet>2</a>// Copyright (c) 2024-2026 Friehub
+<a href=#3 id=3 data-nosnippet>3</a>// Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
+<a href=#4 id=4 data-nosnippet>4</a>
+<a href=#5 id=5 data-nosnippet>5</a></span><span class="doccomment">//! Rule cards: the one place a finding's identity, title, CWE and advice
+<a href=#6 id=6 data-nosnippet>6</a>//! live. Terminal, SARIF, JSON and `explain` all render from here, so the
+<a href=#7 id=7 data-nosnippet>7</a>//! surfaces cannot drift and a built-in rule cannot ship without a CWE
+<a href=#8 id=8 data-nosnippet>8</a>//! (see the coverage tests here and in `frensense-packgen`).
+<a href=#9 id=9 data-nosnippet>9</a>//!
+<a href=#10 id=10 data-nosnippet>10</a>//! Taint findings resolve a card from the sink label slug
+<a href=#11 id=11 data-nosnippet>11</a>//! (`SinkLabel::slug`); non-dataflow checkers resolve one from the checker
+<a href=#12 id=12 data-nosnippet>12</a>//! rule id. Bundle-learned and user policy rules are not listed: they carry
+<a href=#13 id=13 data-nosnippet>13</a>//! their own prose, and their CWE comes from the bundle pattern overlay.
+<a href=#14 id=14 data-nosnippet>14</a>
+<a href=#15 id=15 data-nosnippet>15</a></span><span class="kw">use </span><span class="kw">crate</span>::severity::SinkRole;
+<a href=#16 id=16 data-nosnippet>16</a>
+<a href=#17 id=17 data-nosnippet>17</a><span class="doccomment">/// Static description of one built-in rule.
+<a href=#18 id=18 data-nosnippet>18</a></span><span class="attr">#[derive(Debug, PartialEq, Eq)]
+<a href=#19 id=19 data-nosnippet>19</a></span><span class="kw">pub struct </span>RuleCard {
+<a href=#20 id=20 data-nosnippet>20</a>    <span class="doccomment">/// Stable id, `taint.&lt;class&gt;` or `check.&lt;class&gt;`. Never contains
+<a href=#21 id=21 data-nosnippet>21</a>    /// whitespace, backticks, or finding-specific text.
+<a href=#22 id=22 data-nosnippet>22</a>    </span><span class="kw">pub </span>id: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#23 id=23 data-nosnippet>23</a>    <span class="doccomment">/// Short class name: "SQL injection".
+<a href=#24 id=24 data-nosnippet>24</a>    </span><span class="kw">pub </span>title: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#25 id=25 data-nosnippet>25</a>    <span class="doccomment">/// CWE ids, primary first. Never empty for a built-in rule.
+<a href=#26 id=26 data-nosnippet>26</a>    </span><span class="kw">pub </span>cwe: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>[<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str],
+<a href=#27 id=27 data-nosnippet>27</a>    <span class="doccomment">/// One sentence: why this is a problem.
+<a href=#28 id=28 data-nosnippet>28</a>    </span><span class="kw">pub </span>why: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#29 id=29 data-nosnippet>29</a>    <span class="doccomment">/// One sentence: how to fix it.
+<a href=#30 id=30 data-nosnippet>30</a>    </span><span class="kw">pub </span>fix: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#31 id=31 data-nosnippet>31</a>}
+<a href=#32 id=32 data-nosnippet>32</a>
+<a href=#33 id=33 data-nosnippet>33</a><span class="kw">const fn </span>card(
+<a href=#34 id=34 data-nosnippet>34</a>    id: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#35 id=35 data-nosnippet>35</a>    title: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#36 id=36 data-nosnippet>36</a>    cwe: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>[<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str],
+<a href=#37 id=37 data-nosnippet>37</a>    why: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#38 id=38 data-nosnippet>38</a>    fix: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str,
+<a href=#39 id=39 data-nosnippet>39</a>) -&gt; RuleCard {
+<a href=#40 id=40 data-nosnippet>40</a>    RuleCard {
+<a href=#41 id=41 data-nosnippet>41</a>        id,
+<a href=#42 id=42 data-nosnippet>42</a>        title,
+<a href=#43 id=43 data-nosnippet>43</a>        cwe,
+<a href=#44 id=44 data-nosnippet>44</a>        why,
+<a href=#45 id=45 data-nosnippet>45</a>        fix,
+<a href=#46 id=46 data-nosnippet>46</a>    }
+<a href=#47 id=47 data-nosnippet>47</a>}
+<a href=#48 id=48 data-nosnippet>48</a>
+<a href=#49 id=49 data-nosnippet>49</a><span class="doccomment">/// Fallback card ids: the ones that name no vulnerability class.
+<a href=#50 id=50 data-nosnippet>50</a>///
+<a href=#51 id=51 data-nosnippet>51</a>/// A finding that resolves to one of these says only "untrusted data reached
+<a href=#52 id=52 data-nosnippet>52</a>/// a sensitive operation": the sink's class is unknown, so the report gives
+<a href=#53 id=53 data-nosnippet>53</a>/// the reader nothing to fix, suppress or trend. The scanner's reporting
+<a href=#54 id=54 data-nosnippet>54</a>/// policy drops those findings instead of printing them.
+<a href=#55 id=55 data-nosnippet>55</a></span><span class="kw">const </span>GENERIC_IDS: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>str] = <span class="kw-2">&amp;</span>[<span class="string">"taint.untrusted-data"</span>, <span class="string">"taint.injection"</span>];
+<a href=#56 id=56 data-nosnippet>56</a>
+<a href=#57 id=57 data-nosnippet>57</a><span class="kw">impl </span>RuleCard {
+<a href=#58 id=58 data-nosnippet>58</a>    <span class="doccomment">/// Does this card name no vulnerability class (a fallback card)?
+<a href=#59 id=59 data-nosnippet>59</a>    </span><span class="attr">#[must_use]
+<a href=#60 id=60 data-nosnippet>60</a>    </span><span class="kw">pub fn </span>is_generic(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#61 id=61 data-nosnippet>61</a>        GENERIC_IDS.contains(<span class="kw-2">&amp;</span><span class="self">self</span>.id)
+<a href=#62 id=62 data-nosnippet>62</a>    }
+<a href=#63 id=63 data-nosnippet>63</a>}
+<a href=#64 id=64 data-nosnippet>64</a>
+<a href=#65 id=65 data-nosnippet>65</a><span class="doccomment">/// Taint-finding cards, keyed by sink label slug (first field of each pair).
+<a href=#66 id=66 data-nosnippet>66</a></span><span class="kw">static </span>TAINT: <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span>str, RuleCard)] = <span class="kw-2">&amp;</span>[
+<a href=#67 id=67 data-nosnippet>67</a>    (<span class="string">"sql"</span>, card(<span class="string">"taint.sql-injection"</span>, <span class="string">"SQL injection"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-89"</span>],
+<a href=#68 id=68 data-nosnippet>68</a>        <span class="string">"Attacker-supplied text becomes part of the query and can change its meaning."</span>,
+<a href=#69 id=69 data-nosnippet>69</a>        <span class="string">"Pass the value as a bound parameter instead of building the query string."</span>)),
+<a href=#70 id=70 data-nosnippet>70</a>    (<span class="string">"nosql"</span>, card(<span class="string">"taint.nosql-injection"</span>, <span class="string">"NoSQL injection"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-943"</span>],
+<a href=#71 id=71 data-nosnippet>71</a>        <span class="string">"Attacker-supplied objects or operators can alter the query's logic."</span>,
+<a href=#72 id=72 data-nosnippet>72</a>        <span class="string">"Validate the value as a plain string or number and reject operator objects before querying."</span>)),
+<a href=#73 id=73 data-nosnippet>73</a>    (<span class="string">"command"</span>, card(<span class="string">"taint.command-injection"</span>, <span class="string">"OS command injection"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-78"</span>],
+<a href=#74 id=74 data-nosnippet>74</a>        <span class="string">"Attacker-supplied text reaches a shell or process launcher and can run other commands."</span>,
+<a href=#75 id=75 data-nosnippet>75</a>        <span class="string">"Pass arguments as a list without a shell, and validate the value against an allowlist."</span>)),
+<a href=#76 id=76 data-nosnippet>76</a>    (<span class="string">"execution"</span>, card(<span class="string">"taint.code-injection"</span>, <span class="string">"Code injection"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-94"</span>],
+<a href=#77 id=77 data-nosnippet>77</a>        <span class="string">"Attacker-supplied text is evaluated as code."</span>,
+<a href=#78 id=78 data-nosnippet>78</a>        <span class="string">"Do not evaluate user input; use a data format and a parser instead."</span>)),
+<a href=#79 id=79 data-nosnippet>79</a>    (<span class="string">"template"</span>, card(<span class="string">"taint.template-injection"</span>, <span class="string">"Template injection"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-1336"</span>, <span class="string">"CWE-94"</span>],
+<a href=#80 id=80 data-nosnippet>80</a>        <span class="string">"A template built from user input can run expressions on the server."</span>,
+<a href=#81 id=81 data-nosnippet>81</a>        <span class="string">"Keep the template constant and pass user input only as data to render."</span>)),
+<a href=#82 id=82 data-nosnippet>82</a>    (<span class="string">"traversal"</span>, card(<span class="string">"taint.path-traversal"</span>, <span class="string">"Path traversal"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-22"</span>],
+<a href=#83 id=83 data-nosnippet>83</a>        <span class="string">"Attacker-supplied path segments can reach files outside the intended directory."</span>,
+<a href=#84 id=84 data-nosnippet>84</a>        <span class="string">"Resolve the path, then check it stays inside the allowed base directory; prefer fixed names."</span>)),
+<a href=#85 id=85 data-nosnippet>85</a>    (<span class="string">"ssrf"</span>, card(<span class="string">"taint.ssrf"</span>, <span class="string">"Server-side request forgery"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-918"</span>],
+<a href=#86 id=86 data-nosnippet>86</a>        <span class="string">"The server can be made to request internal or attacker-chosen addresses."</span>,
+<a href=#87 id=87 data-nosnippet>87</a>        <span class="string">"Allowlist the destination host and scheme; do not build the URL from user input."</span>)),
+<a href=#88 id=88 data-nosnippet>88</a>    (<span class="string">"redirect"</span>, card(<span class="string">"taint.open-redirect"</span>, <span class="string">"Open redirect"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-601"</span>],
+<a href=#89 id=89 data-nosnippet>89</a>        <span class="string">"Users can be sent to an attacker-controlled site from a trusted address."</span>,
+<a href=#90 id=90 data-nosnippet>90</a>        <span class="string">"Redirect only to relative paths or hosts on an allowlist."</span>)),
+<a href=#91 id=91 data-nosnippet>91</a>    (<span class="string">"xss"</span>, card(<span class="string">"taint.xss"</span>, <span class="string">"Cross-site scripting"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-79"</span>],
+<a href=#92 id=92 data-nosnippet>92</a>        <span class="string">"Attacker-supplied text is written into a page and can run script in the victim's browser."</span>,
+<a href=#93 id=93 data-nosnippet>93</a>        <span class="string">"Escape the value for its output context, or use an API that does not interpret markup."</span>)),
+<a href=#94 id=94 data-nosnippet>94</a>    (<span class="string">"deserialize"</span>, card(<span class="string">"taint.unsafe-deserialization"</span>, <span class="string">"Unsafe deserialization"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-502"</span>],
+<a href=#95 id=95 data-nosnippet>95</a>        <span class="string">"Deserializing attacker-supplied data can instantiate objects and run code."</span>,
+<a href=#96 id=96 data-nosnippet>96</a>        <span class="string">"Parse untrusted input with a data-only format (JSON) and validate it against a schema."</span>)),
+<a href=#97 id=97 data-nosnippet>97</a>    (<span class="string">"ldap"</span>, card(<span class="string">"taint.ldap-injection"</span>, <span class="string">"LDAP injection"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-90"</span>],
+<a href=#98 id=98 data-nosnippet>98</a>        <span class="string">"Attacker-supplied text can change the directory query."</span>,
+<a href=#99 id=99 data-nosnippet>99</a>        <span class="string">"Escape filter values with the LDAP escaping routine or use parameterized filters."</span>)),
+<a href=#100 id=100 data-nosnippet>100</a>    (<span class="string">"xpath"</span>, card(<span class="string">"taint.xpath-injection"</span>, <span class="string">"XPath injection"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-643"</span>],
+<a href=#101 id=101 data-nosnippet>101</a>        <span class="string">"Attacker-supplied text can change the XPath expression."</span>,
+<a href=#102 id=102 data-nosnippet>102</a>        <span class="string">"Use parameterized XPath variables instead of concatenating the value."</span>)),
+<a href=#103 id=103 data-nosnippet>103</a>    (<span class="string">"graphql"</span>, card(<span class="string">"taint.graphql-injection"</span>, <span class="string">"GraphQL injection"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-943"</span>],
+<a href=#104 id=104 data-nosnippet>104</a>        <span class="string">"Attacker-supplied text can change the GraphQL operation."</span>,
+<a href=#105 id=105 data-nosnippet>105</a>        <span class="string">"Pass user values through query variables, never by string concatenation."</span>)),
+<a href=#106 id=106 data-nosnippet>106</a>    (<span class="string">"xxe"</span>, card(<span class="string">"taint.xxe"</span>, <span class="string">"XML external entity"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-611"</span>],
+<a href=#107 id=107 data-nosnippet>107</a>        <span class="string">"A parser that resolves external entities can read local files or reach internal hosts."</span>,
+<a href=#108 id=108 data-nosnippet>108</a>        <span class="string">"Disable DTDs and external entity resolution in the XML parser."</span>)),
+<a href=#109 id=109 data-nosnippet>109</a>    (<span class="string">"prototype"</span>, card(<span class="string">"taint.prototype-pollution"</span>, <span class="string">"Prototype pollution"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-1321"</span>],
+<a href=#110 id=110 data-nosnippet>110</a>        <span class="string">"Attacker-chosen keys can modify Object.prototype and change behaviour across the app."</span>,
+<a href=#111 id=111 data-nosnippet>111</a>        <span class="string">"Reject __proto__, constructor and prototype keys, or use Map / Object.create(null)."</span>)),
+<a href=#112 id=112 data-nosnippet>112</a>    (<span class="string">"regex"</span>, card(<span class="string">"taint.regex-dos"</span>, <span class="string">"Regular-expression denial of service"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-1333"</span>],
+<a href=#113 id=113 data-nosnippet>113</a>        <span class="string">"A pattern built from user input can take exponential time to match."</span>,
+<a href=#114 id=114 data-nosnippet>114</a>        <span class="string">"Use a fixed pattern, escape user text, or a linear-time regex engine."</span>)),
+<a href=#115 id=115 data-nosnippet>115</a>    (<span class="string">"header_injection"</span>, card(<span class="string">"taint.header-injection"</span>, <span class="string">"HTTP header injection"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-113"</span>],
+<a href=#116 id=116 data-nosnippet>116</a>        <span class="string">"Line breaks in a header value can add headers or split the response."</span>,
+<a href=#117 id=117 data-nosnippet>117</a>        <span class="string">"Reject CR/LF in header values or encode them before setting the header."</span>)),
+<a href=#118 id=118 data-nosnippet>118</a>    (<span class="string">"cookie_poisoning"</span>, card(<span class="string">"taint.cookie-poisoning"</span>, <span class="string">"Cookie built from user input"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-565"</span>],
+<a href=#119 id=119 data-nosnippet>119</a>        <span class="string">"Attacker-chosen cookie names or values can fix or overwrite a victim's session state."</span>,
+<a href=#120 id=120 data-nosnippet>120</a>        <span class="string">"Set cookies from server-generated values and validate any value read back."</span>)),
+<a href=#121 id=121 data-nosnippet>121</a>    (<span class="string">"content_type"</span>, card(<span class="string">"taint.content-type-injection"</span>, <span class="string">"Content-Type injection"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-436"</span>],
+<a href=#122 id=122 data-nosnippet>122</a>        <span class="string">"An attacker-chosen content type can make the browser interpret a response as active content."</span>,
+<a href=#123 id=123 data-nosnippet>123</a>        <span class="string">"Set the content type from a fixed allowlist."</span>)),
+<a href=#124 id=124 data-nosnippet>124</a>    (<span class="string">"storage"</span>, card(<span class="string">"taint.untrusted-storage-write"</span>, <span class="string">"Untrusted data written to storage"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-20"</span>],
+<a href=#125 id=125 data-nosnippet>125</a>        <span class="string">"Unvalidated input is persisted and will be trusted by later readers."</span>,
+<a href=#126 id=126 data-nosnippet>126</a>        <span class="string">"Validate and constrain the value (type, length, allowed set) before storing it."</span>)),
+<a href=#127 id=127 data-nosnippet>127</a>    (<span class="string">"log_leak"</span>, card(<span class="string">"taint.sensitive-data-in-log"</span>, <span class="string">"Sensitive data in log"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-532"</span>],
+<a href=#128 id=128 data-nosnippet>128</a>        <span class="string">"Sensitive values written to logs are readable by anyone with log access."</span>,
+<a href=#129 id=129 data-nosnippet>129</a>        <span class="string">"Remove the value from the log call or mask it before logging."</span>)),
+<a href=#130 id=130 data-nosnippet>130</a>    (<span class="string">"response"</span>, card(<span class="string">"taint.sensitive-data-in-response"</span>, <span class="string">"Sensitive data in response"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-200"</span>],
+<a href=#131 id=131 data-nosnippet>131</a>        <span class="string">"Internal or sensitive values are sent to the client."</span>,
+<a href=#132 id=132 data-nosnippet>132</a>        <span class="string">"Return only the fields the client needs and omit secrets and internals."</span>)),
+<a href=#133 id=133 data-nosnippet>133</a>    (<span class="string">"credential_leak"</span>, card(<span class="string">"taint.credential-exposure"</span>, <span class="string">"Credential exposure"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-522"</span>],
+<a href=#134 id=134 data-nosnippet>134</a>        <span class="string">"A credential flows to a place where it is stored or sent unprotected."</span>,
+<a href=#135 id=135 data-nosnippet>135</a>        <span class="string">"Keep credentials out of logs, URLs and responses; store only hashes or use a secrets manager."</span>)),
+<a href=#136 id=136 data-nosnippet>136</a>    (<span class="string">"toctou"</span>, card(<span class="string">"taint.toctou"</span>, <span class="string">"Time-of-check to time-of-use race"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-367"</span>],
+<a href=#137 id=137 data-nosnippet>137</a>        <span class="string">"The resource can change between the check and its use."</span>,
+<a href=#138 id=138 data-nosnippet>138</a>        <span class="string">"Open the resource once and operate on the handle, or make the check and use atomic."</span>)),
+<a href=#139 id=139 data-nosnippet>139</a>    (<span class="string">"jwt"</span>, card(<span class="string">"taint.jwt-misuse"</span>, <span class="string">"JWT verification weakness"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-347"</span>],
+<a href=#140 id=140 data-nosnippet>140</a>        <span class="string">"A token is accepted without verifying its signature or with an attacker-chosen algorithm."</span>,
+<a href=#141 id=141 data-nosnippet>141</a>        <span class="string">"Verify with a fixed algorithm and key; never decode untrusted tokens without verification."</span>)),
+<a href=#142 id=142 data-nosnippet>142</a>    (<span class="string">"buffer_overflow"</span>, card(<span class="string">"taint.buffer-overflow"</span>, <span class="string">"Buffer overflow"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-120"</span>, <span class="string">"CWE-787"</span>],
+<a href=#143 id=143 data-nosnippet>143</a>        <span class="string">"Attacker-controlled length or data can write past the end of a buffer."</span>,
+<a href=#144 id=144 data-nosnippet>144</a>        <span class="string">"Bound the copy by the destination size and validate lengths before use."</span>)),
+<a href=#145 id=145 data-nosnippet>145</a>    (<span class="string">"format_string"</span>, card(<span class="string">"taint.format-string"</span>, <span class="string">"Format string"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-134"</span>],
+<a href=#146 id=146 data-nosnippet>146</a>        <span class="string">"Attacker-controlled format text can read or write memory."</span>,
+<a href=#147 id=147 data-nosnippet>147</a>        <span class="string">"Use a constant format string and pass user text as an argument."</span>)),
+<a href=#148 id=148 data-nosnippet>148</a>    (<span class="string">"idor"</span>, card(<span class="string">"taint.insecure-direct-object-reference"</span>, <span class="string">"Insecure direct object reference"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-639"</span>],
+<a href=#149 id=149 data-nosnippet>149</a>        <span class="string">"A user-chosen identifier selects a record without an ownership check."</span>,
+<a href=#150 id=150 data-nosnippet>150</a>        <span class="string">"Authorize the caller against the record's owner before returning or changing it."</span>)),
+<a href=#151 id=151 data-nosnippet>151</a>    (<span class="string">"injection"</span>, card(<span class="string">"taint.injection"</span>, <span class="string">"Injection"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-74"</span>],
+<a href=#152 id=152 data-nosnippet>152</a>        <span class="string">"Untrusted data reaches an interpreter without neutralization."</span>,
+<a href=#153 id=153 data-nosnippet>153</a>        <span class="string">"Pass untrusted values as parameters or data, never as part of the command text."</span>)),
+<a href=#154 id=154 data-nosnippet>154</a>    (<span class="string">"other"</span>, card(<span class="string">"taint.untrusted-data"</span>, <span class="string">"Untrusted data reaches a sensitive operation"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-20"</span>],
+<a href=#155 id=155 data-nosnippet>155</a>        <span class="string">"Input is used without validation."</span>,
+<a href=#156 id=156 data-nosnippet>156</a>        <span class="string">"Validate the value (type, range, allowed set) before it reaches this call."</span>)),
+<a href=#157 id=157 data-nosnippet>157</a>];
+<a href=#158 id=158 data-nosnippet>158</a>
+<a href=#159 id=159 data-nosnippet>159</a><span class="doccomment">/// Non-dataflow checker cards, keyed by checker rule id.
+<a href=#160 id=160 data-nosnippet>160</a></span><span class="kw">static </span>CHECK: <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span>str, RuleCard)] = <span class="kw-2">&amp;</span>[
+<a href=#161 id=161 data-nosnippet>161</a>    (<span class="string">"weak_hash"</span>, card(<span class="string">"check.weak-hash"</span>, <span class="string">"Weak hash function"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-328"</span>],
+<a href=#162 id=162 data-nosnippet>162</a>        <span class="string">"MD5 and SHA-1 are broken for security use and fast enough to brute-force."</span>,
+<a href=#163 id=163 data-nosnippet>163</a>        <span class="string">"Use SHA-256 or better for digests, and bcrypt, scrypt or argon2 for passwords."</span>)),
+<a href=#164 id=164 data-nosnippet>164</a>    (<span class="string">"weak_hash_wrapper"</span>, card(<span class="string">"check.weak-hash-wrapper"</span>, <span class="string">"Password hashed through a wrapper"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-328"</span>],
+<a href=#165 id=165 data-nosnippet>165</a>        <span class="string">"The wrapper may use a fast or broken digest for passwords."</span>,
+<a href=#166 id=166 data-nosnippet>166</a>        <span class="string">"Confirm the wrapper uses bcrypt, scrypt or argon2."</span>)),
+<a href=#167 id=167 data-nosnippet>167</a>    (<span class="string">"learned_broken_hash_func"</span>, card(<span class="string">"check.weak-hash-function"</span>, <span class="string">"Weak hash function"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-328"</span>],
+<a href=#168 id=168 data-nosnippet>168</a>        <span class="string">"The function is known to use a broken digest."</span>,
+<a href=#169 id=169 data-nosnippet>169</a>        <span class="string">"Replace it with SHA-256 or better, or a password KDF for passwords."</span>)),
+<a href=#170 id=170 data-nosnippet>170</a>    (<span class="string">"weak_rsa_key_size"</span>, card(<span class="string">"check.weak-rsa-key-size"</span>, <span class="string">"RSA key too short"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-326"</span>],
+<a href=#171 id=171 data-nosnippet>171</a>        <span class="string">"Keys under 2048 bits can be factored with modest resources."</span>,
+<a href=#172 id=172 data-nosnippet>172</a>        <span class="string">"Generate RSA keys of at least 2048 bits (3072 recommended)."</span>)),
+<a href=#173 id=173 data-nosnippet>173</a>    (<span class="string">"learned_weak_cipher_des"</span>, card(<span class="string">"check.weak-cipher"</span>, <span class="string">"Weak cipher"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-327"</span>],
+<a href=#174 id=174 data-nosnippet>174</a>        <span class="string">"DES and similar ciphers are broken or too small to be secure."</span>,
+<a href=#175 id=175 data-nosnippet>175</a>        <span class="string">"Use AES-GCM or ChaCha20-Poly1305."</span>)),
+<a href=#176 id=176 data-nosnippet>176</a>    (<span class="string">"insecure_jwt_algorithm"</span>, card(<span class="string">"check.insecure-jwt-algorithm"</span>, <span class="string">"Insecure JWT algorithm"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-347"</span>],
+<a href=#177 id=177 data-nosnippet>177</a>        <span class="string">"The `none` algorithm or an unchecked algorithm lets attackers forge tokens."</span>,
+<a href=#178 id=178 data-nosnippet>178</a>        <span class="string">"Pin the verification algorithm to a strong one such as RS256 or ES256."</span>)),
+<a href=#179 id=179 data-nosnippet>179</a>    (<span class="string">"credential_kdf_policy"</span>, card(<span class="string">"check.password-kdf"</span>, <span class="string">"Password not hashed with a password KDF"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-916"</span>],
+<a href=#180 id=180 data-nosnippet>180</a>        <span class="string">"Fast digests let attackers test billions of guesses per second."</span>,
+<a href=#181 id=181 data-nosnippet>181</a>        <span class="string">"Hash passwords with bcrypt, scrypt or argon2 and a per-password salt."</span>)),
+<a href=#182 id=182 data-nosnippet>182</a>    (<span class="string">"use_after_free"</span>, card(<span class="string">"check.use-after-free"</span>, <span class="string">"Use after free"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-416"</span>],
+<a href=#183 id=183 data-nosnippet>183</a>        <span class="string">"Memory is used after it has been released."</span>,
+<a href=#184 id=184 data-nosnippet>184</a>        <span class="string">"Do not use the pointer after free, and set it to NULL after releasing it."</span>)),
+<a href=#185 id=185 data-nosnippet>185</a>    (<span class="string">"double_free"</span>, card(<span class="string">"check.double-free"</span>, <span class="string">"Double free"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-415"</span>],
+<a href=#186 id=186 data-nosnippet>186</a>        <span class="string">"Memory is released twice, corrupting the allocator."</span>,
+<a href=#187 id=187 data-nosnippet>187</a>        <span class="string">"Free each allocation exactly once; set the pointer to NULL after freeing."</span>)),
+<a href=#188 id=188 data-nosnippet>188</a>    (<span class="string">"uninitialized_free"</span>, card(<span class="string">"check.uninitialized-free"</span>, <span class="string">"Free of uninitialized pointer"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-908"</span>],
+<a href=#189 id=189 data-nosnippet>189</a>        <span class="string">"Freeing an uninitialized pointer corrupts memory."</span>,
+<a href=#190 id=190 data-nosnippet>190</a>        <span class="string">"Initialize pointers to NULL or a valid allocation before they can be freed."</span>)),
+<a href=#191 id=191 data-nosnippet>191</a>    (<span class="string">"buffer_overflow"</span>, card(<span class="string">"check.buffer-overflow"</span>, <span class="string">"Buffer overflow"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-120"</span>],
+<a href=#192 id=192 data-nosnippet>192</a>        <span class="string">"A write can run past the end of the buffer."</span>,
+<a href=#193 id=193 data-nosnippet>193</a>        <span class="string">"Bound the write by the buffer size."</span>)),
+<a href=#194 id=194 data-nosnippet>194</a>    (<span class="string">"out_of_bounds_read"</span>, card(<span class="string">"check.out-of-bounds-read"</span>, <span class="string">"Out-of-bounds read"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-125"</span>],
+<a href=#195 id=195 data-nosnippet>195</a>        <span class="string">"An index or length can exceed the buffer."</span>,
+<a href=#196 id=196 data-nosnippet>196</a>        <span class="string">"Check the index against the buffer length before reading."</span>)),
+<a href=#197 id=197 data-nosnippet>197</a>    (<span class="string">"out_of_bounds_access"</span>, card(<span class="string">"check.out-of-bounds-write"</span>, <span class="string">"Out-of-bounds write"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-787"</span>],
+<a href=#198 id=198 data-nosnippet>198</a>        <span class="string">"An index or length can exceed the buffer."</span>,
+<a href=#199 id=199 data-nosnippet>199</a>        <span class="string">"Check the index against the buffer length before writing."</span>)),
+<a href=#200 id=200 data-nosnippet>200</a>    (<span class="string">"integer_overflow_alloc"</span>, card(<span class="string">"check.integer-overflow-allocation"</span>, <span class="string">"Integer overflow in allocation size"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-190"</span>],
+<a href=#201 id=201 data-nosnippet>201</a>        <span class="string">"The size computation can wrap, allocating less memory than later code uses."</span>,
+<a href=#202 id=202 data-nosnippet>202</a>        <span class="string">"Check the multiplication for overflow before allocating, or use a checked or calloc-style API."</span>)),
+<a href=#203 id=203 data-nosnippet>203</a>    (<span class="string">"memory_leak"</span>, card(<span class="string">"check.memory-leak"</span>, <span class="string">"Memory leak"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-401"</span>],
+<a href=#204 id=204 data-nosnippet>204</a>        <span class="string">"Allocated memory is never released on some path."</span>,
+<a href=#205 id=205 data-nosnippet>205</a>        <span class="string">"Free the allocation on every path, or return or store it intentionally."</span>)),
+<a href=#206 id=206 data-nosnippet>206</a>    (<span class="string">"substring_allowlist_guard"</span>, card(<span class="string">"check.substring-allowlist"</span>, <span class="string">"Allowlist checked by substring"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-20"</span>],
+<a href=#207 id=207 data-nosnippet>207</a>        <span class="string">"A substring test is satisfied by hostile values such as `evil.com/trusted.com`."</span>,
+<a href=#208 id=208 data-nosnippet>208</a>        <span class="string">"Parse the URL and compare the exact host against the allowlist."</span>)),
+<a href=#209 id=209 data-nosnippet>209</a>    (<span class="string">"guard_bypass"</span>, card(<span class="string">"check.guard-bypass"</span>, <span class="string">"Bypassable validation guard"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-20"</span>],
+<a href=#210 id=210 data-nosnippet>210</a>        <span class="string">"The guard accepts inputs it was meant to reject."</span>,
+<a href=#211 id=211 data-nosnippet>211</a>        <span class="string">"Compare against an exact allowlist after parsing, not with contains/startsWith."</span>)),
+<a href=#212 id=212 data-nosnippet>212</a>    (<span class="string">"allowlist_definition_bypassable"</span>, card(<span class="string">"check.permissive-allowlist"</span>, <span class="string">"Permissive allowlist"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-183"</span>],
+<a href=#213 id=213 data-nosnippet>213</a>        <span class="string">"The allowlist is too loose to contain a hostile value."</span>,
+<a href=#214 id=214 data-nosnippet>214</a>        <span class="string">"List exact hosts or paths and compare for equality."</span>)),
+<a href=#215 id=215 data-nosnippet>215</a>    (<span class="string">"unbounded_number_schema"</span>, card(<span class="string">"check.unbounded-number"</span>, <span class="string">"Numeric input without bounds"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-1284"</span>],
+<a href=#216 id=216 data-nosnippet>216</a>        <span class="string">"A number accepted without min/max can be negative, huge, or non-finite."</span>,
+<a href=#217 id=217 data-nosnippet>217</a>        <span class="string">"Declare minimum and maximum (and integer-ness) in the schema."</span>)),
+<a href=#218 id=218 data-nosnippet>218</a>    (<span class="string">"schema_policy"</span>, card(<span class="string">"check.schema-validation"</span>, <span class="string">"Input schema too permissive"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-20"</span>],
+<a href=#219 id=219 data-nosnippet>219</a>        <span class="string">"Input is accepted without a strict schema."</span>,
+<a href=#220 id=220 data-nosnippet>220</a>        <span class="string">"Validate request data against a strict schema before using it."</span>)),
+<a href=#221 id=221 data-nosnippet>221</a>    (<span class="string">"cookie_secure_missing"</span>, card(<span class="string">"check.cookie-secure-missing"</span>, <span class="string">"Cookie without Secure flag"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-614"</span>],
+<a href=#222 id=222 data-nosnippet>222</a>        <span class="string">"The cookie can be sent over plain HTTP and intercepted."</span>,
+<a href=#223 id=223 data-nosnippet>223</a>        <span class="string">"Set Secure=True (and SameSite) on cookies that carry session data."</span>)),
+<a href=#224 id=224 data-nosnippet>224</a>    (<span class="string">"cookie_httponly_missing"</span>, card(<span class="string">"check.cookie-httponly-missing"</span>, <span class="string">"Cookie without HttpOnly flag"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-1004"</span>],
+<a href=#225 id=225 data-nosnippet>225</a>        <span class="string">"Page scripts can read the cookie, so XSS can steal it."</span>,
+<a href=#226 id=226 data-nosnippet>226</a>        <span class="string">"Set HttpOnly=True on cookies that do not need script access."</span>)),
+<a href=#227 id=227 data-nosnippet>227</a>    (<span class="string">"policy_open_redirect"</span>, card(<span class="string">"check.open-redirect-policy"</span>, <span class="string">"Unvalidated redirect target"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-601"</span>],
+<a href=#228 id=228 data-nosnippet>228</a>        <span class="string">"A redirect uses a target that was not checked against an allowlist."</span>,
+<a href=#229 id=229 data-nosnippet>229</a>        <span class="string">"Validate the redirect target against relative paths or allowed hosts first."</span>)),
+<a href=#230 id=230 data-nosnippet>230</a>    (<span class="string">"policy_banned_insecure_transport"</span>, card(<span class="string">"check.insecure-transport"</span>, <span class="string">"Insecure transport"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-319"</span>],
+<a href=#231 id=231 data-nosnippet>231</a>        <span class="string">"Data is sent without TLS and can be read or altered in transit."</span>,
+<a href=#232 id=232 data-nosnippet>232</a>        <span class="string">"Use https:// (or TLS-enabled clients) and keep certificate verification on."</span>)),
+<a href=#233 id=233 data-nosnippet>233</a>    (<span class="string">"policy_require_secure_algorithm"</span>, card(<span class="string">"check.insecure-algorithm"</span>, <span class="string">"Insecure algorithm selected"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-327"</span>],
+<a href=#234 id=234 data-nosnippet>234</a>        <span class="string">"The selected algorithm is not considered secure."</span>,
+<a href=#235 id=235 data-nosnippet>235</a>        <span class="string">"Choose a current algorithm (AES-GCM, SHA-256+, Ed25519)."</span>)),
+<a href=#236 id=236 data-nosnippet>236</a>    (<span class="string">"regex"</span>, card(<span class="string">"check.regex-dos"</span>, <span class="string">"Regular-expression denial of service"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-1333"</span>],
+<a href=#237 id=237 data-nosnippet>237</a>        <span class="string">"The pattern can backtrack exponentially on crafted input."</span>,
+<a href=#238 id=238 data-nosnippet>238</a>        <span class="string">"Simplify the pattern, bound the input length, or use a linear-time engine."</span>)),
+<a href=#239 id=239 data-nosnippet>239</a>    (<span class="string">"function_complexity"</span>, card(<span class="string">"check.function-complexity"</span>, <span class="string">"Function too complex"</span>, <span class="kw-2">&amp;</span>[<span class="string">"CWE-1121"</span>],
+<a href=#240 id=240 data-nosnippet>240</a>        <span class="string">"Control flow this tangled is hard to review, and defects hide in branches nobody re-reads."</span>,
+<a href=#241 id=241 data-nosnippet>241</a>        <span class="string">"Split the function into smaller single-purpose pieces until every path is reviewable."</span>)),
+<a href=#242 id=242 data-nosnippet>242</a>];
+<a href=#243 id=243 data-nosnippet>243</a>
+<a href=#244 id=244 data-nosnippet>244</a><span class="doccomment">/// Resolve the card for a taint finding.
+<a href=#245 id=245 data-nosnippet>245</a>///
+<a href=#246 id=246 data-nosnippet>246</a>/// `label` is the sink label slug (`SinkLabel::slug`), `role` the sink's
+<a href=#247 id=247 data-nosnippet>247</a>/// role, `idor` whether the finding's class is an access-control shape.
+<a href=#248 id=248 data-nosnippet>248</a>/// Always returns a card: unlabeled sinks fall back by role to the
+<a href=#249 id=249 data-nosnippet>249</a>/// generic injection / untrusted-data cards.
+<a href=#250 id=250 data-nosnippet>250</a></span><span class="attr">#[must_use]
+<a href=#251 id=251 data-nosnippet>251</a></span><span class="kw">pub fn </span>taint_card(label: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;, role: SinkRole, idor: bool) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>RuleCard {
+<a href=#252 id=252 data-nosnippet>252</a>    <span class="kw">if </span>idor {
+<a href=#253 id=253 data-nosnippet>253</a>        <span class="kw">return </span>taint_by_slug(<span class="string">"idor"</span>);
+<a href=#254 id=254 data-nosnippet>254</a>    }
+<a href=#255 id=255 data-nosnippet>255</a>    <span class="kw">let </span>slug = <span class="kw">match </span>(label, role) {
+<a href=#256 id=256 data-nosnippet>256</a>        <span class="comment">// "eval" is the historic slug for code-execution sinks.
+<a href=#257 id=257 data-nosnippet>257</a>        </span>(<span class="prelude-val">Some</span>(<span class="string">"eval"</span>), <span class="kw">_</span>) =&gt; <span class="string">"execution"</span>,
+<a href=#258 id=258 data-nosnippet>258</a>        (<span class="prelude-val">Some</span>(l), <span class="kw">_</span>) <span class="kw">if </span>find(TAINT, l).is_some() =&gt; l,
+<a href=#259 id=259 data-nosnippet>259</a>        (<span class="kw">_</span>, SinkRole::Xss) =&gt; <span class="string">"xss"</span>,
+<a href=#260 id=260 data-nosnippet>260</a>        (<span class="kw">_</span>, SinkRole::Execution) =&gt; <span class="string">"injection"</span>,
+<a href=#261 id=261 data-nosnippet>261</a>        <span class="kw">_ </span>=&gt; <span class="string">"other"</span>,
+<a href=#262 id=262 data-nosnippet>262</a>    };
+<a href=#263 id=263 data-nosnippet>263</a>    taint_by_slug(slug)
+<a href=#264 id=264 data-nosnippet>264</a>}
+<a href=#265 id=265 data-nosnippet>265</a>
+<a href=#266 id=266 data-nosnippet>266</a><span class="kw">fn </span>taint_by_slug(slug: <span class="kw-2">&amp;</span>str) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'static </span>RuleCard {
+<a href=#267 id=267 data-nosnippet>267</a>    find(TAINT, slug).unwrap_or_else(|| find(TAINT, <span class="string">"other"</span>).expect(<span class="string">"fallback card"</span>))
+<a href=#268 id=268 data-nosnippet>268</a>}
+<a href=#269 id=269 data-nosnippet>269</a>
+<a href=#270 id=270 data-nosnippet>270</a><span class="doccomment">/// The taint class a CWE id names, as `(role, label slug)`.
+<a href=#271 id=271 data-nosnippet>271</a>///
+<a href=#272 id=272 data-nosnippet>272</a>/// Corpus families declare `cwe:` in their `[frensense]` block and the bundler
+<a href=#273 id=273 data-nosnippet>273</a>/// records it on the published advisory pattern, so this is class information
+<a href=#274 id=274 data-nosnippet>274</a>/// every `.frc` has always carried. Deriving a learned sink's role and label
+<a href=#275 id=275 data-nosnippet>275</a>/// from it classifies the sink **without a bundle format change**, which is
+<a href=#276 id=276 data-nosnippet>276</a>/// what keeps previously published bundles loadable.
+<a href=#277 id=277 data-nosnippet>277</a>///
+<a href=#278 id=278 data-nosnippet>278</a>/// Only the TAINT cards are considered: a CWE that only a checker rule names
+<a href=#279 id=279 data-nosnippet>279</a>/// (weak hash, TOCTOU) says nothing about what a sink does with its input.
+<a href=#280 id=280 data-nosnippet>280</a></span><span class="attr">#[must_use]
+<a href=#281 id=281 data-nosnippet>281</a></span><span class="kw">pub fn </span>taint_class_for_cwe(cwe: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;(SinkRole, <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str)&gt; {
+<a href=#282 id=282 data-nosnippet>282</a>    <span class="kw">let </span>want = cwe.trim();
+<a href=#283 id=283 data-nosnippet>283</a>    <span class="comment">// Parent CWEs describe "improper validation" in general, not what a sink
+<a href=#284 id=284 data-nosnippet>284</a>    // does with its input, and several class cards list them. Deriving a
+<a href=#285 id=285 data-nosnippet>285</a>    // class from one would invent a verdict the corpus never made.
+<a href=#286 id=286 data-nosnippet>286</a>    </span><span class="kw">const </span>BROAD: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>str] = <span class="kw-2">&amp;</span>[<span class="string">"cwe-20"</span>, <span class="string">"cwe-74"</span>, <span class="string">"cwe-693"</span>];
+<a href=#287 id=287 data-nosnippet>287</a>    <span class="kw">let </span>lower = want.to_ascii_lowercase();
+<a href=#288 id=288 data-nosnippet>288</a>    <span class="kw">if </span>BROAD.contains(<span class="kw-2">&amp;</span>lower.as_str()) {
+<a href=#289 id=289 data-nosnippet>289</a>        <span class="kw">return </span><span class="prelude-val">None</span>;
+<a href=#290 id=290 data-nosnippet>290</a>    }
+<a href=#291 id=291 data-nosnippet>291</a>    <span class="comment">// CWE variants an advisory files a defect under that our cards name by
+<a href=#292 id=292 data-nosnippet>292</a>    // their canonical id: Django's SQL injection is CWE-564, argument
+<a href=#293 id=293 data-nosnippet>293</a>    // injection is CWE-88. Aliased here rather than appended to the cards so
+<a href=#294 id=294 data-nosnippet>294</a>    // a finding's own CWE tags keep the canonical id.
+<a href=#295 id=295 data-nosnippet>295</a>    </span><span class="kw">const </span>ALIASES: <span class="kw-2">&amp;</span>[(<span class="kw-2">&amp;</span>str, <span class="kw-2">&amp;</span>str)] = <span class="kw-2">&amp;</span>[(<span class="string">"cwe-564"</span>, <span class="string">"sql"</span>), (<span class="string">"cwe-88"</span>, <span class="string">"command"</span>)];
+<a href=#296 id=296 data-nosnippet>296</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>((<span class="kw">_</span>, slug)) = ALIASES.iter().find(|(alias, <span class="kw">_</span>)| <span class="kw-2">*</span>alias == lower) {
+<a href=#297 id=297 data-nosnippet>297</a>        <span class="kw">return </span><span class="prelude-val">Some</span>((taint_role_for_slug(slug), <span class="kw-2">*</span>slug));
+<a href=#298 id=298 data-nosnippet>298</a>    }
+<a href=#299 id=299 data-nosnippet>299</a>    TAINT
+<a href=#300 id=300 data-nosnippet>300</a>        .iter()
+<a href=#301 id=301 data-nosnippet>301</a>        <span class="comment">// A generic card ("untrusted data reaches a sensitive operation")
+<a href=#302 id=302 data-nosnippet>302</a>        // names no class, so landing on one would classify nothing. CWE-20
+<a href=#303 id=303 data-nosnippet>303</a>        // and CWE-74 are attached to those catch-all cards.
+<a href=#304 id=304 data-nosnippet>304</a>        </span>.filter(|(<span class="kw">_</span>, c)| !c.is_generic())
+<a href=#305 id=305 data-nosnippet>305</a>        .find(|(<span class="kw">_</span>, c)| c.cwe.iter().any(|id| id.eq_ignore_ascii_case(want)))
+<a href=#306 id=306 data-nosnippet>306</a>        .map(|(slug, <span class="kw">_</span>)| (taint_role_for_slug(slug), <span class="kw-2">*</span>slug))
+<a href=#307 id=307 data-nosnippet>307</a>}
+<a href=#308 id=308 data-nosnippet>308</a>
+<a href=#309 id=309 data-nosnippet>309</a><span class="doccomment">/// The role a taint card's class implies. Classes with a dedicated role keep
+<a href=#310 id=310 data-nosnippet>310</a>/// it; every other class is code/SQL/command/deserialization, i.e.
+<a href=#311 id=311 data-nosnippet>311</a>/// `Execution`.
+<a href=#312 id=312 data-nosnippet>312</a></span><span class="kw">fn </span>taint_role_for_slug(slug: <span class="kw-2">&amp;</span>str) -&gt; SinkRole {
+<a href=#313 id=313 data-nosnippet>313</a>    <span class="kw">match </span>slug {
+<a href=#314 id=314 data-nosnippet>314</a>        <span class="string">"traversal" </span>=&gt; SinkRole::Resource,
+<a href=#315 id=315 data-nosnippet>315</a>        <span class="string">"storage" </span>=&gt; SinkRole::Storage,
+<a href=#316 id=316 data-nosnippet>316</a>        <span class="string">"xss" </span>=&gt; SinkRole::Xss,
+<a href=#317 id=317 data-nosnippet>317</a>        <span class="string">"response" </span>=&gt; SinkRole::Response,
+<a href=#318 id=318 data-nosnippet>318</a>        <span class="string">"validation" </span>=&gt; SinkRole::Validation,
+<a href=#319 id=319 data-nosnippet>319</a>        <span class="kw">_ </span>=&gt; SinkRole::Execution,
+<a href=#320 id=320 data-nosnippet>320</a>    }
+<a href=#321 id=321 data-nosnippet>321</a>}
+<a href=#322 id=322 data-nosnippet>322</a>
+<a href=#323 id=323 data-nosnippet>323</a><span class="doccomment">/// Does a taint finding on this `(label, role)` pair name a vulnerability
+<a href=#324 id=324 data-nosnippet>324</a>/// class a consumer can act on?
+<a href=#325 id=325 data-nosnippet>325</a>///
+<a href=#326 id=326 data-nosnippet>326</a>/// Single source of truth for "is this taint finding reportable". The bundler's
+<a href=#327 id=327 data-nosnippet>327</a>/// replay gate and the CLI's advisory policy both answer it here, because they
+<a href=#328 id=328 data-nosnippet>328</a>/// answered it separately before: the gate asked only whether a finding
+<a href=#329 id=329 data-nosnippet>329</a>/// existed, the CLI asked whether it named a class, and the gate came to
+<a href=#330 id=330 data-nosnippet>330</a>/// approve learned sinks no surface would ever report.
+<a href=#331 id=331 data-nosnippet>331</a></span><span class="attr">#[must_use]
+<a href=#332 id=332 data-nosnippet>332</a></span><span class="kw">pub fn </span>names_vulnerability_class(label: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;, role: SinkRole, idor: bool) -&gt; bool {
+<a href=#333 id=333 data-nosnippet>333</a>    !taint_card(label, role, idor).is_generic()
+<a href=#334 id=334 data-nosnippet>334</a>}
+<a href=#335 id=335 data-nosnippet>335</a>
+<a href=#336 id=336 data-nosnippet>336</a><span class="doccomment">/// Card for a built-in checker rule id, if one exists.
+<a href=#337 id=337 data-nosnippet>337</a></span><span class="attr">#[must_use]
+<a href=#338 id=338 data-nosnippet>338</a></span><span class="kw">pub fn </span>checker_card(rule: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'static </span>RuleCard&gt; {
+<a href=#339 id=339 data-nosnippet>339</a>    find(CHECK, rule)
+<a href=#340 id=340 data-nosnippet>340</a>}
+<a href=#341 id=341 data-nosnippet>341</a>
+<a href=#342 id=342 data-nosnippet>342</a><span class="doccomment">/// The checker rule key (`weak_hash`) a card id (`check.weak-hash`) belongs
+<a href=#343 id=343 data-nosnippet>343</a>/// to, for callers that hold a card id but need the registry key (tier,
+<a href=#344 id=344 data-nosnippet>344</a>/// suppression, per-rule scoring).
+<a href=#345 id=345 data-nosnippet>345</a></span><span class="attr">#[must_use]
+<a href=#346 id=346 data-nosnippet>346</a></span><span class="kw">pub fn </span>checker_key(card_id: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str&gt; {
+<a href=#347 id=347 data-nosnippet>347</a>    CHECK.iter().find(|(<span class="kw">_</span>, c)| c.id == card_id).map(|(k, <span class="kw">_</span>)| <span class="kw-2">*</span>k)
+<a href=#348 id=348 data-nosnippet>348</a>}
+<a href=#349 id=349 data-nosnippet>349</a>
+<a href=#350 id=350 data-nosnippet>350</a><span class="doccomment">/// Card by its stable id (`taint.sql-injection`, `check.weak-hash`).
+<a href=#351 id=351 data-nosnippet>351</a></span><span class="attr">#[must_use]
+<a href=#352 id=352 data-nosnippet>352</a></span><span class="kw">pub fn </span>card_by_id(id: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'static </span>RuleCard&gt; {
+<a href=#353 id=353 data-nosnippet>353</a>    all_cards().find(|c| c.id == id)
+<a href=#354 id=354 data-nosnippet>354</a>}
+<a href=#355 id=355 data-nosnippet>355</a>
+<a href=#356 id=356 data-nosnippet>356</a><span class="doccomment">/// Every built-in card: taint first, then checkers.
+<a href=#357 id=357 data-nosnippet>357</a></span><span class="kw">pub fn </span>all_cards() -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">'static </span>RuleCard&gt; {
+<a href=#358 id=358 data-nosnippet>358</a>    TAINT.iter().chain(CHECK.iter()).map(|(<span class="kw">_</span>, c)| c)
+<a href=#359 id=359 data-nosnippet>359</a>}
+<a href=#360 id=360 data-nosnippet>360</a>
+<a href=#361 id=361 data-nosnippet>361</a><span class="doccomment">/// Sink-label slugs that have a card (for coverage tests in crates that
+<a href=#362 id=362 data-nosnippet>362</a>/// own the label enum).
+<a href=#363 id=363 data-nosnippet>363</a></span><span class="kw">pub fn </span>taint_slugs() -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span><span class="lifetime">'static </span>str&gt; {
+<a href=#364 id=364 data-nosnippet>364</a>    TAINT.iter().map(|(s, <span class="kw">_</span>)| <span class="kw-2">*</span>s)
+<a href=#365 id=365 data-nosnippet>365</a>}
+<a href=#366 id=366 data-nosnippet>366</a>
+<a href=#367 id=367 data-nosnippet>367</a><span class="kw">fn </span>find(table: <span class="kw-2">&amp;</span><span class="lifetime">'static </span>[(<span class="kw-2">&amp;</span><span class="lifetime">'static </span>str, RuleCard)], key: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'static </span>RuleCard&gt; {
+<a href=#368 id=368 data-nosnippet>368</a>    table.iter().find(|(k, <span class="kw">_</span>)| <span class="kw-2">*</span>k == key).map(|(<span class="kw">_</span>, c)| c)
+<a href=#369 id=369 data-nosnippet>369</a>}
+<a href=#370 id=370 data-nosnippet>370</a>
+<a href=#371 id=371 data-nosnippet>371</a><span class="doccomment">/// Reference URL for a CWE id such as `CWE-89`.
+<a href=#372 id=372 data-nosnippet>372</a></span><span class="attr">#[must_use]
+<a href=#373 id=373 data-nosnippet>373</a></span><span class="kw">pub fn </span>cwe_url(cwe: <span class="kw-2">&amp;</span>str) -&gt; String {
+<a href=#374 id=374 data-nosnippet>374</a>    <span class="kw">let </span>n = cwe.trim_start_matches(<span class="string">"CWE-"</span>);
+<a href=#375 id=375 data-nosnippet>375</a>    <span class="macro">format!</span>(<span class="string">"https://cwe.mitre.org/data/definitions/{n}.html"</span>)
+<a href=#376 id=376 data-nosnippet>376</a>}
+<a href=#377 id=377 data-nosnippet>377</a>
+<a href=#378 id=378 data-nosnippet>378</a><span class="attr">#[cfg(test)]
+<a href=#379 id=379 data-nosnippet>379</a></span><span class="kw">mod </span>tests {
+<a href=#380 id=380 data-nosnippet>380</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#381 id=381 data-nosnippet>381</a>
+<a href=#382 id=382 data-nosnippet>382</a>    <span class="attr">#[test]
+<a href=#383 id=383 data-nosnippet>383</a>    </span><span class="kw">fn </span>every_card_has_cwe_and_clean_id() {
+<a href=#384 id=384 data-nosnippet>384</a>        <span class="kw">for </span>c <span class="kw">in </span>all_cards() {
+<a href=#385 id=385 data-nosnippet>385</a>            <span class="macro">assert!</span>(!c.cwe.is_empty(), <span class="string">"{} has no CWE"</span>, c.id);
+<a href=#386 id=386 data-nosnippet>386</a>            <span class="kw">for </span>w <span class="kw">in </span>c.cwe {
+<a href=#387 id=387 data-nosnippet>387</a>                <span class="macro">assert!</span>(
+<a href=#388 id=388 data-nosnippet>388</a>                    w.starts_with(<span class="string">"CWE-"</span>) &amp;&amp; w[<span class="number">4</span>..].chars().all(|d| d.is_ascii_digit()),
+<a href=#389 id=389 data-nosnippet>389</a>                    <span class="string">"{}: bad CWE {w}"</span>,
+<a href=#390 id=390 data-nosnippet>390</a>                    c.id
+<a href=#391 id=391 data-nosnippet>391</a>                );
+<a href=#392 id=392 data-nosnippet>392</a>            }
+<a href=#393 id=393 data-nosnippet>393</a>            <span class="macro">assert!</span>(
+<a href=#394 id=394 data-nosnippet>394</a>                c.id.starts_with(<span class="string">"taint."</span>) || c.id.starts_with(<span class="string">"check."</span>),
+<a href=#395 id=395 data-nosnippet>395</a>                <span class="string">"{}"</span>,
+<a href=#396 id=396 data-nosnippet>396</a>                c.id
+<a href=#397 id=397 data-nosnippet>397</a>            );
+<a href=#398 id=398 data-nosnippet>398</a>            <span class="macro">assert!</span>(
+<a href=#399 id=399 data-nosnippet>399</a>                c.id.chars()
+<a href=#400 id=400 data-nosnippet>400</a>                    .all(|ch| ch.is_ascii_lowercase() || ch == <span class="string">'.' </span>|| ch == <span class="string">'-'</span>),
+<a href=#401 id=401 data-nosnippet>401</a>                <span class="string">"{} must be lowercase kebab"</span>,
+<a href=#402 id=402 data-nosnippet>402</a>                c.id
+<a href=#403 id=403 data-nosnippet>403</a>            );
+<a href=#404 id=404 data-nosnippet>404</a>            <span class="macro">assert!</span>(!c.title.is_empty() &amp;&amp; !c.why.is_empty() &amp;&amp; !c.fix.is_empty());
+<a href=#405 id=405 data-nosnippet>405</a>        }
+<a href=#406 id=406 data-nosnippet>406</a>    }
+<a href=#407 id=407 data-nosnippet>407</a>
+<a href=#408 id=408 data-nosnippet>408</a>    <span class="attr">#[test]
+<a href=#409 id=409 data-nosnippet>409</a>    </span><span class="kw">fn </span>ids_are_unique() {
+<a href=#410 id=410 data-nosnippet>410</a>        <span class="kw">let </span><span class="kw-2">mut </span>seen = std::collections::HashSet::new();
+<a href=#411 id=411 data-nosnippet>411</a>        <span class="kw">for </span>c <span class="kw">in </span>all_cards() {
+<a href=#412 id=412 data-nosnippet>412</a>            <span class="macro">assert!</span>(seen.insert(c.id), <span class="string">"duplicate card id {}"</span>, c.id);
+<a href=#413 id=413 data-nosnippet>413</a>        }
+<a href=#414 id=414 data-nosnippet>414</a>    }
+<a href=#415 id=415 data-nosnippet>415</a>
+<a href=#416 id=416 data-nosnippet>416</a>    <span class="attr">#[test]
+<a href=#417 id=417 data-nosnippet>417</a>    </span><span class="kw">fn </span>unlabeled_sinks_still_resolve_a_cwe() {
+<a href=#418 id=418 data-nosnippet>418</a>        <span class="kw">for </span>role <span class="kw">in </span>[
+<a href=#419 id=419 data-nosnippet>419</a>            SinkRole::Execution,
+<a href=#420 id=420 data-nosnippet>420</a>            SinkRole::Resource,
+<a href=#421 id=421 data-nosnippet>421</a>            SinkRole::Storage,
+<a href=#422 id=422 data-nosnippet>422</a>            SinkRole::Crypto,
+<a href=#423 id=423 data-nosnippet>423</a>            SinkRole::Response,
+<a href=#424 id=424 data-nosnippet>424</a>            SinkRole::Validation,
+<a href=#425 id=425 data-nosnippet>425</a>            SinkRole::Xss,
+<a href=#426 id=426 data-nosnippet>426</a>            SinkRole::Other,
+<a href=#427 id=427 data-nosnippet>427</a>        ] {
+<a href=#428 id=428 data-nosnippet>428</a>            <span class="macro">assert!</span>(!taint_card(<span class="prelude-val">None</span>, role, <span class="bool-val">false</span>).cwe.is_empty());
+<a href=#429 id=429 data-nosnippet>429</a>        }
+<a href=#430 id=430 data-nosnippet>430</a>    }
+<a href=#431 id=431 data-nosnippet>431</a>
+<a href=#432 id=432 data-nosnippet>432</a>    <span class="attr">#[test]
+<a href=#433 id=433 data-nosnippet>433</a>    </span><span class="kw">fn </span>only_the_fallback_cards_are_generic() {
+<a href=#434 id=434 data-nosnippet>434</a>        <span class="kw">let </span>generic: Vec&lt;<span class="kw-2">&amp;</span>str&gt; = all_cards()
+<a href=#435 id=435 data-nosnippet>435</a>            .filter(|c| c.is_generic())
+<a href=#436 id=436 data-nosnippet>436</a>            .map(|c| c.id)
+<a href=#437 id=437 data-nosnippet>437</a>            .collect();
+<a href=#438 id=438 data-nosnippet>438</a>        <span class="macro">assert_eq!</span>(generic, [<span class="string">"taint.injection"</span>, <span class="string">"taint.untrusted-data"</span>]);
+<a href=#439 id=439 data-nosnippet>439</a>        <span class="kw">for </span>id <span class="kw">in </span>[<span class="string">"taint.sql-injection"</span>, <span class="string">"taint.ssrf"</span>, <span class="string">"check.weak-hash"</span>] {
+<a href=#440 id=440 data-nosnippet>440</a>            <span class="macro">assert!</span>(!card_by_id(id).expect(id).is_generic(), <span class="string">"{id}"</span>);
+<a href=#441 id=441 data-nosnippet>441</a>        }
+<a href=#442 id=442 data-nosnippet>442</a>    }
+<a href=#443 id=443 data-nosnippet>443</a>
+<a href=#444 id=444 data-nosnippet>444</a>    <span class="attr">#[test]
+<a href=#445 id=445 data-nosnippet>445</a>    </span><span class="kw">fn </span>historic_eval_slug_maps_to_code_injection() {
+<a href=#446 id=446 data-nosnippet>446</a>        <span class="macro">assert_eq!</span>(
+<a href=#447 id=447 data-nosnippet>447</a>            taint_card(<span class="prelude-val">Some</span>(<span class="string">"eval"</span>), SinkRole::Execution, <span class="bool-val">false</span>).id,
+<a href=#448 id=448 data-nosnippet>448</a>            <span class="string">"taint.code-injection"
+<a href=#449 id=449 data-nosnippet>449</a>        </span>);
+<a href=#450 id=450 data-nosnippet>450</a>    }
+<a href=#451 id=451 data-nosnippet>451</a>}
+<a href=#452 id=452 data-nosnippet>452</a>
+<a href=#453 id=453 data-nosnippet>453</a><span class="attr">#[cfg(test)]
+<a href=#454 id=454 data-nosnippet>454</a></span><span class="kw">mod </span>cwe_class_tests {
+<a href=#455 id=455 data-nosnippet>455</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#456 id=456 data-nosnippet>456</a>
+<a href=#457 id=457 data-nosnippet>457</a>    <span class="attr">#[test]
+<a href=#458 id=458 data-nosnippet>458</a>    </span><span class="kw">fn </span>cwe_maps_to_the_taint_class_it_names() {
+<a href=#459 id=459 data-nosnippet>459</a>        <span class="macro">assert_eq!</span>(taint_class_for_cwe(<span class="string">"CWE-89"</span>).map(|c| c.<span class="number">1</span>), <span class="prelude-val">Some</span>(<span class="string">"sql"</span>));
+<a href=#460 id=460 data-nosnippet>460</a>        <span class="macro">assert_eq!</span>(taint_class_for_cwe(<span class="string">"CWE-564"</span>).map(|c| c.<span class="number">1</span>), <span class="prelude-val">Some</span>(<span class="string">"sql"</span>));
+<a href=#461 id=461 data-nosnippet>461</a>        <span class="macro">assert_eq!</span>(
+<a href=#462 id=462 data-nosnippet>462</a>            taint_class_for_cwe(<span class="string">"CWE-22"</span>).map(|c| c.<span class="number">1</span>),
+<a href=#463 id=463 data-nosnippet>463</a>            <span class="prelude-val">Some</span>(<span class="string">"traversal"</span>)
+<a href=#464 id=464 data-nosnippet>464</a>        );
+<a href=#465 id=465 data-nosnippet>465</a>        <span class="macro">assert_eq!</span>(
+<a href=#466 id=466 data-nosnippet>466</a>            taint_class_for_cwe(<span class="string">"CWE-502"</span>).map(|c| c.<span class="number">1</span>),
+<a href=#467 id=467 data-nosnippet>467</a>            <span class="prelude-val">Some</span>(<span class="string">"deserialize"</span>)
+<a href=#468 id=468 data-nosnippet>468</a>        );
+<a href=#469 id=469 data-nosnippet>469</a>        <span class="macro">assert_eq!</span>(taint_class_for_cwe(<span class="string">"cwe-89"</span>).map(|c| c.<span class="number">1</span>), <span class="prelude-val">Some</span>(<span class="string">"sql"</span>));
+<a href=#470 id=470 data-nosnippet>470</a>    }
+<a href=#471 id=471 data-nosnippet>471</a>
+<a href=#472 id=472 data-nosnippet>472</a>    <span class="attr">#[test]
+<a href=#473 id=473 data-nosnippet>473</a>    </span><span class="kw">fn </span>cwe_roles_follow_the_class() {
+<a href=#474 id=474 data-nosnippet>474</a>        <span class="macro">assert_eq!</span>(
+<a href=#475 id=475 data-nosnippet>475</a>            taint_class_for_cwe(<span class="string">"CWE-22"</span>).map(|c| c.<span class="number">0</span>),
+<a href=#476 id=476 data-nosnippet>476</a>            <span class="prelude-val">Some</span>(SinkRole::Resource)
+<a href=#477 id=477 data-nosnippet>477</a>        );
+<a href=#478 id=478 data-nosnippet>478</a>        <span class="macro">assert_eq!</span>(
+<a href=#479 id=479 data-nosnippet>479</a>            taint_class_for_cwe(<span class="string">"CWE-79"</span>).map(|c| c.<span class="number">0</span>),
+<a href=#480 id=480 data-nosnippet>480</a>            <span class="prelude-val">Some</span>(SinkRole::Xss)
+<a href=#481 id=481 data-nosnippet>481</a>        );
+<a href=#482 id=482 data-nosnippet>482</a>        <span class="macro">assert_eq!</span>(
+<a href=#483 id=483 data-nosnippet>483</a>            taint_class_for_cwe(<span class="string">"CWE-89"</span>).map(|c| c.<span class="number">0</span>),
+<a href=#484 id=484 data-nosnippet>484</a>            <span class="prelude-val">Some</span>(SinkRole::Execution)
+<a href=#485 id=485 data-nosnippet>485</a>        );
+<a href=#486 id=486 data-nosnippet>486</a>    }
+<a href=#487 id=487 data-nosnippet>487</a>
+<a href=#488 id=488 data-nosnippet>488</a>    <span class="attr">#[test]
+<a href=#489 id=489 data-nosnippet>489</a>    </span><span class="kw">fn </span>unknown_cwe_names_no_class() {
+<a href=#490 id=490 data-nosnippet>490</a>        <span class="macro">assert!</span>(taint_class_for_cwe(<span class="string">"CWE-20"</span>).is_none());
+<a href=#491 id=491 data-nosnippet>491</a>        <span class="macro">assert!</span>(taint_class_for_cwe(<span class="string">""</span>).is_none());
+<a href=#492 id=492 data-nosnippet>492</a>    }
+<a href=#493 id=493 data-nosnippet>493</a>
+<a href=#494 id=494 data-nosnippet>494</a>    <span class="attr">#[test]
+<a href=#495 id=495 data-nosnippet>495</a>    </span><span class="kw">fn </span>classified_cwe_satisfies_the_reportability_predicate() {
+<a href=#496 id=496 data-nosnippet>496</a>        <span class="kw">let </span>(role, slug) = taint_class_for_cwe(<span class="string">"CWE-89"</span>).expect(<span class="string">"sql class"</span>);
+<a href=#497 id=497 data-nosnippet>497</a>        <span class="macro">assert!</span>(names_vulnerability_class(<span class="prelude-val">Some</span>(slug), role, <span class="bool-val">false</span>));
+<a href=#498 id=498 data-nosnippet>498</a>        <span class="macro">assert!</span>(!names_vulnerability_class(<span class="prelude-val">None</span>, SinkRole::Other, <span class="bool-val">false</span>));
+<a href=#499 id=499 data-nosnippet>499</a>    }
+<a href=#500 id=500 data-nosnippet>500</a>}
+</code></pre></div></section></main></body></html>

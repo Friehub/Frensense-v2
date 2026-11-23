@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["CLASS_SCOPED_SANITIZER_PREFIX"]};

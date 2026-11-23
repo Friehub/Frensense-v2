@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["diagnostic_from_advisory","diagnostics_for_file","initialize_result","path_to_uri","publish_params","run_server","severity_code","uri_to_path"],"type":["DiagnosticItem","PublishParams"]};

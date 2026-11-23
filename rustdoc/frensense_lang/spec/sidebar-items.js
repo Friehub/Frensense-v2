@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ItemKind","JsxPart","JumpKind","LiteralShape","NodeRole","PackageCategory","TaintOrigin","Visibility"],"fn":["call_last_segment","node_text"],"struct":["Export","Import","ModuleItem"],"trait":["LanguageSpec"]};

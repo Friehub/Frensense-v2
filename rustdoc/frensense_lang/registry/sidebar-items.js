@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["all_specs","spec_for_ext","spec_for_path"],"struct":["LanguageRegistry"]};

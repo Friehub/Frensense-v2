@@ -1,0 +1,52 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Missing release of memory after its effective lifetime (CWE-401)."><title>frensense_engine::checks::leak - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="frensense_engine" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc mod"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Module leak</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../frensense_engine/index.html">frensense_<wbr>engine</a><span class="version">0.9.1</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Module leak</a></h2><h3><a href="#functions">Module Items</a></h3><ul class="block"><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"><h2><a href="../index.html">In frensense_<wbr>engine::<wbr>checks</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">frensense_engine</a>::<wbr><a href="../index.html">checks</a></div><h1>Module <span>leak</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/frensense_engine/checks/leak.rs.html#5-899">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Missing release of memory after its effective lifetime (CWE-401).</p>
+<p>Path-sensitive may-leak accounting over the intraprocedural CFG: an
+allocation is reported when some concrete path reaches function exit
+with the allocation still frame-owned - never released, returned, or
+stored anywhere that outlives the call.</p>
+<p>Lang declares / corpus teaches / engine computes: which calls allocate
+fresh memory and which consume their arguments comes from the
+lang-declared memory vocabulary seeded into the
+<a href="../../analysis/taint/facts/table/struct.FactTable.html" title="struct frensense_engine::analysis::taint::facts::table::FactTable"><code>crate::analysis::taint::facts::FactTable</code></a> and
+merged into the registry (<code>MemorySummaryRegistry::from_facts</code> -
+spec vocab plus bundle-learned contracts), never from hardcoded names
+here. Stack allocators (<code>alloca</code> and friends) come from
+<code>FactTable::stack_allocators</code> (default-pack-seeded since Phase 6.5)
+and are never leak candidates: their storage dies with the frame. The
+analysis itself (join, phi merge, escape, null-guard skip) is the
+stable engine “how”.</p>
+<p>Zero-FP by construction:</p>
+<ul>
+<li>The live state is a flow-sensitive variable -&gt; allocations map:
+SSA copies bind the values that actually flow there and phi nodes
+merge per-edge, so a <code>free(phi)</code> or <code>store(phi)</code> sees every
+allocation the merge can carry.</li>
+<li>Exit states are may-live (union join over predecessors): a finding
+means an actual path to <code>return</code> exists on which nothing released
+the allocation.</li>
+<li>Ownership escapes remove the candidate: returned operands, values
+stored to fields/elements/globals, ownership assigned to a
+parameter, derived handles (<code>&amp;p-&gt;field</code> / load chains) passed to
+callees, and arguments the callee’s contract consumes. Direct
+pointer arguments to unknown callees keep frame ownership; a pointer
+retained by an unsummarized callee may therefore be reported as a leak.</li>
+<li>A branch whose condition compares an allocation against NULL
+(<code>== NULL</code>, <code>!= NULL</code>, <code>!p</code>) kills it on the null edge: the failed
+allocation path is not a live object. The proof covers every
+version of that <em>storage</em> (SSA re-assignments and the phi that
+merges them): a stale binding a loop join carried along cannot hold
+a live object where the storage itself is NULL. Pointer identity
+guards (<code>p != buf</code> taken false) likewise drop allocations bound to
+one side only - <code>buf</code> (a stack buffer) holds none, so the edge
+cannot carry the heap object.</li>
+<li>A branch on a literal condition (<code>while (1)</code> lowering) propagates
+only along the statically live edge; the placeholder block on the
+dead edge is unreachable code, not a function exit.</li>
+<li>The exit scan counts only <em>reaching</em> definitions: per storage cell
+(SSA versions of one variable, grouped by copy/phi edges and shared
+source name), only the deepest definition that dominates the exit is
+live there. Stale versions a loop join carried into an earlier
+block’s state are superseded by the reaching key (or its phi), so
+their lingering bindings are not separate leaks.</li>
+<li>Unknown (unsummarized) callees consume nothing.</li>
+</ul>
+</div></details><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.check.html" title="fn frensense_engine::checks::leak::check">check</a></dt><dd>Run the allocation-lifetime check over one function.</dd></dl></section></div></main></body></html>

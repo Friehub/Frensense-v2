@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["apply_language_entries","languages_for_exts","tables_from_exts","tables_from_exts_with_pack"]};

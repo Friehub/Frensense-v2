@@ -1,0 +1,717 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `frensense-engine/src/checks/policy.rs`."><title>policy.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="frensense_engine" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">frensense_engine/checks/</div>policy.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="comment">// SPDX-License-Identifier: GPL-3.0-only
+<a href=#2 id=2 data-nosnippet>2</a>// Copyright (c) 2024-2026 Friehub
+<a href=#3 id=3 data-nosnippet>3</a>// Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
+<a href=#4 id=4 data-nosnippet>4</a>
+<a href=#5 id=5 data-nosnippet>5</a></span><span class="doccomment">//! Co-occurrence policy checks: the generalized learned-check evaluator.
+<a href=#6 id=6 data-nosnippet>6</a>//!
+<a href=#7 id=7 data-nosnippet>7</a>//! A [`PolicyFact`] poses a question at every trigger call: do the policy's
+<a href=#8 id=8 data-nosnippet>8</a>//! requirements hold in the trigger's scope? A function violating the policy
+<a href=#9 id=9 data-nosnippet>9</a>//! (trigger present, at least one requirement unsatisfied) yields a
+<a href=#10 id=10 data-nosnippet>10</a>//! [`CheckerFinding`]. This complements and operates alongside
+<a href=#11 id=11 data-nosnippet>11</a>//! `LearnedCheckFact` - `unless_guard` is evaluated as a `GuardCall`
+<a href=#12 id=12 data-nosnippet>12</a>//! requirement, `unless_range_check` as a `RangeCheck` - and adds the
+<a href=#13 id=13 data-nosnippet>13</a>//! presence forms (`RequireCall`, `NotCall`) plus a cross-function scope,
+<a href=#14 id=14 data-nosnippet>14</a>//! so bundles can express "privileged action without its audit log",
+<a href=#15 id=15 data-nosnippet>15</a>//! "dangerous call without any of its sanctioned wrappers", or "trigger
+<a href=#16 id=16 data-nosnippet>16</a>//! helper defined in a sibling module still counts as enforcement".
+<a href=#17 id=17 data-nosnippet>17</a>
+<a href=#18 id=18 data-nosnippet>18</a></span><span class="kw">use </span>rustc_hash::FxHashMap;
+<a href=#19 id=19 data-nosnippet>19</a>
+<a href=#20 id=20 data-nosnippet>20</a><span class="kw">use </span><span class="kw">super</span>::CheckerFinding;
+<a href=#21 id=21 data-nosnippet>21</a><span class="kw">use </span><span class="kw">super</span>::Provenance;
+<a href=#22 id=22 data-nosnippet>22</a><span class="kw">use </span><span class="kw">super</span>::learned::{call_segments, is_range_guarded};
+<a href=#23 id=23 data-nosnippet>23</a><span class="kw">use </span><span class="kw">crate</span>::analysis::taint::facts::{FactTable, PolicyFact, PolicyRequirement, PolicyScope};
+<a href=#24 id=24 data-nosnippet>24</a><span class="kw">use </span><span class="kw">crate</span>::graph::module::PackageImport;
+<a href=#25 id=25 data-nosnippet>25</a><span class="kw">use </span><span class="kw">crate</span>::ir::control::{<span class="self">self</span>, DomSets};
+<a href=#26 id=26 data-nosnippet>26</a><span class="kw">use </span><span class="kw">crate</span>::ir::function::{BlockId, FunctionIR, Instruction, Operand, VarId, strip_quotes};
+<a href=#27 id=27 data-nosnippet>27</a>
+<a href=#28 id=28 data-nosnippet>28</a><span class="doccomment">/// A taught callable matches a written callee in one of two modes:
+<a href=#29 id=29 data-nosnippet>29</a>///
+<a href=#30 id=30 data-nosnippet>30</a>/// - bare fact (`issue_refund`): matched by the callee's last segment, the
+<a href=#31 id=31 data-nosnippet>31</a>///   dominant learned-check rule that every sink vocabulary shares;
+<a href=#32 id=32 data-nosnippet>32</a>/// - qualified fact (`payments.issue_refund`, `storage::ops::wipe_volume`):
+<a href=#33 id=33 data-nosnippet>33</a>///   matched through the full dotted tail against the callee's written
+<a href=#34 id=34 data-nosnippet>34</a>///   path, so a trigger pinned to one member no longer collides with an
+<a href=#35 id=35 data-nosnippet>35</a>///   unrelated object that happens to share the verb
+<a href=#36 id=36 data-nosnippet>36</a>///   (`billing.issue_refund` stays silent for a `payments.issue_refund`
+<a href=#37 id=37 data-nosnippet>37</a>///   policy).
+<a href=#38 id=38 data-nosnippet>38</a>///
+<a href=#39 id=39 data-nosnippet>39</a>/// Presence-level requirements only see bare segment lists (see
+<a href=#40 id=40 data-nosnippet>40</a>/// `call_segments`), so they keep bare matching; this narrowing applies
+<a href=#41 id=41 data-nosnippet>41</a>/// exactly where instruction-letter callee paths are available.
+<a href=#42 id=42 data-nosnippet>42</a></span><span class="attr">#[inline]
+<a href=#43 id=43 data-nosnippet>43</a></span><span class="kw">fn </span>callee_matches(taught: <span class="kw-2">&amp;</span>str, written: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#44 id=44 data-nosnippet>44</a>    <span class="kw">if </span>!taught.contains(<span class="string">'.'</span>) &amp;&amp; !taught.contains(<span class="string">"::"</span>) {
+<a href=#45 id=45 data-nosnippet>45</a>        <span class="kw">let </span>seg = <span class="kw">super</span>::last_segment(written);
+<a href=#46 id=46 data-nosnippet>46</a>        <span class="comment">// A decorated mirror of the taught operation: a `extractAllTo`
+<a href=#47 id=47 data-nosnippet>47</a>        // trigger also governs `extractAllToAsync`, the same call in its
+<a href=#48 id=48 data-nosnippet>48</a>        // promise form.
+<a href=#49 id=49 data-nosnippet>49</a>        </span><span class="kw">return </span>seg == taught
+<a href=#50 id=50 data-nosnippet>50</a>            || <span class="kw">crate</span>::analysis::taint::facts::mirror_call_base(seg) == <span class="prelude-val">Some</span>(taught);
+<a href=#51 id=51 data-nosnippet>51</a>    }
+<a href=#52 id=52 data-nosnippet>52</a>    <span class="kw">let </span>norm = |s: <span class="kw-2">&amp;</span>str| -&gt; String { s.replace(<span class="string">"::"</span>, <span class="string">"."</span>) };
+<a href=#53 id=53 data-nosnippet>53</a>    <span class="kw">let </span>t = norm(taught);
+<a href=#54 id=54 data-nosnippet>54</a>    <span class="kw">let </span>w = norm(written);
+<a href=#55 id=55 data-nosnippet>55</a>    <span class="kw">if </span>w == t {
+<a href=#56 id=56 data-nosnippet>56</a>        <span class="kw">return </span><span class="bool-val">true</span>;
+<a href=#57 id=57 data-nosnippet>57</a>    }
+<a href=#58 id=58 data-nosnippet>58</a>    <span class="kw">let </span><span class="kw-2">mut </span>dotted_tail = String::with_capacity(t.len() + <span class="number">1</span>);
+<a href=#59 id=59 data-nosnippet>59</a>    dotted_tail.push(<span class="string">'.'</span>);
+<a href=#60 id=60 data-nosnippet>60</a>    dotted_tail.push_str(<span class="kw-2">&amp;</span>t);
+<a href=#61 id=61 data-nosnippet>61</a>    w.ends_with(dotted_tail.as_str())
+<a href=#62 id=62 data-nosnippet>62</a>}
+<a href=#63 id=63 data-nosnippet>63</a>
+<a href=#64 id=64 data-nosnippet>64</a><span class="doccomment">/// Package-import context for policy scoping: which file each function
+<a href=#65 id=65 data-nosnippet>65</a>/// came from, and which external packages each file imports. Policies
+<a href=#66 id=66 data-nosnippet>66</a>/// carrying `package: Some(pkg)` only fire in functions whose file
+<a href=#67 id=67 data-nosnippet>67</a>/// imports `pkg` (mirrors the sink/source package-scoping model).
+<a href=#68 id=68 data-nosnippet>68</a></span><span class="attr">#[derive(Debug)]
+<a href=#69 id=69 data-nosnippet>69</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">struct </span>PackageScope&lt;<span class="lifetime">'a</span>&gt; {
+<a href=#70 id=70 data-nosnippet>70</a>    <span class="doccomment">/// Function name -&gt; source file path.
+<a href=#71 id=71 data-nosnippet>71</a>    </span><span class="kw">pub </span>fn_file: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>FxHashMap&lt;String, String&gt;,
+<a href=#72 id=72 data-nosnippet>72</a>    <span class="doccomment">/// File path -&gt; (local import name -&gt; import record).
+<a href=#73 id=73 data-nosnippet>73</a>    </span><span class="kw">pub </span>file_package_imports: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>FxHashMap&lt;String, FxHashMap&lt;String, PackageImport&gt;&gt;,
+<a href=#74 id=74 data-nosnippet>74</a>}
+<a href=#75 id=75 data-nosnippet>75</a>
+<a href=#76 id=76 data-nosnippet>76</a><span class="kw">impl</span>&lt;<span class="lifetime">'a</span>&gt; PackageScope&lt;<span class="lifetime">'a</span>&gt; {
+<a href=#77 id=77 data-nosnippet>77</a>    <span class="doccomment">/// The import table that applies to `fn_name`, with the single-file fallback.
+<a href=#78 id=78 data-nosnippet>78</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>imports_for(
+<a href=#79 id=79 data-nosnippet>79</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#80 id=80 data-nosnippet>80</a>        fn_name: <span class="kw-2">&amp;</span>str,
+<a href=#81 id=81 data-nosnippet>81</a>    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>FxHashMap&lt;String, PackageImport&gt;&gt; {
+<a href=#82 id=82 data-nosnippet>82</a>        <span class="kw">crate</span>::graph::module::imports_for_function(<span class="self">self</span>.fn_file, <span class="self">self</span>.file_package_imports, fn_name)
+<a href=#83 id=83 data-nosnippet>83</a>    }
+<a href=#84 id=84 data-nosnippet>84</a>
+<a href=#85 id=85 data-nosnippet>85</a>    <span class="doccomment">/// Does the file containing `fn_name` import `pkg`?
+<a href=#86 id=86 data-nosnippet>86</a>    ///
+<a href=#87 id=87 data-nosnippet>87</a>    /// Uses the taint engine's single-file fallback
+<a href=#88 id=88 data-nosnippet>88</a>    /// ([`imports_for_function`](crate::graph::module::imports_for_function)).
+<a href=#89 id=89 data-nosnippet>89</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>fn_imports_package(<span class="kw-2">&amp;</span><span class="self">self</span>, fn_name: <span class="kw-2">&amp;</span>str, pkg: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#90 id=90 data-nosnippet>90</a>        <span class="self">self</span>.imports_for(fn_name)
+<a href=#91 id=91 data-nosnippet>91</a>            .is_some_and(|m| m.values().any(|i| i.package == pkg))
+<a href=#92 id=92 data-nosnippet>92</a>    }
+<a href=#93 id=93 data-nosnippet>93</a>}
+<a href=#94 id=94 data-nosnippet>94</a>
+<a href=#95 id=95 data-nosnippet>95</a><span class="doccomment">/// Evaluate every policy fact in `facts` over the scanned program.
+<a href=#96 id=96 data-nosnippet>96</a>///
+<a href=#97 id=97 data-nosnippet>97</a>/// Function-scoped policies evaluate per function; module-scoped policies
+<a href=#98 id=98 data-nosnippet>98</a>/// evaluate against the union of all scanned functions (the check pipeline
+<a href=#99 id=99 data-nosnippet>99</a>/// passes one scan's IR set here, which is the module the policy author
+<a href=#100 id=100 data-nosnippet>100</a>/// refers to). Active `learned_checks` participate alongside native policies,
+<a href=#101 id=101 data-nosnippet>101</a>/// ensuring both check representations fire harmoniously.
+<a href=#102 id=102 data-nosnippet>102</a>///
+<a href=#103 id=103 data-nosnippet>103</a>/// ```
+<a href=#104 id=104 data-nosnippet>104</a>/// use frensense_engine::analysis::taint::facts::{FactTable, PolicyFact, PolicyRequirement, PolicyScope};
+<a href=#105 id=105 data-nosnippet>105</a>/// use frensense_engine::checks::policy::check_program;
+<a href=#106 id=106 data-nosnippet>106</a>/// use frensense_engine::checks::Provenance;
+<a href=#107 id=107 data-nosnippet>107</a>/// use frensense_engine::harness::lower_source;
+<a href=#108 id=108 data-nosnippet>108</a>/// use frensense_engine::ir::function::FunctionIR;
+<a href=#109 id=109 data-nosnippet>109</a>///
+<a href=#110 id=110 data-nosnippet>110</a>/// // Rule: a call to `deleteUser` requires an `authorize` call.
+<a href=#111 id=111 data-nosnippet>111</a>/// let mut facts = FactTable::default();
+<a href=#112 id=112 data-nosnippet>112</a>/// facts.policy_facts.push((
+<a href=#113 id=113 data-nosnippet>113</a>///     PolicyFact {
+<a href=#114 id=114 data-nosnippet>114</a>///         package: None,
+<a href=#115 id=115 data-nosnippet>115</a>///         rule: "missing_authorize".into(),
+<a href=#116 id=116 data-nosnippet>116</a>///         when_call: "deleteUser".into(),
+<a href=#117 id=117 data-nosnippet>117</a>///         require: vec![PolicyRequirement::GuardCall { call: "authorize".into() }],
+<a href=#118 id=118 data-nosnippet>118</a>///         scope: PolicyScope::Function,
+<a href=#119 id=119 data-nosnippet>119</a>///         message: String::new(),
+<a href=#120 id=120 data-nosnippet>120</a>///         severity: "warning".into(),
+<a href=#121 id=121 data-nosnippet>121</a>///     },
+<a href=#122 id=122 data-nosnippet>122</a>///     Provenance::Spec,
+<a href=#123 id=123 data-nosnippet>123</a>/// ));
+<a href=#124 id=124 data-nosnippet>124</a>/// let src = "declare function authorize(): void\n\
+<a href=#125 id=125 data-nosnippet>125</a>///            declare function deleteUser(): void\n\
+<a href=#126 id=126 data-nosnippet>126</a>///            function guarded() { authorize(); deleteUser() }\n\
+<a href=#127 id=127 data-nosnippet>127</a>///            function unguarded() { deleteUser() }\n\
+<a href=#128 id=128 data-nosnippet>128</a>///            function guard_after() { deleteUser(); authorize() }\n\
+<a href=#129 id=129 data-nosnippet>129</a>///            function guard_on_one_path(c: boolean) { if (c) { authorize() } deleteUser() }";
+<a href=#130 id=130 data-nosnippet>130</a>/// let fns = lower_source("t.ts", src, "ts").unwrap();
+<a href=#131 id=131 data-nosnippet>131</a>/// let irs: Vec&lt;&amp;FunctionIR&gt; = fns.values().collect();
+<a href=#132 id=132 data-nosnippet>132</a>/// let mut flagged: Vec&lt;String&gt; = check_program(&amp;irs, &amp;facts).into_iter().map(|f| f.function).collect();
+<a href=#133 id=133 data-nosnippet>133</a>/// flagged.sort();
+<a href=#134 id=134 data-nosnippet>134</a>/// // Only a guard that runs before the trigger on every path counts.
+<a href=#135 id=135 data-nosnippet>135</a>/// assert_eq!(flagged, ["guard_after", "guard_on_one_path", "unguarded"]);
+<a href=#136 id=136 data-nosnippet>136</a>/// ```
+<a href=#137 id=137 data-nosnippet>137</a></span><span class="kw">pub fn </span>check_program(irs: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>FunctionIR], facts: <span class="kw-2">&amp;</span>FactTable) -&gt; Vec&lt;CheckerFinding&gt; {
+<a href=#138 id=138 data-nosnippet>138</a>    check_program_scoped(irs, facts, <span class="prelude-val">None</span>)
+<a href=#139 id=139 data-nosnippet>139</a>}
+<a href=#140 id=140 data-nosnippet>140</a>
+<a href=#141 id=141 data-nosnippet>141</a><span class="doccomment">/// [`check_program`] with package-scope filtering: policies carrying
+<a href=#142 id=142 data-nosnippet>142</a>/// `package: Some(pkg)` only fire in functions whose file imports `pkg`.
+<a href=#143 id=143 data-nosnippet>143</a>/// `scope = None` disables filtering (backward-compatible default).
+<a href=#144 id=144 data-nosnippet>144</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>check_program_scoped(
+<a href=#145 id=145 data-nosnippet>145</a>    irs: <span class="kw-2">&amp;</span>[<span class="kw-2">&amp;</span>FunctionIR],
+<a href=#146 id=146 data-nosnippet>146</a>    facts: <span class="kw-2">&amp;</span>FactTable,
+<a href=#147 id=147 data-nosnippet>147</a>    scope: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>PackageScope&lt;<span class="lifetime">'_</span>&gt;&gt;,
+<a href=#148 id=148 data-nosnippet>148</a>) -&gt; Vec&lt;CheckerFinding&gt; {
+<a href=#149 id=149 data-nosnippet>149</a>    <span class="kw">if </span>facts.learned_checks.is_empty() &amp;&amp; facts.policy_facts.is_empty() {
+<a href=#150 id=150 data-nosnippet>150</a>        <span class="kw">return </span>Vec::new();
+<a href=#151 id=151 data-nosnippet>151</a>    }
+<a href=#152 id=152 data-nosnippet>152</a>
+<a href=#153 id=153 data-nosnippet>153</a>    <span class="comment">// Function index by name for stable ordering; segment sets per function
+<a href=#154 id=154 data-nosnippet>154</a>    // (computed once per function, not per trigger).
+<a href=#155 id=155 data-nosnippet>155</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>segsets: FxHashMap&lt;<span class="kw-2">&amp;</span>str, Vec&lt;String&gt;&gt; = FxHashMap::default();
+<a href=#156 id=156 data-nosnippet>156</a>    <span class="kw">for </span>ir <span class="kw">in </span>irs {
+<a href=#157 id=157 data-nosnippet>157</a>        segsets.insert(ir.name.as_str(), call_segments(ir));
+<a href=#158 id=158 data-nosnippet>158</a>    }
+<a href=#159 id=159 data-nosnippet>159</a>    <span class="comment">// Program-wide segment set for module-scoped requirements: every call
+<a href=#160 id=160 data-nosnippet>160</a>    // segment anywhere PLUS every defined function name (a sibling module
+<a href=#161 id=161 data-nosnippet>161</a>    // that DEFINES the enforcement helper counts as enforcement available;
+<a href=#162 id=162 data-nosnippet>162</a>    // the definition is the strongest evidence a helper is in scope even if
+<a href=#163 id=163 data-nosnippet>163</a>    // this scan never sees its call site).
+<a href=#164 id=164 data-nosnippet>164</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>module_segs: Vec&lt;String&gt; = segsets.values().flatten().cloned().collect();
+<a href=#165 id=165 data-nosnippet>165</a>    module_segs.extend(irs.iter().map(|ir| ir.name.clone()));
+<a href=#166 id=166 data-nosnippet>166</a>    module_segs.sort();
+<a href=#167 id=167 data-nosnippet>167</a>    module_segs.dedup();
+<a href=#168 id=168 data-nosnippet>168</a>
+<a href=#169 id=169 data-nosnippet>169</a>    <span class="comment">// Learned checks evaluate alongside native policies (deduped by rule id:
+<a href=#170 id=170 data-nosnippet>170</a>    // a bundle shipping both shapes of the same rule must not fire twice).
+<a href=#171 id=171 data-nosnippet>171</a>    // Each entry keeps its own provenance so findings report the origin.
+<a href=#172 id=172 data-nosnippet>172</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>native_rules: Vec&lt;<span class="kw-2">&amp;</span>str&gt; = facts
+<a href=#173 id=173 data-nosnippet>173</a>        .policy_facts
+<a href=#174 id=174 data-nosnippet>174</a>        .iter()
+<a href=#175 id=175 data-nosnippet>175</a>        .map(|(p, <span class="kw">_</span>)| p.rule.as_str())
+<a href=#176 id=176 data-nosnippet>176</a>        .collect();
+<a href=#177 id=177 data-nosnippet>177</a>    native_rules.sort();
+<a href=#178 id=178 data-nosnippet>178</a>    native_rules.dedup();
+<a href=#179 id=179 data-nosnippet>179</a>    <span class="kw">let </span><span class="kw-2">mut </span>all_policies: Vec&lt;(PolicyFact, Provenance)&gt; = Vec::new();
+<a href=#180 id=180 data-nosnippet>180</a>    all_policies.extend(facts.policy_facts.iter().cloned());
+<a href=#181 id=181 data-nosnippet>181</a>    <span class="kw">for </span>(check, prov) <span class="kw">in </span><span class="kw-2">&amp;</span>facts.learned_checks {
+<a href=#182 id=182 data-nosnippet>182</a>        <span class="kw">if </span>native_rules.contains(<span class="kw-2">&amp;</span>check.rule.as_str()) {
+<a href=#183 id=183 data-nosnippet>183</a>            <span class="kw">continue</span>;
+<a href=#184 id=184 data-nosnippet>184</a>        }
+<a href=#185 id=185 data-nosnippet>185</a>        all_policies.push((PolicyFact::from_legacy(check), <span class="kw-2">*</span>prov));
+<a href=#186 id=186 data-nosnippet>186</a>    }
+<a href=#187 id=187 data-nosnippet>187</a>
+<a href=#188 id=188 data-nosnippet>188</a>    <span class="kw">let </span><span class="kw-2">mut </span>findings = Vec::new();
+<a href=#189 id=189 data-nosnippet>189</a>    <span class="comment">// Function-scoped import-alias resolution (`from x import A as B`):
+<a href=#190 id=190 data-nosnippet>190</a>    // a Trigger call spelled with the local alias `B` resolves to the
+<a href=#191 id=191 data-nosnippet>191</a>    // original symbol `A`, so a check taught at the shipped name still
+<a href=#192 id=192 data-nosnippet>192</a>    // fires on renamed callers (WI cross-cut: aliasing is callee
+<a href=#193 id=193 data-nosnippet>193</a>    // resolution, engine-side mechanism, no per-language vocabulary).
+<a href=#194 id=194 data-nosnippet>194</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>alias_maps: FxHashMap&lt;<span class="kw-2">&amp;</span>str, FxHashMap&lt;String, String&gt;&gt; = FxHashMap::default();
+<a href=#195 id=195 data-nosnippet>195</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(scope) = scope {
+<a href=#196 id=196 data-nosnippet>196</a>        <span class="kw">for </span>ir <span class="kw">in </span>irs {
+<a href=#197 id=197 data-nosnippet>197</a>            <span class="kw">let </span>imports = scope.imports_for(ir.name.as_str());
+<a href=#198 id=198 data-nosnippet>198</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(imports) = imports {
+<a href=#199 id=199 data-nosnippet>199</a>                <span class="kw">let </span>aliases: FxHashMap&lt;String, String&gt; = imports
+<a href=#200 id=200 data-nosnippet>200</a>                    .iter()
+<a href=#201 id=201 data-nosnippet>201</a>                    .filter_map(|(local, pi)| {
+<a href=#202 id=202 data-nosnippet>202</a>                        pi.symbol
+<a href=#203 id=203 data-nosnippet>203</a>                            .as_deref()
+<a href=#204 id=204 data-nosnippet>204</a>                            .filter(|sym| <span class="kw-2">*</span>sym != local)
+<a href=#205 id=205 data-nosnippet>205</a>                            .map(|sym| (local.to_string(), sym.to_string()))
+<a href=#206 id=206 data-nosnippet>206</a>                    })
+<a href=#207 id=207 data-nosnippet>207</a>                    .collect();
+<a href=#208 id=208 data-nosnippet>208</a>                <span class="kw">if </span>!aliases.is_empty() {
+<a href=#209 id=209 data-nosnippet>209</a>                    alias_maps.insert(ir.name.as_str(), aliases);
+<a href=#210 id=210 data-nosnippet>210</a>                }
+<a href=#211 id=211 data-nosnippet>211</a>            }
+<a href=#212 id=212 data-nosnippet>212</a>        }
+<a href=#213 id=213 data-nosnippet>213</a>    }
+<a href=#214 id=214 data-nosnippet>214</a>    <span class="comment">// Dominance for function-scoped guard/require presence: cached per
+<a href=#215 id=215 data-nosnippet>215</a>    // function across policies (computed at most once per scanned IR).
+<a href=#216 id=216 data-nosnippet>216</a>    </span><span class="kw">let </span><span class="kw-2">mut </span>dom_cache: FxHashMap&lt;<span class="kw-2">&amp;</span>str, DomSets&gt; = FxHashMap::default();
+<a href=#217 id=217 data-nosnippet>217</a>    <span class="kw">for </span>(policy, policy_provenance) <span class="kw">in </span><span class="kw-2">&amp;</span>all_policies {
+<a href=#218 id=218 data-nosnippet>218</a>        <span class="comment">// The FULL taught callee goes into trigger matching: a bare fact
+<a href=#219 id=219 data-nosnippet>219</a>        // matches by last segment, a qualified fact (`payments.issue_refund`)
+<a href=#220 id=220 data-nosnippet>220</a>        // matches the written callee path (see `callee_matches`).
+<a href=#221 id=221 data-nosnippet>221</a>        </span><span class="kw">let </span>trigger_call: <span class="kw-2">&amp;</span>str = <span class="kw-2">&amp;</span>policy.when_call;
+<a href=#222 id=222 data-nosnippet>222</a>        <span class="kw">let </span>needs_dom = policy.scope == PolicyScope::Function
+<a href=#223 id=223 data-nosnippet>223</a>            &amp;&amp; policy.require.iter().any(|r| {
+<a href=#224 id=224 data-nosnippet>224</a>                <span class="macro">matches!</span>(
+<a href=#225 id=225 data-nosnippet>225</a>                    r,
+<a href=#226 id=226 data-nosnippet>226</a>                    PolicyRequirement::GuardCall { .. } | PolicyRequirement::RequireCall { .. }
+<a href=#227 id=227 data-nosnippet>227</a>                )
+<a href=#228 id=228 data-nosnippet>228</a>            });
+<a href=#229 id=229 data-nosnippet>229</a>        <span class="kw">for </span>ir <span class="kw">in </span>irs {
+<a href=#230 id=230 data-nosnippet>230</a>            <span class="kw">let </span>segs = <span class="kw">match </span>segsets.get(ir.name.as_str()) {
+<a href=#231 id=231 data-nosnippet>231</a>                <span class="prelude-val">Some</span>(s) =&gt; s,
+<a href=#232 id=232 data-nosnippet>232</a>                <span class="prelude-val">None </span>=&gt; <span class="kw">continue</span>,
+<a href=#233 id=233 data-nosnippet>233</a>            };
+<a href=#234 id=234 data-nosnippet>234</a>            <span class="comment">// Package-scope filter: a policy carrying `package: Some(pkg)`
+<a href=#235 id=235 data-nosnippet>235</a>            // only fires in functions whose file imports `pkg` (mirrors the
+<a href=#236 id=236 data-nosnippet>236</a>            // sink/source package-scoping model). When no scope context is
+<a href=#237 id=237 data-nosnippet>237</a>            // supplied (unit tests, legacy callers) the filter is inert.
+<a href=#238 id=238 data-nosnippet>238</a>            </span><span class="kw">if let </span>(<span class="prelude-val">Some</span>(pkg), <span class="prelude-val">Some</span>(scope)) = (<span class="kw-2">&amp;</span>policy.package, scope)
+<a href=#239 id=239 data-nosnippet>239</a>                &amp;&amp; !scope.fn_imports_package(<span class="kw-2">&amp;</span>ir.name, pkg)
+<a href=#240 id=240 data-nosnippet>240</a>            {
+<a href=#241 id=241 data-nosnippet>241</a>                <span class="kw">continue</span>;
+<a href=#242 id=242 data-nosnippet>242</a>            }
+<a href=#243 id=243 data-nosnippet>243</a>            <span class="kw">let </span>doms: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>DomSets&gt; = <span class="kw">if </span>needs_dom {
+<a href=#244 id=244 data-nosnippet>244</a>                <span class="kw">let </span>d: <span class="kw-2">&amp;</span>DomSets = dom_cache
+<a href=#245 id=245 data-nosnippet>245</a>                    .entry(ir.name.as_str())
+<a href=#246 id=246 data-nosnippet>246</a>                    .or_insert_with(|| control::dominators(ir));
+<a href=#247 id=247 data-nosnippet>247</a>                <span class="prelude-val">Some</span>(d)
+<a href=#248 id=248 data-nosnippet>248</a>            } <span class="kw">else </span>{
+<a href=#249 id=249 data-nosnippet>249</a>                <span class="prelude-val">None
+<a href=#250 id=250 data-nosnippet>250</a>            </span>};
+<a href=#251 id=251 data-nosnippet>251</a>            <span class="kw">let </span>val_info = <span class="kw">crate</span>::analysis::value::analyze(ir);
+<a href=#252 id=252 data-nosnippet>252</a>            <span class="comment">// Collect every trigger call site in this function with its args.
+<a href=#253 id=253 data-nosnippet>253</a>            </span><span class="kw">for </span>(bid, idx, args, arg_names, span) <span class="kw">in
+<a href=#254 id=254 data-nosnippet>254</a>                </span>trigger_sites(ir, trigger_call, alias_maps.get(ir.name.as_str()))
+<a href=#255 id=255 data-nosnippet>255</a>            {
+<a href=#256 id=256 data-nosnippet>256</a>                <span class="comment">// A requirement violation is the finding, but a
+<a href=#257 id=257 data-nosnippet>257</a>                // presence-only policy (`require` empty) alerts whenever
+<a href=#258 id=258 data-nosnippet>258</a>                // the trigger call occurs at all: the corpus twins proved
+<a href=#259 id=259 data-nosnippet>259</a>                // the call site itself is the vulnerability (the negative
+<a href=#260 id=260 data-nosnippet>260</a>                // avoids the call, not a guard shape around it).
+<a href=#261 id=261 data-nosnippet>261</a>                </span><span class="kw">let </span>satisfied = !policy.require.is_empty()
+<a href=#262 id=262 data-nosnippet>262</a>                    &amp;&amp; policy.require.iter().all(|req| {
+<a href=#263 id=263 data-nosnippet>263</a>                        requirement_holds(
+<a href=#264 id=264 data-nosnippet>264</a>                            req,
+<a href=#265 id=265 data-nosnippet>265</a>                            ir,
+<a href=#266 id=266 data-nosnippet>266</a>                            bid,
+<a href=#267 id=267 data-nosnippet>267</a>                            idx,
+<a href=#268 id=268 data-nosnippet>268</a>                            doms,
+<a href=#269 id=269 data-nosnippet>269</a>                            <span class="kw-2">&amp;</span>val_info,
+<a href=#270 id=270 data-nosnippet>270</a>                            args,
+<a href=#271 id=271 data-nosnippet>271</a>                            arg_names,
+<a href=#272 id=272 data-nosnippet>272</a>                            segs,
+<a href=#273 id=273 data-nosnippet>273</a>                            <span class="kw-2">&amp;</span>module_segs,
+<a href=#274 id=274 data-nosnippet>274</a>                            policy.scope,
+<a href=#275 id=275 data-nosnippet>275</a>                        )
+<a href=#276 id=276 data-nosnippet>276</a>                    });
+<a href=#277 id=277 data-nosnippet>277</a>                <span class="kw">if </span>!satisfied {
+<a href=#278 id=278 data-nosnippet>278</a>                    findings.push(CheckerFinding {
+<a href=#279 id=279 data-nosnippet>279</a>                        function: ir.name.clone(),
+<a href=#280 id=280 data-nosnippet>280</a>                        rule: policy.rule.clone(),
+<a href=#281 id=281 data-nosnippet>281</a>                        message: policy.message.clone(),
+<a href=#282 id=282 data-nosnippet>282</a>                        params: Vec::new(),
+<a href=#283 id=283 data-nosnippet>283</a>                        span,
+<a href=#284 id=284 data-nosnippet>284</a>                        severity: policy.severity.clone(),
+<a href=#285 id=285 data-nosnippet>285</a>                        provenance: <span class="kw-2">*</span>policy_provenance,
+<a href=#286 id=286 data-nosnippet>286</a>                    });
+<a href=#287 id=287 data-nosnippet>287</a>                }
+<a href=#288 id=288 data-nosnippet>288</a>            }
+<a href=#289 id=289 data-nosnippet>289</a>        }
+<a href=#290 id=290 data-nosnippet>290</a>    }
+<a href=#291 id=291 data-nosnippet>291</a>    findings
+<a href=#292 id=292 data-nosnippet>292</a>}
+<a href=#293 id=293 data-nosnippet>293</a>
+<a href=#294 id=294 data-nosnippet>294</a><span class="doccomment">/// Every call instruction in `ir` whose callee's last segment is `seg`,
+<a href=#295 id=295 data-nosnippet>295</a>/// as (bid, instr index, args, keyword names, span) tuples. The index
+<a href=#296 id=296 data-nosnippet>296</a>/// orders same-block guard/trigger pairs; `keyword names` is parallel to
+<a href=#297 id=297 data-nosnippet>297</a>/// `args` and may be shorter (missing entry = positional).
+<a href=#298 id=298 data-nosnippet>298</a></span><span class="kw">type </span>TriggerSite&lt;<span class="lifetime">'a</span>&gt; = (
+<a href=#299 id=299 data-nosnippet>299</a>    BlockId,
+<a href=#300 id=300 data-nosnippet>300</a>    usize,
+<a href=#301 id=301 data-nosnippet>301</a>    <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[Operand],
+<a href=#302 id=302 data-nosnippet>302</a>    <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[String],
+<a href=#303 id=303 data-nosnippet>303</a>    <span class="prelude-ty">Option</span>&lt;(usize, usize)&gt;,
+<a href=#304 id=304 data-nosnippet>304</a>);
+<a href=#305 id=305 data-nosnippet>305</a>
+<a href=#306 id=306 data-nosnippet>306</a><span class="kw">fn </span>trigger_sites&lt;<span class="lifetime">'a</span>&gt;(
+<a href=#307 id=307 data-nosnippet>307</a>    ir: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>FunctionIR,
+<a href=#308 id=308 data-nosnippet>308</a>    seg: <span class="kw-2">&amp;</span>str,
+<a href=#309 id=309 data-nosnippet>309</a>    aliases: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>FxHashMap&lt;String, String&gt;&gt;,
+<a href=#310 id=310 data-nosnippet>310</a>) -&gt; Vec&lt;TriggerSite&lt;<span class="lifetime">'a</span>&gt;&gt; {
+<a href=#311 id=311 data-nosnippet>311</a>    <span class="kw">let </span><span class="kw-2">mut </span>out = Vec::new();
+<a href=#312 id=312 data-nosnippet>312</a>    <span class="kw">for </span>(<span class="kw-2">&amp;</span>bid, block) <span class="kw">in </span><span class="kw-2">&amp;</span>ir.blocks {
+<a href=#313 id=313 data-nosnippet>313</a>        <span class="kw">for </span>(idx, instr) <span class="kw">in </span>block.instructions.iter().enumerate() {
+<a href=#314 id=314 data-nosnippet>314</a>            <span class="comment">// Written callee path: static calls carry their full path
+<a href=#315 id=315 data-nosnippet>315</a>            // (Rust `storage::ops::wipe_volume`); member calls are
+<a href=#316 id=316 data-nosnippet>316</a>            // reconstructed from the receiver chain (`payments.x` -&gt;
+<a href=#317 id=317 data-nosnippet>317</a>            // `payments.x`), so qualified facts can match the exact
+<a href=#318 id=318 data-nosnippet>318</a>            // member instead of every object sharing the bare verb.
+<a href=#319 id=319 data-nosnippet>319</a>            </span><span class="kw">let </span>name = <span class="kw">match </span>instr {
+<a href=#320 id=320 data-nosnippet>320</a>                Instruction::CallStatic { func, .. } =&gt; func.clone(),
+<a href=#321 id=321 data-nosnippet>321</a>                Instruction::CallVirtual {
+<a href=#322 id=322 data-nosnippet>322</a>                    method, receiver, ..
+<a href=#323 id=323 data-nosnippet>323</a>                } =&gt; <span class="kw">crate</span>::analysis::forward::receiver_call_path(ir, receiver, method),
+<a href=#324 id=324 data-nosnippet>324</a>                <span class="kw">_ </span>=&gt; <span class="kw">continue</span>,
+<a href=#325 id=325 data-nosnippet>325</a>            };
+<a href=#326 id=326 data-nosnippet>326</a>            <span class="comment">// The callee's bare last segment, or an import alias resolving
+<a href=#327 id=327 data-nosnippet>327</a>            // to `seg` (`refund` -&gt; `issue_refund`), counts as the trigger.
+<a href=#328 id=328 data-nosnippet>328</a>            // A qualified taught name matches the written callee path
+<a href=#329 id=329 data-nosnippet>329</a>            // instead of the bare verb (see `callee_matches`).
+<a href=#330 id=330 data-nosnippet>330</a>            </span><span class="kw">let </span>matches = callee_matches(seg, <span class="kw-2">&amp;</span>name)
+<a href=#331 id=331 data-nosnippet>331</a>                || aliases.is_some_and(|m| {
+<a href=#332 id=332 data-nosnippet>332</a>                    m.get(<span class="kw">super</span>::last_segment(<span class="kw-2">&amp;</span>name))
+<a href=#333 id=333 data-nosnippet>333</a>                        .is_some_and(|sym| callee_matches(seg, sym))
+<a href=#334 id=334 data-nosnippet>334</a>                });
+<a href=#335 id=335 data-nosnippet>335</a>            <span class="kw">if </span>!matches {
+<a href=#336 id=336 data-nosnippet>336</a>                <span class="kw">continue</span>;
+<a href=#337 id=337 data-nosnippet>337</a>            }
+<a href=#338 id=338 data-nosnippet>338</a>            <span class="kw">let </span>(args, arg_names) = call_args(instr).unwrap_or((<span class="kw-2">&amp;</span>[], <span class="kw-2">&amp;</span>[]));
+<a href=#339 id=339 data-nosnippet>339</a>            out.push((bid, idx, args, arg_names, ir.instr_span(instr)));
+<a href=#340 id=340 data-nosnippet>340</a>        }
+<a href=#341 id=341 data-nosnippet>341</a>    }
+<a href=#342 id=342 data-nosnippet>342</a>    out
+<a href=#343 id=343 data-nosnippet>343</a>}
+<a href=#344 id=344 data-nosnippet>344</a>
+<a href=#345 id=345 data-nosnippet>345</a><span class="doccomment">/// A call instruction's argument list and its parallel keyword names, for
+<a href=#346 id=346 data-nosnippet>346</a>/// site indexing outside the match arm that already destructures it. The
+<a href=#347 id=347 data-nosnippet>347</a>/// name slice may be shorter than the argument slice; a missing entry is a
+<a href=#348 id=348 data-nosnippet>348</a>/// positional argument.
+<a href=#349 id=349 data-nosnippet>349</a></span><span class="kw">fn </span>call_args(instr: <span class="kw-2">&amp;</span>Instruction) -&gt; <span class="prelude-ty">Option</span>&lt;(<span class="kw-2">&amp;</span>[Operand], <span class="kw-2">&amp;</span>[String])&gt; {
+<a href=#350 id=350 data-nosnippet>350</a>    <span class="kw">match </span>instr {
+<a href=#351 id=351 data-nosnippet>351</a>        Instruction::CallStatic {
+<a href=#352 id=352 data-nosnippet>352</a>            args, arg_names, ..
+<a href=#353 id=353 data-nosnippet>353</a>        } =&gt; <span class="prelude-val">Some</span>((args.as_slice(), arg_names.as_slice())),
+<a href=#354 id=354 data-nosnippet>354</a>        Instruction::CallVirtual {
+<a href=#355 id=355 data-nosnippet>355</a>            args, arg_names, ..
+<a href=#356 id=356 data-nosnippet>356</a>        } =&gt; <span class="prelude-val">Some</span>((args.as_slice(), arg_names.as_slice())),
+<a href=#357 id=357 data-nosnippet>357</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#358 id=358 data-nosnippet>358</a>    }
+<a href=#359 id=359 data-nosnippet>359</a>}
+<a href=#360 id=360 data-nosnippet>360</a>
+<a href=#361 id=361 data-nosnippet>361</a><span class="doccomment">/// Does one requirement hold for this trigger site?
+<a href=#362 id=362 data-nosnippet>362</a></span><span class="attr">#[allow(clippy::too_many_arguments)]
+<a href=#363 id=363 data-nosnippet>363</a></span><span class="kw">fn </span>requirement_holds(
+<a href=#364 id=364 data-nosnippet>364</a>    req: <span class="kw-2">&amp;</span>PolicyRequirement,
+<a href=#365 id=365 data-nosnippet>365</a>    ir: <span class="kw-2">&amp;</span>FunctionIR,
+<a href=#366 id=366 data-nosnippet>366</a>    block: BlockId,
+<a href=#367 id=367 data-nosnippet>367</a>    trigger_idx: usize,
+<a href=#368 id=368 data-nosnippet>368</a>    doms: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>DomSets&gt;,
+<a href=#369 id=369 data-nosnippet>369</a>    val_info: <span class="kw-2">&amp;</span><span class="kw">crate</span>::analysis::value::ValueInfo,
+<a href=#370 id=370 data-nosnippet>370</a>    args: <span class="kw-2">&amp;</span>[Operand],
+<a href=#371 id=371 data-nosnippet>371</a>    arg_names: <span class="kw-2">&amp;</span>[String],
+<a href=#372 id=372 data-nosnippet>372</a>    fn_segs: <span class="kw-2">&amp;</span>[String],
+<a href=#373 id=373 data-nosnippet>373</a>    module_segs: <span class="kw-2">&amp;</span>[String],
+<a href=#374 id=374 data-nosnippet>374</a>    scope: PolicyScope,
+<a href=#375 id=375 data-nosnippet>375</a>) -&gt; bool {
+<a href=#376 id=376 data-nosnippet>376</a>    <span class="kw">match </span>req {
+<a href=#377 id=377 data-nosnippet>377</a>        PolicyRequirement::GuardCall { call } =&gt; {
+<a href=#378 id=378 data-nosnippet>378</a>            <span class="comment">// Enforcement by a named helper. Function scope is spatial: the
+<a href=#379 id=379 data-nosnippet>379</a>            // guard must EXECUTE before the trigger on every path (its block
+<a href=#380 id=380 data-nosnippet>380</a>            // dominates the trigger's, or same block with the guard first) -
+<a href=#381 id=381 data-nosnippet>381</a>            // a call that may be skipped enforces nothing. Module scope
+<a href=#382 id=382 data-nosnippet>382</a>            // stays presence (the helper exists somewhere in the module).
+<a href=#383 id=383 data-nosnippet>383</a>            </span><span class="kw">let </span>seg = <span class="kw">super</span>::last_segment(call);
+<a href=#384 id=384 data-nosnippet>384</a>            <span class="kw">if </span>is_entry_guarded(ir, seg) {
+<a href=#385 id=385 data-nosnippet>385</a>                <span class="kw">return </span><span class="bool-val">true</span>;
+<a href=#386 id=386 data-nosnippet>386</a>            }
+<a href=#387 id=387 data-nosnippet>387</a>            <span class="kw">if </span>scope == PolicyScope::Module {
+<a href=#388 id=388 data-nosnippet>388</a>                module_segs.iter().any(|s| s == seg)
+<a href=#389 id=389 data-nosnippet>389</a>            } <span class="kw">else </span>{
+<a href=#390 id=390 data-nosnippet>390</a>                <span class="comment">// Spatial matching sees the full taught guard name so a
+<a href=#391 id=391 data-nosnippet>391</a>                // qualified helper matches its member-call sites exactly.
+<a href=#392 id=392 data-nosnippet>392</a>                </span>guard_executes_before(ir, call, block, trigger_idx, doms)
+<a href=#393 id=393 data-nosnippet>393</a>            }
+<a href=#394 id=394 data-nosnippet>394</a>        }
+<a href=#395 id=395 data-nosnippet>395</a>        PolicyRequirement::RequireCall { any_of } =&gt; {
+<a href=#396 id=396 data-nosnippet>396</a>            <span class="kw">if </span>scope == PolicyScope::Module {
+<a href=#397 id=397 data-nosnippet>397</a>                <span class="kw">let </span>wanted: Vec&lt;<span class="kw-2">&amp;</span>str&gt; = any_of.iter().map(|c| <span class="kw">super</span>::last_segment(c)).collect();
+<a href=#398 id=398 data-nosnippet>398</a>                <span class="kw">return </span>module_segs.iter().any(|s| wanted.contains(<span class="kw-2">&amp;</span>s.as_str()));
+<a href=#399 id=399 data-nosnippet>399</a>            }
+<a href=#400 id=400 data-nosnippet>400</a>            any_of.iter().any(|c| {
+<a href=#401 id=401 data-nosnippet>401</a>                is_entry_guarded(ir, <span class="kw">super</span>::last_segment(c))
+<a href=#402 id=402 data-nosnippet>402</a>                    || guard_executes_before(ir, c, block, trigger_idx, doms)
+<a href=#403 id=403 data-nosnippet>403</a>            })
+<a href=#404 id=404 data-nosnippet>404</a>        }
+<a href=#405 id=405 data-nosnippet>405</a>        PolicyRequirement::NotCall { call } =&gt; {
+<a href=#406 id=406 data-nosnippet>406</a>            <span class="kw">let </span>seg = <span class="kw">super</span>::last_segment(call);
+<a href=#407 id=407 data-nosnippet>407</a>            !scope_segs(scope, fn_segs, module_segs)
+<a href=#408 id=408 data-nosnippet>408</a>                .iter()
+<a href=#409 id=409 data-nosnippet>409</a>                .any(|s| s == seg)
+<a href=#410 id=410 data-nosnippet>410</a>        }
+<a href=#411 id=411 data-nosnippet>411</a>        PolicyRequirement::RangeCheck { ops } =&gt; args.iter().any(|a| <span class="kw">match </span>a {
+<a href=#412 id=412 data-nosnippet>412</a>            Operand::Var(v) =&gt; is_range_guarded(ir, <span class="kw-2">*</span>v, ops, block, val_info),
+<a href=#413 id=413 data-nosnippet>413</a>            <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+<a href=#414 id=414 data-nosnippet>414</a>        }),
+<a href=#415 id=415 data-nosnippet>415</a>        PolicyRequirement::BannedArgLiteral { slot, values } =&gt; {
+<a href=#416 id=416 data-nosnippet>416</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(arg) = args.get(<span class="kw-2">*</span>slot)
+<a href=#417 id=417 data-nosnippet>417</a>                &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(s) = extract_literal_string(arg, ir, val_info)
+<a href=#418 id=418 data-nosnippet>418</a>            {
+<a href=#419 id=419 data-nosnippet>419</a>                <span class="kw">let </span>s_lower = s.to_ascii_lowercase();
+<a href=#420 id=420 data-nosnippet>420</a>                <span class="kw">return </span>!values.iter().any(|v| v.to_ascii_lowercase() == s_lower);
+<a href=#421 id=421 data-nosnippet>421</a>            }
+<a href=#422 id=422 data-nosnippet>422</a>            <span class="bool-val">true
+<a href=#423 id=423 data-nosnippet>423</a>        </span>}
+<a href=#424 id=424 data-nosnippet>424</a>        PolicyRequirement::RequiredArgLiteral { slot, values } =&gt; {
+<a href=#425 id=425 data-nosnippet>425</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(arg) = args.get(<span class="kw-2">*</span>slot)
+<a href=#426 id=426 data-nosnippet>426</a>                &amp;&amp; <span class="kw">let </span><span class="prelude-val">Some</span>(s) = extract_literal_string(arg, ir, val_info)
+<a href=#427 id=427 data-nosnippet>427</a>            {
+<a href=#428 id=428 data-nosnippet>428</a>                <span class="kw">let </span>s_lower = s.to_ascii_lowercase();
+<a href=#429 id=429 data-nosnippet>429</a>                <span class="kw">return </span>values.iter().any(|v| v.to_ascii_lowercase() == s_lower);
+<a href=#430 id=430 data-nosnippet>430</a>            }
+<a href=#431 id=431 data-nosnippet>431</a>            <span class="bool-val">false
+<a href=#432 id=432 data-nosnippet>432</a>        </span>}
+<a href=#433 id=433 data-nosnippet>433</a>        PolicyRequirement::RequireArgKey { slot, keys } =&gt; {
+<a href=#434 id=434 data-nosnippet>434</a>            <span class="kw">if </span><span class="kw-2">*</span>slot == usize::MAX {
+<a href=#435 id=435 data-nosnippet>435</a>                args.iter().any(|a| <span class="kw">match </span>a {
+<a href=#436 id=436 data-nosnippet>436</a>                    Operand::Var(v) =&gt; arg_has_key(ir, <span class="kw-2">*</span>v, keys),
+<a href=#437 id=437 data-nosnippet>437</a>                    <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+<a href=#438 id=438 data-nosnippet>438</a>                })
+<a href=#439 id=439 data-nosnippet>439</a>            } <span class="kw">else </span>{
+<a href=#440 id=440 data-nosnippet>440</a>                args.get(<span class="kw-2">*</span>slot).is_some_and(|arg| <span class="kw">match </span>arg {
+<a href=#441 id=441 data-nosnippet>441</a>                    Operand::Var(v) =&gt; arg_has_key(ir, <span class="kw-2">*</span>v, keys),
+<a href=#442 id=442 data-nosnippet>442</a>                    <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+<a href=#443 id=443 data-nosnippet>443</a>                })
+<a href=#444 id=444 data-nosnippet>444</a>            }
+<a href=#445 id=445 data-nosnippet>445</a>        }
+<a href=#446 id=446 data-nosnippet>446</a>        PolicyRequirement::RequireNamedArgLiteral { name, values } =&gt; {
+<a href=#447 id=447 data-nosnippet>447</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(idx) = arg_names.iter().position(|n| n.eq_ignore_ascii_case(name)) <span class="kw">else </span>{
+<a href=#448 id=448 data-nosnippet>448</a>                <span class="comment">// The caller never set the flag: the violation the policy
+<a href=#449 id=449 data-nosnippet>449</a>                // exists to catch.
+<a href=#450 id=450 data-nosnippet>450</a>                </span><span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#451 id=451 data-nosnippet>451</a>            };
+<a href=#452 id=452 data-nosnippet>452</a>            <span class="kw">match </span>args
+<a href=#453 id=453 data-nosnippet>453</a>                .get(idx)
+<a href=#454 id=454 data-nosnippet>454</a>                .and_then(|a| extract_literal_string(a, ir, val_info))
+<a href=#455 id=455 data-nosnippet>455</a>            {
+<a href=#456 id=456 data-nosnippet>456</a>                <span class="comment">// A provable literal must be one of the required values.
+<a href=#457 id=457 data-nosnippet>457</a>                </span><span class="prelude-val">Some</span>(s) =&gt; values.iter().any(|v| v.eq_ignore_ascii_case(<span class="kw-2">&amp;</span>s)),
+<a href=#458 id=458 data-nosnippet>458</a>                <span class="comment">// Unresolvable value: literal-only proof, so not a
+<a href=#459 id=459 data-nosnippet>459</a>                // violation. This is the conservative direction - it can
+<a href=#460 id=460 data-nosnippet>460</a>                // miss `secure=flag`, never invent it.
+<a href=#461 id=461 data-nosnippet>461</a>                </span><span class="prelude-val">None </span>=&gt; <span class="bool-val">true</span>,
+<a href=#462 id=462 data-nosnippet>462</a>            }
+<a href=#463 id=463 data-nosnippet>463</a>        }
+<a href=#464 id=464 data-nosnippet>464</a>        PolicyRequirement::BannedNamedArgLiteral { name, values } =&gt; {
+<a href=#465 id=465 data-nosnippet>465</a>            <span class="kw">let </span><span class="prelude-val">Some</span>(idx) = arg_names.iter().position(|n| n.eq_ignore_ascii_case(name)) <span class="kw">else </span>{
+<a href=#466 id=466 data-nosnippet>466</a>                <span class="comment">// The caller never set the flag: absent is NOT a violation.
+<a href=#467 id=467 data-nosnippet>467</a>                </span><span class="kw">return </span><span class="bool-val">true</span>;
+<a href=#468 id=468 data-nosnippet>468</a>            };
+<a href=#469 id=469 data-nosnippet>469</a>            <span class="kw">match </span>args
+<a href=#470 id=470 data-nosnippet>470</a>                .get(idx)
+<a href=#471 id=471 data-nosnippet>471</a>                .and_then(|a| extract_literal_string(a, ir, val_info))
+<a href=#472 id=472 data-nosnippet>472</a>            {
+<a href=#473 id=473 data-nosnippet>473</a>                <span class="comment">// A provable literal must NOT match any of the banned values.
+<a href=#474 id=474 data-nosnippet>474</a>                </span><span class="prelude-val">Some</span>(s) =&gt; !values.iter().any(|v| v.eq_ignore_ascii_case(<span class="kw-2">&amp;</span>s)),
+<a href=#475 id=475 data-nosnippet>475</a>                <span class="comment">// Unresolvable value: literal-only proof, conservative.
+<a href=#476 id=476 data-nosnippet>476</a>                </span><span class="prelude-val">None </span>=&gt; <span class="bool-val">true</span>,
+<a href=#477 id=477 data-nosnippet>477</a>            }
+<a href=#478 id=478 data-nosnippet>478</a>        }
+<a href=#479 id=479 data-nosnippet>479</a>    }
+<a href=#480 id=480 data-nosnippet>480</a>}
+<a href=#481 id=481 data-nosnippet>481</a>
+<a href=#482 id=482 data-nosnippet>482</a><span class="doccomment">/// True when the function's own definition carries a decorator/attribute
+<a href=#483 id=483 data-nosnippet>483</a>/// whose call name is `seg` (`@guard`, `#[guard]`). A decorator executes
+<a href=#484 id=484 data-nosnippet>484</a>/// before ANY statement of the body, so it dominates every trigger in the
+<a href=#485 id=485 data-nosnippet>485</a>/// function by construction - the caller-side enforcement shape.
+<a href=#486 id=486 data-nosnippet>486</a></span><span class="kw">fn </span>is_entry_guarded(ir: <span class="kw-2">&amp;</span>FunctionIR, seg: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#487 id=487 data-nosnippet>487</a>    ir.entry_guards
+<a href=#488 id=488 data-nosnippet>488</a>        .iter()
+<a href=#489 id=489 data-nosnippet>489</a>        .any(|g| <span class="kw">super</span>::last_segment(g) == seg)
+<a href=#490 id=490 data-nosnippet>490</a>}
+<a href=#491 id=491 data-nosnippet>491</a>
+<a href=#492 id=492 data-nosnippet>492</a><span class="doccomment">/// The bundler's fact extractor consults the SAME guard model the scanner
+<a href=#493 id=493 data-nosnippet>493</a>/// uses, so a corpus twin can teach a check whose negative suppresses the
+<a href=#494 id=494 data-nosnippet>494</a>/// trigger dominantly (a bare `guard(x);` statement before the trigger,
+<a href=#495 id=495 data-nosnippet>495</a>/// same block earlier or in a dominating block) even when no dataflow
+<a href=#496 id=496 data-nosnippet>496</a>/// connects the guard's value to the trigger's arguments. Argument-nested
+<a href=#497 id=497 data-nosnippet>497</a>/// calls (`new Date()` inside a `where: { lt: ... }` literal) are excluded,
+<a href=#498 id=498 data-nosnippet>498</a>/// as their span lies inside the trigger's argument span. Mechanism only;
+<a href=#499 id=499 data-nosnippet>499</a>/// conclusions stay bundle data.
+<a href=#500 id=500 data-nosnippet>500</a></span><span class="kw">pub fn </span>guard_dominates_trigger_call(ir: <span class="kw-2">&amp;</span>FunctionIR, guard_seg: <span class="kw-2">&amp;</span>str, trigger_seg: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#501 id=501 data-nosnippet>501</a>    <span class="kw">let </span>doms = control::dominators(ir);
+<a href=#502 id=502 data-nosnippet>502</a>    <span class="kw">let </span>call_span = |bid: BlockId, idx: usize| -&gt; <span class="prelude-ty">Option</span>&lt;(usize, usize)&gt; {
+<a href=#503 id=503 data-nosnippet>503</a>        ir.blocks
+<a href=#504 id=504 data-nosnippet>504</a>            .get(<span class="kw-2">&amp;</span>bid)
+<a href=#505 id=505 data-nosnippet>505</a>            .and_then(|b| b.instructions.get(idx))
+<a href=#506 id=506 data-nosnippet>506</a>            .and_then(|instr| <span class="kw">match </span>instr {
+<a href=#507 id=507 data-nosnippet>507</a>                Instruction::CallStatic { dest, .. }
+<a href=#508 id=508 data-nosnippet>508</a>                | Instruction::CallVirtual { dest, .. }
+<a href=#509 id=509 data-nosnippet>509</a>                | Instruction::CallPointer { dest, .. } =&gt; <span class="kw-2">*</span>dest,
+<a href=#510 id=510 data-nosnippet>510</a>                <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#511 id=511 data-nosnippet>511</a>            })
+<a href=#512 id=512 data-nosnippet>512</a>            .and_then(|d| ir.var_metadata.get(<span class="kw-2">&amp;</span>d).and_then(|m| m.byte_range))
+<a href=#513 id=513 data-nosnippet>513</a>    };
+<a href=#514 id=514 data-nosnippet>514</a>    <span class="kw">for </span>(<span class="kw-2">&amp;</span>tb, block) <span class="kw">in </span><span class="kw-2">&amp;</span>ir.blocks {
+<a href=#515 id=515 data-nosnippet>515</a>        <span class="kw">for </span>(tidx, instr) <span class="kw">in </span>block.instructions.iter().enumerate() {
+<a href=#516 id=516 data-nosnippet>516</a>            <span class="kw">let </span>name = <span class="kw">match </span>instr {
+<a href=#517 id=517 data-nosnippet>517</a>                Instruction::CallStatic { func, .. } =&gt; func,
+<a href=#518 id=518 data-nosnippet>518</a>                Instruction::CallVirtual { method, .. } =&gt; method,
+<a href=#519 id=519 data-nosnippet>519</a>                <span class="kw">_ </span>=&gt; <span class="kw">continue</span>,
+<a href=#520 id=520 data-nosnippet>520</a>            };
+<a href=#521 id=521 data-nosnippet>521</a>            <span class="kw">if </span><span class="kw">super</span>::last_segment(name) != trigger_seg {
+<a href=#522 id=522 data-nosnippet>522</a>                <span class="kw">continue</span>;
+<a href=#523 id=523 data-nosnippet>523</a>            }
+<a href=#524 id=524 data-nosnippet>524</a>            <span class="comment">// Guard sites that execute before this trigger, with the
+<a href=#525 id=525 data-nosnippet>525</a>            // argument-nested coincidence excluded by span containment.
+<a href=#526 id=526 data-nosnippet>526</a>            </span><span class="kw">for </span>(<span class="kw-2">&amp;</span>gb, gblock) <span class="kw">in </span><span class="kw-2">&amp;</span>ir.blocks {
+<a href=#527 id=527 data-nosnippet>527</a>                <span class="kw">for </span>(gi, ginstr) <span class="kw">in </span>gblock.instructions.iter().enumerate() {
+<a href=#528 id=528 data-nosnippet>528</a>                    <span class="kw">let </span>gname = <span class="kw">match </span>ginstr {
+<a href=#529 id=529 data-nosnippet>529</a>                        Instruction::CallStatic { func, .. } =&gt; func,
+<a href=#530 id=530 data-nosnippet>530</a>                        Instruction::CallVirtual { method, .. } =&gt; method,
+<a href=#531 id=531 data-nosnippet>531</a>                        <span class="kw">_ </span>=&gt; <span class="kw">continue</span>,
+<a href=#532 id=532 data-nosnippet>532</a>                    };
+<a href=#533 id=533 data-nosnippet>533</a>                    <span class="kw">if </span><span class="kw">super</span>::last_segment(gname) != guard_seg {
+<a href=#534 id=534 data-nosnippet>534</a>                        <span class="kw">continue</span>;
+<a href=#535 id=535 data-nosnippet>535</a>                    }
+<a href=#536 id=536 data-nosnippet>536</a>                    <span class="kw">let </span>prev = <span class="kw">if </span>gb == tb {
+<a href=#537 id=537 data-nosnippet>537</a>                        gi &lt; tidx
+<a href=#538 id=538 data-nosnippet>538</a>                    } <span class="kw">else </span>{
+<a href=#539 id=539 data-nosnippet>539</a>                        doms.get(<span class="kw-2">&amp;</span>tb).is_some_and(|d| d.contains(<span class="kw-2">&amp;</span>gb))
+<a href=#540 id=540 data-nosnippet>540</a>                    };
+<a href=#541 id=541 data-nosnippet>541</a>                    <span class="kw">if </span>!prev {
+<a href=#542 id=542 data-nosnippet>542</a>                        <span class="kw">continue</span>;
+<a href=#543 id=543 data-nosnippet>543</a>                    }
+<a href=#544 id=544 data-nosnippet>544</a>                    <span class="comment">// Exclude guards nested inside the trigger's own
+<a href=#545 id=545 data-nosnippet>545</a>                    // argument lowering.
+<a href=#546 id=546 data-nosnippet>546</a>                    </span><span class="kw">if let </span>(<span class="prelude-val">Some</span>(gs), <span class="prelude-val">Some</span>(ts)) = (call_span(gb, gi), call_span(tb, tidx))
+<a href=#547 id=547 data-nosnippet>547</a>                        &amp;&amp; gs.<span class="number">0 </span>&gt;= ts.<span class="number">0
+<a href=#548 id=548 data-nosnippet>548</a>                        </span>&amp;&amp; gs.<span class="number">1 </span>&lt;= ts.<span class="number">1
+<a href=#549 id=549 data-nosnippet>549</a>                    </span>{
+<a href=#550 id=550 data-nosnippet>550</a>                        <span class="kw">continue</span>;
+<a href=#551 id=551 data-nosnippet>551</a>                    }
+<a href=#552 id=552 data-nosnippet>552</a>                    <span class="kw">return </span><span class="bool-val">true</span>;
+<a href=#553 id=553 data-nosnippet>553</a>                }
+<a href=#554 id=554 data-nosnippet>554</a>            }
+<a href=#555 id=555 data-nosnippet>555</a>        }
+<a href=#556 id=556 data-nosnippet>556</a>    }
+<a href=#557 id=557 data-nosnippet>557</a>    <span class="bool-val">false
+<a href=#558 id=558 data-nosnippet>558</a></span>}
+<a href=#559 id=559 data-nosnippet>559</a>
+<a href=#560 id=560 data-nosnippet>560</a><span class="doccomment">/// Does `start` trace to an object construction carrying any of `keys`?
+<a href=#561 id=561 data-nosnippet>561</a>/// Fully-keyed object literals lower to `Allocate(kind: Object)` plus one
+<a href=#562 id=562 data-nosnippet>562</a>/// `StoreField { base, field }` per key, and the lowering records the pair
+<a href=#563 id=563 data-nosnippet>563</a>/// keys on the composite var's metadata (shorthand/mixed composites carry
+<a href=#564 id=564 data-nosnippet>564</a>/// the metadata without stores). Both paths are checked; plain `Assign`
+<a href=#565 id=565 data-nosnippet>565</a>/// hops are followed like the shape classifier in `forward/predicates.rs`
+<a href=#566 id=566 data-nosnippet>566</a>/// (`arg_is_idor_shape`), depth-bounded.
+<a href=#567 id=567 data-nosnippet>567</a></span><span class="kw">fn </span>arg_has_key(ir: <span class="kw-2">&amp;</span>FunctionIR, start: VarId, keys: <span class="kw-2">&amp;</span>[String]) -&gt; bool {
+<a href=#568 id=568 data-nosnippet>568</a>    <span class="kw">let </span><span class="kw-2">mut </span>frontier = <span class="macro">vec!</span>[start];
+<a href=#569 id=569 data-nosnippet>569</a>    <span class="kw">let </span><span class="kw-2">mut </span>seen: rustc_hash::FxHashSet&lt;VarId&gt; = rustc_hash::FxHashSet::default();
+<a href=#570 id=570 data-nosnippet>570</a>    seen.insert(start);
+<a href=#571 id=571 data-nosnippet>571</a>    <span class="kw">for _ in </span><span class="number">0</span>..<span class="number">8 </span>{
+<a href=#572 id=572 data-nosnippet>572</a>        <span class="kw">let </span><span class="kw-2">mut </span>next = Vec::new();
+<a href=#573 id=573 data-nosnippet>573</a>        <span class="kw">for </span>v <span class="kw">in </span>frontier.drain(..) {
+<a href=#574 id=574 data-nosnippet>574</a>            <span class="comment">// (1) Metadata path: the composite var remembers its pair keys.
+<a href=#575 id=575 data-nosnippet>575</a>            </span><span class="kw">if </span>ir
+<a href=#576 id=576 data-nosnippet>576</a>                .var_metadata
+<a href=#577 id=577 data-nosnippet>577</a>                .get(<span class="kw-2">&amp;</span>v)
+<a href=#578 id=578 data-nosnippet>578</a>                .is_some_and(|m| m.object_keys.iter().any(|k| keys.contains(k)))
+<a href=#579 id=579 data-nosnippet>579</a>            {
+<a href=#580 id=580 data-nosnippet>580</a>                <span class="kw">return </span><span class="bool-val">true</span>;
+<a href=#581 id=581 data-nosnippet>581</a>            }
+<a href=#582 id=582 data-nosnippet>582</a>            <span class="kw">for </span>b <span class="kw">in </span>ir.blocks.values() {
+<a href=#583 id=583 data-nosnippet>583</a>                <span class="kw">for </span>instr <span class="kw">in </span><span class="kw-2">&amp;</span>b.instructions {
+<a href=#584 id=584 data-nosnippet>584</a>                    <span class="kw">match </span>instr {
+<a href=#585 id=585 data-nosnippet>585</a>                        <span class="comment">// (2) Store path: the literal's own per-key store
+<a href=#586 id=586 data-nosnippet>586</a>                        // (`where: ...`), checked by field name.
+<a href=#587 id=587 data-nosnippet>587</a>                        </span>Instruction::StoreField {
+<a href=#588 id=588 data-nosnippet>588</a>                            base, field, src, ..
+<a href=#589 id=589 data-nosnippet>589</a>                        } <span class="kw">if </span><span class="kw-2">*</span>base == v =&gt; {
+<a href=#590 id=590 data-nosnippet>590</a>                            <span class="kw">if </span>keys.iter().any(|k| k == field) {
+<a href=#591 id=591 data-nosnippet>591</a>                                <span class="kw">return </span><span class="bool-val">true</span>;
+<a href=#592 id=592 data-nosnippet>592</a>                            }
+<a href=#593 id=593 data-nosnippet>593</a>                            <span class="comment">// (3) Recurse into stored member objects:
+<a href=#594 id=594 data-nosnippet>594</a>                            // a nested `{ lt: ... }` is a fresh Allocate
+<a href=#595 id=595 data-nosnippet>595</a>                            // reached through the outer object's store.
+<a href=#596 id=596 data-nosnippet>596</a>                            </span><span class="kw">if let </span>Operand::Var(s) = src
+<a href=#597 id=597 data-nosnippet>597</a>                                &amp;&amp; seen.insert(<span class="kw-2">*</span>s)
+<a href=#598 id=598 data-nosnippet>598</a>                            {
+<a href=#599 id=599 data-nosnippet>599</a>                                next.push(<span class="kw-2">*</span>s);
+<a href=#600 id=600 data-nosnippet>600</a>                            }
+<a href=#601 id=601 data-nosnippet>601</a>                        }
+<a href=#602 id=602 data-nosnippet>602</a>                        <span class="comment">// (4) Plain assign hop keeps the shape identity.
+<a href=#603 id=603 data-nosnippet>603</a>                        </span>Instruction::Assign {
+<a href=#604 id=604 data-nosnippet>604</a>                            dest,
+<a href=#605 id=605 data-nosnippet>605</a>                            src: Operand::Var(s),
+<a href=#606 id=606 data-nosnippet>606</a>                        } <span class="kw">if </span><span class="kw-2">*</span>dest == v &amp;&amp; seen.insert(<span class="kw-2">*</span>s) =&gt; {
+<a href=#607 id=607 data-nosnippet>607</a>                            next.push(<span class="kw-2">*</span>s);
+<a href=#608 id=608 data-nosnippet>608</a>                        }
+<a href=#609 id=609 data-nosnippet>609</a>                        <span class="kw">_ </span>=&gt; {}
+<a href=#610 id=610 data-nosnippet>610</a>                    }
+<a href=#611 id=611 data-nosnippet>611</a>                }
+<a href=#612 id=612 data-nosnippet>612</a>            }
+<a href=#613 id=613 data-nosnippet>613</a>        }
+<a href=#614 id=614 data-nosnippet>614</a>        <span class="kw">if </span>next.is_empty() {
+<a href=#615 id=615 data-nosnippet>615</a>            <span class="kw">break</span>;
+<a href=#616 id=616 data-nosnippet>616</a>        }
+<a href=#617 id=617 data-nosnippet>617</a>        frontier = next;
+<a href=#618 id=618 data-nosnippet>618</a>    }
+<a href=#619 id=619 data-nosnippet>619</a>    <span class="bool-val">false
+<a href=#620 id=620 data-nosnippet>620</a></span>}
+<a href=#621 id=621 data-nosnippet>621</a>
+<a href=#622 id=622 data-nosnippet>622</a><span class="doccomment">/// Extract constant literal string/bool/int representation from an operand.
+<a href=#623 id=623 data-nosnippet>623</a></span><span class="kw">fn </span>extract_literal_string(
+<a href=#624 id=624 data-nosnippet>624</a>    op: <span class="kw-2">&amp;</span>Operand,
+<a href=#625 id=625 data-nosnippet>625</a>    ir: <span class="kw-2">&amp;</span>FunctionIR,
+<a href=#626 id=626 data-nosnippet>626</a>    val_info: <span class="kw-2">&amp;</span><span class="kw">crate</span>::analysis::value::ValueInfo,
+<a href=#627 id=627 data-nosnippet>627</a>) -&gt; <span class="prelude-ty">Option</span>&lt;String&gt; {
+<a href=#628 id=628 data-nosnippet>628</a>    <span class="kw">match </span>op {
+<a href=#629 id=629 data-nosnippet>629</a>        Operand::StringLiteral(s) =&gt; <span class="prelude-val">Some</span>(strip_quotes(s).to_string()),
+<a href=#630 id=630 data-nosnippet>630</a>        Operand::IntLiteral(i) =&gt; <span class="prelude-val">Some</span>(i.to_string()),
+<a href=#631 id=631 data-nosnippet>631</a>        Operand::BoolLiteral(b) =&gt; <span class="prelude-val">Some</span>(b.to_string()),
+<a href=#632 id=632 data-nosnippet>632</a>        Operand::Var(v) =&gt; {
+<a href=#633 id=633 data-nosnippet>633</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(s) = val_info.const_str(<span class="kw-2">*</span>v) {
+<a href=#634 id=634 data-nosnippet>634</a>                <span class="kw">return </span><span class="prelude-val">Some</span>(strip_quotes(s).to_string());
+<a href=#635 id=635 data-nosnippet>635</a>            }
+<a href=#636 id=636 data-nosnippet>636</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(c) = val_info.const_int(<span class="kw-2">*</span>v) {
+<a href=#637 id=637 data-nosnippet>637</a>                <span class="kw">return </span><span class="prelude-val">Some</span>(c.to_string());
+<a href=#638 id=638 data-nosnippet>638</a>            }
+<a href=#639 id=639 data-nosnippet>639</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(b) = val_info.const_bool(<span class="kw-2">*</span>v) {
+<a href=#640 id=640 data-nosnippet>640</a>                <span class="kw">return </span><span class="prelude-val">Some</span>(b.to_string());
+<a href=#641 id=641 data-nosnippet>641</a>            }
+<a href=#642 id=642 data-nosnippet>642</a>            <span class="kw">for </span>block <span class="kw">in </span>ir.blocks.values() {
+<a href=#643 id=643 data-nosnippet>643</a>                <span class="kw">for </span>instr <span class="kw">in </span><span class="kw-2">&amp;</span>block.instructions {
+<a href=#644 id=644 data-nosnippet>644</a>                    <span class="kw">match </span>instr {
+<a href=#645 id=645 data-nosnippet>645</a>                        Instruction::Assign { dest, src } <span class="kw">if </span>dest == v =&gt; {
+<a href=#646 id=646 data-nosnippet>646</a>                            <span class="kw">return </span>extract_literal_string(src, ir, val_info);
+<a href=#647 id=647 data-nosnippet>647</a>                        }
+<a href=#648 id=648 data-nosnippet>648</a>                        Instruction::Cast { dest, src, .. } <span class="kw">if </span>dest == v =&gt; {
+<a href=#649 id=649 data-nosnippet>649</a>                            <span class="kw">return </span>extract_literal_string(src, ir, val_info);
+<a href=#650 id=650 data-nosnippet>650</a>                        }
+<a href=#651 id=651 data-nosnippet>651</a>                        <span class="kw">_ </span>=&gt; {}
+<a href=#652 id=652 data-nosnippet>652</a>                    }
+<a href=#653 id=653 data-nosnippet>653</a>                }
+<a href=#654 id=654 data-nosnippet>654</a>            }
+<a href=#655 id=655 data-nosnippet>655</a>            <span class="prelude-val">None
+<a href=#656 id=656 data-nosnippet>656</a>        </span>}
+<a href=#657 id=657 data-nosnippet>657</a>        <span class="kw">_ </span>=&gt; <span class="prelude-val">None</span>,
+<a href=#658 id=658 data-nosnippet>658</a>    }
+<a href=#659 id=659 data-nosnippet>659</a>}
+<a href=#660 id=660 data-nosnippet>660</a>
+<a href=#661 id=661 data-nosnippet>661</a><span class="doccomment">/// The segment set a requirement is evaluated against.
+<a href=#662 id=662 data-nosnippet>662</a></span><span class="kw">fn </span>scope_segs&lt;<span class="lifetime">'a</span>&gt;(
+<a href=#663 id=663 data-nosnippet>663</a>    scope: PolicyScope,
+<a href=#664 id=664 data-nosnippet>664</a>    fn_segs: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[String],
+<a href=#665 id=665 data-nosnippet>665</a>    module_segs: <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[String],
+<a href=#666 id=666 data-nosnippet>666</a>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">'a </span>[String] {
+<a href=#667 id=667 data-nosnippet>667</a>    <span class="kw">match </span>scope {
+<a href=#668 id=668 data-nosnippet>668</a>        PolicyScope::Function =&gt; fn_segs,
+<a href=#669 id=669 data-nosnippet>669</a>        PolicyScope::Module =&gt; module_segs,
+<a href=#670 id=670 data-nosnippet>670</a>    }
+<a href=#671 id=671 data-nosnippet>671</a>}
+<a href=#672 id=672 data-nosnippet>672</a>
+<a href=#673 id=673 data-nosnippet>673</a><span class="doccomment">/// True when some call to `seg` provably executes before the trigger:
+<a href=#674 id=674 data-nosnippet>674</a>/// its block dominates the trigger's block, or both share a block with the
+<a href=#675 id=675 data-nosnippet>675</a>/// guard at a lower instruction index. Falls back to mere presence when no
+<a href=#676 id=676 data-nosnippet>676</a>/// dominance information was computed (caller contract: function-scoped
+<a href=#677 id=677 data-nosnippet>677</a>/// guard/require requirements always pass one).
+<a href=#678 id=678 data-nosnippet>678</a></span><span class="kw">fn </span>guard_executes_before(
+<a href=#679 id=679 data-nosnippet>679</a>    ir: <span class="kw-2">&amp;</span>FunctionIR,
+<a href=#680 id=680 data-nosnippet>680</a>    seg: <span class="kw-2">&amp;</span>str,
+<a href=#681 id=681 data-nosnippet>681</a>    trigger_block: BlockId,
+<a href=#682 id=682 data-nosnippet>682</a>    trigger_idx: usize,
+<a href=#683 id=683 data-nosnippet>683</a>    doms: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>DomSets&gt;,
+<a href=#684 id=684 data-nosnippet>684</a>) -&gt; bool {
+<a href=#685 id=685 data-nosnippet>685</a>    <span class="kw">let </span><span class="kw-2">mut </span>sites: Vec&lt;(BlockId, usize)&gt; = Vec::new();
+<a href=#686 id=686 data-nosnippet>686</a>    <span class="kw">for </span>(<span class="kw-2">&amp;</span>bid, block) <span class="kw">in </span><span class="kw-2">&amp;</span>ir.blocks {
+<a href=#687 id=687 data-nosnippet>687</a>        <span class="kw">for </span>(idx, instr) <span class="kw">in </span>block.instructions.iter().enumerate() {
+<a href=#688 id=688 data-nosnippet>688</a>            <span class="kw">let </span>matched = <span class="kw">match </span>instr {
+<a href=#689 id=689 data-nosnippet>689</a>                Instruction::CallStatic { func, .. } =&gt; callee_matches(seg, func),
+<a href=#690 id=690 data-nosnippet>690</a>                Instruction::CallVirtual {
+<a href=#691 id=691 data-nosnippet>691</a>                    method, receiver, ..
+<a href=#692 id=692 data-nosnippet>692</a>                } =&gt; {
+<a href=#693 id=693 data-nosnippet>693</a>                    <span class="kw">let </span>path = <span class="kw">crate</span>::analysis::forward::receiver_call_path(ir, receiver, method);
+<a href=#694 id=694 data-nosnippet>694</a>                    callee_matches(seg, <span class="kw-2">&amp;</span>path)
+<a href=#695 id=695 data-nosnippet>695</a>                }
+<a href=#696 id=696 data-nosnippet>696</a>                <span class="kw">_ </span>=&gt; <span class="bool-val">false</span>,
+<a href=#697 id=697 data-nosnippet>697</a>            };
+<a href=#698 id=698 data-nosnippet>698</a>            <span class="kw">if </span>matched {
+<a href=#699 id=699 data-nosnippet>699</a>                sites.push((bid, idx));
+<a href=#700 id=700 data-nosnippet>700</a>            }
+<a href=#701 id=701 data-nosnippet>701</a>        }
+<a href=#702 id=702 data-nosnippet>702</a>    }
+<a href=#703 id=703 data-nosnippet>703</a>    <span class="kw">if </span>sites.is_empty() {
+<a href=#704 id=704 data-nosnippet>704</a>        <span class="kw">return </span><span class="bool-val">false</span>;
+<a href=#705 id=705 data-nosnippet>705</a>    }
+<a href=#706 id=706 data-nosnippet>706</a>    <span class="kw">let </span><span class="prelude-val">Some</span>(doms) = doms <span class="kw">else </span>{
+<a href=#707 id=707 data-nosnippet>707</a>        <span class="kw">return </span><span class="bool-val">true</span>;
+<a href=#708 id=708 data-nosnippet>708</a>    };
+<a href=#709 id=709 data-nosnippet>709</a>    sites.iter().any(|<span class="kw-2">&amp;</span>(gb, gi)| {
+<a href=#710 id=710 data-nosnippet>710</a>        <span class="kw">if </span>gb == trigger_block {
+<a href=#711 id=711 data-nosnippet>711</a>            gi &lt; trigger_idx
+<a href=#712 id=712 data-nosnippet>712</a>        } <span class="kw">else </span>{
+<a href=#713 id=713 data-nosnippet>713</a>            doms.get(<span class="kw-2">&amp;</span>trigger_block).is_some_and(|d| d.contains(<span class="kw-2">&amp;</span>gb))
+<a href=#714 id=714 data-nosnippet>714</a>        }
+<a href=#715 id=715 data-nosnippet>715</a>    })
+<a href=#716 id=716 data-nosnippet>716</a>}
+</code></pre></div></section></main></body></html>

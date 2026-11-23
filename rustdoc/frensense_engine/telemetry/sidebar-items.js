@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["PARTIAL_SAMPLE","UNLOCATED_FINDING"],"enum":["CheckOutcome"],"struct":["CapHit","CheckTelemetry","FileTiming","FunctionTiming","GraphSize","InputAccounting","PhaseTiming","ScanTelemetry","SuppressionCount","TaintFunnel","UnmatchedCallee"]};

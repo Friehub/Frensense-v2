@@ -1,0 +1,827 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `frensense-engine/src/analysis/taint/facts/table.rs`."><title>table.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../../../" data-static-root-path="../../../../../static.files/" data-current-crate="frensense_engine" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../../../static.files/src-script-813739b1.js"></script><script defer src="../../../../../src-files.js"></script><script defer src="../../../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">frensense_engine/analysis/taint/facts/</div>table.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="comment">// SPDX-License-Identifier: GPL-3.0-only
+<a href=#2 id=2 data-nosnippet>2</a>// Copyright (c) 2024-2026 Friehub
+<a href=#3 id=3 data-nosnippet>3</a>// Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
+<a href=#4 id=4 data-nosnippet>4</a>
+<a href=#5 id=5 data-nosnippet>5</a></span><span class="kw">use </span>rustc_hash::{FxHashMap, FxHashSet};
+<a href=#6 id=6 data-nosnippet>6</a>
+<a href=#7 id=7 data-nosnippet>7</a><span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#8 id=8 data-nosnippet>8</a><span class="kw">use </span><span class="kw">crate</span>::analysis::taint::config::TaintConfig;
+<a href=#9 id=9 data-nosnippet>9</a><span class="kw">use </span><span class="kw">crate</span>::ir::function::strip_quotes;
+<a href=#10 id=10 data-nosnippet>10</a>
+<a href=#11 id=11 data-nosnippet>11</a><span class="doccomment">/// The merged fact table: built-in language tables + bundle-learned facts.
+<a href=#12 id=12 data-nosnippet>12</a>///
+<a href=#13 id=13 data-nosnippet>13</a>/// Built from a [`TaintConfig`] (name sets, backward compatible) plus
+<a href=#14 id=14 data-nosnippet>14</a>/// optional signatures/sanitizer facts supplied by `frensense-lang` specs or
+<a href=#15 id=15 data-nosnippet>15</a>/// a `.frc` bundle.
+<a href=#16 id=16 data-nosnippet>16</a></span><span class="attr">#[derive(Debug, Clone, Default)]
+<a href=#17 id=17 data-nosnippet>17</a></span><span class="kw">pub struct </span>FactTable {
+<a href=#18 id=18 data-nosnippet>18</a>    <span class="doccomment">/// By call name. Absent = default "all args dangerous" for configured
+<a href=#19 id=19 data-nosnippet>19</a>    /// sinks.
+<a href=#20 id=20 data-nosnippet>20</a>    </span><span class="kw">pub </span>sink_signatures: FxHashMap&lt;String, SinkSignature&gt;,
+<a href=#21 id=21 data-nosnippet>21</a>    <span class="doccomment">/// Language-keyed sink signatures: `language -&gt; call -&gt; signature`.
+<a href=#22 id=22 data-nosnippet>22</a>    ///
+<a href=#23 id=23 data-nosnippet>23</a>    /// The default pack declares its provider vocabulary per language, and a
+<a href=#24 id=24 data-nosnippet>24</a>    /// bare call name is not portable between them: Rust's `File::create`
+<a href=#25 id=25 data-nosnippet>25</a>    /// and a JavaScript `prisma.order.create(...)` share the last segment
+<a href=#26 id=26 data-nosnippet>26</a>    /// `create`, so installing both into one name-keyed map makes the Rust
+<a href=#27 id=27 data-nosnippet>27</a>    /// fact fire on the TypeScript call. Measured on a real repo: a single
+<a href=#28 id=28 data-nosnippet>28</a>    /// `.rs` file in a TypeScript-only package took the scan from 6 findings
+<a href=#29 id=29 data-nosnippet>29</a>    /// to 40, all of them `create`/`output` calls in `.ts` files.
+<a href=#30 id=30 data-nosnippet>30</a>    ///
+<a href=#31 id=31 data-nosnippet>31</a>    /// Facts therefore stay under the language that declared them, and
+<a href=#32 id=32 data-nosnippet>32</a>    /// matching consults the call site's language first
+<a href=#33 id=33 data-nosnippet>33</a>    /// ([`FactTable::sink_signature_for_language`]). [`sink_signatures`]
+<a href=#34 id=34 data-nosnippet>34</a>    /// keeps only genuinely language-agnostic knowledge (`"*"` pack group,
+<a href=#35 id=35 data-nosnippet>35</a>    /// bundle facts, hand-built configs).
+<a href=#36 id=36 data-nosnippet>36</a>    ///
+<a href=#37 id=37 data-nosnippet>37</a>    /// [`sink_signatures`]: FactTable::sink_signatures
+<a href=#38 id=38 data-nosnippet>38</a>    </span><span class="kw">pub </span>lang_sink_signatures: FxHashMap&lt;String, FxHashMap&lt;String, SinkSignature&gt;&gt;,
+<a href=#39 id=39 data-nosnippet>39</a>    <span class="doccomment">/// Language-keyed taint sources: `language -&gt; patterns`.
+<a href=#40 id=40 data-nosnippet>40</a>    ///
+<a href=#41 id=41 data-nosnippet>41</a>    /// The source mirror of [`lang_sink_signatures`]: conventional parameter
+<a href=#42 id=42 data-nosnippet>42</a>    /// names (`req`, `input`, ...) and framework source patterns are declared
+<a href=#43 id=43 data-nosnippet>43</a>    /// per language, so a JavaScript-only name must not seed taint in a Rust
+<a href=#44 id=44 data-nosnippet>44</a>    /// file. `input` is a request source in TypeScript and an unrelated local
+<a href=#45 id=45 data-nosnippet>45</a>    /// in Rust; sharing one set made `info!(..)` a source for every Rust
+<a href=#46 id=46 data-nosnippet>46</a>    /// `tokio::spawn` call in the same repo.
+<a href=#47 id=47 data-nosnippet>47</a>    ///
+<a href=#48 id=48 data-nosnippet>48</a>    /// [`lang_sink_signatures`]: FactTable::lang_sink_signatures
+<a href=#49 id=49 data-nosnippet>49</a>    </span><span class="kw">pub </span>lang_sources: FxHashMap&lt;String, FxHashSet&lt;String&gt;&gt;,
+<a href=#50 id=50 data-nosnippet>50</a>    <span class="doccomment">/// Sanitizer facts keyed by call name.
+<a href=#51 id=51 data-nosnippet>51</a>    </span><span class="kw">pub </span>sanitizer_facts: FxHashMap&lt;String, SanitizerFact&gt;,
+<a href=#52 id=52 data-nosnippet>52</a>    <span class="doccomment">/// Scoped sink signatures: (package, call_name) -&gt; SinkSignature.
+<a href=#53 id=53 data-nosnippet>53</a>    </span><span class="kw">pub </span>scoped_sink_signatures: FxHashMap&lt;(String, String), SinkSignature&gt;,
+<a href=#54 id=54 data-nosnippet>54</a>    <span class="doccomment">/// Scoped sanitizers: (package, call_name) -&gt; SanitizerFact.
+<a href=#55 id=55 data-nosnippet>55</a>    </span><span class="kw">pub </span>scoped_sanitizer_facts: FxHashMap&lt;(String, String), SanitizerFact&gt;,
+<a href=#56 id=56 data-nosnippet>56</a>    <span class="doccomment">/// Scoped taint sources: (package, pattern).
+<a href=#57 id=57 data-nosnippet>57</a>    </span><span class="kw">pub </span>scoped_sources: FxHashSet&lt;(String, String)&gt;,
+<a href=#58 id=58 data-nosnippet>58</a>    <span class="doccomment">/// Corpus-verified non-dataflow checks (order-preserving; dedup on
+<a href=#59 id=59 data-nosnippet>59</a>    /// `(rule, call)` at merge time, provenance-ordered per entry).
+<a href=#60 id=60 data-nosnippet>60</a>    </span><span class="kw">pub </span>learned_checks: Vec&lt;(LearnedCheckFact, Provenance)&gt;,
+<a href=#61 id=61 data-nosnippet>61</a>    <span class="doccomment">/// Corpus-verified co-occurrence policies (the generalized check fact).
+<a href=#62 id=62 data-nosnippet>62</a>    /// Evaluated by `checks::policy`; legacy `learned_checks` entries ALSO
+<a href=#63 id=63 data-nosnippet>63</a>    /// evaluate there after `PolicyFact::from_legacy` conversion, so bundles
+<a href=#64 id=64 data-nosnippet>64</a>    /// never need to migrate to keep firing. Dedup on
+<a href=#65 id=65 data-nosnippet>65</a>    /// `(rule, when_call)` at merge time, provenance-ordered per entry.
+<a href=#66 id=66 data-nosnippet>66</a>    </span><span class="kw">pub </span>policy_facts: Vec&lt;(PolicyFact, Provenance)&gt;,
+<a href=#67 id=67 data-nosnippet>67</a>    <span class="doccomment">/// Corpus-verified interprocedural memory contracts (allocators / deallocators).
+<a href=#68 id=68 data-nosnippet>68</a>    </span><span class="kw">pub </span>memory_contracts: Vec&lt;MemoryContractFact&gt;,
+<a href=#69 id=69 data-nosnippet>69</a>    <span class="doccomment">/// Corpus-verified weak cryptography rules.
+<a href=#70 id=70 data-nosnippet>70</a>    </span><span class="kw">pub </span>weak_crypto_rules: Vec&lt;WeakCryptoFact&gt;,
+<a href=#71 id=71 data-nosnippet>71</a>    <span class="doccomment">/// Containment callees (for allowlist bypass checks) with per-entry
+<a href=#72 id=72 data-nosnippet>72</a>    /// provenance: default-pack-seeded (Spec), bundle-applied (Learned).
+<a href=#73 id=73 data-nosnippet>73</a>    </span><span class="kw">pub </span>containment_callees: FxHashMap&lt;String, Provenance&gt;,
+<a href=#74 id=74 data-nosnippet>74</a>    <span class="doccomment">/// Credential setter/hasher sinks with per-entry provenance (pack -&gt;
+<a href=#75 id=75 data-nosnippet>75</a>    /// Spec, bundle -&gt; Learned).
+<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="kw">pub </span>credential_sinks: FxHashMap&lt;String, Provenance&gt;,
+<a href=#77 id=77 data-nosnippet>77</a>    <span class="doccomment">/// Parameter names identifying credentials with per-entry provenance
+<a href=#78 id=78 data-nosnippet>78</a>    /// (pack -&gt; Spec, bundle -&gt; Learned).
+<a href=#79 id=79 data-nosnippet>79</a>    </span><span class="kw">pub </span>credential_params: FxHashMap&lt;String, Provenance&gt;,
+<a href=#80 id=80 data-nosnippet>80</a>    <span class="doccomment">/// Schema builder methods with per-entry provenance (pack -&gt; Spec,
+<a href=#81 id=81 data-nosnippet>81</a>    /// bundle -&gt; Learned).
+<a href=#82 id=82 data-nosnippet>82</a>    </span><span class="kw">pub </span>schema_builders: FxHashMap&lt;String, Provenance&gt;,
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="doccomment">/// Corpus-verified schema enforcer methods (default-pack-seeded).
+<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="kw">pub </span>schema_enforcers: FxHashSet&lt;String&gt;,
+<a href=#85 id=85 data-nosnippet>85</a>    <span class="doccomment">/// Bound keywords with per-entry provenance (pack -&gt; Spec, bundle -&gt;
+<a href=#86 id=86 data-nosnippet>86</a>    /// Learned).
+<a href=#87 id=87 data-nosnippet>87</a>    </span><span class="kw">pub </span>schema_keywords: FxHashMap&lt;String, Provenance&gt;,
+<a href=#88 id=88 data-nosnippet>88</a>    <span class="doccomment">/// URL/redirect parameter-name hints (default-pack-seeded).
+<a href=#89 id=89 data-nosnippet>89</a>    </span><span class="kw">pub </span>url_param_hints: FxHashSet&lt;String&gt;,
+<a href=#90 id=90 data-nosnippet>90</a>    <span class="doccomment">/// URL-ish guard argument hints (default-pack-seeded).
+<a href=#91 id=91 data-nosnippet>91</a>    </span><span class="kw">pub </span>url_arg_hints: FxHashSet&lt;String&gt;,
+<a href=#92 id=92 data-nosnippet>92</a>    <span class="doccomment">/// Absolute-URL literal hints (default-pack-seeded).
+<a href=#93 id=93 data-nosnippet>93</a>    </span><span class="kw">pub </span>url_literal_hints: FxHashSet&lt;String&gt;,
+<a href=#94 id=94 data-nosnippet>94</a>    <span class="doccomment">/// Security-context name hints (default-pack-seeded).
+<a href=#95 id=95 data-nosnippet>95</a>    </span><span class="kw">pub </span>security_context_hints: FxHashSet&lt;String&gt;,
+<a href=#96 id=96 data-nosnippet>96</a>    <span class="doccomment">/// Auth-guard call-path hints (default-pack-seeded); the idor emission
+<a href=#97 id=97 data-nosnippet>97</a>    /// gate suppresses identity findings behind a guard branch over these
+<a href=#98 id=98 data-nosnippet>98</a>    /// calls.
+<a href=#99 id=99 data-nosnippet>99</a>    </span><span class="kw">pub </span>auth_guard_hints: FxHashSet&lt;String&gt;,
+<a href=#100 id=100 data-nosnippet>100</a>    <span class="doccomment">/// JWT algorithm-operation call-path hints (default-pack-seeded).
+<a href=#101 id=101 data-nosnippet>101</a>    </span><span class="kw">pub </span>jwt_algorithm_hints: FxHashSet&lt;String&gt;,
+<a href=#102 id=102 data-nosnippet>102</a>    <span class="doccomment">/// Credential-context name hints (default-pack-seeded).
+<a href=#103 id=103 data-nosnippet>103</a>    </span><span class="kw">pub </span>credential_context_hints: FxHashSet&lt;String&gt;,
+<a href=#104 id=104 data-nosnippet>104</a>    <span class="doccomment">/// Receiver-name fragments of password-hashing libraries.
+<a href=#105 id=105 data-nosnippet>105</a>    </span><span class="kw">pub </span>kdf_receiver_hints: FxHashSet&lt;String&gt;,
+<a href=#106 id=106 data-nosnippet>106</a>    <span class="doccomment">/// Lowercase name prefixes of calls that create a bound-parameter
+<a href=#107 id=107 data-nosnippet>107</a>    /// statement handle (`Prepare`, `prepareStatement`, `prepare_cached`).
+<a href=#108 id=108 data-nosnippet>108</a>    ///
+<a href=#109 id=109 data-nosnippet>109</a>    /// A handle from one of these factories executes text that was fixed
+<a href=#110 id=110 data-nosnippet>110</a>    /// when it was created, so the arguments of its later calls are bindings,
+<a href=#111 id=111 data-nosnippet>111</a>    /// not SQL. Which factory names exist is pack knowledge; the engine only
+<a href=#112 id=112 data-nosnippet>112</a>    /// walks the def chain and matches the prefix against this set.
+<a href=#113 id=113 data-nosnippet>113</a>    </span><span class="kw">pub </span>prepared_statement_prefixes: FxHashSet&lt;String&gt;,
+<a href=#114 id=114 data-nosnippet>114</a>    <span class="doccomment">/// Argument tokens (lowercase) that disclaim security use of a weak
+<a href=#115 id=115 data-nosnippet>115</a>    /// digest: a literal `false` flag in a non-payload position marks the
+<a href=#116 id=116 data-nosnippet>116</a>    /// digest as a checksum or cache key, not as credential protection.
+<a href=#117 id=117 data-nosnippet>117</a>    /// Pack knowledge; the engine only decides which positions are flags.
+<a href=#118 id=118 data-nosnippet>118</a>    </span><span class="kw">pub </span>weak_hash_disclaimer_tokens: FxHashSet&lt;String&gt;,
+<a href=#119 id=119 data-nosnippet>119</a>    <span class="doccomment">/// Weak-hash policy rules (default-pack-seeded).
+<a href=#120 id=120 data-nosnippet>120</a>    </span><span class="kw">pub </span>weak_hash_rules: Vec&lt;WeakPrimitiveRule&gt;,
+<a href=#121 id=121 data-nosnippet>121</a>    <span class="doccomment">/// Corpus-extendable allocation-size overflow rules (CWE-190 -&gt; CWE-680;
+<a href=#122 id=122 data-nosnippet>122</a>    /// default-pack-seeded, bundle extension via
+<a href=#123 id=123 data-nosnippet>123</a>    /// `LearnedFactEntry::IntegerOverflowRule` from a family's
+<a href=#124 id=124 data-nosnippet>124</a>    /// `[frensense] check-rule:` declaration).
+<a href=#125 id=125 data-nosnippet>125</a>    </span><span class="kw">pub </span>integer_overflow_rules: Vec&lt;(IntegerOverflowRule, Provenance)&gt;,
+<a href=#126 id=126 data-nosnippet>126</a>    <span class="doccomment">/// Insecure config selectors (default-pack-seeded).
+<a href=#127 id=127 data-nosnippet>127</a>    </span><span class="kw">pub </span>insecure_config_selectors: Vec&lt;InsecureConfigRule&gt;,
+<a href=#128 id=128 data-nosnippet>128</a>    <span class="doccomment">/// Key-size policy rules (default-pack-seeded).
+<a href=#129 id=129 data-nosnippet>129</a>    </span><span class="kw">pub </span>key_size_rules: Vec&lt;KeySizeRule&gt;,
+<a href=#130 id=130 data-nosnippet>130</a>    <span class="doccomment">/// Suspicious hash-wrapper names (default-pack-seeded).
+<a href=#131 id=131 data-nosnippet>131</a>    </span><span class="kw">pub </span>suspicious_hash_wrappers: FxHashSet&lt;String&gt;,
+<a href=#132 id=132 data-nosnippet>132</a>    <span class="doccomment">/// Last segments that come ONLY from dotted client sinks (`got.get`,
+<a href=#133 id=133 data-nosnippet>133</a>    /// `axios.post`, ...). These verbs are ambiguous, `Map.get`, router
+<a href=#134 id=134 data-nosnippet>134</a>    /// `app.post`, LRU `.put` all share the names, so they match
+<a href=#135 id=135 data-nosnippet>135</a>    /// receiver-aware: the call only counts as a sink when the receiver's
+<a href=#136 id=136 data-nosnippet>136</a>    /// root is a known client (see [`Self::client_roots`]).
+<a href=#137 id=137 data-nosnippet>137</a>    </span><span class="kw">pub </span>verb_sinks: FxHashSet&lt;String&gt;,
+<a href=#138 id=138 data-nosnippet>138</a>    <span class="doccomment">/// Receiver roots that make `verb_sinks` real client calls, derived
+<a href=#139 id=139 data-nosnippet>139</a>    /// from the first segment of dotted verb sinks (`got`, `axios`, `http`).
+<a href=#140 id=140 data-nosnippet>140</a>    </span><span class="kw">pub </span>client_roots: FxHashSet&lt;String&gt;,
+<a href=#141 id=141 data-nosnippet>141</a>    <span class="doccomment">/// Receiver-specific roles for dotted sinks that share their last
+<a href=#142 id=142 data-nosnippet>142</a>    /// segment with a different-role bare entry:
+<a href=#143 id=143 data-nosnippet>143</a>    /// `(receiver_root, method) -&gt; role`.
+<a href=#144 id=144 data-nosnippet>144</a>    ///
+<a href=#145 id=145 data-nosnippet>145</a>    /// Example: `KVNamespace.put` is StorageWrite while bare `run` is
+<a href=#146 id=146 data-nosnippet>146</a>    /// SqlInjection; `shell.run` is CommandInjection. When the engine sees
+<a href=#147 id=147 data-nosnippet>147</a>    /// `kv.put(...)` and the receiver root resolves to `kv`'s declared
+<a href=#148 id=148 data-nosnippet>148</a>    /// dotted root, THIS role wins over the bare entry's, the receiver is
+<a href=#149 id=149 data-nosnippet>149</a>    /// the disambiguator, exactly like `verb_sinks` for match/no-match.
+<a href=#150 id=150 data-nosnippet>150</a>    </span><span class="kw">pub </span>receiver_roles: FxHashMap&lt;(String, String), <span class="kw">crate</span>::analysis::taint::role::SinkRole&gt;,
+<a href=#151 id=151 data-nosnippet>151</a>    <span class="doccomment">/// Receiver-specific label slugs: (receiver_root, method) -&gt; label slug.
+<a href=#152 id=152 data-nosnippet>152</a>    </span><span class="kw">pub </span>receiver_labels: FxHashMap&lt;(String, String), String&gt;,
+<a href=#153 id=153 data-nosnippet>153</a>    <span class="doccomment">/// Last segments that are ONLY sinks under a declared receiver root:
+<a href=#154 id=154 data-nosnippet>154</a>    /// `last -&gt; declared roots`.
+<a href=#155 id=155 data-nosnippet>155</a>    ///
+<a href=#156 id=156 data-nosnippet>156</a>    /// A dotted declaration (`pickle.loads`, `urllib.request.urlopen`)
+<a href=#157 id=157 data-nosnippet>157</a>    /// publishes a bare shadow of its last segment, because the walker
+<a href=#158 id=158 data-nosnippet>158</a>    /// matches a virtual call by method name and cannot see the module the
+<a href=#159 id=159 data-nosnippet>159</a>    /// method was reached through. Without this map the shadow is
+<a href=#160 id=160 data-nosnippet>160</a>    /// receiver-agnostic: `json.loads(t)` inherited unsafe-deserialization
+<a href=#161 id=161 data-nosnippet>161</a>    /// semantics from `pickle.loads`, and `client.urlopen(t)` inherited
+<a href=#162 id=162 data-nosnippet>162</a>    /// SSRF from `urllib.request.urlopen`.
+<a href=#163 id=163 data-nosnippet>163</a>    ///
+<a href=#164 id=164 data-nosnippet>164</a>    /// The map turns "declared qualified" into an engine-enforced
+<a href=#165 id=165 data-nosnippet>165</a>    /// requirement: a name listed in this map arms only under a receiver root (or
+<a href=#166 id=166 data-nosnippet>166</a>    /// an import origin) the declaration named. The engine stays
+<a href=#167 id=167 data-nosnippet>167</a>    /// mechanism-only - which roots qualify which name is pack/bundle
+<a href=#168 id=168 data-nosnippet>168</a>    /// knowledge, not engine vocabulary.
+<a href=#169 id=169 data-nosnippet>169</a>    </span><span class="kw">pub </span>receiver_qualified_sinks: FxHashMap&lt;String, FxHashSet&lt;String&gt;&gt;,
+<a href=#170 id=170 data-nosnippet>170</a>    <span class="doccomment">/// Last segments declared BARE (a declaration with no dot in it).
+<a href=#171 id=171 data-nosnippet>171</a>    ///
+<a href=#172 id=172 data-nosnippet>172</a>    /// A bare declaration is the receiver-agnostic form: it is the
+<a href=#173 id=173 data-nosnippet>173</a>    /// language builtin's own name (`eval`, `exec`, `open`). A name that
+<a href=#174 id=174 data-nosnippet>174</a>    /// is only ever declared qualified is gated by
+<a href=#175 id=175 data-nosnippet>175</a>    /// `receiver_qualified_sinks`; a name declared bare is not - it keeps
+<a href=#176 id=176 data-nosnippet>176</a>    /// matching any receiver, which is correct for a builtin and wrong for
+<a href=#177 id=177 data-nosnippet>177</a>    /// a library function.
+<a href=#178 id=178 data-nosnippet>178</a>    </span><span class="kw">pub </span>bare_sink_names: FxHashSet&lt;String&gt;,
+<a href=#179 id=179 data-nosnippet>179</a>    <span class="doccomment">/// Receiver roots of trusted session stores (`authenticatedUsers`):
+<a href=#180 id=180 data-nosnippet>180</a>    /// `store.get(token)` returns a server-issued session object or
+<a href=#181 id=181 data-nosnippet>181</a>    /// undefined, values read off the result are not attacker-controlled
+<a href=#182 id=182 data-nosnippet>182</a>    /// (the pack ships these with session-trust sanitizer facts).
+<a href=#183 id=183 data-nosnippet>183</a>    </span><span class="kw">pub </span>session_roots: FxHashSet&lt;String&gt;,
+<a href=#184 id=184 data-nosnippet>184</a>    <span class="doccomment">/// Taint-source patterns learned from a `.frc` bundle: call names or
+<a href=#185 id=185 data-nosnippet>185</a>    /// member-access paths whose results carry attacker-controlled data.
+<a href=#186 id=186 data-nosnippet>186</a>    /// Merged into the scan's `TaintConfig::sources` before analysis so
+<a href=#187 id=187 data-nosnippet>187</a>    /// bundles teach new frameworks without touching the built-in tables.
+<a href=#188 id=188 data-nosnippet>188</a>    </span><span class="kw">pub </span>learned_sources: FxHashSet&lt;String&gt;,
+<a href=#189 id=189 data-nosnippet>189</a>    <span class="doccomment">/// Dynamic node role classifications learned from a `.frc` bundle:
+<a href=#190 id=190 data-nosnippet>190</a>    /// `(language, node_kind) -&gt; role`. Stored as the owned
+<a href=#191 id=191 data-nosnippet>191</a>    /// [`TeachableNodeRole`] (bundle payload type) and converted to a
+<a href=#192 id=192 data-nosnippet>192</a>    /// `frensense_lang::NodeRole` on lookup, so applying a fact never
+<a href=#193 id=193 data-nosnippet>193</a>    /// allocates `'static` memory (the previous `Box::leak` intern leaked
+<a href=#194 id=194 data-nosnippet>194</a>    /// per merge, growing unboundedly in long-lived MCP/LSP processes).
+<a href=#195 id=195 data-nosnippet>195</a>    </span><span class="kw">pub </span>grammar_roles:
+<a href=#196 id=196 data-nosnippet>196</a>        FxHashMap&lt;(String, String), <span class="kw">crate</span>::analysis::taint::facts::TeachableNodeRole&gt;,
+<a href=#197 id=197 data-nosnippet>197</a>    <span class="doccomment">/// Dynamic grammar features learned from a `.frc` bundle:
+<a href=#198 id=198 data-nosnippet>198</a>    /// `(language, node_kind) -&gt; Set&lt;GrammarFeature&gt;`.
+<a href=#199 id=199 data-nosnippet>199</a>    </span><span class="kw">pub </span>grammar_features: FxHashMap&lt;(String, String), FxHashSet&lt;GrammarFeature&gt;&gt;,
+<a href=#200 id=200 data-nosnippet>200</a>    <span class="doccomment">/// Dynamic custom memory allocators learned from a bundle or specification.
+<a href=#201 id=201 data-nosnippet>201</a>    </span><span class="kw">pub </span>custom_allocators: FxHashSet&lt;String&gt;,
+<a href=#202 id=202 data-nosnippet>202</a>    <span class="doccomment">/// Dynamic custom memory deallocators learned from a bundle or specification.
+<a href=#203 id=203 data-nosnippet>203</a>    </span><span class="kw">pub </span>custom_deallocators: FxHashSet&lt;String&gt;,
+<a href=#204 id=204 data-nosnippet>204</a>    <span class="doccomment">/// Memory-function vocabulary (allocators/deallocators and their
+<a href=#205 id=205 data-nosnippet>205</a>    /// capacity contracts), default-pack-seeded (Phase 6.1). Empty means
+<a href=#206 id=206 data-nosnippet>206</a>    /// the caller built a bare table; the checks then see no memory
+<a href=#207 id=207 data-nosnippet>207</a>    /// vocabulary at all.
+<a href=#208 id=208 data-nosnippet>208</a>    </span><span class="kw">pub </span>memory_functions: Vec&lt;MemoryFuncSpec&gt;,
+<a href=#209 id=209 data-nosnippet>209</a>    <span class="doccomment">/// Buffer-manipulation vocabulary (copy/fill/read builtins with their
+<a href=#210 id=210 data-nosnippet>210</a>    /// dst/src/len argument slots), default-pack-seeded (Phase 6.1).
+<a href=#211 id=211 data-nosnippet>211</a>    /// Empty means the caller built a bare table; the OOB check then sees
+<a href=#212 id=212 data-nosnippet>212</a>    /// no buffer vocabulary.
+<a href=#213 id=213 data-nosnippet>213</a>    </span><span class="kw">pub </span>buffer_builtins: Vec&lt;BufferBuiltinSpec&gt;,
+<a href=#214 id=214 data-nosnippet>214</a>    <span class="doccomment">/// Stack-frame allocators (`alloca`, ...), default-pack-seeded
+<a href=#215 id=215 data-nosnippet>215</a>    /// (Phase 6.5); leak-style checkers exclude them.
+<a href=#216 id=216 data-nosnippet>216</a>    </span><span class="kw">pub </span>stack_allocators: Vec&lt;String&gt;,
+<a href=#217 id=217 data-nosnippet>217</a>    <span class="doccomment">/// Route-registration call patterns per language
+<a href=#218 id=218 data-nosnippet>218</a>    /// (`(language or "*", patterns)`), default-pack-seeded (Phase 6.2);
+<a href=#219 id=219 data-nosnippet>219</a>    /// the lowering harness unions these with the spec's route verbs.
+<a href=#220 id=220 data-nosnippet>220</a>    </span><span class="kw">pub </span>route_patterns: FxHashMap&lt;String, Vec&lt;String&gt;&gt;,
+<a href=#221 id=221 data-nosnippet>221</a>    <span class="doccomment">/// Collection constructors (`Set`, `Map`), default-pack-seeded
+<a href=#222 id=222 data-nosnippet>222</a>    /// (Phase 6.5); the allowlist-definition check reads their literal
+<a href=#223 id=223 data-nosnippet>223</a>    /// elements.
+<a href=#224 id=224 data-nosnippet>224</a>    </span><span class="kw">pub </span>collection_constructors: FxHashSet&lt;String&gt;,
+<a href=#225 id=225 data-nosnippet>225</a>    <span class="doccomment">/// Schema-describing methods (`describe`, `description`),
+<a href=#226 id=226 data-nosnippet>226</a>    /// default-pack-seeded (Phase 6.5).
+<a href=#227 id=227 data-nosnippet>227</a>    </span><span class="kw">pub </span>schema_describe_methods: FxHashSet&lt;String&gt;,
+<a href=#228 id=228 data-nosnippet>228</a>    <span class="doccomment">/// String literals that compare as the null pointer (`NULL`),
+<a href=#229 id=229 data-nosnippet>229</a>    /// default-pack-seeded (Phase 6.5).
+<a href=#230 id=230 data-nosnippet>230</a>    </span><span class="kw">pub </span>null_tokens: FxHashSet&lt;String&gt;,
+<a href=#231 id=231 data-nosnippet>231</a>    <span class="doccomment">/// Read-accessor method names of trusted session stores (`get`),
+<a href=#232 id=232 data-nosnippet>232</a>    /// default-pack-seeded (Phase 6.5).
+<a href=#233 id=233 data-nosnippet>233</a>    </span><span class="kw">pub </span>session_accessors: FxHashSet&lt;String&gt;,
+<a href=#234 id=234 data-nosnippet>234</a>    <span class="doccomment">/// Formal parameter names receiving the implicit receiver (`self`,
+<a href=#235 id=235 data-nosnippet>235</a>    /// `this`), default-pack-seeded (Phase 6.5).
+<a href=#236 id=236 data-nosnippet>236</a>    </span><span class="kw">pub </span>receiver_params: FxHashSet&lt;String&gt;,
+<a href=#237 id=237 data-nosnippet>237</a>    <span class="doccomment">/// Dynamic IDOR-class query keys learned from a bundle or specification.
+<a href=#238 id=238 data-nosnippet>238</a>    </span><span class="kw">pub </span>idor_keys: FxHashSet&lt;String&gt;,
+<a href=#239 id=239 data-nosnippet>239</a>    <span class="doccomment">/// Dynamic IDOR-class finder sinks learned from a bundle or specification.
+<a href=#240 id=240 data-nosnippet>240</a>    </span><span class="kw">pub </span>idor_finder_sinks: FxHashSet&lt;String&gt;,
+<a href=#241 id=241 data-nosnippet>241</a>    <span class="doccomment">/// Dynamic taint propagators: `call -&gt; input_arg_slots`.
+<a href=#242 id=242 data-nosnippet>242</a>    </span><span class="kw">pub </span>propagators: FxHashMap&lt;String, Vec&lt;usize&gt;&gt;,
+<a href=#243 id=243 data-nosnippet>243</a>    <span class="doccomment">/// Per-call receiver-taint declarations from propagator rules:
+<a href=#244 id=244 data-nosnippet>244</a>    /// `call -&gt; blocked`, where `blocked` is `!tainted_receiver`. A key is
+<a href=#245 id=245 data-nosnippet>245</a>    /// present only when a rule explicitly named it; unknown calls keep the
+<a href=#246 id=246 data-nosnippet>246</a>    /// default receiver pass-through. Stored as a two-way map (not a
+<a href=#247 id=247 data-nosnippet>247</a>    /// negative set) so a later `tainted_receiver: true` entry can un-block
+<a href=#248 id=248 data-nosnippet>248</a>    /// a key an earlier `tainted_receiver: false` entry blocked - keeping
+<a href=#249 id=249 data-nosnippet>249</a>    /// install and merge last-wins for both the arg slots and this flag.
+<a href=#250 id=250 data-nosnippet>250</a>    </span><span class="kw">pub </span>propagator_blocks_receiver: FxHashMap&lt;String, bool&gt;,
+<a href=#251 id=251 data-nosnippet>251</a>    <span class="doccomment">/// Guard denylist string patterns: default-pack-seeded
+<a href=#252 id=252 data-nosnippet>252</a>    /// (`GuardDenylistPattern`, Phase 6.5) and bundle-learned
+<a href=#253 id=253 data-nosnippet>253</a>    /// (`GuardDenylistPattern`).
+<a href=#254 id=254 data-nosnippet>254</a>    </span><span class="kw">pub </span>guard_denylist_patterns: Vec&lt;String&gt;,
+<a href=#255 id=255 data-nosnippet>255</a>    <span class="doccomment">/// Optional cyclomatic complexity limit override for `FunctionComplexity` check.
+<a href=#256 id=256 data-nosnippet>256</a>    /// When None, defaults to `health::MAX_COMPLEXITY` (25).
+<a href=#257 id=257 data-nosnippet>257</a>    </span><span class="kw">pub </span>max_complexity: <span class="prelude-ty">Option</span>&lt;usize&gt;,
+<a href=#258 id=258 data-nosnippet>258</a>}
+<a href=#259 id=259 data-nosnippet>259</a>
+<a href=#260 id=260 data-nosnippet>260</a><span class="kw">impl </span>FactTable {
+<a href=#261 id=261 data-nosnippet>261</a>    <span class="doccomment">/// Build from a plain [`TaintConfig`]: every configured sink gets the
+<a href=#262 id=262 data-nosnippet>262</a>    /// all-args signature; every configured sanitizer a default fact.
+<a href=#263 id=263 data-nosnippet>263</a>    </span><span class="kw">pub fn </span>from_config(config: <span class="kw-2">&amp;</span>TaintConfig) -&gt; <span class="self">Self </span>{
+<a href=#264 id=264 data-nosnippet>264</a>        <span class="kw">let </span><span class="kw-2">mut </span>t = <span class="self">Self</span>::default();
+<a href=#265 id=265 data-nosnippet>265</a>        <span class="kw">for </span>s <span class="kw">in </span><span class="kw-2">&amp;</span>config.sinks {
+<a href=#266 id=266 data-nosnippet>266</a>            t.sink_signatures
+<a href=#267 id=267 data-nosnippet>267</a>                .insert(s.clone(), SinkSignature::all_args(s));
+<a href=#268 id=268 data-nosnippet>268</a>        }
+<a href=#269 id=269 data-nosnippet>269</a>        <span class="kw">for </span>s <span class="kw">in </span><span class="kw-2">&amp;</span>config.sanitizers {
+<a href=#270 id=270 data-nosnippet>270</a>            t.sanitizer_facts.insert(
+<a href=#271 id=271 data-nosnippet>271</a>                s.clone(),
+<a href=#272 id=272 data-nosnippet>272</a>                SanitizerFact {
+<a href=#273 id=273 data-nosnippet>273</a>                    call: s.clone(),
+<a href=#274 id=274 data-nosnippet>274</a>                    package: <span class="prelude-val">None</span>,
+<a href=#275 id=275 data-nosnippet>275</a>                    kind: DEFAULT_SANITIZER_KIND.into(),
+<a href=#276 id=276 data-nosnippet>276</a>                    sanitizes_args: Default::default(),
+<a href=#277 id=277 data-nosnippet>277</a>                    guard_style: <span class="bool-val">false</span>,
+<a href=#278 id=278 data-nosnippet>278</a>                },
+<a href=#279 id=279 data-nosnippet>279</a>            );
+<a href=#280 id=280 data-nosnippet>280</a>        }
+<a href=#281 id=281 data-nosnippet>281</a>        t
+<a href=#282 id=282 data-nosnippet>282</a>    }
+<a href=#283 id=283 data-nosnippet>283</a>
+<a href=#284 id=284 data-nosnippet>284</a>    <span class="doccomment">/// Merge bundle-learned facts over the current table (learned wins on
+<a href=#285 id=285 data-nosnippet>285</a>    /// name collision, bundle facts are more specific than built-ins).
+<a href=#286 id=286 data-nosnippet>286</a>    ///
+<a href=#287 id=287 data-nosnippet>287</a>    /// All-args signatures never overwrite slot-restricted ones on collision:
+<a href=#288 id=288 data-nosnippet>288</a>    /// a slot-restricted signature is strictly more specific knowledge, so an
+<a href=#289 id=289 data-nosnippet>289</a>    /// all-args merge (e.g. another language spec declaring the same bare
+<a href=#290 id=290 data-nosnippet>290</a>    /// call name) must not widen it back to "everything dangerous".
+<a href=#291 id=291 data-nosnippet>291</a>    /// Merge another table's language-keyed section under `language`.
+<a href=#292 id=292 data-nosnippet>292</a>    ///
+<a href=#293 id=293 data-nosnippet>293</a>    /// Used by [`crate::analysis::taint::facts::apply_language_entries`]
+<a href=#294 id=294 data-nosnippet>294</a>    /// to install one pack language group: the group is built in a fresh
+<a href=#295 id=295 data-nosnippet>295</a>    /// table (exactly like the pre-scoping per-spec seed merge) and then
+<a href=#296 id=296 data-nosnippet>296</a>    /// filed under its own language instead of the shared name space, so
+<a href=#297 id=297 data-nosnippet>297</a>    /// cross-language key collisions can no longer resolve last-merge-wins.
+<a href=#298 id=298 data-nosnippet>298</a>    /// The signature-widening rule is the same one [`Self::merge`] applies.
+<a href=#299 id=299 data-nosnippet>299</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>merge_language(<span class="kw-2">&amp;mut </span><span class="self">self</span>, language: <span class="kw-2">&amp;</span>str, other: <span class="kw-2">&amp;</span>FactTable) {
+<a href=#300 id=300 data-nosnippet>300</a>        <span class="kw">let </span>slot = <span class="self">self
+<a href=#301 id=301 data-nosnippet>301</a>            </span>.lang_sink_signatures
+<a href=#302 id=302 data-nosnippet>302</a>            .entry(language.to_string())
+<a href=#303 id=303 data-nosnippet>303</a>            .or_default();
+<a href=#304 id=304 data-nosnippet>304</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.sink_signatures {
+<a href=#305 id=305 data-nosnippet>305</a>            <span class="kw">let </span>widens = v.dangerous_args.is_empty()
+<a href=#306 id=306 data-nosnippet>306</a>                &amp;&amp; !v.binding_args_safe
+<a href=#307 id=307 data-nosnippet>307</a>                &amp;&amp; slot
+<a href=#308 id=308 data-nosnippet>308</a>                    .get(k)
+<a href=#309 id=309 data-nosnippet>309</a>                    .map(|cur| !cur.dangerous_args.is_empty() || cur.binding_args_safe)
+<a href=#310 id=310 data-nosnippet>310</a>                    .unwrap_or(<span class="bool-val">false</span>);
+<a href=#311 id=311 data-nosnippet>311</a>            <span class="kw">if </span>widens {
+<a href=#312 id=312 data-nosnippet>312</a>                <span class="kw">continue</span>;
+<a href=#313 id=313 data-nosnippet>313</a>            }
+<a href=#314 id=314 data-nosnippet>314</a>            slot.insert(k.clone(), v.clone());
+<a href=#315 id=315 data-nosnippet>315</a>        }
+<a href=#316 id=316 data-nosnippet>316</a>    }
+<a href=#317 id=317 data-nosnippet>317</a>
+<a href=#318 id=318 data-nosnippet>318</a>    <span class="doccomment">/// The source vocabulary declared for `language`, if any.
+<a href=#319 id=319 data-nosnippet>319</a>    </span><span class="kw">pub fn </span>language_sources(<span class="kw-2">&amp;</span><span class="self">self</span>, language: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>FxHashSet&lt;String&gt;&gt; {
+<a href=#320 id=320 data-nosnippet>320</a>        <span class="self">self</span>.lang_sources.get(language)
+<a href=#321 id=321 data-nosnippet>321</a>    }
+<a href=#322 id=322 data-nosnippet>322</a>
+<a href=#323 id=323 data-nosnippet>323</a>    <span class="doccomment">/// Sink signature for `call` in the language it was written in.
+<a href=#324 id=324 data-nosnippet>324</a>    ///
+<a href=#325 id=325 data-nosnippet>325</a>    /// Precedence: the language-agnostic lane first (a consumer bundle and
+<a href=#326 id=326 data-nosnippet>326</a>    /// the `"*"` pack group are the last seeding layer, so they win over a
+<a href=#327 id=327 data-nosnippet>327</a>    /// language section), then the call site's own language - except that a
+<a href=#328 id=328 data-nosnippet>328</a>    /// blanket all-args placeholder (`SinkSignature::is_blanket`, what
+<a href=#329 id=329 data-nosnippet>329</a>    /// `TaintConfig::sinks` seeds for every configured name) never shadows
+<a href=#330 id=330 data-nosnippet>330</a>    /// the language's own entry, which knows the call's dangerous slots and
+<a href=#331 id=331 data-nosnippet>331</a>    /// identity-payload keys. A qualified callee
+<a href=#332 id=332 data-nosnippet>332</a>    /// (`std::fs::read_to_string`) also matches shorter declared shapes
+<a href=#333 id=333 data-nosnippet>333</a>    /// through its `::` suffixes, exact matches first - the same rule
+<a href=#334 id=334 data-nosnippet>334</a>    /// [`FactTable::sink_signature`] applies.
+<a href=#335 id=335 data-nosnippet>335</a>    ///
+<a href=#336 id=336 data-nosnippet>336</a>    /// `language: None` is the legacy "no call-site context" form: it
+<a href=#337 id=337 data-nosnippet>337</a>    /// over-approximates across every installed language, which is why the
+<a href=#338 id=338 data-nosnippet>338</a>    /// real scan path always passes the IR's language.
+<a href=#339 id=339 data-nosnippet>339</a>    </span><span class="kw">pub fn </span>sink_signature_for_language(
+<a href=#340 id=340 data-nosnippet>340</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#341 id=341 data-nosnippet>341</a>        call: <span class="kw-2">&amp;</span>str,
+<a href=#342 id=342 data-nosnippet>342</a>        language: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;,
+<a href=#343 id=343 data-nosnippet>343</a>    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>SinkSignature&gt; {
+<a href=#344 id=344 data-nosnippet>344</a>        <span class="kw">let </span>universal = <span class="self">Self</span>::lookup_sink_shape(<span class="kw-2">&amp;</span>|c: <span class="kw-2">&amp;</span>str| <span class="self">self</span>.sink_signatures.get(c), call);
+<a href=#345 id=345 data-nosnippet>345</a>        <span class="kw">let </span>scoped = <span class="kw">match </span>language {
+<a href=#346 id=346 data-nosnippet>346</a>            <span class="prelude-val">Some</span>(language) =&gt; <span class="self">self
+<a href=#347 id=347 data-nosnippet>347</a>                </span>.lang_sink_signatures
+<a href=#348 id=348 data-nosnippet>348</a>                .get(language)
+<a href=#349 id=349 data-nosnippet>349</a>                .and_then(|table| <span class="self">Self</span>::lookup_sink_shape(<span class="kw-2">&amp;</span>|c: <span class="kw-2">&amp;</span>str| table.get(c), call)),
+<a href=#350 id=350 data-nosnippet>350</a>            <span class="prelude-val">None </span>=&gt; <span class="self">self
+<a href=#351 id=351 data-nosnippet>351</a>                </span>.lang_sink_signatures
+<a href=#352 id=352 data-nosnippet>352</a>                .values()
+<a href=#353 id=353 data-nosnippet>353</a>                .find_map(|table| <span class="self">Self</span>::lookup_sink_shape(<span class="kw-2">&amp;</span>|c: <span class="kw-2">&amp;</span>str| table.get(c), call)),
+<a href=#354 id=354 data-nosnippet>354</a>        };
+<a href=#355 id=355 data-nosnippet>355</a>        <span class="kw">match </span>(universal, scoped) {
+<a href=#356 id=356 data-nosnippet>356</a>            (<span class="prelude-val">Some</span>(u), <span class="prelude-val">Some</span>(l)) <span class="kw">if </span>u.is_blanket() =&gt; <span class="prelude-val">Some</span>(l),
+<a href=#357 id=357 data-nosnippet>357</a>            (<span class="prelude-val">Some</span>(u), <span class="kw">_</span>) =&gt; <span class="prelude-val">Some</span>(u),
+<a href=#358 id=358 data-nosnippet>358</a>            (<span class="prelude-val">None</span>, scoped) =&gt; scoped,
+<a href=#359 id=359 data-nosnippet>359</a>        }
+<a href=#360 id=360 data-nosnippet>360</a>    }
+<a href=#361 id=361 data-nosnippet>361</a>
+<a href=#362 id=362 data-nosnippet>362</a>    <span class="doccomment">/// Exact, then `::`-suffix, then decorated-mirror lookup over one
+<a href=#363 id=363 data-nosnippet>363</a>    /// signature source.
+<a href=#364 id=364 data-nosnippet>364</a>    </span><span class="kw">fn </span>lookup_sink_shape&lt;<span class="lifetime">'a</span>&gt;(
+<a href=#365 id=365 data-nosnippet>365</a>        lookup: <span class="kw-2">&amp;</span><span class="kw">dyn </span>Fn(<span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>SinkSignature&gt;,
+<a href=#366 id=366 data-nosnippet>366</a>        call: <span class="kw-2">&amp;</span>str,
+<a href=#367 id=367 data-nosnippet>367</a>    ) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span><span class="lifetime">'a </span>SinkSignature&gt; {
+<a href=#368 id=368 data-nosnippet>368</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(sig) = lookup(call) {
+<a href=#369 id=369 data-nosnippet>369</a>            <span class="kw">return </span><span class="prelude-val">Some</span>(sig);
+<a href=#370 id=370 data-nosnippet>370</a>        }
+<a href=#371 id=371 data-nosnippet>371</a>        <span class="kw">if </span>call.contains(<span class="string">"::"</span>) {
+<a href=#372 id=372 data-nosnippet>372</a>            <span class="kw">let </span>parts: Vec&lt;<span class="kw-2">&amp;</span>str&gt; = call.split(<span class="string">"::"</span>).collect();
+<a href=#373 id=373 data-nosnippet>373</a>            <span class="kw">for </span>i <span class="kw">in </span><span class="number">1</span>..parts.len() {
+<a href=#374 id=374 data-nosnippet>374</a>                <span class="kw">let </span>suffix = parts[i..].join(<span class="string">"::"</span>);
+<a href=#375 id=375 data-nosnippet>375</a>                <span class="kw">if let </span><span class="prelude-val">Some</span>(sig) = lookup(<span class="kw-2">&amp;</span>suffix) {
+<a href=#376 id=376 data-nosnippet>376</a>                    <span class="kw">return </span><span class="prelude-val">Some</span>(sig);
+<a href=#377 id=377 data-nosnippet>377</a>                }
+<a href=#378 id=378 data-nosnippet>378</a>            }
+<a href=#379 id=379 data-nosnippet>379</a>        }
+<a href=#380 id=380 data-nosnippet>380</a>        <span class="comment">// A decorated mirror of a taught operation (`extractAllToAsync` for
+<a href=#381 id=381 data-nosnippet>381</a>        // `extractAllTo`) is the same API under a conventional suffix.
+<a href=#382 id=382 data-nosnippet>382</a>        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(base) = <span class="kw">super</span>::mirror_call_base(call) {
+<a href=#383 id=383 data-nosnippet>383</a>            <span class="kw">return </span>lookup(base);
+<a href=#384 id=384 data-nosnippet>384</a>        }
+<a href=#385 id=385 data-nosnippet>385</a>        <span class="prelude-val">None
+<a href=#386 id=386 data-nosnippet>386</a>    </span>}
+<a href=#387 id=387 data-nosnippet>387</a>
+<a href=#388 id=388 data-nosnippet>388</a>    <span class="doccomment">/// Merges `other` into this table. A blanket sink signature never widens an existing slot-restricted one, and for provenance-tracked entries the higher provenance wins.
+<a href=#389 id=389 data-nosnippet>389</a>    </span><span class="kw">pub fn </span>merge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, other: <span class="kw-2">&amp;</span>FactTable) {
+<a href=#390 id=390 data-nosnippet>390</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.sink_signatures {
+<a href=#391 id=391 data-nosnippet>391</a>            <span class="kw">let </span>widens = v.dangerous_args.is_empty()
+<a href=#392 id=392 data-nosnippet>392</a>                &amp;&amp; !v.binding_args_safe
+<a href=#393 id=393 data-nosnippet>393</a>                &amp;&amp; <span class="self">self
+<a href=#394 id=394 data-nosnippet>394</a>                    </span>.sink_signatures
+<a href=#395 id=395 data-nosnippet>395</a>                    .get(k)
+<a href=#396 id=396 data-nosnippet>396</a>                    .map(|cur| !cur.dangerous_args.is_empty() || cur.binding_args_safe)
+<a href=#397 id=397 data-nosnippet>397</a>                    .unwrap_or(<span class="bool-val">false</span>);
+<a href=#398 id=398 data-nosnippet>398</a>            <span class="kw">if </span>widens {
+<a href=#399 id=399 data-nosnippet>399</a>                <span class="kw">continue</span>;
+<a href=#400 id=400 data-nosnippet>400</a>            }
+<a href=#401 id=401 data-nosnippet>401</a>            <span class="self">self</span>.sink_signatures.insert(k.clone(), v.clone());
+<a href=#402 id=402 data-nosnippet>402</a>        }
+<a href=#403 id=403 data-nosnippet>403</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.sanitizer_facts {
+<a href=#404 id=404 data-nosnippet>404</a>            <span class="self">self</span>.sanitizer_facts.insert(k.clone(), v.clone());
+<a href=#405 id=405 data-nosnippet>405</a>        }
+<a href=#406 id=406 data-nosnippet>406</a>        <span class="kw">for </span>(lang, section) <span class="kw">in </span><span class="kw-2">&amp;</span>other.lang_sink_signatures {
+<a href=#407 id=407 data-nosnippet>407</a>            <span class="kw">let </span>slot = <span class="self">self</span>.lang_sink_signatures.entry(lang.clone()).or_default();
+<a href=#408 id=408 data-nosnippet>408</a>            <span class="kw">for </span>(k, v) <span class="kw">in </span>section {
+<a href=#409 id=409 data-nosnippet>409</a>                slot.insert(k.clone(), v.clone());
+<a href=#410 id=410 data-nosnippet>410</a>            }
+<a href=#411 id=411 data-nosnippet>411</a>        }
+<a href=#412 id=412 data-nosnippet>412</a>        <span class="kw">for </span>(lang, section) <span class="kw">in </span><span class="kw-2">&amp;</span>other.lang_sources {
+<a href=#413 id=413 data-nosnippet>413</a>            <span class="self">self</span>.lang_sources
+<a href=#414 id=414 data-nosnippet>414</a>                .entry(lang.clone())
+<a href=#415 id=415 data-nosnippet>415</a>                .or_default()
+<a href=#416 id=416 data-nosnippet>416</a>                .extend(section.iter().cloned());
+<a href=#417 id=417 data-nosnippet>417</a>        }
+<a href=#418 id=418 data-nosnippet>418</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.scoped_sink_signatures {
+<a href=#419 id=419 data-nosnippet>419</a>            <span class="kw">let </span>widens = <span class="self">self
+<a href=#420 id=420 data-nosnippet>420</a>                </span>.scoped_sink_signatures
+<a href=#421 id=421 data-nosnippet>421</a>                .get(k)
+<a href=#422 id=422 data-nosnippet>422</a>                .map(|cur| !cur.dangerous_args.is_empty() || cur.binding_args_safe)
+<a href=#423 id=423 data-nosnippet>423</a>                .unwrap_or(<span class="bool-val">false</span>);
+<a href=#424 id=424 data-nosnippet>424</a>            <span class="kw">if </span>widens {
+<a href=#425 id=425 data-nosnippet>425</a>                <span class="kw">continue</span>;
+<a href=#426 id=426 data-nosnippet>426</a>            }
+<a href=#427 id=427 data-nosnippet>427</a>            <span class="self">self</span>.scoped_sink_signatures.insert(k.clone(), v.clone());
+<a href=#428 id=428 data-nosnippet>428</a>        }
+<a href=#429 id=429 data-nosnippet>429</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.scoped_sanitizer_facts {
+<a href=#430 id=430 data-nosnippet>430</a>            <span class="self">self</span>.scoped_sanitizer_facts.insert(k.clone(), v.clone());
+<a href=#431 id=431 data-nosnippet>431</a>        }
+<a href=#432 id=432 data-nosnippet>432</a>        <span class="self">self</span>.scoped_sources
+<a href=#433 id=433 data-nosnippet>433</a>            .extend(other.scoped_sources.iter().cloned());
+<a href=#434 id=434 data-nosnippet>434</a>        <span class="comment">// Provenance-ordered (Phase 5.3): learned checks accumulate with
+<a href=#435 id=435 data-nosnippet>435</a>        // dedup on (rule, call), but the higher-ranked provenance wins the
+<a href=#436 id=436 data-nosnippet>436</a>        // collision (Spec &lt; Authored &lt; Learned) and ties keep the existing
+<a href=#437 id=437 data-nosnippet>437</a>        // entry, so merge is order-independent across provenance tiers.
+<a href=#438 id=438 data-nosnippet>438</a>        </span><span class="kw">for </span>(c, prov) <span class="kw">in </span><span class="kw-2">&amp;</span>other.learned_checks {
+<a href=#439 id=439 data-nosnippet>439</a>            upsert_by_provenance(<span class="kw-2">&amp;mut </span><span class="self">self</span>.learned_checks, c.clone(), <span class="kw-2">*</span>prov, |a, b| {
+<a href=#440 id=440 data-nosnippet>440</a>                a.rule == b.rule &amp;&amp; a.call == b.call
+<a href=#441 id=441 data-nosnippet>441</a>            });
+<a href=#442 id=442 data-nosnippet>442</a>        }
+<a href=#443 id=443 data-nosnippet>443</a>        <span class="comment">// Policy facts order the same way, dedup on (rule, when_call).
+<a href=#444 id=444 data-nosnippet>444</a>        </span><span class="kw">for </span>(p, prov) <span class="kw">in </span><span class="kw-2">&amp;</span>other.policy_facts {
+<a href=#445 id=445 data-nosnippet>445</a>            upsert_by_provenance(<span class="kw-2">&amp;mut </span><span class="self">self</span>.policy_facts, p.clone(), <span class="kw-2">*</span>prov, |a, b| {
+<a href=#446 id=446 data-nosnippet>446</a>                a.rule == b.rule &amp;&amp; a.when_call == b.when_call
+<a href=#447 id=447 data-nosnippet>447</a>            });
+<a href=#448 id=448 data-nosnippet>448</a>        }
+<a href=#449 id=449 data-nosnippet>449</a>        <span class="comment">// Memory contracts accumulate, with newer/learned contracts replacing older ones on collision.
+<a href=#450 id=450 data-nosnippet>450</a>        </span><span class="kw">for </span>mc <span class="kw">in </span><span class="kw-2">&amp;</span>other.memory_contracts {
+<a href=#451 id=451 data-nosnippet>451</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(existing) = <span class="self">self</span>.memory_contracts.iter_mut().find(|c| c.name == mc.name) {
+<a href=#452 id=452 data-nosnippet>452</a>                <span class="kw-2">*</span>existing = mc.clone();
+<a href=#453 id=453 data-nosnippet>453</a>            } <span class="kw">else </span>{
+<a href=#454 id=454 data-nosnippet>454</a>                <span class="self">self</span>.memory_contracts.push(mc.clone());
+<a href=#455 id=455 data-nosnippet>455</a>            }
+<a href=#456 id=456 data-nosnippet>456</a>        }
+<a href=#457 id=457 data-nosnippet>457</a>        <span class="kw">for </span>wc <span class="kw">in </span><span class="kw-2">&amp;</span>other.weak_crypto_rules {
+<a href=#458 id=458 data-nosnippet>458</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(existing) = <span class="self">self
+<a href=#459 id=459 data-nosnippet>459</a>                </span>.weak_crypto_rules
+<a href=#460 id=460 data-nosnippet>460</a>                .iter_mut()
+<a href=#461 id=461 data-nosnippet>461</a>                .find(|r| r.rule_id == wc.rule_id &amp;&amp; r.call == wc.call)
+<a href=#462 id=462 data-nosnippet>462</a>            {
+<a href=#463 id=463 data-nosnippet>463</a>                <span class="kw-2">*</span>existing = wc.clone();
+<a href=#464 id=464 data-nosnippet>464</a>            } <span class="kw">else </span>{
+<a href=#465 id=465 data-nosnippet>465</a>                <span class="self">self</span>.weak_crypto_rules.push(wc.clone());
+<a href=#466 id=466 data-nosnippet>466</a>            }
+<a href=#467 id=467 data-nosnippet>467</a>        }
+<a href=#468 id=468 data-nosnippet>468</a>        <span class="comment">// Merged entries keep their own provenance; on collision the
+<a href=#469 id=469 data-nosnippet>469</a>        // higher-ranked provenance wins (Spec &lt; Authored &lt; Learned), ties
+<a href=#470 id=470 data-nosnippet>470</a>        // keep the existing entry - order-independent across tiers.
+<a href=#471 id=471 data-nosnippet>471</a>        </span><span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.containment_callees {
+<a href=#472 id=472 data-nosnippet>472</a>            <span class="kw">if </span><span class="self">self</span>.containment_callees.get(k).is_none_or(|cur| <span class="kw-2">*</span>v &gt; <span class="kw-2">*</span>cur) {
+<a href=#473 id=473 data-nosnippet>473</a>                <span class="self">self</span>.containment_callees.insert(k.clone(), <span class="kw-2">*</span>v);
+<a href=#474 id=474 data-nosnippet>474</a>            }
+<a href=#475 id=475 data-nosnippet>475</a>        }
+<a href=#476 id=476 data-nosnippet>476</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.credential_sinks {
+<a href=#477 id=477 data-nosnippet>477</a>            <span class="kw">if </span><span class="self">self</span>.credential_sinks.get(k).is_none_or(|cur| <span class="kw-2">*</span>v &gt; <span class="kw-2">*</span>cur) {
+<a href=#478 id=478 data-nosnippet>478</a>                <span class="self">self</span>.credential_sinks.insert(k.clone(), <span class="kw-2">*</span>v);
+<a href=#479 id=479 data-nosnippet>479</a>            }
+<a href=#480 id=480 data-nosnippet>480</a>        }
+<a href=#481 id=481 data-nosnippet>481</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.credential_params {
+<a href=#482 id=482 data-nosnippet>482</a>            <span class="kw">if </span><span class="self">self</span>.credential_params.get(k).is_none_or(|cur| <span class="kw-2">*</span>v &gt; <span class="kw-2">*</span>cur) {
+<a href=#483 id=483 data-nosnippet>483</a>                <span class="self">self</span>.credential_params.insert(k.clone(), <span class="kw-2">*</span>v);
+<a href=#484 id=484 data-nosnippet>484</a>            }
+<a href=#485 id=485 data-nosnippet>485</a>        }
+<a href=#486 id=486 data-nosnippet>486</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.schema_builders {
+<a href=#487 id=487 data-nosnippet>487</a>            <span class="kw">if </span><span class="self">self</span>.schema_builders.get(k).is_none_or(|cur| <span class="kw-2">*</span>v &gt; <span class="kw-2">*</span>cur) {
+<a href=#488 id=488 data-nosnippet>488</a>                <span class="self">self</span>.schema_builders.insert(k.clone(), <span class="kw-2">*</span>v);
+<a href=#489 id=489 data-nosnippet>489</a>            }
+<a href=#490 id=490 data-nosnippet>490</a>        }
+<a href=#491 id=491 data-nosnippet>491</a>        <span class="self">self</span>.schema_enforcers
+<a href=#492 id=492 data-nosnippet>492</a>            .extend(other.schema_enforcers.iter().cloned());
+<a href=#493 id=493 data-nosnippet>493</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.schema_keywords {
+<a href=#494 id=494 data-nosnippet>494</a>            <span class="kw">if </span><span class="self">self</span>.schema_keywords.get(k).is_none_or(|cur| <span class="kw-2">*</span>v &gt; <span class="kw-2">*</span>cur) {
+<a href=#495 id=495 data-nosnippet>495</a>                <span class="self">self</span>.schema_keywords.insert(k.clone(), <span class="kw-2">*</span>v);
+<a href=#496 id=496 data-nosnippet>496</a>            }
+<a href=#497 id=497 data-nosnippet>497</a>        }
+<a href=#498 id=498 data-nosnippet>498</a>        <span class="self">self</span>.url_param_hints
+<a href=#499 id=499 data-nosnippet>499</a>            .extend(other.url_param_hints.iter().cloned());
+<a href=#500 id=500 data-nosnippet>500</a>        <span class="self">self</span>.url_arg_hints
+<a href=#501 id=501 data-nosnippet>501</a>            .extend(other.url_arg_hints.iter().cloned());
+<a href=#502 id=502 data-nosnippet>502</a>        <span class="self">self</span>.url_literal_hints
+<a href=#503 id=503 data-nosnippet>503</a>            .extend(other.url_literal_hints.iter().cloned());
+<a href=#504 id=504 data-nosnippet>504</a>        <span class="self">self</span>.security_context_hints
+<a href=#505 id=505 data-nosnippet>505</a>            .extend(other.security_context_hints.iter().cloned());
+<a href=#506 id=506 data-nosnippet>506</a>        <span class="self">self</span>.auth_guard_hints
+<a href=#507 id=507 data-nosnippet>507</a>            .extend(other.auth_guard_hints.iter().cloned());
+<a href=#508 id=508 data-nosnippet>508</a>        <span class="self">self</span>.jwt_algorithm_hints
+<a href=#509 id=509 data-nosnippet>509</a>            .extend(other.jwt_algorithm_hints.iter().cloned());
+<a href=#510 id=510 data-nosnippet>510</a>        <span class="self">self</span>.credential_context_hints
+<a href=#511 id=511 data-nosnippet>511</a>            .extend(other.credential_context_hints.iter().cloned());
+<a href=#512 id=512 data-nosnippet>512</a>        <span class="self">self</span>.kdf_receiver_hints
+<a href=#513 id=513 data-nosnippet>513</a>            .extend(other.kdf_receiver_hints.iter().cloned());
+<a href=#514 id=514 data-nosnippet>514</a>        <span class="self">self</span>.prepared_statement_prefixes
+<a href=#515 id=515 data-nosnippet>515</a>            .extend(other.prepared_statement_prefixes.iter().cloned());
+<a href=#516 id=516 data-nosnippet>516</a>        <span class="self">self</span>.weak_hash_disclaimer_tokens
+<a href=#517 id=517 data-nosnippet>517</a>            .extend(other.weak_hash_disclaimer_tokens.iter().cloned());
+<a href=#518 id=518 data-nosnippet>518</a>        <span class="comment">// Same identity rules as `LearnedFactEntry::apply_with`: a later
+<a href=#519 id=519 data-nosnippet>519</a>        // table overrides an earlier one on the rule's call coverage, so a
+<a href=#520 id=520 data-nosnippet>520</a>        // consumer bundle can replace a learned/default conclusion without
+<a href=#521 id=521 data-nosnippet>521</a>        // appending a duplicate the first-match loop never reaches.
+<a href=#522 id=522 data-nosnippet>522</a>        </span><span class="kw">for </span>r <span class="kw">in </span><span class="kw-2">&amp;</span>other.weak_hash_rules {
+<a href=#523 id=523 data-nosnippet>523</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(existing) = <span class="self">self</span>.weak_hash_rules.iter_mut().find(|e| e.same_identity(r)) {
+<a href=#524 id=524 data-nosnippet>524</a>                <span class="kw-2">*</span>existing = r.clone();
+<a href=#525 id=525 data-nosnippet>525</a>            } <span class="kw">else </span>{
+<a href=#526 id=526 data-nosnippet>526</a>                <span class="self">self</span>.weak_hash_rules.push(r.clone());
+<a href=#527 id=527 data-nosnippet>527</a>            }
+<a href=#528 id=528 data-nosnippet>528</a>        }
+<a href=#529 id=529 data-nosnippet>529</a>        <span class="comment">// Provenance-ordered like the policy tables: a consumer bundle
+<a href=#530 id=530 data-nosnippet>530</a>        // redefining a spec-seeded rule now overrides it (Learned &gt;
+<a href=#531 id=531 data-nosnippet>531</a>        // Spec), ties keep the existing entry.
+<a href=#532 id=532 data-nosnippet>532</a>        </span><span class="kw">for </span>(r, p) <span class="kw">in </span><span class="kw-2">&amp;</span>other.integer_overflow_rules {
+<a href=#533 id=533 data-nosnippet>533</a>            upsert_by_provenance(<span class="kw-2">&amp;mut </span><span class="self">self</span>.integer_overflow_rules, r.clone(), <span class="kw-2">*</span>p, |a, b| {
+<a href=#534 id=534 data-nosnippet>534</a>                a.rule_id == b.rule_id &amp;&amp; a.wrap_threshold == b.wrap_threshold
+<a href=#535 id=535 data-nosnippet>535</a>            });
+<a href=#536 id=536 data-nosnippet>536</a>        }
+<a href=#537 id=537 data-nosnippet>537</a>        <span class="kw">for </span>s <span class="kw">in </span><span class="kw-2">&amp;</span>other.insecure_config_selectors {
+<a href=#538 id=538 data-nosnippet>538</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(existing) = <span class="self">self
+<a href=#539 id=539 data-nosnippet>539</a>                </span>.insecure_config_selectors
+<a href=#540 id=540 data-nosnippet>540</a>                .iter_mut()
+<a href=#541 id=541 data-nosnippet>541</a>                .find(|e| e.same_identity(s))
+<a href=#542 id=542 data-nosnippet>542</a>            {
+<a href=#543 id=543 data-nosnippet>543</a>                <span class="kw-2">*</span>existing = s.clone();
+<a href=#544 id=544 data-nosnippet>544</a>            } <span class="kw">else </span>{
+<a href=#545 id=545 data-nosnippet>545</a>                <span class="self">self</span>.insecure_config_selectors.push(s.clone());
+<a href=#546 id=546 data-nosnippet>546</a>            }
+<a href=#547 id=547 data-nosnippet>547</a>        }
+<a href=#548 id=548 data-nosnippet>548</a>        <span class="kw">for </span>r <span class="kw">in </span><span class="kw-2">&amp;</span>other.key_size_rules {
+<a href=#549 id=549 data-nosnippet>549</a>            <span class="kw">if let </span><span class="prelude-val">Some</span>(existing) = <span class="self">self</span>.key_size_rules.iter_mut().find(|e| e.same_identity(r)) {
+<a href=#550 id=550 data-nosnippet>550</a>                existing.override_with(r);
+<a href=#551 id=551 data-nosnippet>551</a>            } <span class="kw">else </span>{
+<a href=#552 id=552 data-nosnippet>552</a>                <span class="self">self</span>.key_size_rules.push(r.clone());
+<a href=#553 id=553 data-nosnippet>553</a>            }
+<a href=#554 id=554 data-nosnippet>554</a>        }
+<a href=#555 id=555 data-nosnippet>555</a>        <span class="self">self</span>.suspicious_hash_wrappers
+<a href=#556 id=556 data-nosnippet>556</a>            .extend(other.suspicious_hash_wrappers.iter().cloned());
+<a href=#557 id=557 data-nosnippet>557</a>
+<a href=#558 id=558 data-nosnippet>558</a>        <span class="comment">// Verb-sink bookkeeping accumulates too: dotted client entries
+<a href=#559 id=559 data-nosnippet>559</a>        // (`got.get`, `axios.post`) from any merged spec/bundle widen the
+<a href=#560 id=560 data-nosnippet>560</a>        // receiver-aware sets.
+<a href=#561 id=561 data-nosnippet>561</a>        </span><span class="self">self</span>.verb_sinks.extend(other.verb_sinks.iter().cloned());
+<a href=#562 id=562 data-nosnippet>562</a>        <span class="self">self</span>.client_roots.extend(other.client_roots.iter().cloned());
+<a href=#563 id=563 data-nosnippet>563</a>        <span class="comment">// Receiver-qualification bookkeeping accumulates like the other
+<a href=#564 id=564 data-nosnippet>564</a>        // receiver-aware sets: two merged specs can declare different
+<a href=#565 id=565 data-nosnippet>565</a>        // roots for the same method, and both must survive.
+<a href=#566 id=566 data-nosnippet>566</a>        </span><span class="kw">for </span>(k, roots) <span class="kw">in </span><span class="kw-2">&amp;</span>other.receiver_qualified_sinks {
+<a href=#567 id=567 data-nosnippet>567</a>            <span class="self">self</span>.receiver_qualified_sinks
+<a href=#568 id=568 data-nosnippet>568</a>                .entry(k.clone())
+<a href=#569 id=569 data-nosnippet>569</a>                .or_default()
+<a href=#570 id=570 data-nosnippet>570</a>                .extend(roots.iter().cloned());
+<a href=#571 id=571 data-nosnippet>571</a>        }
+<a href=#572 id=572 data-nosnippet>572</a>        <span class="comment">// A bare declaration wins over a qualified one for the same name:
+<a href=#573 id=573 data-nosnippet>573</a>        // the bare form is the receiver-agnostic one.
+<a href=#574 id=574 data-nosnippet>574</a>        </span><span class="self">self</span>.bare_sink_names
+<a href=#575 id=575 data-nosnippet>575</a>            .extend(other.bare_sink_names.iter().cloned());
+<a href=#576 id=576 data-nosnippet>576</a>        <span class="comment">// Receiver-specific roles accumulate like the other receiver-aware
+<a href=#577 id=577 data-nosnippet>577</a>        // sets: two merged specs can declare different dotted roots for the
+<a href=#578 id=578 data-nosnippet>578</a>        // same method, and both disambiguation rules must survive.
+<a href=#579 id=579 data-nosnippet>579</a>        </span><span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.receiver_roles {
+<a href=#580 id=580 data-nosnippet>580</a>            <span class="self">self</span>.receiver_roles.entry(k.clone()).or_insert(<span class="kw-2">*</span>v);
+<a href=#581 id=581 data-nosnippet>581</a>        }
+<a href=#582 id=582 data-nosnippet>582</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.receiver_labels {
+<a href=#583 id=583 data-nosnippet>583</a>            <span class="self">self</span>.receiver_labels
+<a href=#584 id=584 data-nosnippet>584</a>                .entry(k.clone())
+<a href=#585 id=585 data-nosnippet>585</a>                .or_insert_with(|| v.clone());
+<a href=#586 id=586 data-nosnippet>586</a>        }
+<a href=#587 id=587 data-nosnippet>587</a>        <span class="self">self</span>.session_roots
+<a href=#588 id=588 data-nosnippet>588</a>            .extend(other.session_roots.iter().cloned());
+<a href=#589 id=589 data-nosnippet>589</a>        <span class="self">self</span>.learned_sources
+<a href=#590 id=590 data-nosnippet>590</a>            .extend(other.learned_sources.iter().cloned());
+<a href=#591 id=591 data-nosnippet>591</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.grammar_roles {
+<a href=#592 id=592 data-nosnippet>592</a>            <span class="self">self</span>.grammar_roles.insert(k.clone(), v.clone());
+<a href=#593 id=593 data-nosnippet>593</a>        }
+<a href=#594 id=594 data-nosnippet>594</a>        <span class="kw">for </span>(lang, pats) <span class="kw">in </span><span class="kw-2">&amp;</span>other.route_patterns {
+<a href=#595 id=595 data-nosnippet>595</a>            <span class="kw">let </span>slot = <span class="self">self</span>.route_patterns.entry(lang.clone()).or_default();
+<a href=#596 id=596 data-nosnippet>596</a>            <span class="kw">for </span>p <span class="kw">in </span>pats {
+<a href=#597 id=597 data-nosnippet>597</a>                <span class="kw">if </span>!slot.contains(p) {
+<a href=#598 id=598 data-nosnippet>598</a>                    slot.push(p.clone());
+<a href=#599 id=599 data-nosnippet>599</a>                }
+<a href=#600 id=600 data-nosnippet>600</a>            }
+<a href=#601 id=601 data-nosnippet>601</a>        }
+<a href=#602 id=602 data-nosnippet>602</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.grammar_features {
+<a href=#603 id=603 data-nosnippet>603</a>            <span class="self">self</span>.grammar_features
+<a href=#604 id=604 data-nosnippet>604</a>                .entry(k.clone())
+<a href=#605 id=605 data-nosnippet>605</a>                .or_default()
+<a href=#606 id=606 data-nosnippet>606</a>                .extend(v.iter().copied());
+<a href=#607 id=607 data-nosnippet>607</a>        }
+<a href=#608 id=608 data-nosnippet>608</a>        <span class="self">self</span>.custom_allocators
+<a href=#609 id=609 data-nosnippet>609</a>            .extend(other.custom_allocators.iter().cloned());
+<a href=#610 id=610 data-nosnippet>610</a>        <span class="self">self</span>.custom_deallocators
+<a href=#611 id=611 data-nosnippet>611</a>            .extend(other.custom_deallocators.iter().cloned());
+<a href=#612 id=612 data-nosnippet>612</a>        <span class="kw">if </span>!other.memory_functions.is_empty() {
+<a href=#613 id=613 data-nosnippet>613</a>            <span class="self">self</span>.memory_functions = other.memory_functions.clone();
+<a href=#614 id=614 data-nosnippet>614</a>        }
+<a href=#615 id=615 data-nosnippet>615</a>        <span class="kw">if </span>!other.buffer_builtins.is_empty() {
+<a href=#616 id=616 data-nosnippet>616</a>            <span class="self">self</span>.buffer_builtins = other.buffer_builtins.clone();
+<a href=#617 id=617 data-nosnippet>617</a>        }
+<a href=#618 id=618 data-nosnippet>618</a>        <span class="kw">if </span>!other.stack_allocators.is_empty() {
+<a href=#619 id=619 data-nosnippet>619</a>            <span class="self">self</span>.stack_allocators = other.stack_allocators.clone();
+<a href=#620 id=620 data-nosnippet>620</a>        }
+<a href=#621 id=621 data-nosnippet>621</a>        <span class="self">self</span>.collection_constructors
+<a href=#622 id=622 data-nosnippet>622</a>            .extend(other.collection_constructors.iter().cloned());
+<a href=#623 id=623 data-nosnippet>623</a>        <span class="self">self</span>.schema_describe_methods
+<a href=#624 id=624 data-nosnippet>624</a>            .extend(other.schema_describe_methods.iter().cloned());
+<a href=#625 id=625 data-nosnippet>625</a>        <span class="self">self</span>.null_tokens.extend(other.null_tokens.iter().cloned());
+<a href=#626 id=626 data-nosnippet>626</a>        <span class="self">self</span>.session_accessors
+<a href=#627 id=627 data-nosnippet>627</a>            .extend(other.session_accessors.iter().cloned());
+<a href=#628 id=628 data-nosnippet>628</a>        <span class="self">self</span>.receiver_params
+<a href=#629 id=629 data-nosnippet>629</a>            .extend(other.receiver_params.iter().cloned());
+<a href=#630 id=630 data-nosnippet>630</a>        <span class="self">self</span>.idor_keys.extend(other.idor_keys.iter().cloned());
+<a href=#631 id=631 data-nosnippet>631</a>        <span class="self">self</span>.idor_finder_sinks
+<a href=#632 id=632 data-nosnippet>632</a>            .extend(other.idor_finder_sinks.iter().cloned());
+<a href=#633 id=633 data-nosnippet>633</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.propagators {
+<a href=#634 id=634 data-nosnippet>634</a>            <span class="self">self</span>.propagators.insert(k.clone(), v.clone());
+<a href=#635 id=635 data-nosnippet>635</a>        }
+<a href=#636 id=636 data-nosnippet>636</a>        <span class="kw">for </span>(k, v) <span class="kw">in </span><span class="kw-2">&amp;</span>other.propagator_blocks_receiver {
+<a href=#637 id=637 data-nosnippet>637</a>            <span class="self">self</span>.propagator_blocks_receiver.insert(k.clone(), <span class="kw-2">*</span>v);
+<a href=#638 id=638 data-nosnippet>638</a>        }
+<a href=#639 id=639 data-nosnippet>639</a>        <span class="kw">for </span>p <span class="kw">in </span><span class="kw-2">&amp;</span>other.guard_denylist_patterns {
+<a href=#640 id=640 data-nosnippet>640</a>            <span class="kw">if </span>!<span class="self">self</span>.guard_denylist_patterns.contains(p) {
+<a href=#641 id=641 data-nosnippet>641</a>                <span class="self">self</span>.guard_denylist_patterns.push(p.clone());
+<a href=#642 id=642 data-nosnippet>642</a>            }
+<a href=#643 id=643 data-nosnippet>643</a>        }
+<a href=#644 id=644 data-nosnippet>644</a>        <span class="kw">if </span>other.max_complexity.is_some() {
+<a href=#645 id=645 data-nosnippet>645</a>            <span class="self">self</span>.max_complexity = other.max_complexity;
+<a href=#646 id=646 data-nosnippet>646</a>        }
+<a href=#647 id=647 data-nosnippet>647</a>    }
+<a href=#648 id=648 data-nosnippet>648</a>
+<a href=#649 id=649 data-nosnippet>649</a>    <span class="doccomment">/// Look up a dynamic AST node classification role learned from a `.frc` bundle.
+<a href=#650 id=650 data-nosnippet>650</a>    </span><span class="kw">pub fn </span>get_grammar_role(
+<a href=#651 id=651 data-nosnippet>651</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#652 id=652 data-nosnippet>652</a>        language: <span class="kw-2">&amp;</span>str,
+<a href=#653 id=653 data-nosnippet>653</a>        node_kind: <span class="kw-2">&amp;</span>str,
+<a href=#654 id=654 data-nosnippet>654</a>    ) -&gt; <span class="prelude-ty">Option</span>&lt;frensense_lang::NodeRole&gt; {
+<a href=#655 id=655 data-nosnippet>655</a>        <span class="kw">let </span>lang = language.to_lowercase();
+<a href=#656 id=656 data-nosnippet>656</a>        <span class="self">self</span>.grammar_roles
+<a href=#657 id=657 data-nosnippet>657</a>            .get(<span class="kw-2">&amp;</span>(lang, node_kind.to_string()))
+<a href=#658 id=658 data-nosnippet>658</a>            .or_else(|| {
+<a href=#659 id=659 data-nosnippet>659</a>                <span class="self">self</span>.grammar_roles
+<a href=#660 id=660 data-nosnippet>660</a>                    .get(<span class="kw-2">&amp;</span>(<span class="string">"*"</span>.to_string(), node_kind.to_string()))
+<a href=#661 id=661 data-nosnippet>661</a>            })
+<a href=#662 id=662 data-nosnippet>662</a>            .map(|r| r.to_node_role())
+<a href=#663 id=663 data-nosnippet>663</a>    }
+<a href=#664 id=664 data-nosnippet>664</a>
+<a href=#665 id=665 data-nosnippet>665</a>    <span class="doccomment">/// Check if a dynamic AST grammar feature is learned from a `.frc` bundle.
+<a href=#666 id=666 data-nosnippet>666</a>    </span><span class="kw">pub fn </span>has_grammar_feature(
+<a href=#667 id=667 data-nosnippet>667</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
+<a href=#668 id=668 data-nosnippet>668</a>        language: <span class="kw-2">&amp;</span>str,
+<a href=#669 id=669 data-nosnippet>669</a>        node_kind: <span class="kw-2">&amp;</span>str,
+<a href=#670 id=670 data-nosnippet>670</a>        feature: GrammarFeature,
+<a href=#671 id=671 data-nosnippet>671</a>    ) -&gt; <span class="prelude-ty">Option</span>&lt;bool&gt; {
+<a href=#672 id=672 data-nosnippet>672</a>        <span class="kw">let </span>lang = language.to_lowercase();
+<a href=#673 id=673 data-nosnippet>673</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(set) = <span class="self">self</span>.grammar_features.get(<span class="kw-2">&amp;</span>(lang, node_kind.to_string()))
+<a href=#674 id=674 data-nosnippet>674</a>            &amp;&amp; set.contains(<span class="kw-2">&amp;</span>feature)
+<a href=#675 id=675 data-nosnippet>675</a>        {
+<a href=#676 id=676 data-nosnippet>676</a>            <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="bool-val">true</span>);
+<a href=#677 id=677 data-nosnippet>677</a>        }
+<a href=#678 id=678 data-nosnippet>678</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(set) = <span class="self">self
+<a href=#679 id=679 data-nosnippet>679</a>            </span>.grammar_features
+<a href=#680 id=680 data-nosnippet>680</a>            .get(<span class="kw-2">&amp;</span>(<span class="string">"*"</span>.to_string(), node_kind.to_string()))
+<a href=#681 id=681 data-nosnippet>681</a>            &amp;&amp; set.contains(<span class="kw-2">&amp;</span>feature)
+<a href=#682 id=682 data-nosnippet>682</a>        {
+<a href=#683 id=683 data-nosnippet>683</a>            <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="bool-val">true</span>);
+<a href=#684 id=684 data-nosnippet>684</a>        }
+<a href=#685 id=685 data-nosnippet>685</a>        <span class="prelude-val">None
+<a href=#686 id=686 data-nosnippet>686</a>    </span>}
+<a href=#687 id=687 data-nosnippet>687</a>
+<a href=#688 id=688 data-nosnippet>688</a>    <span class="doccomment">/// Check whether a key is an IDOR-class query parameter (spec/bundle
+<a href=#689 id=689 data-nosnippet>689</a>    /// vocabulary - the engine ships no built-in key set).
+<a href=#690 id=690 data-nosnippet>690</a>    </span><span class="kw">pub fn </span>is_idor_key(<span class="kw-2">&amp;</span><span class="self">self</span>, key: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#691 id=691 data-nosnippet>691</a>        <span class="self">self</span>.idor_keys.contains(key)
+<a href=#692 id=692 data-nosnippet>692</a>    }
+<a href=#693 id=693 data-nosnippet>693</a>
+<a href=#694 id=694 data-nosnippet>694</a>    <span class="doccomment">/// Check whether a call is an IDOR finder sink (spec/bundle vocabulary -
+<a href=#695 id=695 data-nosnippet>695</a>    /// the engine ships no built-in sink set).
+<a href=#696 id=696 data-nosnippet>696</a>    </span><span class="kw">pub fn </span>is_idor_finder_sink(<span class="kw-2">&amp;</span><span class="self">self</span>, sink: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#697 id=697 data-nosnippet>697</a>        <span class="kw">let </span>last = sink.rsplit(<span class="string">'.'</span>).next().unwrap_or(sink);
+<a href=#698 id=698 data-nosnippet>698</a>        <span class="self">self</span>.idor_finder_sinks.contains(sink) || <span class="self">self</span>.idor_finder_sinks.contains(last)
+<a href=#699 id=699 data-nosnippet>699</a>    }
+<a href=#700 id=700 data-nosnippet>700</a>
+<a href=#701 id=701 data-nosnippet>701</a>    <span class="doccomment">/// Is `name` (bare, dotted, or `::`-qualified) a declared stack
+<a href=#702 id=702 data-nosnippet>702</a>    /// allocator? Frame-local storage is never a leak candidate; the
+<a href=#703 id=703 data-nosnippet>703</a>    /// vocabulary is default-pack-seeded (Phase 6.5).
+<a href=#704 id=704 data-nosnippet>704</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_stack_allocator(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#705 id=705 data-nosnippet>705</a>        <span class="kw">let </span>s = name.rsplit(<span class="string">'.'</span>).next().unwrap_or(name);
+<a href=#706 id=706 data-nosnippet>706</a>        <span class="kw">let </span>s = s.rsplit(<span class="string">"::"</span>).next().unwrap_or(s);
+<a href=#707 id=707 data-nosnippet>707</a>        <span class="self">self</span>.stack_allocators.iter().any(|a| a == s)
+<a href=#708 id=708 data-nosnippet>708</a>    }
+<a href=#709 id=709 data-nosnippet>709</a>
+<a href=#710 id=710 data-nosnippet>710</a>    <span class="doccomment">/// Is `name` a declared collection constructor (`Set`, `Map`)?
+<a href=#711 id=711 data-nosnippet>711</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_collection_ctor(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#712 id=712 data-nosnippet>712</a>        <span class="self">self</span>.collection_constructors.contains(name)
+<a href=#713 id=713 data-nosnippet>713</a>    }
+<a href=#714 id=714 data-nosnippet>714</a>
+<a href=#715 id=715 data-nosnippet>715</a>    <span class="doccomment">/// Is `name` a schema-describing method (`describe`, `description`)?
+<a href=#716 id=716 data-nosnippet>716</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_schema_describe_method(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#717 id=717 data-nosnippet>717</a>        <span class="self">self</span>.schema_describe_methods.contains(name)
+<a href=#718 id=718 data-nosnippet>718</a>    }
+<a href=#719 id=719 data-nosnippet>719</a>
+<a href=#720 id=720 data-nosnippet>720</a>    <span class="doccomment">/// Does the string literal `s` compare as the language's null pointer?
+<a href=#721 id=721 data-nosnippet>721</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_null_token(<span class="kw-2">&amp;</span><span class="self">self</span>, s: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#722 id=722 data-nosnippet>722</a>        <span class="self">self</span>.null_tokens.contains(s)
+<a href=#723 id=723 data-nosnippet>723</a>    }
+<a href=#724 id=724 data-nosnippet>724</a>
+<a href=#725 id=725 data-nosnippet>725</a>    <span class="doccomment">/// Is `last` a read accessor of a trusted session store
+<a href=#726 id=726 data-nosnippet>726</a>    /// (`authenticatedUsers.get(...)`)? Receiver-aware callers combine
+<a href=#727 id=727 data-nosnippet>727</a>    /// this with [`Self::session_roots`] via [`Self::is_session_path`].
+<a href=#728 id=728 data-nosnippet>728</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_session_accessor(<span class="kw-2">&amp;</span><span class="self">self</span>, last: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#729 id=729 data-nosnippet>729</a>        <span class="self">self</span>.session_accessors.contains(last)
+<a href=#730 id=730 data-nosnippet>730</a>    }
+<a href=#731 id=731 data-nosnippet>731</a>
+<a href=#732 id=732 data-nosnippet>732</a>    <span class="doccomment">/// Is `name` a formal parameter that receives the implicit receiver
+<a href=#733 id=733 data-nosnippet>733</a>    /// (`self`, `this`)?
+<a href=#734 id=734 data-nosnippet>734</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_receiver_param(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#735 id=735 data-nosnippet>735</a>        <span class="self">self</span>.receiver_params.contains(name)
+<a href=#736 id=736 data-nosnippet>736</a>    }
+<a href=#737 id=737 data-nosnippet>737</a>
+<a href=#738 id=738 data-nosnippet>738</a>    <span class="doccomment">/// Provenance of the containment callee matching `seg`
+<a href=#739 id=739 data-nosnippet>739</a>    /// (case-insensitive), or None when not declared.
+<a href=#740 id=740 data-nosnippet>740</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>containment_callee(<span class="kw-2">&amp;</span><span class="self">self</span>, seg: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;Provenance&gt; {
+<a href=#741 id=741 data-nosnippet>741</a>        <span class="self">self</span>.containment_callees
+<a href=#742 id=742 data-nosnippet>742</a>            .iter()
+<a href=#743 id=743 data-nosnippet>743</a>            .find(|(c, <span class="kw">_</span>)| c.eq_ignore_ascii_case(seg))
+<a href=#744 id=744 data-nosnippet>744</a>            .map(|(<span class="kw">_</span>, p)| <span class="kw-2">*</span>p)
+<a href=#745 id=745 data-nosnippet>745</a>    }
+<a href=#746 id=746 data-nosnippet>746</a>
+<a href=#747 id=747 data-nosnippet>747</a>    <span class="doccomment">/// Provenance of the credential sink matching `seg`
+<a href=#748 id=748 data-nosnippet>748</a>    /// (case-insensitive), or None when not declared.
+<a href=#749 id=749 data-nosnippet>749</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>credential_sink(<span class="kw-2">&amp;</span><span class="self">self</span>, seg: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;Provenance&gt; {
+<a href=#750 id=750 data-nosnippet>750</a>        <span class="self">self</span>.credential_sinks
+<a href=#751 id=751 data-nosnippet>751</a>            .iter()
+<a href=#752 id=752 data-nosnippet>752</a>            .find(|(s, <span class="kw">_</span>)| s.eq_ignore_ascii_case(seg))
+<a href=#753 id=753 data-nosnippet>753</a>            .map(|(<span class="kw">_</span>, p)| <span class="kw-2">*</span>p)
+<a href=#754 id=754 data-nosnippet>754</a>    }
+<a href=#755 id=755 data-nosnippet>755</a>
+<a href=#756 id=756 data-nosnippet>756</a>    <span class="doccomment">/// Provenance of the credential parameter whose lowercased name equals
+<a href=#757 id=757 data-nosnippet>757</a>    /// `lowered`, or None when not declared.
+<a href=#758 id=758 data-nosnippet>758</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>credential_param(<span class="kw-2">&amp;</span><span class="self">self</span>, lowered: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;Provenance&gt; {
+<a href=#759 id=759 data-nosnippet>759</a>        <span class="self">self</span>.credential_params
+<a href=#760 id=760 data-nosnippet>760</a>            .iter()
+<a href=#761 id=761 data-nosnippet>761</a>            .find(|(c, <span class="kw">_</span>)| lowered == c.to_ascii_lowercase())
+<a href=#762 id=762 data-nosnippet>762</a>            .map(|(<span class="kw">_</span>, p)| <span class="kw-2">*</span>p)
+<a href=#763 id=763 data-nosnippet>763</a>    }
+<a href=#764 id=764 data-nosnippet>764</a>
+<a href=#765 id=765 data-nosnippet>765</a>    <span class="doccomment">/// Provenance of the schema builder matching `seg`
+<a href=#766 id=766 data-nosnippet>766</a>    /// (case-insensitive), or None when not declared.
+<a href=#767 id=767 data-nosnippet>767</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>schema_builder(<span class="kw-2">&amp;</span><span class="self">self</span>, seg: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;Provenance&gt; {
+<a href=#768 id=768 data-nosnippet>768</a>        <span class="self">self</span>.schema_builders
+<a href=#769 id=769 data-nosnippet>769</a>            .iter()
+<a href=#770 id=770 data-nosnippet>770</a>            .find(|(b, <span class="kw">_</span>)| b.eq_ignore_ascii_case(seg))
+<a href=#771 id=771 data-nosnippet>771</a>            .map(|(<span class="kw">_</span>, p)| <span class="kw-2">*</span>p)
+<a href=#772 id=772 data-nosnippet>772</a>    }
+<a href=#773 id=773 data-nosnippet>773</a>
+<a href=#774 id=774 data-nosnippet>774</a>    <span class="doccomment">/// Provenance of a bound keyword contained in the lowercased schema
+<a href=#775 id=775 data-nosnippet>775</a>    /// description `lower`, or None when none matches.
+<a href=#776 id=776 data-nosnippet>776</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>schema_keyword(<span class="kw-2">&amp;</span><span class="self">self</span>, lower: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;Provenance&gt; {
+<a href=#777 id=777 data-nosnippet>777</a>        <span class="self">self</span>.schema_keywords
+<a href=#778 id=778 data-nosnippet>778</a>            .iter()
+<a href=#779 id=779 data-nosnippet>779</a>            .find(|(k, <span class="kw">_</span>)| lower.contains(<span class="kw-2">&amp;</span>k.to_ascii_lowercase()))
+<a href=#780 id=780 data-nosnippet>780</a>            .map(|(<span class="kw">_</span>, p)| <span class="kw-2">*</span>p)
+<a href=#781 id=781 data-nosnippet>781</a>    }
+<a href=#782 id=782 data-nosnippet>782</a>
+<a href=#783 id=783 data-nosnippet>783</a>    <span class="doccomment">/// Look up input argument slots that propagate taint through `call`.
+<a href=#784 id=784 data-nosnippet>784</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>propagator_input_args(<span class="kw-2">&amp;</span><span class="self">self</span>, call: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[usize]&gt; {
+<a href=#785 id=785 data-nosnippet>785</a>        <span class="kw">let </span>last = call.rsplit(<span class="string">'.'</span>).next().unwrap_or(call);
+<a href=#786 id=786 data-nosnippet>786</a>        <span class="self">self</span>.propagators
+<a href=#787 id=787 data-nosnippet>787</a>            .get(call)
+<a href=#788 id=788 data-nosnippet>788</a>            .or_else(|| <span class="self">self</span>.propagators.get(last))
+<a href=#789 id=789 data-nosnippet>789</a>            .map(|v| v.as_slice())
+<a href=#790 id=790 data-nosnippet>790</a>    }
+<a href=#791 id=791 data-nosnippet>791</a>
+<a href=#792 id=792 data-nosnippet>792</a>    <span class="doccomment">/// Does a spec rule declare that `call`'s receiver does not taint its
+<a href=#793 id=793 data-nosnippet>793</a>    /// return (`tainted_receiver: false`)? Keyed like `propagators`: full
+<a href=#794 id=794 data-nosnippet>794</a>    /// name first, then last segment; a key with no declaration defaults to
+<a href=#795 id=795 data-nosnippet>795</a>    /// pass-through (not blocked).
+<a href=#796 id=796 data-nosnippet>796</a>    </span><span class="kw">pub fn </span>propagator_blocks_receiver(<span class="kw-2">&amp;</span><span class="self">self</span>, call: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#797 id=797 data-nosnippet>797</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>blocked) = <span class="self">self</span>.propagator_blocks_receiver.get(call) {
+<a href=#798 id=798 data-nosnippet>798</a>            <span class="kw">return </span>blocked;
+<a href=#799 id=799 data-nosnippet>799</a>        }
+<a href=#800 id=800 data-nosnippet>800</a>        <span class="kw">let </span>last = call.rsplit(<span class="string">'.'</span>).next().unwrap_or(call);
+<a href=#801 id=801 data-nosnippet>801</a>        last != call
+<a href=#802 id=802 data-nosnippet>802</a>            &amp;&amp; <span class="self">self
+<a href=#803 id=803 data-nosnippet>803</a>                </span>.propagator_blocks_receiver
+<a href=#804 id=804 data-nosnippet>804</a>                .get(last)
+<a href=#805 id=805 data-nosnippet>805</a>                .copied()
+<a href=#806 id=806 data-nosnippet>806</a>                .unwrap_or(<span class="bool-val">false</span>)
+<a href=#807 id=807 data-nosnippet>807</a>    }
+<a href=#808 id=808 data-nosnippet>808</a>
+<a href=#809 id=809 data-nosnippet>809</a>    <span class="doccomment">/// Check whether a string literal matches a guard denylist pattern.
+<a href=#810 id=810 data-nosnippet>810</a>    /// Patterns are pack/bundle vocabulary (the default pack's
+<a href=#811 id=811 data-nosnippet>811</a>    /// `GuardDenylistPattern` entries, extended by learned
+<a href=#812 id=812 data-nosnippet>812</a>    /// `GuardDenylistPattern` facts) - the engine ships no built-in list.
+<a href=#813 id=813 data-nosnippet>813</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>is_guard_denylist(<span class="kw-2">&amp;</span><span class="self">self</span>, literal: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#814 id=814 data-nosnippet>814</a>        <span class="kw">let </span>unquoted = strip_quotes(literal);
+<a href=#815 id=815 data-nosnippet>815</a>        <span class="self">self</span>.guard_denylist_patterns
+<a href=#816 id=816 data-nosnippet>816</a>            .iter()
+<a href=#817 id=817 data-nosnippet>817</a>            .any(|p| unquoted.contains(p.as_str()))
+<a href=#818 id=818 data-nosnippet>818</a>    }
+<a href=#819 id=819 data-nosnippet>819</a>
+<a href=#820 id=820 data-nosnippet>820</a>    <span class="doccomment">/// Source patterns to merge into the scan's `TaintConfig`: the union of
+<a href=#821 id=821 data-nosnippet>821</a>    /// spec-derived names and bundle-learned ones. The engine matches both
+<a href=#822 id=822 data-nosnippet>822</a>    /// by full name and, for dotted entries, by last segment.
+<a href=#823 id=823 data-nosnippet>823</a>    </span><span class="kw">pub fn </span>source_patterns(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span>str&gt; {
+<a href=#824 id=824 data-nosnippet>824</a>        <span class="self">self</span>.learned_sources.iter().map(|s| s.as_str())
+<a href=#825 id=825 data-nosnippet>825</a>    }
+<a href=#826 id=826 data-nosnippet>826</a>}
+</code></pre></div></section></main></body></html>

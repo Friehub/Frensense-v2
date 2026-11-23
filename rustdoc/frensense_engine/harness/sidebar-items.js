@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["lower_source","lower_source_with_facts"]};

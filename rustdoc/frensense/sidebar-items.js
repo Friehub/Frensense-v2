@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FRENSENSE_VERSION","REPORT_SCHEMA_VERSION"],"enum":["FrensenseError","Profile","RuleTier","Severity"],"mod":["cli","engine","explain","identity","lsp","mcp","parser","policy","reporter"],"struct":["Advisory","FileId"],"type":["Result"]};

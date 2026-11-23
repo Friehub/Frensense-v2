@@ -1,0 +1,726 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `frensense-engine/src/ir/function.rs`."><title>function.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="frensense_engine" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">frensense_engine/ir/</div>function.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="comment">// SPDX-License-Identifier: GPL-3.0-only
+<a href=#2 id=2 data-nosnippet>2</a>// Copyright (c) 2024-2026 Friehub
+<a href=#3 id=3 data-nosnippet>3</a>// Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
+<a href=#4 id=4 data-nosnippet>4</a>
+<a href=#5 id=5 data-nosnippet>5</a></span><span class="doccomment">//! Phase 1: Intermediate Representation (IR)
+<a href=#6 id=6 data-nosnippet>6</a>//!
+<a href=#7 id=7 data-nosnippet>7</a>//! This module defines the 3-Address Code and Control Flow Graph structures.
+<a href=#8 id=8 data-nosnippet>8</a>//! It serves as the foundation for modern SSA-based dataflow analysis across
+<a href=#9 id=9 data-nosnippet>9</a>//! dynamic, object-oriented, and systems languages.
+<a href=#10 id=10 data-nosnippet>10</a>//!
+<a href=#11 id=11 data-nosnippet>11</a>//! NEW: Incorporates Memory SSA concepts. The heap is no longer a global state.
+<a href=#12 id=12 data-nosnippet>12</a>//! Instead, memory mutations generate a new `MemoryState` (represented as a VarId),
+<a href=#13 id=13 data-nosnippet>13</a>//! which perfectly tracks flow-sensitive object modifications over time.
+<a href=#14 id=14 data-nosnippet>14</a>
+<a href=#15 id=15 data-nosnippet>15</a></span><span class="kw">use </span>rustc_hash::FxHashMap;
+<a href=#16 id=16 data-nosnippet>16</a>
+<a href=#17 id=17 data-nosnippet>17</a><span class="doccomment">/// A unique identifier for a variable or Memory State in the IR.
+<a href=#18 id=18 data-nosnippet>18</a></span><span class="attr">#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+<a href=#19 id=19 data-nosnippet>19</a>#[cfg_attr(feature = <span class="string">"serialize"</span>, derive(serde::Serialize, serde::Deserialize))]
+<a href=#20 id=20 data-nosnippet>20</a></span><span class="kw">pub struct </span>VarId(<span class="kw">pub </span>usize);
+<a href=#21 id=21 data-nosnippet>21</a>
+<a href=#22 id=22 data-nosnippet>22</a><span class="doccomment">/// Source name of the hidden memory-state parameter every [`FunctionIR`]
+<a href=#23 id=23 data-nosnippet>23</a>/// allocates as its `VarId(0)`. Shared by the IR builder (which names the
+<a href=#24 id=24 data-nosnippet>24</a>/// variable) and path reconstruction (which strips the artifact).
+<a href=#25 id=25 data-nosnippet>25</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">const </span>INITIAL_HEAP_STATE: <span class="kw-2">&amp;</span>str = <span class="string">"InitialHeapState"</span>;
+<a href=#26 id=26 data-nosnippet>26</a>
+<a href=#27 id=27 data-nosnippet>27</a><span class="doccomment">/// A unique identifier for a Basic Block in the CFG.
+<a href=#28 id=28 data-nosnippet>28</a></span><span class="attr">#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+<a href=#29 id=29 data-nosnippet>29</a>#[cfg_attr(feature = <span class="string">"serialize"</span>, derive(serde::Serialize, serde::Deserialize))]
+<a href=#30 id=30 data-nosnippet>30</a></span><span class="kw">pub struct </span>BlockId(<span class="kw">pub </span>usize);
+<a href=#31 id=31 data-nosnippet>31</a>
+<a href=#32 id=32 data-nosnippet>32</a><span class="doccomment">/// Identifies the type of allocation for points-to analysis.
+<a href=#33 id=33 data-nosnippet>33</a></span><span class="attr">#[derive(Debug, Clone, PartialEq, Eq)]
+<a href=#34 id=34 data-nosnippet>34</a>#[cfg_attr(feature = <span class="string">"serialize"</span>, derive(serde::Serialize, serde::Deserialize))]
+<a href=#35 id=35 data-nosnippet>35</a></span><span class="kw">pub enum </span>AllocationKind {
+<a href=#36 id=36 data-nosnippet>36</a>    <span class="doccomment">/// A plain object (record, dictionary, struct literal).
+<a href=#37 id=37 data-nosnippet>37</a>    </span>Object,
+<a href=#38 id=38 data-nosnippet>38</a>    <span class="doccomment">/// An array or list.
+<a href=#39 id=39 data-nosnippet>39</a>    </span>Array,
+<a href=#40 id=40 data-nosnippet>40</a>    <span class="doccomment">/// An instance of the named class, constructor call, or struct type.
+<a href=#41 id=41 data-nosnippet>41</a>    </span>ClassInstance(String),
+<a href=#42 id=42 data-nosnippet>42</a>}
+<a href=#43 id=43 data-nosnippet>43</a>
+<a href=#44 id=44 data-nosnippet>44</a><span class="doccomment">/// Metadata mapping a VarId back to its original source code context.
+<a href=#45 id=45 data-nosnippet>45</a></span><span class="attr">#[derive(Debug, Clone)]
+<a href=#46 id=46 data-nosnippet>46</a>#[cfg_attr(feature = <span class="string">"serialize"</span>, derive(serde::Serialize, serde::Deserialize))]
+<a href=#47 id=47 data-nosnippet>47</a></span><span class="kw">pub struct </span>VarMetadata {
+<a href=#48 id=48 data-nosnippet>48</a>    <span class="doccomment">/// Name of the variable as written in the source, when it has one. `None` for compiler temporaries.
+<a href=#49 id=49 data-nosnippet>49</a>    </span><span class="kw">pub </span>source_name: <span class="prelude-ty">Option</span>&lt;String&gt;,
+<a href=#50 id=50 data-nosnippet>50</a>    <span class="doccomment">/// Declared or inferred type name from the source, when the language provides one.
+<a href=#51 id=51 data-nosnippet>51</a>    </span><span class="kw">pub </span>type_name: <span class="prelude-ty">Option</span>&lt;String&gt;,
+<a href=#52 id=52 data-nosnippet>52</a>    <span class="doccomment">/// Byte range `(start, end)` of the defining source text, used to map findings back to source.
+<a href=#53 id=53 data-nosnippet>53</a>    </span><span class="kw">pub </span>byte_range: <span class="prelude-ty">Option</span>&lt;(usize, usize)&gt;,
+<a href=#54 id=54 data-nosnippet>54</a>    <span class="doccomment">/// Flags if this VarId represents a hidden Memory State rather than a real code variable
+<a href=#55 id=55 data-nosnippet>55</a>    </span><span class="kw">pub </span>is_memory_state: bool,
+<a href=#56 id=56 data-nosnippet>56</a>    <span class="doccomment">/// For a var produced by an object-literal composite: the keys whose
+<a href=#57 id=57 data-nosnippet>57</a>    /// values were merged into it (e.g. `["where", "message"]`). Sinks use
+<a href=#58 id=58 data-nosnippet>58</a>    /// this to classify the *shape* of the tainted argument (IDOR-style
+<a href=#59 id=59 data-nosnippet>59</a>    /// object payload vs raw injection string).
+<a href=#60 id=60 data-nosnippet>60</a>    </span><span class="kw">pub </span>object_keys: Vec&lt;String&gt;,
+<a href=#61 id=61 data-nosnippet>61</a>    <span class="doccomment">/// Bound by a declaration visited while lowering this function's body
+<a href=#62 id=62 data-nosnippet>62</a>    /// (`char *p;`, `let x;`, `x = v` in Python, destructuring patterns) -
+<a href=#63 id=63 data-nosnippet>63</a>    /// provably function-scoped. Vars created at first *expression* use are
+<a href=#64 id=64 data-nosnippet>64</a>    /// left `false`: those are file/module/header globals (or undeclared
+<a href=#65 id=65 data-nosnippet>65</a>    /// names), whose values are initialized elsewhere. Uninitialized-free
+<a href=#66 id=66 data-nosnippet>66</a>    /// analysis fires only on `declared` vars.
+<a href=#67 id=67 data-nosnippet>67</a>    </span><span class="attr">#[cfg_attr(feature = <span class="string">"serialize"</span>, serde(default))]
+<a href=#68 id=68 data-nosnippet>68</a>    </span><span class="kw">pub </span>declared: bool,
+<a href=#69 id=69 data-nosnippet>69</a>}
+<a href=#70 id=70 data-nosnippet>70</a>
+<a href=#71 id=71 data-nosnippet>71</a><span class="doccomment">/// Operands are the inputs to instructions.
+<a href=#72 id=72 data-nosnippet>72</a></span><span class="attr">#[derive(Debug, Clone, PartialEq)]
+<a href=#73 id=73 data-nosnippet>73</a>#[cfg_attr(feature = <span class="string">"serialize"</span>, derive(serde::Serialize, serde::Deserialize))]
+<a href=#74 id=74 data-nosnippet>74</a></span><span class="kw">pub enum </span>Operand {
+<a href=#75 id=75 data-nosnippet>75</a>    <span class="doccomment">/// A variable holding an SSA value.
+<a href=#76 id=76 data-nosnippet>76</a>    </span>Var(VarId),
+<a href=#77 id=77 data-nosnippet>77</a>    <span class="doccomment">/// A string literal.
+<a href=#78 id=78 data-nosnippet>78</a>    </span>StringLiteral(String),
+<a href=#79 id=79 data-nosnippet>79</a>    <span class="doccomment">/// An integer literal.
+<a href=#80 id=80 data-nosnippet>80</a>    </span>IntLiteral(i64),
+<a href=#81 id=81 data-nosnippet>81</a>    <span class="doccomment">/// A floating-point literal.
+<a href=#82 id=82 data-nosnippet>82</a>    </span>FloatLiteral(f64),
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="doccomment">/// A boolean literal.
+<a href=#84 id=84 data-nosnippet>84</a>    </span>BoolLiteral(bool),
+<a href=#85 id=85 data-nosnippet>85</a>    <span class="doccomment">/// The null / nil / None value.
+<a href=#86 id=86 data-nosnippet>86</a>    </span>Null,
+<a href=#87 id=87 data-nosnippet>87</a>    <span class="doccomment">/// A value the lowering could not model (an unsupported expression form).
+<a href=#88 id=88 data-nosnippet>88</a>    </span>Unknown,
+<a href=#89 id=89 data-nosnippet>89</a>}
+<a href=#90 id=90 data-nosnippet>90</a>
+<a href=#91 id=91 data-nosnippet>91</a><span class="doccomment">/// A Phi node for SSA representation. Evaluated at the start of a block.
+<a href=#92 id=92 data-nosnippet>92</a></span><span class="attr">#[derive(Debug, Clone)]
+<a href=#93 id=93 data-nosnippet>93</a>#[cfg_attr(feature = <span class="string">"serialize"</span>, derive(serde::Serialize, serde::Deserialize))]
+<a href=#94 id=94 data-nosnippet>94</a></span><span class="kw">pub struct </span>Phi {
+<a href=#95 id=95 data-nosnippet>95</a>    <span class="doccomment">/// Variable defined by the phi (the merged value).
+<a href=#96 id=96 data-nosnippet>96</a>    </span><span class="kw">pub </span>dest: VarId,
+<a href=#97 id=97 data-nosnippet>97</a>    <span class="doccomment">/// One `(predecessor block, variable)` pair per incoming control-flow edge: the phi takes the variable that arrives along that edge.
+<a href=#98 id=98 data-nosnippet>98</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) incoming: Vec&lt;(BlockId, VarId)&gt;,
+<a href=#99 id=99 data-nosnippet>99</a>}
+<a href=#100 id=100 data-nosnippet>100</a>
+<a href=#101 id=101 data-nosnippet>101</a><span class="doccomment">/// A single linear instruction in 3-Address Code form.
+<a href=#102 id=102 data-nosnippet>102</a></span><span class="attr">#[derive(Debug, Clone)]
+<a href=#103 id=103 data-nosnippet>103</a>#[cfg_attr(feature = <span class="string">"serialize"</span>, derive(serde::Serialize, serde::Deserialize))]
+<a href=#104 id=104 data-nosnippet>104</a></span><span class="kw">pub enum </span>Instruction {
+<a href=#105 id=105 data-nosnippet>105</a>    <span class="doccomment">/// v_dest = v_src
+<a href=#106 id=106 data-nosnippet>106</a>    </span>Assign {
+<a href=#107 id=107 data-nosnippet>107</a>        <span class="doccomment">/// Variable being defined.
+<a href=#108 id=108 data-nosnippet>108</a>        </span>dest: VarId,
+<a href=#109 id=109 data-nosnippet>109</a>        <span class="doccomment">/// Value assigned to `dest`.
+<a href=#110 id=110 data-nosnippet>110</a>        </span>src: Operand,
+<a href=#111 id=111 data-nosnippet>111</a>    },
+<a href=#112 id=112 data-nosnippet>112</a>
+<a href=#113 id=113 data-nosnippet>113</a>    <span class="comment">// --- Object &amp; Array Memory Access (Memory SSA Enabled) ---
+<a href=#114 id=114 data-nosnippet>114</a>    // Reads depend on a specific moment in time (mem_in).
+<a href=#115 id=115 data-nosnippet>115</a>    // Writes consume a moment in time, and generate a new one (mem_out).
+<a href=#116 id=116 data-nosnippet>116</a>    </span><span class="doccomment">/// v_dest = base.field  @ mem_in
+<a href=#117 id=117 data-nosnippet>117</a>    </span>LoadField {
+<a href=#118 id=118 data-nosnippet>118</a>        <span class="doccomment">/// Variable that receives the loaded value.
+<a href=#119 id=119 data-nosnippet>119</a>        </span>dest: VarId,
+<a href=#120 id=120 data-nosnippet>120</a>        <span class="doccomment">/// Memory state the load reads from.
+<a href=#121 id=121 data-nosnippet>121</a>        </span>mem_in: VarId,
+<a href=#122 id=122 data-nosnippet>122</a>        <span class="doccomment">/// Variable holding the object whose field is read.
+<a href=#123 id=123 data-nosnippet>123</a>        </span>base: VarId,
+<a href=#124 id=124 data-nosnippet>124</a>        <span class="doccomment">/// Name of the field being read.
+<a href=#125 id=125 data-nosnippet>125</a>        </span>field: String,
+<a href=#126 id=126 data-nosnippet>126</a>    },
+<a href=#127 id=127 data-nosnippet>127</a>
+<a href=#128 id=128 data-nosnippet>128</a>    <span class="doccomment">/// base.field = src  -&gt; generates mem_out
+<a href=#129 id=129 data-nosnippet>129</a>    </span>StoreField {
+<a href=#130 id=130 data-nosnippet>130</a>        <span class="doccomment">/// New memory state produced by the store.
+<a href=#131 id=131 data-nosnippet>131</a>        </span>mem_out: VarId,
+<a href=#132 id=132 data-nosnippet>132</a>        <span class="doccomment">/// Memory state the store applies to.
+<a href=#133 id=133 data-nosnippet>133</a>        </span>mem_in: VarId,
+<a href=#134 id=134 data-nosnippet>134</a>        <span class="doccomment">/// Variable holding the object being written.
+<a href=#135 id=135 data-nosnippet>135</a>        </span>base: VarId,
+<a href=#136 id=136 data-nosnippet>136</a>        <span class="doccomment">/// Name of the field being written.
+<a href=#137 id=137 data-nosnippet>137</a>        </span>field: String,
+<a href=#138 id=138 data-nosnippet>138</a>        <span class="doccomment">/// Value stored into the field.
+<a href=#139 id=139 data-nosnippet>139</a>        </span>src: Operand,
+<a href=#140 id=140 data-nosnippet>140</a>        <span class="doccomment">/// Byte range of the expression that performs the write (the
+<a href=#141 id=141 data-nosnippet>141</a>        /// assignment, its member target, or the JSX attribute). The write is
+<a href=#142 id=142 data-nosnippet>142</a>        /// the statement a property-sink finding must point at: the stored
+<a href=#143 id=143 data-nosnippet>143</a>        /// value's variable is defined somewhere else. `None` for stores a
+<a href=#144 id=144 data-nosnippet>144</a>        /// lowering synthesised without one source expression (object-literal
+<a href=#145 id=145 data-nosnippet>145</a>        /// fields, test fixtures).
+<a href=#146 id=146 data-nosnippet>146</a>        </span>span: <span class="prelude-ty">Option</span>&lt;(usize, usize)&gt;,
+<a href=#147 id=147 data-nosnippet>147</a>    },
+<a href=#148 id=148 data-nosnippet>148</a>
+<a href=#149 id=149 data-nosnippet>149</a>    <span class="doccomment">/// `v_dest = base[index]  @ mem_in`
+<a href=#150 id=150 data-nosnippet>150</a>    </span>LoadElement {
+<a href=#151 id=151 data-nosnippet>151</a>        <span class="doccomment">/// Variable that receives the loaded element.
+<a href=#152 id=152 data-nosnippet>152</a>        </span>dest: VarId,
+<a href=#153 id=153 data-nosnippet>153</a>        <span class="doccomment">/// Memory state the load reads from.
+<a href=#154 id=154 data-nosnippet>154</a>        </span>mem_in: VarId,
+<a href=#155 id=155 data-nosnippet>155</a>        <span class="doccomment">/// Variable holding the array or collection.
+<a href=#156 id=156 data-nosnippet>156</a>        </span>base: VarId,
+<a href=#157 id=157 data-nosnippet>157</a>        <span class="doccomment">/// Index or key operand selecting the element.
+<a href=#158 id=158 data-nosnippet>158</a>        </span>index: Operand,
+<a href=#159 id=159 data-nosnippet>159</a>    },
+<a href=#160 id=160 data-nosnippet>160</a>
+<a href=#161 id=161 data-nosnippet>161</a>    <span class="doccomment">/// `base[index] = src` generates `mem_out`.
+<a href=#162 id=162 data-nosnippet>162</a>    </span>StoreElement {
+<a href=#163 id=163 data-nosnippet>163</a>        <span class="doccomment">/// New memory state produced by the store.
+<a href=#164 id=164 data-nosnippet>164</a>        </span>mem_out: VarId,
+<a href=#165 id=165 data-nosnippet>165</a>        <span class="doccomment">/// Memory state the store applies to.
+<a href=#166 id=166 data-nosnippet>166</a>        </span>mem_in: VarId,
+<a href=#167 id=167 data-nosnippet>167</a>        <span class="doccomment">/// Variable holding the array or collection being written.
+<a href=#168 id=168 data-nosnippet>168</a>        </span>base: VarId,
+<a href=#169 id=169 data-nosnippet>169</a>        <span class="doccomment">/// Index or key operand selecting the element.
+<a href=#170 id=170 data-nosnippet>170</a>        </span>index: Operand,
+<a href=#171 id=171 data-nosnippet>171</a>        <span class="doccomment">/// Value stored into the element.
+<a href=#172 id=172 data-nosnippet>172</a>        </span>src: Operand,
+<a href=#173 id=173 data-nosnippet>173</a>    },
+<a href=#174 id=174 data-nosnippet>174</a>
+<a href=#175 id=175 data-nosnippet>175</a>    <span class="comment">// --- Global Environment ---
+<a href=#176 id=176 data-nosnippet>176</a>    </span><span class="doccomment">/// v_dest = global_name
+<a href=#177 id=177 data-nosnippet>177</a>    </span>LoadGlobal {
+<a href=#178 id=178 data-nosnippet>178</a>        <span class="doccomment">/// Variable that receives the global's value.
+<a href=#179 id=179 data-nosnippet>179</a>        </span>dest: VarId,
+<a href=#180 id=180 data-nosnippet>180</a>        <span class="doccomment">/// Memory state the load reads from.
+<a href=#181 id=181 data-nosnippet>181</a>        </span>mem_in: VarId,
+<a href=#182 id=182 data-nosnippet>182</a>        <span class="doccomment">/// Name of the global being read.
+<a href=#183 id=183 data-nosnippet>183</a>        </span>name: String,
+<a href=#184 id=184 data-nosnippet>184</a>    },
+<a href=#185 id=185 data-nosnippet>185</a>
+<a href=#186 id=186 data-nosnippet>186</a>    <span class="doccomment">/// global_name = src
+<a href=#187 id=187 data-nosnippet>187</a>    </span>StoreGlobal {
+<a href=#188 id=188 data-nosnippet>188</a>        <span class="doccomment">/// New memory state produced by the store.
+<a href=#189 id=189 data-nosnippet>189</a>        </span>mem_out: VarId,
+<a href=#190 id=190 data-nosnippet>190</a>        <span class="doccomment">/// Memory state the store applies to.
+<a href=#191 id=191 data-nosnippet>191</a>        </span>mem_in: VarId,
+<a href=#192 id=192 data-nosnippet>192</a>        <span class="doccomment">/// Name of the global being written.
+<a href=#193 id=193 data-nosnippet>193</a>        </span>name: String,
+<a href=#194 id=194 data-nosnippet>194</a>        <span class="doccomment">/// Value stored into the global.
+<a href=#195 id=195 data-nosnippet>195</a>        </span>src: Operand,
+<a href=#196 id=196 data-nosnippet>196</a>    },
+<a href=#197 id=197 data-nosnippet>197</a>
+<a href=#198 id=198 data-nosnippet>198</a>    <span class="comment">// --- Functions &amp; Calls ---
+<a href=#199 id=199 data-nosnippet>199</a>    // Function calls can mutate memory, so they consume mem_in and return mem_out.
+<a href=#200 id=200 data-nosnippet>200</a>    </span><span class="doccomment">/// mem_out, dest = func(args) @ mem_in
+<a href=#201 id=201 data-nosnippet>201</a>    </span>CallStatic {
+<a href=#202 id=202 data-nosnippet>202</a>        <span class="doccomment">/// Variable receiving the call's return value, or `None` when the result is discarded.
+<a href=#203 id=203 data-nosnippet>203</a>        </span>dest: <span class="prelude-ty">Option</span>&lt;VarId&gt;,
+<a href=#204 id=204 data-nosnippet>204</a>        <span class="doccomment">/// Memory state after the call (calls may mutate memory).
+<a href=#205 id=205 data-nosnippet>205</a>        </span>mem_out: VarId,
+<a href=#206 id=206 data-nosnippet>206</a>        <span class="doccomment">/// Memory state the call executes in.
+<a href=#207 id=207 data-nosnippet>207</a>        </span>mem_in: VarId,
+<a href=#208 id=208 data-nosnippet>208</a>        <span class="doccomment">/// Name of the called function as written at the call site.
+<a href=#209 id=209 data-nosnippet>209</a>        </span>func: String,
+<a href=#210 id=210 data-nosnippet>210</a>        <span class="doccomment">/// Argument operands, in call order.
+<a href=#211 id=211 data-nosnippet>211</a>        </span>args: Vec&lt;Operand&gt;,
+<a href=#212 id=212 data-nosnippet>212</a>        <span class="doccomment">/// Keyword/keyed argument names, parallel to `args`: entry `i` is
+<a href=#213 id=213 data-nosnippet>213</a>        /// the name of `args[i]`, or empty when that argument is
+<a href=#214 id=214 data-nosnippet>214</a>        /// positional. Shorter than `args` (or empty) means the source
+<a href=#215 id=215 data-nosnippet>215</a>        /// language, or the lowered node, carries no names - callers must
+<a href=#216 id=216 data-nosnippet>216</a>        /// treat a missing entry as positional. See the `args` field documentation.
+<a href=#217 id=217 data-nosnippet>217</a>        </span>arg_names: Vec&lt;String&gt;,
+<a href=#218 id=218 data-nosnippet>218</a>    },
+<a href=#219 id=219 data-nosnippet>219</a>
+<a href=#220 id=220 data-nosnippet>220</a>    <span class="doccomment">/// mem_out, dest = receiver.method(args) @ mem_in
+<a href=#221 id=221 data-nosnippet>221</a>    </span>CallVirtual {
+<a href=#222 id=222 data-nosnippet>222</a>        <span class="doccomment">/// Variable receiving the call's return value, or `None` when the result is discarded.
+<a href=#223 id=223 data-nosnippet>223</a>        </span>dest: <span class="prelude-ty">Option</span>&lt;VarId&gt;,
+<a href=#224 id=224 data-nosnippet>224</a>        <span class="doccomment">/// Memory state after the call (calls may mutate memory).
+<a href=#225 id=225 data-nosnippet>225</a>        </span>mem_out: VarId,
+<a href=#226 id=226 data-nosnippet>226</a>        <span class="doccomment">/// Memory state the call executes in.
+<a href=#227 id=227 data-nosnippet>227</a>        </span>mem_in: VarId,
+<a href=#228 id=228 data-nosnippet>228</a>        <span class="doccomment">/// Name of the invoked method.
+<a href=#229 id=229 data-nosnippet>229</a>        </span>method: String,
+<a href=#230 id=230 data-nosnippet>230</a>        <span class="doccomment">/// The receiver the method is invoked on (`self`, `this`, or the object before the dot).
+<a href=#231 id=231 data-nosnippet>231</a>        </span>receiver: Operand,
+<a href=#232 id=232 data-nosnippet>232</a>        <span class="doccomment">/// Argument operands, in call order, not including the receiver.
+<a href=#233 id=233 data-nosnippet>233</a>        </span>args: Vec&lt;Operand&gt;,
+<a href=#234 id=234 data-nosnippet>234</a>        <span class="doccomment">/// Parallel to `args`; see [`Instruction::CallStatic`].
+<a href=#235 id=235 data-nosnippet>235</a>        </span>arg_names: Vec&lt;String&gt;,
+<a href=#236 id=236 data-nosnippet>236</a>    },
+<a href=#237 id=237 data-nosnippet>237</a>
+<a href=#238 id=238 data-nosnippet>238</a>    <span class="doccomment">/// mem_out, dest = func_ptr(args) @ mem_in
+<a href=#239 id=239 data-nosnippet>239</a>    </span>CallPointer {
+<a href=#240 id=240 data-nosnippet>240</a>        <span class="doccomment">/// Variable receiving the call's return value, or `None` when the result is discarded.
+<a href=#241 id=241 data-nosnippet>241</a>        </span>dest: <span class="prelude-ty">Option</span>&lt;VarId&gt;,
+<a href=#242 id=242 data-nosnippet>242</a>        <span class="doccomment">/// Memory state after the call (calls may mutate memory).
+<a href=#243 id=243 data-nosnippet>243</a>        </span>mem_out: VarId,
+<a href=#244 id=244 data-nosnippet>244</a>        <span class="doccomment">/// Memory state the call executes in.
+<a href=#245 id=245 data-nosnippet>245</a>        </span>mem_in: VarId,
+<a href=#246 id=246 data-nosnippet>246</a>        <span class="doccomment">/// Operand holding the callee value (a function pointer, closure or callable variable).
+<a href=#247 id=247 data-nosnippet>247</a>        </span>func_ptr: Operand,
+<a href=#248 id=248 data-nosnippet>248</a>        <span class="doccomment">/// Argument operands, in call order.
+<a href=#249 id=249 data-nosnippet>249</a>        </span>args: Vec&lt;Operand&gt;,
+<a href=#250 id=250 data-nosnippet>250</a>        <span class="doccomment">/// Parallel to `args`; see [`Instruction::CallStatic`].
+<a href=#251 id=251 data-nosnippet>251</a>        </span>arg_names: Vec&lt;String&gt;,
+<a href=#252 id=252 data-nosnippet>252</a>    },
+<a href=#253 id=253 data-nosnippet>253</a>
+<a href=#254 id=254 data-nosnippet>254</a>    <span class="comment">// --- Memory &amp; Pointers (Systems Languages) ---
+<a href=#255 id=255 data-nosnippet>255</a>    </span><span class="doccomment">/// mem_out, v_dest = new Object/Array() @ mem_in
+<a href=#256 id=256 data-nosnippet>256</a>    </span>Allocate {
+<a href=#257 id=257 data-nosnippet>257</a>        <span class="doccomment">/// Variable that receives the new object or array.
+<a href=#258 id=258 data-nosnippet>258</a>        </span>dest: VarId,
+<a href=#259 id=259 data-nosnippet>259</a>        <span class="doccomment">/// Memory state after the allocation.
+<a href=#260 id=260 data-nosnippet>260</a>        </span>mem_out: VarId,
+<a href=#261 id=261 data-nosnippet>261</a>        <span class="doccomment">/// Memory state the allocation executes in.
+<a href=#262 id=262 data-nosnippet>262</a>        </span>mem_in: VarId,
+<a href=#263 id=263 data-nosnippet>263</a>        <span class="doccomment">/// What is being allocated; used by points-to analysis to name the abstract object.
+<a href=#264 id=264 data-nosnippet>264</a>        </span>kind: AllocationKind,
+<a href=#265 id=265 data-nosnippet>265</a>    },
+<a href=#266 id=266 data-nosnippet>266</a>
+<a href=#267 id=267 data-nosnippet>267</a>    <span class="doccomment">/// v_dest = &amp;src
+<a href=#268 id=268 data-nosnippet>268</a>    </span>AddressOf {
+<a href=#269 id=269 data-nosnippet>269</a>        <span class="doccomment">/// Variable that receives the address.
+<a href=#270 id=270 data-nosnippet>270</a>        </span>dest: VarId,
+<a href=#271 id=271 data-nosnippet>271</a>        <span class="doccomment">/// Variable whose address is taken.
+<a href=#272 id=272 data-nosnippet>272</a>        </span>src: VarId,
+<a href=#273 id=273 data-nosnippet>273</a>    },
+<a href=#274 id=274 data-nosnippet>274</a>
+<a href=#275 id=275 data-nosnippet>275</a>    <span class="doccomment">/// v_dest = *ptr @ mem_in
+<a href=#276 id=276 data-nosnippet>276</a>    </span>Dereference {
+<a href=#277 id=277 data-nosnippet>277</a>        <span class="doccomment">/// Variable that receives the dereferenced value.
+<a href=#278 id=278 data-nosnippet>278</a>        </span>dest: VarId,
+<a href=#279 id=279 data-nosnippet>279</a>        <span class="doccomment">/// Memory state the load reads from.
+<a href=#280 id=280 data-nosnippet>280</a>        </span>mem_in: VarId,
+<a href=#281 id=281 data-nosnippet>281</a>        <span class="doccomment">/// Pointer operand being dereferenced.
+<a href=#282 id=282 data-nosnippet>282</a>        </span>ptr: Operand,
+<a href=#283 id=283 data-nosnippet>283</a>    },
+<a href=#284 id=284 data-nosnippet>284</a>
+<a href=#285 id=285 data-nosnippet>285</a>    <span class="comment">// --- Types &amp; Multiple Returns ---
+<a href=#286 id=286 data-nosnippet>286</a>    </span><span class="doccomment">/// Converts `src` to `target_type`, defining `dest`.
+<a href=#287 id=287 data-nosnippet>287</a>    </span>Cast {
+<a href=#288 id=288 data-nosnippet>288</a>        <span class="doccomment">/// Variable that receives the converted value.
+<a href=#289 id=289 data-nosnippet>289</a>        </span>dest: VarId,
+<a href=#290 id=290 data-nosnippet>290</a>        <span class="doccomment">/// Value being converted.
+<a href=#291 id=291 data-nosnippet>291</a>        </span>src: Operand,
+<a href=#292 id=292 data-nosnippet>292</a>        <span class="doccomment">/// Name of the target type as written in the source.
+<a href=#293 id=293 data-nosnippet>293</a>        </span>target_type: String,
+<a href=#294 id=294 data-nosnippet>294</a>    },
+<a href=#295 id=295 data-nosnippet>295</a>    <span class="doccomment">/// Extracts one component of a tuple or multiple-return value.
+<a href=#296 id=296 data-nosnippet>296</a>    </span>ExtractValue {
+<a href=#297 id=297 data-nosnippet>297</a>        <span class="doccomment">/// Variable that receives the extracted component.
+<a href=#298 id=298 data-nosnippet>298</a>        </span>dest: VarId,
+<a href=#299 id=299 data-nosnippet>299</a>        <span class="doccomment">/// The tuple (or multi-value result) being unpacked.
+<a href=#300 id=300 data-nosnippet>300</a>        </span>tuple: Operand,
+<a href=#301 id=301 data-nosnippet>301</a>        <span class="doccomment">/// Zero-based position of the component.
+<a href=#302 id=302 data-nosnippet>302</a>        </span>index: usize,
+<a href=#303 id=303 data-nosnippet>303</a>    },
+<a href=#304 id=304 data-nosnippet>304</a>
+<a href=#305 id=305 data-nosnippet>305</a>    <span class="comment">// --- Operations &amp; Async ---
+<a href=#306 id=306 data-nosnippet>306</a>    </span><span class="doccomment">/// A binary operation, `dest = lhs op rhs`.
+<a href=#307 id=307 data-nosnippet>307</a>    </span>BinaryOp {
+<a href=#308 id=308 data-nosnippet>308</a>        <span class="doccomment">/// Variable that receives the result.
+<a href=#309 id=309 data-nosnippet>309</a>        </span>dest: VarId,
+<a href=#310 id=310 data-nosnippet>310</a>        <span class="doccomment">/// Operator as recorded by lowering: the token as written (for example `==`, `&amp;&amp;`), except that `+` is recorded as `concat`.
+<a href=#311 id=311 data-nosnippet>311</a>        </span>op: String,
+<a href=#312 id=312 data-nosnippet>312</a>        <span class="doccomment">/// Left operand.
+<a href=#313 id=313 data-nosnippet>313</a>        </span>lhs: Operand,
+<a href=#314 id=314 data-nosnippet>314</a>        <span class="doccomment">/// Right operand.
+<a href=#315 id=315 data-nosnippet>315</a>        </span>rhs: Operand,
+<a href=#316 id=316 data-nosnippet>316</a>    },
+<a href=#317 id=317 data-nosnippet>317</a>    <span class="doccomment">/// A unary operation, `dest = op src`.
+<a href=#318 id=318 data-nosnippet>318</a>    </span>UnaryOp {
+<a href=#319 id=319 data-nosnippet>319</a>        <span class="doccomment">/// Variable that receives the result.
+<a href=#320 id=320 data-nosnippet>320</a>        </span>dest: VarId,
+<a href=#321 id=321 data-nosnippet>321</a>        <span class="doccomment">/// Operator token as written (for example `!`, `-`, `~`), or `neg` when none was found.
+<a href=#322 id=322 data-nosnippet>322</a>        </span>op: String,
+<a href=#323 id=323 data-nosnippet>323</a>        <span class="doccomment">/// Operand.
+<a href=#324 id=324 data-nosnippet>324</a>        </span>src: Operand,
+<a href=#325 id=325 data-nosnippet>325</a>    },
+<a href=#326 id=326 data-nosnippet>326</a>    <span class="doccomment">/// Awaits a promise or future; `dest` receives the resolved value.
+<a href=#327 id=327 data-nosnippet>327</a>    </span>Await {
+<a href=#328 id=328 data-nosnippet>328</a>        <span class="doccomment">/// Variable that receives the resolved value.
+<a href=#329 id=329 data-nosnippet>329</a>        </span>dest: VarId,
+<a href=#330 id=330 data-nosnippet>330</a>        <span class="doccomment">/// Memory state after the await (other code may run while suspended).
+<a href=#331 id=331 data-nosnippet>331</a>        </span>mem_out: VarId,
+<a href=#332 id=332 data-nosnippet>332</a>        <span class="doccomment">/// Memory state the await starts in.
+<a href=#333 id=333 data-nosnippet>333</a>        </span>mem_in: VarId,
+<a href=#334 id=334 data-nosnippet>334</a>        <span class="doccomment">/// The promise or future being awaited.
+<a href=#335 id=335 data-nosnippet>335</a>        </span>promise: Operand,
+<a href=#336 id=336 data-nosnippet>336</a>    },
+<a href=#337 id=337 data-nosnippet>337</a>    <span class="doccomment">/// Yields a value from a generator or coroutine; `dest` receives whatever the caller sends back.
+<a href=#338 id=338 data-nosnippet>338</a>    </span>Yield {
+<a href=#339 id=339 data-nosnippet>339</a>        <span class="doccomment">/// Variable that receives the value sent back into the generator, if it is used.
+<a href=#340 id=340 data-nosnippet>340</a>        </span>dest: <span class="prelude-ty">Option</span>&lt;VarId&gt;,
+<a href=#341 id=341 data-nosnippet>341</a>        <span class="doccomment">/// Memory state after the yield.
+<a href=#342 id=342 data-nosnippet>342</a>        </span>mem_out: VarId,
+<a href=#343 id=343 data-nosnippet>343</a>        <span class="doccomment">/// Memory state the yield starts in.
+<a href=#344 id=344 data-nosnippet>344</a>        </span>mem_in: VarId,
+<a href=#345 id=345 data-nosnippet>345</a>        <span class="doccomment">/// The yielded value, if any.
+<a href=#346 id=346 data-nosnippet>346</a>        </span>src: <span class="prelude-ty">Option</span>&lt;Operand&gt;,
+<a href=#347 id=347 data-nosnippet>347</a>    },
+<a href=#348 id=348 data-nosnippet>348</a>}
+<a href=#349 id=349 data-nosnippet>349</a>
+<a href=#350 id=350 data-nosnippet>350</a><span class="kw">impl </span>Instruction {
+<a href=#351 id=351 data-nosnippet>351</a>    <span class="doccomment">/// The value variable this instruction defines, if any.
+<a href=#352 id=352 data-nosnippet>352</a>    ///
+<a href=#353 id=353 data-nosnippet>353</a>    /// Covers every instruction kind that produces a value: assignments,
+<a href=#354 id=354 data-nosnippet>354</a>    /// loads, calls (when the result is used), allocations, address-of,
+<a href=#355 id=355 data-nosnippet>355</a>    /// dereference, casts, aggregate extraction, unary/binary operations,
+<a href=#356 id=356 data-nosnippet>356</a>    /// `await` and `yield`. Memory-state outputs are not included; see
+<a href=#357 id=357 data-nosnippet>357</a>    /// `Instruction::mem_out`. This is the one definition of "what does this
+<a href=#358 id=358 data-nosnippet>358</a>    /// instruction define"; do not re-match the variants elsewhere, because
+<a href=#359 id=359 data-nosnippet>359</a>    /// a copy that forgets a variant silently drops findings on it.
+<a href=#360 id=360 data-nosnippet>360</a>    </span><span class="attr">#[must_use]
+<a href=#361 id=361 data-nosnippet>361</a>    </span><span class="kw">pub fn </span>dest(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;VarId&gt; {
+<a href=#362 id=362 data-nosnippet>362</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#363 id=363 data-nosnippet>363</a>            <span class="self">Self</span>::Assign { dest, .. }
+<a href=#364 id=364 data-nosnippet>364</a>            | <span class="self">Self</span>::LoadField { dest, .. }
+<a href=#365 id=365 data-nosnippet>365</a>            | <span class="self">Self</span>::LoadElement { dest, .. }
+<a href=#366 id=366 data-nosnippet>366</a>            | <span class="self">Self</span>::LoadGlobal { dest, .. }
+<a href=#367 id=367 data-nosnippet>367</a>            | <span class="self">Self</span>::Allocate { dest, .. }
+<a href=#368 id=368 data-nosnippet>368</a>            | <span class="self">Self</span>::AddressOf { dest, .. }
+<a href=#369 id=369 data-nosnippet>369</a>            | <span class="self">Self</span>::Dereference { dest, .. }
+<a href=#370 id=370 data-nosnippet>370</a>            | <span class="self">Self</span>::Cast { dest, .. }
+<a href=#371 id=371 data-nosnippet>371</a>            | <span class="self">Self</span>::ExtractValue { dest, .. }
+<a href=#372 id=372 data-nosnippet>372</a>            | <span class="self">Self</span>::BinaryOp { dest, .. }
+<a href=#373 id=373 data-nosnippet>373</a>            | <span class="self">Self</span>::UnaryOp { dest, .. }
+<a href=#374 id=374 data-nosnippet>374</a>            | <span class="self">Self</span>::Await { dest, .. } =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>dest),
+<a href=#375 id=375 data-nosnippet>375</a>            <span class="self">Self</span>::CallStatic { dest, .. }
+<a href=#376 id=376 data-nosnippet>376</a>            | <span class="self">Self</span>::CallVirtual { dest, .. }
+<a href=#377 id=377 data-nosnippet>377</a>            | <span class="self">Self</span>::CallPointer { dest, .. }
+<a href=#378 id=378 data-nosnippet>378</a>            | <span class="self">Self</span>::Yield { dest, .. } =&gt; <span class="kw-2">*</span>dest,
+<a href=#379 id=379 data-nosnippet>379</a>            <span class="comment">// No `_` arm on purpose: a new instruction kind must decide here
+<a href=#380 id=380 data-nosnippet>380</a>            // whether it defines a value.
+<a href=#381 id=381 data-nosnippet>381</a>            </span><span class="self">Self</span>::StoreField { .. } | <span class="self">Self</span>::StoreElement { .. } | <span class="self">Self</span>::StoreGlobal { .. } =&gt; <span class="prelude-val">None</span>,
+<a href=#382 id=382 data-nosnippet>382</a>        }
+<a href=#383 id=383 data-nosnippet>383</a>    }
+<a href=#384 id=384 data-nosnippet>384</a>
+<a href=#385 id=385 data-nosnippet>385</a>    <span class="doccomment">/// The memory-state variable this instruction produces, if any.
+<a href=#386 id=386 data-nosnippet>386</a>    </span><span class="attr">#[must_use]
+<a href=#387 id=387 data-nosnippet>387</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>mem_out(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;VarId&gt; {
+<a href=#388 id=388 data-nosnippet>388</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#389 id=389 data-nosnippet>389</a>            <span class="self">Self</span>::StoreField { mem_out, .. }
+<a href=#390 id=390 data-nosnippet>390</a>            | <span class="self">Self</span>::StoreElement { mem_out, .. }
+<a href=#391 id=391 data-nosnippet>391</a>            | <span class="self">Self</span>::StoreGlobal { mem_out, .. }
+<a href=#392 id=392 data-nosnippet>392</a>            | <span class="self">Self</span>::CallStatic { mem_out, .. }
+<a href=#393 id=393 data-nosnippet>393</a>            | <span class="self">Self</span>::CallVirtual { mem_out, .. }
+<a href=#394 id=394 data-nosnippet>394</a>            | <span class="self">Self</span>::CallPointer { mem_out, .. }
+<a href=#395 id=395 data-nosnippet>395</a>            | <span class="self">Self</span>::Allocate { mem_out, .. }
+<a href=#396 id=396 data-nosnippet>396</a>            | <span class="self">Self</span>::Await { mem_out, .. }
+<a href=#397 id=397 data-nosnippet>397</a>            | <span class="self">Self</span>::Yield { mem_out, .. } =&gt; <span class="prelude-val">Some</span>(<span class="kw-2">*</span>mem_out),
+<a href=#398 id=398 data-nosnippet>398</a>            <span class="self">Self</span>::Assign { .. }
+<a href=#399 id=399 data-nosnippet>399</a>            | <span class="self">Self</span>::LoadField { .. }
+<a href=#400 id=400 data-nosnippet>400</a>            | <span class="self">Self</span>::LoadElement { .. }
+<a href=#401 id=401 data-nosnippet>401</a>            | <span class="self">Self</span>::LoadGlobal { .. }
+<a href=#402 id=402 data-nosnippet>402</a>            | <span class="self">Self</span>::AddressOf { .. }
+<a href=#403 id=403 data-nosnippet>403</a>            | <span class="self">Self</span>::Dereference { .. }
+<a href=#404 id=404 data-nosnippet>404</a>            | <span class="self">Self</span>::Cast { .. }
+<a href=#405 id=405 data-nosnippet>405</a>            | <span class="self">Self</span>::ExtractValue { .. }
+<a href=#406 id=406 data-nosnippet>406</a>            | <span class="self">Self</span>::BinaryOp { .. }
+<a href=#407 id=407 data-nosnippet>407</a>            | <span class="self">Self</span>::UnaryOp { .. } =&gt; <span class="prelude-val">None</span>,
+<a href=#408 id=408 data-nosnippet>408</a>        }
+<a href=#409 id=409 data-nosnippet>409</a>    }
+<a href=#410 id=410 data-nosnippet>410</a>
+<a href=#411 id=411 data-nosnippet>411</a>    <span class="doccomment">/// Every variable this instruction defines: the value result first, then
+<a href=#412 id=412 data-nosnippet>412</a>    /// the memory-state output.
+<a href=#413 id=413 data-nosnippet>413</a>    </span><span class="attr">#[must_use]
+<a href=#414 id=414 data-nosnippet>414</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>defs(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;VarId&gt; {
+<a href=#415 id=415 data-nosnippet>415</a>        <span class="self">self</span>.dest().into_iter().chain(<span class="self">self</span>.mem_out()).collect()
+<a href=#416 id=416 data-nosnippet>416</a>    }
+<a href=#417 id=417 data-nosnippet>417</a>}
+<a href=#418 id=418 data-nosnippet>418</a>
+<a href=#419 id=419 data-nosnippet>419</a><span class="doccomment">/// Determines how control flow exits a BasicBlock.
+<a href=#420 id=420 data-nosnippet>420</a></span><span class="attr">#[derive(Debug, Clone)]
+<a href=#421 id=421 data-nosnippet>421</a>#[cfg_attr(feature = <span class="string">"serialize"</span>, derive(serde::Serialize, serde::Deserialize))]
+<a href=#422 id=422 data-nosnippet>422</a></span><span class="kw">pub enum </span>Terminator {
+<a href=#423 id=423 data-nosnippet>423</a>    <span class="doccomment">/// Unconditional jump to the given block.
+<a href=#424 id=424 data-nosnippet>424</a>    </span>Jump(BlockId),
+<a href=#425 id=425 data-nosnippet>425</a>    <span class="doccomment">/// Two-way conditional branch on `cond`.
+<a href=#426 id=426 data-nosnippet>426</a>    </span>Branch {
+<a href=#427 id=427 data-nosnippet>427</a>        <span class="doccomment">/// Condition operand.
+<a href=#428 id=428 data-nosnippet>428</a>        </span>cond: Operand,
+<a href=#429 id=429 data-nosnippet>429</a>        <span class="doccomment">/// Block taken when the condition is truthy.
+<a href=#430 id=430 data-nosnippet>430</a>        </span>true_block: BlockId,
+<a href=#431 id=431 data-nosnippet>431</a>        <span class="doccomment">/// Block taken when the condition is falsy.
+<a href=#432 id=432 data-nosnippet>432</a>        </span>false_block: BlockId,
+<a href=#433 id=433 data-nosnippet>433</a>    },
+<a href=#434 id=434 data-nosnippet>434</a>    <span class="doccomment">/// Multi-way branch on `cond`.
+<a href=#435 id=435 data-nosnippet>435</a>    </span>Switch {
+<a href=#436 id=436 data-nosnippet>436</a>        <span class="doccomment">/// Value being switched on.
+<a href=#437 id=437 data-nosnippet>437</a>        </span>cond: Operand,
+<a href=#438 id=438 data-nosnippet>438</a>        <span class="doccomment">/// `(case value, target block)` pairs in source order.
+<a href=#439 id=439 data-nosnippet>439</a>        </span>cases: Vec&lt;(Operand, BlockId)&gt;,
+<a href=#440 id=440 data-nosnippet>440</a>        <span class="doccomment">/// Block taken when no case matches.
+<a href=#441 id=441 data-nosnippet>441</a>        </span>default_block: BlockId,
+<a href=#442 id=442 data-nosnippet>442</a>    },
+<a href=#443 id=443 data-nosnippet>443</a>    <span class="doccomment">/// Returns from the function.
+<a href=#444 id=444 data-nosnippet>444</a>    </span>Return {
+<a href=#445 id=445 data-nosnippet>445</a>        <span class="doccomment">/// Returned value, or `None` for a bare return.
+<a href=#446 id=446 data-nosnippet>446</a>        </span>src: <span class="prelude-ty">Option</span>&lt;Operand&gt;,
+<a href=#447 id=447 data-nosnippet>447</a>    },
+<a href=#448 id=448 data-nosnippet>448</a>    <span class="doccomment">/// Raises an exception or panics with the given value.
+<a href=#449 id=449 data-nosnippet>449</a>    </span>Throw {
+<a href=#450 id=450 data-nosnippet>450</a>        <span class="doccomment">/// Value being thrown.
+<a href=#451 id=451 data-nosnippet>451</a>        </span>src: Operand,
+<a href=#452 id=452 data-nosnippet>452</a>    },
+<a href=#453 id=453 data-nosnippet>453</a>    <span class="doccomment">/// No terminator yet: the block is still under construction (the state of every block created by `BasicBlock::new`).
+<a href=#454 id=454 data-nosnippet>454</a>    </span><span class="prelude-val">None</span>,
+<a href=#455 id=455 data-nosnippet>455</a>}
+<a href=#456 id=456 data-nosnippet>456</a>
+<a href=#457 id=457 data-nosnippet>457</a><span class="doccomment">/// A straight-line sequence of instructions with a single entry and a single terminator.
+<a href=#458 id=458 data-nosnippet>458</a></span><span class="attr">#[derive(Debug, Clone)]
+<a href=#459 id=459 data-nosnippet>459</a>#[cfg_attr(feature = <span class="string">"serialize"</span>, derive(serde::Serialize, serde::Deserialize))]
+<a href=#460 id=460 data-nosnippet>460</a></span><span class="kw">pub struct </span>BasicBlock {
+<a href=#461 id=461 data-nosnippet>461</a>    <span class="doccomment">/// Identifier of this block within its function.
+<a href=#462 id=462 data-nosnippet>462</a>    </span><span class="kw">pub </span>id: BlockId,
+<a href=#463 id=463 data-nosnippet>463</a>    <span class="doccomment">/// Phi nodes evaluated at block entry, before any instruction.
+<a href=#464 id=464 data-nosnippet>464</a>    </span><span class="kw">pub </span>phis: Vec&lt;Phi&gt;,
+<a href=#465 id=465 data-nosnippet>465</a>    <span class="doccomment">/// Instructions in execution order.
+<a href=#466 id=466 data-nosnippet>466</a>    </span><span class="kw">pub </span>instructions: Vec&lt;Instruction&gt;,
+<a href=#467 id=467 data-nosnippet>467</a>    <span class="doccomment">/// How control leaves the block.
+<a href=#468 id=468 data-nosnippet>468</a>    </span><span class="kw">pub </span>terminator: Terminator,
+<a href=#469 id=469 data-nosnippet>469</a>    <span class="doccomment">/// Blocks with an edge into this one.
+<a href=#470 id=470 data-nosnippet>470</a>    </span><span class="kw">pub </span>predecessors: Vec&lt;BlockId&gt;,
+<a href=#471 id=471 data-nosnippet>471</a>    <span class="doccomment">/// Blocks this one has an edge to.
+<a href=#472 id=472 data-nosnippet>472</a>    </span><span class="kw">pub </span>successors: Vec&lt;BlockId&gt;,
+<a href=#473 id=473 data-nosnippet>473</a>}
+<a href=#474 id=474 data-nosnippet>474</a>
+<a href=#475 id=475 data-nosnippet>475</a><span class="kw">impl </span>BasicBlock {
+<a href=#476 id=476 data-nosnippet>476</a>    <span class="doccomment">/// Creates an empty block with the given id: no phis, no instructions, [`Terminator::None`] and no edges.
+<a href=#477 id=477 data-nosnippet>477</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new(id: BlockId) -&gt; <span class="self">Self </span>{
+<a href=#478 id=478 data-nosnippet>478</a>        <span class="self">Self </span>{
+<a href=#479 id=479 data-nosnippet>479</a>            id,
+<a href=#480 id=480 data-nosnippet>480</a>            phis: Vec::new(),
+<a href=#481 id=481 data-nosnippet>481</a>            instructions: Vec::new(),
+<a href=#482 id=482 data-nosnippet>482</a>            terminator: Terminator::None,
+<a href=#483 id=483 data-nosnippet>483</a>            predecessors: Vec::new(),
+<a href=#484 id=484 data-nosnippet>484</a>            successors: Vec::new(),
+<a href=#485 id=485 data-nosnippet>485</a>        }
+<a href=#486 id=486 data-nosnippet>486</a>    }
+<a href=#487 id=487 data-nosnippet>487</a>}
+<a href=#488 id=488 data-nosnippet>488</a>
+<a href=#489 id=489 data-nosnippet>489</a><span class="doccomment">/// The IR of one function: its parameters, control-flow graph and per-variable metadata.
+<a href=#490 id=490 data-nosnippet>490</a>///
+<a href=#491 id=491 data-nosnippet>491</a>/// The heap is modelled explicitly. Every function owns a hidden memory-state parameter ([`FunctionIR::initial_memory_state`]) and every memory-affecting instruction consumes and produces a memory-state variable, so flow-sensitive heap reasoning is ordinary SSA dataflow.
+<a href=#492 id=492 data-nosnippet>492</a></span><span class="attr">#[derive(Debug, Clone)]
+<a href=#493 id=493 data-nosnippet>493</a>#[cfg_attr(feature = <span class="string">"serialize"</span>, derive(serde::Serialize, serde::Deserialize))]
+<a href=#494 id=494 data-nosnippet>494</a></span><span class="kw">pub struct </span>FunctionIR {
+<a href=#495 id=495 data-nosnippet>495</a>    <span class="doccomment">/// Program-level name of the function.
+<a href=#496 id=496 data-nosnippet>496</a>    </span><span class="kw">pub </span>name: String,
+<a href=#497 id=497 data-nosnippet>497</a>    <span class="doccomment">/// Formal parameters in declaration order, not including the hidden memory-state parameter.
+<a href=#498 id=498 data-nosnippet>498</a>    </span><span class="kw">pub </span>parameters: Vec&lt;VarId&gt;,
+<a href=#499 id=499 data-nosnippet>499</a>    <span class="doccomment">/// The initial Memory State parameter for the function (representing the heap upon entry)
+<a href=#500 id=500 data-nosnippet>500</a>    </span><span class="kw">pub </span>initial_memory_state: VarId,
+<a href=#501 id=501 data-nosnippet>501</a>    <span class="doccomment">/// All basic blocks, keyed by their [`BlockId`].
+<a href=#502 id=502 data-nosnippet>502</a>    </span><span class="kw">pub </span>blocks: FxHashMap&lt;BlockId, BasicBlock&gt;,
+<a href=#503 id=503 data-nosnippet>503</a>    <span class="doccomment">/// The block execution starts in.
+<a href=#504 id=504 data-nosnippet>504</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) entry_block: BlockId,
+<a href=#505 id=505 data-nosnippet>505</a>    <span class="doccomment">/// Source-level metadata for every variable, including memory states.
+<a href=#506 id=506 data-nosnippet>506</a>    </span><span class="kw">pub </span>var_metadata: FxHashMap&lt;VarId, VarMetadata&gt;,
+<a href=#507 id=507 data-nosnippet>507</a>    <span class="doccomment">/// Language key this IR was lowered from (`spec.fact_language()`:
+<a href=#508 id=508 data-nosnippet>508</a>    /// `"typescript"`,
+<a href=#509 id=509 data-nosnippet>509</a>    /// `"rust"`, ...). Sink and sanitizer facts are language-keyed, so every
+<a href=#510 id=510 data-nosnippet>510</a>    /// call site must know its own language: without this, a Rust
+<a href=#511 id=511 data-nosnippet>511</a>    /// `File::create` signature would fire on a JavaScript `prisma.create`
+<a href=#512 id=512 data-nosnippet>512</a>    /// in the same mixed-language scan. Empty when the IR was built by hand
+<a href=#513 id=513 data-nosnippet>513</a>    /// (synthetic test IRs) or decoded from legacy data.
+<a href=#514 id=514 data-nosnippet>514</a>    </span><span class="attr">#[cfg_attr(feature = <span class="string">"serialize"</span>, serde(default))]
+<a href=#515 id=515 data-nosnippet>515</a>    </span><span class="kw">pub </span>language: String,
+<a href=#516 id=516 data-nosnippet>516</a>    <span class="doccomment">/// Program name of the innermost enclosing extracted function, when this
+<a href=#517 id=517 data-nosnippet>517</a>    /// function was extracted from a nested position (None for module scope).
+<a href=#518 id=518 data-nosnippet>518</a>    /// Closure edges resolve free variables through this lexical chain.
+<a href=#519 id=519 data-nosnippet>519</a>    </span><span class="attr">#[cfg_attr(feature = <span class="string">"serialize"</span>, serde(default))]
+<a href=#520 id=520 data-nosnippet>520</a>    </span><span class="kw">pub </span>enclosing_fn: <span class="prelude-ty">Option</span>&lt;String&gt;,
+<a href=#521 id=521 data-nosnippet>521</a>    <span class="doccomment">/// Decorator / attribute call names applied to this function's
+<a href=#522 id=522 data-nosnippet>522</a>    /// definition (`@guard`, `#[guard]`). A decorator executes before ANY
+<a href=#523 id=523 data-nosnippet>523</a>    /// statement of the body, so policy guard requirements are satisfied
+<a href=#524 id=524 data-nosnippet>524</a>    /// by a matching entry guard without a guard call inside the body.
+<a href=#525 id=525 data-nosnippet>525</a>    </span><span class="attr">#[cfg_attr(feature = <span class="string">"serialize"</span>, serde(default))]
+<a href=#526 id=526 data-nosnippet>526</a>    </span><span class="kw">pub </span>entry_guards: Vec&lt;String&gt;,
+<a href=#527 id=527 data-nosnippet>527</a>    <span class="doccomment">/// This IR is a module-level *data* binding, not a callable function:
+<a href=#528 id=528 data-nosnippet>528</a>    /// `const tools = {...}`, `const client = require("pkg")`. The harness
+<a href=#529 id=529 data-nosnippet>529</a>    /// lowers such initializers so non-dataflow checkers can assert policy
+<a href=#530 id=530 data-nosnippet>530</a>    /// over static configuration, but a call written with the binding's name
+<a href=#531 id=531 data-nosnippet>531</a>    /// (`client(req, res)`) is a call into the library, never into this IR.
+<a href=#532 id=532 data-nosnippet>532</a>    /// Resolving it here would hand the call an empty parameter list and a
+<a href=#533 id=533 data-nosnippet>533</a>    /// vacuous summary, which deleted the call site's pass-through taint
+<a href=#534 id=534 data-nosnippet>534</a>    /// edges and made every call through a `require` binding read Unknown.
+<a href=#535 id=535 data-nosnippet>535</a>    </span><span class="attr">#[cfg_attr(feature = <span class="string">"serialize"</span>, serde(default))]
+<a href=#536 id=536 data-nosnippet>536</a>    </span><span class="kw">pub </span>is_static_data: bool,
+<a href=#537 id=537 data-nosnippet>537</a>    <span class="doccomment">/// True when the per-function analysis budget ran out while preparing
+<a href=#538 id=538 data-nosnippet>538</a>    /// this IR (SSA construction degraded to flow-insensitive form), so this
+<a href=#539 id=539 data-nosnippet>539</a>    /// function was analyzed with less precision than usual. The scanner
+<a href=#540 id=540 data-nosnippet>540</a>    /// reports every such function as `analysis_incomplete` instead of
+<a href=#541 id=541 data-nosnippet>541</a>    /// silently producing weaker results for it.
+<a href=#542 id=542 data-nosnippet>542</a>    </span><span class="attr">#[cfg_attr(feature = <span class="string">"serialize"</span>, serde(default))]
+<a href=#543 id=543 data-nosnippet>543</a>    </span><span class="kw">pub </span>analysis_incomplete: bool,
+<a href=#544 id=544 data-nosnippet>544</a>    <span class="attr">#[cfg_attr(feature = <span class="string">"serialize"</span>, serde(default))]
+<a href=#545 id=545 data-nosnippet>545</a>    </span><span class="comment">// legacy safety: recompute via max ids if absent
+<a href=#546 id=546 data-nosnippet>546</a>    </span>next_var_id: usize,
+<a href=#547 id=547 data-nosnippet>547</a>    <span class="attr">#[cfg_attr(feature = <span class="string">"serialize"</span>, serde(default))]
+<a href=#548 id=548 data-nosnippet>548</a>    </span>next_block_id: usize,
+<a href=#549 id=549 data-nosnippet>549</a>}
+<a href=#550 id=550 data-nosnippet>550</a>
+<a href=#551 id=551 data-nosnippet>551</a><span class="kw">impl </span>FunctionIR {
+<a href=#552 id=552 data-nosnippet>552</a>    <span class="doccomment">/// Creates an empty function with one empty entry block, and allocates the hidden memory-state parameter as [`FunctionIR::initial_memory_state`].
+<a href=#553 id=553 data-nosnippet>553</a>    </span><span class="kw">pub fn </span>new(name: String) -&gt; <span class="self">Self </span>{
+<a href=#554 id=554 data-nosnippet>554</a>        <span class="kw">let </span>entry_id = BlockId(<span class="number">0</span>);
+<a href=#555 id=555 data-nosnippet>555</a>        <span class="kw">let </span><span class="kw-2">mut </span>blocks = FxHashMap::default();
+<a href=#556 id=556 data-nosnippet>556</a>        blocks.insert(entry_id, BasicBlock::new(entry_id));
+<a href=#557 id=557 data-nosnippet>557</a>
+<a href=#558 id=558 data-nosnippet>558</a>        <span class="kw">let </span><span class="kw-2">mut </span>f = <span class="self">Self </span>{
+<a href=#559 id=559 data-nosnippet>559</a>            name,
+<a href=#560 id=560 data-nosnippet>560</a>            parameters: Vec::new(),
+<a href=#561 id=561 data-nosnippet>561</a>            initial_memory_state: VarId(<span class="number">0</span>), <span class="comment">// Placeholder
+<a href=#562 id=562 data-nosnippet>562</a>            </span>blocks,
+<a href=#563 id=563 data-nosnippet>563</a>            entry_block: entry_id,
+<a href=#564 id=564 data-nosnippet>564</a>            var_metadata: FxHashMap::default(),
+<a href=#565 id=565 data-nosnippet>565</a>            language: String::new(),
+<a href=#566 id=566 data-nosnippet>566</a>            enclosing_fn: <span class="prelude-val">None</span>,
+<a href=#567 id=567 data-nosnippet>567</a>            entry_guards: Vec::new(),
+<a href=#568 id=568 data-nosnippet>568</a>            is_static_data: <span class="bool-val">false</span>,
+<a href=#569 id=569 data-nosnippet>569</a>            analysis_incomplete: <span class="bool-val">false</span>,
+<a href=#570 id=570 data-nosnippet>570</a>            next_var_id: <span class="number">1</span>,
+<a href=#571 id=571 data-nosnippet>571</a>            next_block_id: <span class="number">1</span>,
+<a href=#572 id=572 data-nosnippet>572</a>        };
+<a href=#573 id=573 data-nosnippet>573</a>
+<a href=#574 id=574 data-nosnippet>574</a>        <span class="comment">// Allocate the hidden Memory State parameter
+<a href=#575 id=575 data-nosnippet>575</a>        </span>f.initial_memory_state = f.new_var(VarMetadata {
+<a href=#576 id=576 data-nosnippet>576</a>            source_name: <span class="prelude-val">Some</span>(INITIAL_HEAP_STATE.into()),
+<a href=#577 id=577 data-nosnippet>577</a>            type_name: <span class="prelude-val">None</span>,
+<a href=#578 id=578 data-nosnippet>578</a>            byte_range: <span class="prelude-val">None</span>,
+<a href=#579 id=579 data-nosnippet>579</a>            is_memory_state: <span class="bool-val">true</span>,
+<a href=#580 id=580 data-nosnippet>580</a>            object_keys: Vec::new(),
+<a href=#581 id=581 data-nosnippet>581</a>            declared: <span class="bool-val">false</span>,
+<a href=#582 id=582 data-nosnippet>582</a>        });
+<a href=#583 id=583 data-nosnippet>583</a>
+<a href=#584 id=584 data-nosnippet>584</a>        f
+<a href=#585 id=585 data-nosnippet>585</a>    }
+<a href=#586 id=586 data-nosnippet>586</a>
+<a href=#587 id=587 data-nosnippet>587</a>    <span class="doccomment">/// Source name of `var`, or `v&lt;id&gt;` when lowering recorded none.
+<a href=#588 id=588 data-nosnippet>588</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>var_name(<span class="kw-2">&amp;</span><span class="self">self</span>, var: VarId) -&gt; String {
+<a href=#589 id=589 data-nosnippet>589</a>        <span class="self">self</span>.var_metadata
+<a href=#590 id=590 data-nosnippet>590</a>            .get(<span class="kw-2">&amp;</span>var)
+<a href=#591 id=591 data-nosnippet>591</a>            .and_then(|m| m.source_name.clone())
+<a href=#592 id=592 data-nosnippet>592</a>            .unwrap_or_else(|| <span class="macro">format!</span>(<span class="string">"v{}"</span>, var.<span class="number">0</span>))
+<a href=#593 id=593 data-nosnippet>593</a>    }
+<a href=#594 id=594 data-nosnippet>594</a>
+<a href=#595 id=595 data-nosnippet>595</a>    <span class="doccomment">/// Byte range of the expression that produced `var`, if lowering recorded one.
+<a href=#596 id=596 data-nosnippet>596</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>var_span(<span class="kw-2">&amp;</span><span class="self">self</span>, var: VarId) -&gt; <span class="prelude-ty">Option</span>&lt;(usize, usize)&gt; {
+<a href=#597 id=597 data-nosnippet>597</a>        <span class="self">self</span>.var_metadata.get(<span class="kw-2">&amp;</span>var).and_then(|m| m.byte_range)
+<a href=#598 id=598 data-nosnippet>598</a>    }
+<a href=#599 id=599 data-nosnippet>599</a>
+<a href=#600 id=600 data-nosnippet>600</a>    <span class="doccomment">/// The instruction that defines `var`, if any. The IR is SSA, so there is
+<a href=#601 id=601 data-nosnippet>601</a>    /// at most one.
+<a href=#602 id=602 data-nosnippet>602</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>def_instruction(<span class="kw-2">&amp;</span><span class="self">self</span>, var: VarId) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Instruction&gt; {
+<a href=#603 id=603 data-nosnippet>603</a>        <span class="self">self</span>.blocks
+<a href=#604 id=604 data-nosnippet>604</a>            .values()
+<a href=#605 id=605 data-nosnippet>605</a>            .flat_map(|b| b.instructions.iter())
+<a href=#606 id=606 data-nosnippet>606</a>            .find(|instr| instr.dest() == <span class="prelude-val">Some</span>(var))
+<a href=#607 id=607 data-nosnippet>607</a>    }
+<a href=#608 id=608 data-nosnippet>608</a>
+<a href=#609 id=609 data-nosnippet>609</a>    <span class="doccomment">/// Byte range of a call instruction: the call result variable carries the
+<a href=#610 id=610 data-nosnippet>610</a>    /// call expression's range. `None` for non-calls and calls with no result.
+<a href=#611 id=611 data-nosnippet>611</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>instr_span(<span class="kw-2">&amp;</span><span class="self">self</span>, instr: <span class="kw-2">&amp;</span>Instruction) -&gt; <span class="prelude-ty">Option</span>&lt;(usize, usize)&gt; {
+<a href=#612 id=612 data-nosnippet>612</a>        <span class="kw">let </span>dest = <span class="kw">match </span>instr {
+<a href=#613 id=613 data-nosnippet>613</a>            Instruction::CallStatic { dest, .. }
+<a href=#614 id=614 data-nosnippet>614</a>            | Instruction::CallVirtual { dest, .. }
+<a href=#615 id=615 data-nosnippet>615</a>            | Instruction::CallPointer { dest, .. } =&gt; (<span class="kw-2">*</span>dest)<span class="question-mark">?</span>,
+<a href=#616 id=616 data-nosnippet>616</a>            <span class="kw">_ </span>=&gt; <span class="kw">return </span><span class="prelude-val">None</span>,
+<a href=#617 id=617 data-nosnippet>617</a>        };
+<a href=#618 id=618 data-nosnippet>618</a>        <span class="self">self</span>.var_span(dest)
+<a href=#619 id=619 data-nosnippet>619</a>    }
+<a href=#620 id=620 data-nosnippet>620</a>
+<a href=#621 id=621 data-nosnippet>621</a>    <span class="doccomment">/// Allocates a fresh variable id, records its `metadata` and returns the id.
+<a href=#622 id=622 data-nosnippet>622</a>    </span><span class="kw">pub fn </span>new_var(<span class="kw-2">&amp;mut </span><span class="self">self</span>, metadata: VarMetadata) -&gt; VarId {
+<a href=#623 id=623 data-nosnippet>623</a>        <span class="kw">let </span>id = VarId(<span class="self">self</span>.next_var_id);
+<a href=#624 id=624 data-nosnippet>624</a>        <span class="self">self</span>.next_var_id += <span class="number">1</span>;
+<a href=#625 id=625 data-nosnippet>625</a>        <span class="self">self</span>.var_metadata.insert(id, metadata);
+<a href=#626 id=626 data-nosnippet>626</a>        id
+<a href=#627 id=627 data-nosnippet>627</a>    }
+<a href=#628 id=628 data-nosnippet>628</a>
+<a href=#629 id=629 data-nosnippet>629</a>    <span class="doccomment">/// Allocates a fresh, empty, unconnected block and returns its id.
+<a href=#630 id=630 data-nosnippet>630</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>new_block(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; BlockId {
+<a href=#631 id=631 data-nosnippet>631</a>        <span class="kw">let </span>id = BlockId(<span class="self">self</span>.next_block_id);
+<a href=#632 id=632 data-nosnippet>632</a>        <span class="self">self</span>.next_block_id += <span class="number">1</span>;
+<a href=#633 id=633 data-nosnippet>633</a>        <span class="self">self</span>.blocks.insert(id, BasicBlock::new(id));
+<a href=#634 id=634 data-nosnippet>634</a>        id
+<a href=#635 id=635 data-nosnippet>635</a>    }
+<a href=#636 id=636 data-nosnippet>636</a>
+<a href=#637 id=637 data-nosnippet>637</a>    <span class="doccomment">/// Appends a phi node to `block`. Does nothing if the block does not exist.
+<a href=#638 id=638 data-nosnippet>638</a>    </span><span class="attr">#[cfg(test)]
+<a href=#639 id=639 data-nosnippet>639</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>push_phi(<span class="kw-2">&amp;mut </span><span class="self">self</span>, block: BlockId, phi: Phi) {
+<a href=#640 id=640 data-nosnippet>640</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(b) = <span class="self">self</span>.blocks.get_mut(<span class="kw-2">&amp;</span>block) {
+<a href=#641 id=641 data-nosnippet>641</a>            b.phis.push(phi);
+<a href=#642 id=642 data-nosnippet>642</a>        }
+<a href=#643 id=643 data-nosnippet>643</a>    }
+<a href=#644 id=644 data-nosnippet>644</a>
+<a href=#645 id=645 data-nosnippet>645</a>    <span class="doccomment">/// Appends an instruction to the end of `block`. Does nothing if the block does not exist.
+<a href=#646 id=646 data-nosnippet>646</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>push_instruction(<span class="kw-2">&amp;mut </span><span class="self">self</span>, block: BlockId, instr: Instruction) {
+<a href=#647 id=647 data-nosnippet>647</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(b) = <span class="self">self</span>.blocks.get_mut(<span class="kw-2">&amp;</span>block) {
+<a href=#648 id=648 data-nosnippet>648</a>            b.instructions.push(instr);
+<a href=#649 id=649 data-nosnippet>649</a>        }
+<a href=#650 id=650 data-nosnippet>650</a>    }
+<a href=#651 id=651 data-nosnippet>651</a>
+<a href=#652 id=652 data-nosnippet>652</a>    <span class="doccomment">/// Sets how `block` exits. Does nothing if the block does not exist; the CFG edges are recorded separately by [`FunctionIR::add_edge`].
+<a href=#653 id=653 data-nosnippet>653</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>set_terminator(<span class="kw-2">&amp;mut </span><span class="self">self</span>, block: BlockId, terminator: Terminator) {
+<a href=#654 id=654 data-nosnippet>654</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(b) = <span class="self">self</span>.blocks.get_mut(<span class="kw-2">&amp;</span>block) {
+<a href=#655 id=655 data-nosnippet>655</a>            b.terminator = terminator;
+<a href=#656 id=656 data-nosnippet>656</a>        }
+<a href=#657 id=657 data-nosnippet>657</a>    }
+<a href=#658 id=658 data-nosnippet>658</a>
+<a href=#659 id=659 data-nosnippet>659</a>    <span class="doccomment">/// Records a control-flow edge `from -&gt; to` in both blocks' successor and predecessor lists. Idempotent: an edge that is already present is not added twice.
+<a href=#660 id=660 data-nosnippet>660</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>add_edge(<span class="kw-2">&amp;mut </span><span class="self">self</span>, from: BlockId, to: BlockId) {
+<a href=#661 id=661 data-nosnippet>661</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(f) = <span class="self">self</span>.blocks.get_mut(<span class="kw-2">&amp;</span>from)
+<a href=#662 id=662 data-nosnippet>662</a>            &amp;&amp; !f.successors.contains(<span class="kw-2">&amp;</span>to)
+<a href=#663 id=663 data-nosnippet>663</a>        {
+<a href=#664 id=664 data-nosnippet>664</a>            f.successors.push(to);
+<a href=#665 id=665 data-nosnippet>665</a>        }
+<a href=#666 id=666 data-nosnippet>666</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(t) = <span class="self">self</span>.blocks.get_mut(<span class="kw-2">&amp;</span>to)
+<a href=#667 id=667 data-nosnippet>667</a>            &amp;&amp; !t.predecessors.contains(<span class="kw-2">&amp;</span>from)
+<a href=#668 id=668 data-nosnippet>668</a>        {
+<a href=#669 id=669 data-nosnippet>669</a>            t.predecessors.push(from);
+<a href=#670 id=670 data-nosnippet>670</a>        }
+<a href=#671 id=671 data-nosnippet>671</a>    }
+<a href=#672 id=672 data-nosnippet>672</a>
+<a href=#673 id=673 data-nosnippet>673</a>    <span class="doccomment">/// The receiver operand of the virtual call whose result is `var`, if
+<a href=#674 id=674 data-nosnippet>674</a>    /// any: lets a chained call (`conn.cursor().execute(..)`) resolve to
+<a href=#675 id=675 data-nosnippet>675</a>    /// the root of its receiver chain.
+<a href=#676 id=676 data-nosnippet>676</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>call_receiver_def(<span class="kw-2">&amp;</span><span class="self">self</span>, var: VarId) -&gt; <span class="prelude-ty">Option</span>&lt;VarId&gt; {
+<a href=#677 id=677 data-nosnippet>677</a>        <span class="kw">for </span>b <span class="kw">in </span><span class="self">self</span>.blocks.values() {
+<a href=#678 id=678 data-nosnippet>678</a>            <span class="kw">for </span>instr <span class="kw">in </span><span class="kw-2">&amp;</span>b.instructions {
+<a href=#679 id=679 data-nosnippet>679</a>                <span class="kw">if let </span>Instruction::CallVirtual {
+<a href=#680 id=680 data-nosnippet>680</a>                    dest: <span class="prelude-val">Some</span>(d),
+<a href=#681 id=681 data-nosnippet>681</a>                    receiver: Operand::Var(r),
+<a href=#682 id=682 data-nosnippet>682</a>                    ..
+<a href=#683 id=683 data-nosnippet>683</a>                } = instr
+<a href=#684 id=684 data-nosnippet>684</a>                    &amp;&amp; <span class="kw-2">*</span>d == var
+<a href=#685 id=685 data-nosnippet>685</a>                {
+<a href=#686 id=686 data-nosnippet>686</a>                    <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="kw-2">*</span>r);
+<a href=#687 id=687 data-nosnippet>687</a>                }
+<a href=#688 id=688 data-nosnippet>688</a>            }
+<a href=#689 id=689 data-nosnippet>689</a>        }
+<a href=#690 id=690 data-nosnippet>690</a>        <span class="prelude-val">None
+<a href=#691 id=691 data-nosnippet>691</a>    </span>}
+<a href=#692 id=692 data-nosnippet>692</a>
+<a href=#693 id=693 data-nosnippet>693</a>    <span class="doccomment">/// The `LoadField` instruction defining `var`, if any (first match - IR
+<a href=#694 id=694 data-nosnippet>694</a>    /// is SSA-shaped): returns the base var and the loaded field. Shared
+<a href=#695 id=695 data-nosnippet>695</a>    /// walk step for member-access path reconstruction.
+<a href=#696 id=696 data-nosnippet>696</a>    </span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>loadfield_def(<span class="kw-2">&amp;</span><span class="self">self</span>, var: VarId) -&gt; <span class="prelude-ty">Option</span>&lt;(VarId, String)&gt; {
+<a href=#697 id=697 data-nosnippet>697</a>        <span class="kw">for </span>b <span class="kw">in </span><span class="self">self</span>.blocks.values() {
+<a href=#698 id=698 data-nosnippet>698</a>            <span class="kw">for </span>instr <span class="kw">in </span><span class="kw-2">&amp;</span>b.instructions {
+<a href=#699 id=699 data-nosnippet>699</a>                <span class="kw">if let </span>Instruction::LoadField {
+<a href=#700 id=700 data-nosnippet>700</a>                    dest, base, field, ..
+<a href=#701 id=701 data-nosnippet>701</a>                } = instr
+<a href=#702 id=702 data-nosnippet>702</a>                    &amp;&amp; <span class="kw-2">*</span>dest == var
+<a href=#703 id=703 data-nosnippet>703</a>                {
+<a href=#704 id=704 data-nosnippet>704</a>                    <span class="kw">return </span><span class="prelude-val">Some</span>((<span class="kw-2">*</span>base, field.clone()));
+<a href=#705 id=705 data-nosnippet>705</a>                }
+<a href=#706 id=706 data-nosnippet>706</a>            }
+<a href=#707 id=707 data-nosnippet>707</a>        }
+<a href=#708 id=708 data-nosnippet>708</a>        <span class="prelude-val">None
+<a href=#709 id=709 data-nosnippet>709</a>    </span>}
+<a href=#710 id=710 data-nosnippet>710</a>}
+<a href=#711 id=711 data-nosnippet>711</a>
+<a href=#712 id=712 data-nosnippet>712</a><span class="doccomment">/// Strips one pair of matching `'`, `"` or `` ` `` quotes from a string
+<a href=#713 id=713 data-nosnippet>713</a>/// literal's source text, after trimming. Unmatched or lone quotes are left as is.
+<a href=#714 id=714 data-nosnippet>714</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>strip_quotes(lit: <span class="kw-2">&amp;</span>str) -&gt; <span class="kw-2">&amp;</span>str {
+<a href=#715 id=715 data-nosnippet>715</a>    <span class="kw">let </span>lit = lit.trim();
+<a href=#716 id=716 data-nosnippet>716</a>    <span class="kw">let </span>bytes = lit.as_bytes();
+<a href=#717 id=717 data-nosnippet>717</a>    <span class="kw">if let </span>(<span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>first), <span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>last)) = (bytes.first(), bytes.last())
+<a href=#718 id=718 data-nosnippet>718</a>        &amp;&amp; bytes.len() &gt;= <span class="number">2
+<a href=#719 id=719 data-nosnippet>719</a>        </span>&amp;&amp; <span class="macro">matches!</span>(first, <span class="string">b'\'' </span>| <span class="string">b'"' </span>| <span class="string">b'`'</span>)
+<a href=#720 id=720 data-nosnippet>720</a>        &amp;&amp; first == last
+<a href=#721 id=721 data-nosnippet>721</a>    {
+<a href=#722 id=722 data-nosnippet>722</a>        <span class="kw">return </span><span class="kw-2">&amp;</span>lit[<span class="number">1</span>..bytes.len() - <span class="number">1</span>];
+<a href=#723 id=723 data-nosnippet>723</a>    }
+<a href=#724 id=724 data-nosnippet>724</a>    lit
+<a href=#725 id=725 data-nosnippet>725</a>}
+</code></pre></div></section></main></body></html>

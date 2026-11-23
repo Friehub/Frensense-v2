@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["SEVERITY_LABELS"],"enum":["Profile","RuleTier","SanitizerKind","Severity","SinkRole","TaintClass"],"fn":["checker_advisory","checker_rule_cwe","checker_rule_tier","generic_rule_advisory","generic_rule_observation","resolved_sink_class","sink_class","sink_name_class","taint_advisory","taint_cwe"],"struct":["RuleAdvisory","RuleEntry"]};

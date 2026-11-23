@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["BackwardVerdict","FindingClass"],"struct":["BackwardStats","BackwardTaintEngine","CutSite","SanitizerSuppression","SinkFinding","SinkFindingBuilder"]};

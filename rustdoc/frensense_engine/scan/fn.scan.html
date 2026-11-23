@@ -1,0 +1,58 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Scan a set of source files under a config and fact table."><title>scan in frensense_engine::scan - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="frensense_engine" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc fn"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">scan</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../frensense_engine/index.html">frensense_<wbr>engine</a><span class="version">0.9.1</span></h2></div><div class="sidebar-elems"><div id="rustdoc-modnav"><h2><a href="index.html">In frensense_<wbr>engine::<wbr>scan</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">frensense_engine</a>::<wbr><a href="index.html">scan</a></div><h1>Function <span class="fn">scan</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/frensense_engine/scan.rs.html#84-98">Source</a> </span></div><pre class="rust item-decl"><code>pub fn scan(
+    files: &amp;[(<a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>, <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>, <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>)],
+    config: &amp;<a class="struct" href="../analysis/taint/config/struct.TaintConfig.html" title="struct frensense_engine::analysis::taint::config::TaintConfig">TaintConfig</a>,
+    facts: &amp;<a class="struct" href="../analysis/taint/facts/table/struct.FactTable.html" title="struct frensense_engine::analysis::taint::facts::table::FactTable">FactTable</a>,
+) -&gt; <a class="struct" href="struct.ScanResult.html" title="struct frensense_engine::scan::ScanResult">ScanResult</a></code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Scan a set of source files under a config and fact table.</p>
+<p><code>files</code> maps file path → extension (used to pick the language spec).
+Files are lowered one at a time through <a href="struct.ProgramBuilder.html" title="struct frensense_engine::scan::ProgramBuilder"><code>ProgramBuilder</code></a> and then
+analyzed as one interprocedural program.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>frensense_engine::analysis::taint::config::TaintConfig;
+<span class="kw">use </span>frensense_engine::analysis::taint::engine::BackwardVerdict;
+<span class="kw">use </span>frensense_engine::analysis::taint::facts::FactTable;
+<span class="kw">use </span>frensense_engine::scan::scan;
+
+<span class="kw">let </span>config = TaintConfig {
+    sources: [<span class="string">"req.body"</span>.to_string()].into_iter().collect(),
+    sinks: [<span class="string">"query"</span>.to_string()].into_iter().collect(),
+    sanitizers: [<span class="string">"escape"</span>.to_string()].into_iter().collect(),
+};
+<span class="kw">let </span>facts = FactTable::from_config(<span class="kw-2">&amp;</span>config);
+
+<span class="kw">let </span>file = |path: <span class="kw-2">&amp;</span>str, src: <span class="kw-2">&amp;</span>str| (path.to_string(), src.to_string(), <span class="string">"ts"</span>.to_string());
+<span class="kw">let </span>vulnerable = |r: <span class="kw-2">&amp;</span>frensense_engine::scan::ScanResult| {
+    r.located.iter().any(|l| l.finding.verdict == BackwardVerdict::Vulnerable)
+};
+
+<span class="comment">// Source and sink in one file.
+</span><span class="kw">let </span>direct = scan(
+    <span class="kw-2">&amp;</span>[file(<span class="string">"a.ts"</span>, <span class="string">"declare const db: any\nexport function h(req: any) {\n  const id = req.body.id\n  db.query('SELECT ' + id)\n}\n"</span>)],
+    <span class="kw-2">&amp;</span>config,
+    <span class="kw-2">&amp;</span>facts,
+);
+<span class="macro">assert!</span>(vulnerable(<span class="kw-2">&amp;</span>direct));
+
+<span class="comment">// The same flow through a configured sanitizer is not reported as vulnerable.
+</span><span class="kw">let </span>sanitized = scan(
+    <span class="kw-2">&amp;</span>[file(<span class="string">"a.ts"</span>, <span class="string">"declare const db: any\ndeclare function escape(s: string): string\nexport function h(req: any) {\n  const id = escape(req.body.id)\n  db.query('SELECT ' + id)\n}\n"</span>)],
+    <span class="kw-2">&amp;</span>config,
+    <span class="kw-2">&amp;</span>facts,
+);
+<span class="macro">assert!</span>(!vulnerable(<span class="kw-2">&amp;</span>sanitized));
+
+<span class="comment">// Source in one file, sink in another: the finding is placed at the sink.
+</span><span class="kw">let </span>cross = scan(
+    <span class="kw-2">&amp;</span>[
+        file(<span class="string">"lib.ts"</span>, <span class="string">"declare const db: any\nexport function run(q: string) { db.query('SELECT ' + q) }\n"</span>),
+        file(<span class="string">"app.ts"</span>, <span class="string">"import { run } from './lib'\nexport function h(req: any) { run(req.body.id) }\n"</span>),
+    ],
+    <span class="kw-2">&amp;</span>config,
+    <span class="kw-2">&amp;</span>facts,
+);
+<span class="kw">let </span>hit = cross
+    .located
+    .iter()
+    .find(|l| l.finding.verdict == BackwardVerdict::Vulnerable)
+    .expect(<span class="string">"cross-file flow is found"</span>);
+<span class="macro">assert_eq!</span>(hit.file, <span class="string">"lib.ts"</span>);
+<span class="macro">assert_eq!</span>(hit.finding.function, <span class="string">"run"</span>);</code></pre></div></div></details></section></div></main></body></html>

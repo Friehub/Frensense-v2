@@ -1,0 +1,9 @@
+(function() {
+    const implementors = Object.fromEntries([["frensense",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/cmp/trait.PartialOrd.html\" title=\"trait core::cmp::PartialOrd\">PartialOrd</a> for <a class=\"struct\" href=\"frensense/engine/files/struct.ExcludedPath.html\" title=\"struct frensense::engine::files::ExcludedPath\">ExcludedPath</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/cmp/trait.PartialOrd.html\" title=\"trait core::cmp::PartialOrd\">PartialOrd</a> for <a class=\"struct\" href=\"frensense/policy/struct.UnresolvedSite.html\" title=\"struct frensense::policy::UnresolvedSite\">UnresolvedSite</a>",0],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/cmp/trait.PartialOrd.html\" title=\"trait core::cmp::PartialOrd\">PartialOrd</a> for <a class=\"struct\" href=\"frensense/engine/files/struct.UnsupportedSourceFile.html\" title=\"struct frensense::engine::files::UnsupportedSourceFile\">UnsupportedSourceFile</a>",0]]],["frensense_engine",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/cmp/trait.PartialOrd.html\" title=\"trait core::cmp::PartialOrd\">PartialOrd</a> for <a class=\"enum\" href=\"frensense_engine/analysis/taint/facts/enum.Provenance.html\" title=\"enum frensense_engine::analysis::taint::facts::Provenance\">Provenance</a>",0]]],["frensense_lang",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.100.0/core/cmp/trait.PartialOrd.html\" title=\"trait core::cmp::PartialOrd\">PartialOrd</a> for <a class=\"enum\" href=\"frensense_lang/severity/enum.RuleTier.html\" title=\"enum frensense_lang::severity::RuleTier\">RuleTier</a>",0]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":59,"fragment_lengths":[968,353,315]}

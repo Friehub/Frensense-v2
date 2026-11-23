@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["RECEIVER_ARG_INDEX"],"enum":["NodeKind"],"struct":["NodeKey","Svfg","SvfgNode"]};

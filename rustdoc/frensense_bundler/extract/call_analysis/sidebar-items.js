@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["CallShape"],"fn":["collect_calls","cross_function_helper","defined_function_names","extract_call_arg_literals","variant_has_range_check_on_call"]};

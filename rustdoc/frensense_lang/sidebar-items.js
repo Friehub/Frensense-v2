@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["intrinsics","providers","registry","rule_card","rules","severity","spec"]};

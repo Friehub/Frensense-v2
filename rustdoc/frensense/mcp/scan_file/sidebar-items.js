@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["filter_advisories","is_supported","result_payload","run_scan_file","scan_file","tool_definition"]};

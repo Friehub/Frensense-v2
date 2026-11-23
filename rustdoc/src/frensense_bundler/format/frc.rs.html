@@ -1,0 +1,691 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Source of the Rust file `frensense-bundler/src/format/frc.rs`."><title>frc.rs - source</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="frensense_bundler" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="../../../static.files/src-script-813739b1.js"></script><script defer src="../../../src-files.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc src"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="sidebar"><div class="src-sidebar-title"><h2>Files</h2></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1><div class="sub-heading">frensense_bundler/format/</div>frc.rs</h1><rustdoc-toolbar></rustdoc-toolbar></div><div class="example-wrap digits-3"><pre class="rust"><code><a href=#1 id=1 data-nosnippet>1</a><span class="comment">// SPDX-License-Identifier: GPL-3.0-only
+<a href=#2 id=2 data-nosnippet>2</a>// Copyright (c) 2024-2026 Friehub
+<a href=#3 id=3 data-nosnippet>3</a>// Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
+<a href=#4 id=4 data-nosnippet>4</a>
+<a href=#5 id=5 data-nosnippet>5</a></span><span class="doccomment">//! # FRC - Frensense Reference Corpus Bundle Format
+<a href=#6 id=6 data-nosnippet>6</a>//!
+<a href=#7 id=7 data-nosnippet>7</a>//! A pre-compiled binary format that embeds corpus fingerprints.
+<a href=#8 id=8 data-nosnippet>8</a>//! This crate handles the `.frc` file envelope (header, versioning, checksum)
+<a href=#9 id=9 data-nosnippet>9</a>//! while remaining generic over the payload data structure.
+<a href=#10 id=10 data-nosnippet>10</a>//!
+<a href=#11 id=11 data-nosnippet>11</a>//! ## Compatibility (Phase 6)
+<a href=#12 id=12 data-nosnippet>12</a>//!
+<a href=#13 id=13 data-nosnippet>13</a>//! A bundle outlives the binary that built it, and it stores `LearnedFactEntry`
+<a href=#14 id=14 data-nosnippet>14</a>//! and `HintKind` values by *variant position*. So a bundle is only decodable
+<a href=#15 id=15 data-nosnippet>15</a>//! by an engine that speaks the same vocabulary, and the envelope now says so
+<a href=#16 id=16 data-nosnippet>16</a>//! explicitly instead of leaving the reader to discover it as a serde error:
+<a href=#17 id=17 data-nosnippet>17</a>//!
+<a href=#18 id=18 data-nosnippet>18</a>//! * [`BundleHeader::vocabulary`] - the
+<a href=#19 id=19 data-nosnippet>19</a>//!   [`fact_vocabulary_fingerprint`](frensense_engine::analysis::taint::facts::fact_vocabulary_fingerprint)
+<a href=#20 id=20 data-nosnippet>20</a>//!   of the engine that wrote it. Checked strictly on load: a mismatch is
+<a href=#21 id=21 data-nosnippet>21</a>//!   refused with both values named.
+<a href=#22 id=22 data-nosnippet>22</a>//! * [`BundleHeader::requires_engine`] - an optional coarse range, for
+<a href=#23 id=23 data-nosnippet>23</a>//!   corpus authors who want a policy bound ("this pack targets 0.9") on top
+<a href=#24 id=24 data-nosnippet>24</a>//!   of the strict vocabulary check.
+<a href=#25 id=25 data-nosnippet>25</a>//! * [`BundleHeader::built_by_engine`] - diagnostics only.
+<a href=#26 id=26 data-nosnippet>26</a>//!
+<a href=#27 id=27 data-nosnippet>27</a>//! Version 6 bundles carry none of this and still load: the fingerprint field
+<a href=#28 id=28 data-nosnippet>28</a>//! is absent, so there is nothing to compare, and the reader treats them as
+<a href=#29 id=29 data-nosnippet>29</a>//! pre-Phase-6 (see [`BundleHeader::is_legacy`]). `docs/FORMATS.md` carries
+<a href=#30 id=30 data-nosnippet>30</a>//! the table of every artifact and its bump rule.
+<a href=#31 id=31 data-nosnippet>31</a>
+<a href=#32 id=32 data-nosnippet>32</a></span><span class="attr">#![allow(clippy::module_name_repetitions)]
+<a href=#33 id=33 data-nosnippet>33</a>
+<a href=#34 id=34 data-nosnippet>34</a></span><span class="kw">use </span>std::fmt;
+<a href=#35 id=35 data-nosnippet>35</a>
+<a href=#36 id=36 data-nosnippet>36</a><span class="doccomment">/// Envelope version. Bumped whenever the header or the payload gains a field
+<a href=#37 id=37 data-nosnippet>37</a>/// or a variant, because bincode is positional and cannot self-describe.
+<a href=#38 id=38 data-nosnippet>38</a>///
+<a href=#39 id=39 data-nosnippet>39</a>/// ## Bump rule
+<a href=#40 id=40 data-nosnippet>40</a>///
+<a href=#41 id=41 data-nosnippet>41</a>/// Adding *any* serialized field or enum variant to the header, the payload,
+<a href=#42 id=42 data-nosnippet>42</a>/// or the fact-entry vocabulary requires a bump here. The engine's
+<a href=#43 id=43 data-nosnippet>43</a>/// `FACT_VOCABULARY_FINGERPRINT` ratchet catches vocabulary movement; this
+<a href=#44 id=44 data-nosnippet>44</a>/// number catches layout movement. `docs/FORMATS.md` records both.
+<a href=#45 id=45 data-nosnippet>45</a></span><span class="kw">pub const </span>BUNDLE_VERSION: u32 = <span class="number">8</span>;
+<a href=#46 id=46 data-nosnippet>46</a>
+<a href=#47 id=47 data-nosnippet>47</a><span class="kw">pub const </span>BUNDLE_MAGIC: <span class="kw-2">&amp;</span>[u8; <span class="number">4</span>] = <span class="string">b"FRC1"</span>;
+<a href=#48 id=48 data-nosnippet>48</a>
+<a href=#49 id=49 data-nosnippet>49</a><span class="doccomment">/// The oldest bundle version this reader can still decode. Older envelopes
+<a href=#50 id=50 data-nosnippet>50</a>/// are rejected with an actionable message rather than a parse error.
+<a href=#51 id=51 data-nosnippet>51</a></span><span class="kw">pub const </span>MIN_SUPPORTED_VERSION: u32 = <span class="number">4</span>;
+<a href=#52 id=52 data-nosnippet>52</a>
+<a href=#53 id=53 data-nosnippet>53</a><span class="doccomment">/// A semver-ish bound on the engine a bundle may be loaded by.
+<a href=#54 id=54 data-nosnippet>54</a>///
+<a href=#55 id=55 data-nosnippet>55</a>/// Expressed as `[major, minor, patch]` triples rather than parsed semver
+<a href=#56 id=56 data-nosnippet>56</a>/// strings, because this type is on the wire: fixed-width arrays bincode
+<a href=#57 id=57 data-nosnippet>57</a>/// encodes without allocation, and there is no string to parse (or to get
+<a href=#58 id=58 data-nosnippet>58</a>/// wrong) at load time. Pre-release/build metadata is deliberately ignored -
+<a href=#59 id=59 data-nosnippet>59</a>/// `0.9.0-beta` and `0.9.0` are the same series for compatibility purposes.
+<a href=#60 id=60 data-nosnippet>60</a></span><span class="attr">#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+<a href=#61 id=61 data-nosnippet>61</a></span><span class="kw">pub struct </span>EngineRequirement {
+<a href=#62 id=62 data-nosnippet>62</a>    <span class="doccomment">/// Inclusive lower bound on the engine version.
+<a href=#63 id=63 data-nosnippet>63</a>    </span><span class="kw">pub </span>min: [u32; <span class="number">3</span>],
+<a href=#64 id=64 data-nosnippet>64</a>    <span class="doccomment">/// Exclusive upper bound. `None` = unbounded above.
+<a href=#65 id=65 data-nosnippet>65</a>    </span><span class="kw">pub </span>max_exclusive: <span class="prelude-ty">Option</span>&lt;[u32; <span class="number">3</span>]&gt;,
+<a href=#66 id=66 data-nosnippet>66</a>}
+<a href=#67 id=67 data-nosnippet>67</a>
+<a href=#68 id=68 data-nosnippet>68</a><span class="kw">impl </span>EngineRequirement {
+<a href=#69 id=69 data-nosnippet>69</a>    <span class="doccomment">/// The requirement satisfied by every engine in the same minor series as
+<a href=#70 id=70 data-nosnippet>70</a>    /// `version`: `[major, minor, 0] &lt;= v &lt; [major, minor + 1, 0]`.
+<a href=#71 id=71 data-nosnippet>71</a>    ///
+<a href=#72 id=72 data-nosnippet>72</a>    /// A minor bump in 0.x may add fact variants, which invalidates bundles;
+<a href=#73 id=73 data-nosnippet>73</a>    /// a patch bump may not. So "same series" is the conservative default a
+<a href=#74 id=74 data-nosnippet>74</a>    /// corpus author reaches for.
+<a href=#75 id=75 data-nosnippet>75</a>    </span><span class="attr">#[must_use]
+<a href=#76 id=76 data-nosnippet>76</a>    </span><span class="kw">pub fn </span>same_series(version: [u32; <span class="number">3</span>]) -&gt; <span class="self">Self </span>{
+<a href=#77 id=77 data-nosnippet>77</a>        <span class="self">Self </span>{
+<a href=#78 id=78 data-nosnippet>78</a>            min: [version[<span class="number">0</span>], version[<span class="number">1</span>], <span class="number">0</span>],
+<a href=#79 id=79 data-nosnippet>79</a>            max_exclusive: <span class="prelude-val">Some</span>([version[<span class="number">0</span>], version[<span class="number">1</span>] + <span class="number">1</span>, <span class="number">0</span>]),
+<a href=#80 id=80 data-nosnippet>80</a>        }
+<a href=#81 id=81 data-nosnippet>81</a>    }
+<a href=#82 id=82 data-nosnippet>82</a>
+<a href=#83 id=83 data-nosnippet>83</a>    <span class="doccomment">/// Whether an engine version satisfies this bound.
+<a href=#84 id=84 data-nosnippet>84</a>    </span><span class="attr">#[must_use]
+<a href=#85 id=85 data-nosnippet>85</a>    </span><span class="kw">pub fn </span>accepts(<span class="kw-2">&amp;</span><span class="self">self</span>, engine: [u32; <span class="number">3</span>]) -&gt; bool {
+<a href=#86 id=86 data-nosnippet>86</a>        <span class="kw">let </span>above_min = engine &gt;= <span class="self">self</span>.min;
+<a href=#87 id=87 data-nosnippet>87</a>        <span class="kw">let </span>below_max = <span class="self">self</span>.max_exclusive.is_none_or(|max| engine &lt; max);
+<a href=#88 id=88 data-nosnippet>88</a>        above_min &amp;&amp; below_max
+<a href=#89 id=89 data-nosnippet>89</a>    }
+<a href=#90 id=90 data-nosnippet>90</a>
+<a href=#91 id=91 data-nosnippet>91</a>    <span class="doccomment">/// Parse `major.minor.patch`, ignoring any `-pre` / `+build` suffix.
+<a href=#92 id=92 data-nosnippet>92</a>    /// Returns `None` when the string is not a version, so a caller can fall
+<a href=#93 id=93 data-nosnippet>93</a>    /// back to the strict vocabulary check rather than guessing.
+<a href=#94 id=94 data-nosnippet>94</a>    </span><span class="attr">#[must_use]
+<a href=#95 id=95 data-nosnippet>95</a>    </span><span class="kw">pub fn </span>parse_triple(version: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;[u32; <span class="number">3</span>]&gt; {
+<a href=#96 id=96 data-nosnippet>96</a>        <span class="kw">let </span>numeric = version.split([<span class="string">'-'</span>, <span class="string">'+'</span>]).next().unwrap_or(version);
+<a href=#97 id=97 data-nosnippet>97</a>        <span class="kw">let </span><span class="kw-2">mut </span>parts = numeric.split(<span class="string">'.'</span>);
+<a href=#98 id=98 data-nosnippet>98</a>        <span class="kw">let </span>next = |parts: <span class="kw-2">&amp;mut </span>core::str::Split&lt;<span class="lifetime">'_</span>, char&gt;| parts.next()<span class="question-mark">?</span>.parse::&lt;u32&gt;().ok();
+<a href=#99 id=99 data-nosnippet>99</a>        <span class="kw">let </span>major = next(<span class="kw-2">&amp;mut </span>parts)<span class="question-mark">?</span>;
+<a href=#100 id=100 data-nosnippet>100</a>        <span class="kw">let </span>minor = next(<span class="kw-2">&amp;mut </span>parts)<span class="question-mark">?</span>;
+<a href=#101 id=101 data-nosnippet>101</a>        <span class="kw">let </span>patch = next(<span class="kw-2">&amp;mut </span>parts).unwrap_or(<span class="number">0</span>);
+<a href=#102 id=102 data-nosnippet>102</a>        <span class="prelude-val">Some</span>([major, minor, patch])
+<a href=#103 id=103 data-nosnippet>103</a>    }
+<a href=#104 id=104 data-nosnippet>104</a>}
+<a href=#105 id=105 data-nosnippet>105</a>
+<a href=#106 id=106 data-nosnippet>106</a><span class="kw">impl </span>fmt::Display <span class="kw">for </span>EngineRequirement {
+<a href=#107 id=107 data-nosnippet>107</a>    <span class="kw">fn </span>fmt(<span class="kw-2">&amp;</span><span class="self">self</span>, f: <span class="kw-2">&amp;mut </span>fmt::Formatter&lt;<span class="lifetime">'_</span>&gt;) -&gt; fmt::Result {
+<a href=#108 id=108 data-nosnippet>108</a>        <span class="macro">write!</span>(f, <span class="string">"&gt;={}.{}.0"</span>, <span class="self">self</span>.min[<span class="number">0</span>], <span class="self">self</span>.min[<span class="number">1</span>])<span class="question-mark">?</span>;
+<a href=#109 id=109 data-nosnippet>109</a>        <span class="kw">if let </span><span class="prelude-val">Some</span>(max) = <span class="self">self</span>.max_exclusive {
+<a href=#110 id=110 data-nosnippet>110</a>            <span class="macro">write!</span>(f, <span class="string">",&lt;{}.{}.0"</span>, max[<span class="number">0</span>], max[<span class="number">1</span>])<span class="question-mark">?</span>;
+<a href=#111 id=111 data-nosnippet>111</a>        }
+<a href=#112 id=112 data-nosnippet>112</a>        <span class="prelude-val">Ok</span>(())
+<a href=#113 id=113 data-nosnippet>113</a>    }
+<a href=#114 id=114 data-nosnippet>114</a>}
+<a href=#115 id=115 data-nosnippet>115</a>
+<a href=#116 id=116 data-nosnippet>116</a><span class="doccomment">/// The `.frc` envelope header.
+<a href=#117 id=117 data-nosnippet>117</a>///
+<a href=#118 id=118 data-nosnippet>118</a>/// Fields 0..4 are the version-6 layout and are unchanged; the trailing three
+<a href=#119 id=119 data-nosnippet>119</a>/// are version 7. `read_bundle_parts` branches on `version` before decoding so
+<a href=#120 id=120 data-nosnippet>120</a>/// that a v6 header is never handed to the v7 shape.
+<a href=#121 id=121 data-nosnippet>121</a></span><span class="attr">#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+<a href=#122 id=122 data-nosnippet>122</a></span><span class="kw">pub struct </span>BundleHeader {
+<a href=#123 id=123 data-nosnippet>123</a>    <span class="kw">pub </span>magic: [u8; <span class="number">4</span>],
+<a href=#124 id=124 data-nosnippet>124</a>    <span class="kw">pub </span>version: u32,
+<a href=#125 id=125 data-nosnippet>125</a>    <span class="kw">pub </span>pattern_count: u32,
+<a href=#126 id=126 data-nosnippet>126</a>    <span class="kw">pub </span>checksum: [u8; <span class="number">32</span>],
+<a href=#127 id=127 data-nosnippet>127</a>    <span class="doccomment">/// Fact-vocabulary fingerprint of the engine that wrote this bundle.
+<a href=#128 id=128 data-nosnippet>128</a>    /// `None` on a v6 (pre-Phase-6) bundle.
+<a href=#129 id=129 data-nosnippet>129</a>    </span><span class="attr">#[serde(default)]
+<a href=#130 id=130 data-nosnippet>130</a>    </span><span class="kw">pub </span>vocabulary: <span class="prelude-ty">Option</span>&lt;u64&gt;,
+<a href=#131 id=131 data-nosnippet>131</a>    <span class="doccomment">/// Coarse engine range this bundle targets. Optional: the vocabulary
+<a href=#132 id=132 data-nosnippet>132</a>    /// fingerprint is the strict check; this is policy for corpus authors.
+<a href=#133 id=133 data-nosnippet>133</a>    </span><span class="attr">#[serde(default)]
+<a href=#134 id=134 data-nosnippet>134</a>    </span><span class="kw">pub </span>requires_engine: <span class="prelude-ty">Option</span>&lt;EngineRequirement&gt;,
+<a href=#135 id=135 data-nosnippet>135</a>    <span class="doccomment">/// Engine version string at write time. Diagnostics only.
+<a href=#136 id=136 data-nosnippet>136</a>    </span><span class="attr">#[serde(default)]
+<a href=#137 id=137 data-nosnippet>137</a>    </span><span class="kw">pub </span>built_by_engine: <span class="prelude-ty">Option</span>&lt;String&gt;,
+<a href=#138 id=138 data-nosnippet>138</a>    <span class="doccomment">/// Where this bundle came from and what it may ship (v8+).
+<a href=#139 id=139 data-nosnippet>139</a>    </span><span class="attr">#[serde(default)]
+<a href=#140 id=140 data-nosnippet>140</a>    </span><span class="kw">pub </span>trust: BundleTrust,
+<a href=#141 id=141 data-nosnippet>141</a>}
+<a href=#142 id=142 data-nosnippet>142</a>
+<a href=#143 id=143 data-nosnippet>143</a><span class="doccomment">/// Where a bundle came from, and therefore which fact kinds it may ship.
+<a href=#144 id=144 data-nosnippet>144</a>///
+<a href=#145 id=145 data-nosnippet>145</a>/// - [`Certified`](Self::Certified): first-party, replay-gated; may ship
+<a href=#146 id=146 data-nosnippet>146</a>///   sanitizers and Stable policies.
+<a href=#147 id=147 data-nosnippet>147</a>/// - [`Community`](Self::Community): third-party; may ship sanitizers only
+<a href=#148 id=148 data-nosnippet>148</a>///   when they are class-scoped and name-scoped, and policies only at the
+<a href=#149 id=149 data-nosnippet>149</a>///   Hygiene tier.
+<a href=#150 id=150 data-nosnippet>150</a>/// - [`Custom`](Self::Custom): locally assembled or remotely fetched; may
+<a href=#151 id=151 data-nosnippet>151</a>///   only add sinks, sources and policies, never sanitizers.
+<a href=#152 id=152 data-nosnippet>152</a></span><span class="attr">#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+<a href=#153 id=153 data-nosnippet>153</a>#[serde(rename_all = <span class="string">"snake_case"</span>)]
+<a href=#154 id=154 data-nosnippet>154</a></span><span class="kw">pub enum </span>BundleTrust {
+<a href=#155 id=155 data-nosnippet>155</a>    <span class="doccomment">/// First-party, replay-gated corpus bundle.
+<a href=#156 id=156 data-nosnippet>156</a>    </span>Certified,
+<a href=#157 id=157 data-nosnippet>157</a>    <span class="doccomment">/// Third-party community bundle.
+<a href=#158 id=158 data-nosnippet>158</a>    </span><span class="attr">#[default]
+<a href=#159 id=159 data-nosnippet>159</a>    </span>Community,
+<a href=#160 id=160 data-nosnippet>160</a>    <span class="doccomment">/// Locally assembled or remotely fetched bundle.
+<a href=#161 id=161 data-nosnippet>161</a>    </span>Custom,
+<a href=#162 id=162 data-nosnippet>162</a>}
+<a href=#163 id=163 data-nosnippet>163</a>
+<a href=#164 id=164 data-nosnippet>164</a><span class="kw">impl </span>BundleTrust {
+<a href=#165 id=165 data-nosnippet>165</a>    <span class="doccomment">/// Does this tier permit shipping sanitizer facts at all?
+<a href=#166 id=166 data-nosnippet>166</a>    </span><span class="attr">#[must_use]
+<a href=#167 id=167 data-nosnippet>167</a>    </span><span class="kw">pub fn </span>may_ship_sanitizers(<span class="self">self</span>) -&gt; bool {
+<a href=#168 id=168 data-nosnippet>168</a>        !<span class="macro">matches!</span>(<span class="self">self</span>, <span class="self">Self</span>::Custom)
+<a href=#169 id=169 data-nosnippet>169</a>    }
+<a href=#170 id=170 data-nosnippet>170</a>
+<a href=#171 id=171 data-nosnippet>171</a>    <span class="doccomment">/// May a sanitizer of this scope ship under this tier?
+<a href=#172 id=172 data-nosnippet>172</a>    </span><span class="attr">#[must_use]
+<a href=#173 id=173 data-nosnippet>173</a>    </span><span class="kw">pub fn </span>may_ship_sanitizer(<span class="self">self</span>, classes: <span class="kw-2">&amp;</span>[String], package: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>str&gt;) -&gt; bool {
+<a href=#174 id=174 data-nosnippet>174</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#175 id=175 data-nosnippet>175</a>            <span class="self">Self</span>::Certified =&gt; <span class="bool-val">true</span>,
+<a href=#176 id=176 data-nosnippet>176</a>            <span class="comment">// Community: class-scoped and name-scoped (package/receiver).
+<a href=#177 id=177 data-nosnippet>177</a>            </span><span class="self">Self</span>::Community =&gt; !classes.is_empty() &amp;&amp; package.is_some(),
+<a href=#178 id=178 data-nosnippet>178</a>            <span class="self">Self</span>::Custom =&gt; <span class="bool-val">false</span>,
+<a href=#179 id=179 data-nosnippet>179</a>        }
+<a href=#180 id=180 data-nosnippet>180</a>    }
+<a href=#181 id=181 data-nosnippet>181</a>
+<a href=#182 id=182 data-nosnippet>182</a>    <span class="doccomment">/// May a policy of this tier ship at `tier`? Only certified bundles may
+<a href=#183 id=183 data-nosnippet>183</a>    /// publish default-on Stable policies; the others are capped at Hygiene.
+<a href=#184 id=184 data-nosnippet>184</a>    </span><span class="attr">#[must_use]
+<a href=#185 id=185 data-nosnippet>185</a>    </span><span class="kw">pub fn </span>may_ship_policy_tier(<span class="self">self</span>, tier: <span class="kw-2">&amp;</span>str) -&gt; bool {
+<a href=#186 id=186 data-nosnippet>186</a>        <span class="kw">match </span><span class="self">self </span>{
+<a href=#187 id=187 data-nosnippet>187</a>            <span class="self">Self</span>::Certified =&gt; <span class="bool-val">true</span>,
+<a href=#188 id=188 data-nosnippet>188</a>            <span class="self">Self</span>::Community | <span class="self">Self</span>::Custom =&gt; tier.eq_ignore_ascii_case(<span class="string">"hygiene"</span>),
+<a href=#189 id=189 data-nosnippet>189</a>        }
+<a href=#190 id=190 data-nosnippet>190</a>    }
+<a href=#191 id=191 data-nosnippet>191</a>}
+<a href=#192 id=192 data-nosnippet>192</a>
+<a href=#193 id=193 data-nosnippet>193</a><span class="doccomment">/// The v7 header, kept so v7 bundles keep loading after the v8 trust field
+<a href=#194 id=194 data-nosnippet>194</a>/// widened the shape. Do not use for new writes.
+<a href=#195 id=195 data-nosnippet>195</a></span><span class="attr">#[derive(serde::Serialize, serde::Deserialize)]
+<a href=#196 id=196 data-nosnippet>196</a></span><span class="kw">struct </span>BundleHeaderV7 {
+<a href=#197 id=197 data-nosnippet>197</a>    <span class="attr">#[allow(dead_code)]
+<a href=#198 id=198 data-nosnippet>198</a>    </span>magic: [u8; <span class="number">4</span>],
+<a href=#199 id=199 data-nosnippet>199</a>    <span class="attr">#[allow(dead_code)]
+<a href=#200 id=200 data-nosnippet>200</a>    </span>version: u32,
+<a href=#201 id=201 data-nosnippet>201</a>    <span class="attr">#[allow(dead_code)]
+<a href=#202 id=202 data-nosnippet>202</a>    </span>pattern_count: u32,
+<a href=#203 id=203 data-nosnippet>203</a>    <span class="attr">#[allow(dead_code)]
+<a href=#204 id=204 data-nosnippet>204</a>    </span>checksum: [u8; <span class="number">32</span>],
+<a href=#205 id=205 data-nosnippet>205</a>    <span class="attr">#[allow(dead_code)]
+<a href=#206 id=206 data-nosnippet>206</a>    </span>vocabulary: <span class="prelude-ty">Option</span>&lt;u64&gt;,
+<a href=#207 id=207 data-nosnippet>207</a>    <span class="attr">#[allow(dead_code)]
+<a href=#208 id=208 data-nosnippet>208</a>    </span>requires_engine: <span class="prelude-ty">Option</span>&lt;EngineRequirement&gt;,
+<a href=#209 id=209 data-nosnippet>209</a>    <span class="attr">#[allow(dead_code)]
+<a href=#210 id=210 data-nosnippet>210</a>    </span>built_by_engine: <span class="prelude-ty">Option</span>&lt;String&gt;,
+<a href=#211 id=211 data-nosnippet>211</a>}
+<a href=#212 id=212 data-nosnippet>212</a>
+<a href=#213 id=213 data-nosnippet>213</a><span class="doccomment">/// The v6 header, kept only so old bundles keep loading. Do not use for new
+<a href=#214 id=214 data-nosnippet>214</a>/// writes.
+<a href=#215 id=215 data-nosnippet>215</a>///
+<a href=#216 id=216 data-nosnippet>216</a>/// `Serialize` is derived (not just `Deserialize`) so a test can fabricate a
+<a href=#217 id=217 data-nosnippet>217</a>/// genuine pre-v7 envelope: hand-writing the four-field bytes is how we
+<a href=#218 id=218 data-nosnippet>218</a>/// exercise the version branch without depending on a real v6 corpus file.
+<a href=#219 id=219 data-nosnippet>219</a></span><span class="attr">#[derive(serde::Serialize, serde::Deserialize)]
+<a href=#220 id=220 data-nosnippet>220</a></span><span class="kw">struct </span>BundleHeaderV6 {
+<a href=#221 id=221 data-nosnippet>221</a>    <span class="attr">#[allow(dead_code)]
+<a href=#222 id=222 data-nosnippet>222</a>    </span>magic: [u8; <span class="number">4</span>],
+<a href=#223 id=223 data-nosnippet>223</a>    <span class="attr">#[allow(dead_code)]
+<a href=#224 id=224 data-nosnippet>224</a>    </span>version: u32,
+<a href=#225 id=225 data-nosnippet>225</a>    <span class="attr">#[allow(dead_code)]
+<a href=#226 id=226 data-nosnippet>226</a>    </span>pattern_count: u32,
+<a href=#227 id=227 data-nosnippet>227</a>    <span class="attr">#[allow(dead_code)]
+<a href=#228 id=228 data-nosnippet>228</a>    </span>checksum: [u8; <span class="number">32</span>],
+<a href=#229 id=229 data-nosnippet>229</a>}
+<a href=#230 id=230 data-nosnippet>230</a>
+<a href=#231 id=231 data-nosnippet>231</a><span class="kw">impl </span>BundleHeader {
+<a href=#232 id=232 data-nosnippet>232</a>    <span class="doccomment">/// Header for a v8 write, recording the current vocabulary fingerprint,
+<a href=#233 id=233 data-nosnippet>233</a>    /// the engine that built it, and the certified trust tier.
+<a href=#234 id=234 data-nosnippet>234</a>    </span><span class="attr">#[must_use]
+<a href=#235 id=235 data-nosnippet>235</a>    </span><span class="kw">pub fn </span>current(pattern_count: u32, checksum: [u8; <span class="number">32</span>]) -&gt; <span class="self">Self </span>{
+<a href=#236 id=236 data-nosnippet>236</a>        <span class="self">Self </span>{
+<a href=#237 id=237 data-nosnippet>237</a>            magic: <span class="kw-2">*</span>BUNDLE_MAGIC,
+<a href=#238 id=238 data-nosnippet>238</a>            version: BUNDLE_VERSION,
+<a href=#239 id=239 data-nosnippet>239</a>            pattern_count,
+<a href=#240 id=240 data-nosnippet>240</a>            checksum,
+<a href=#241 id=241 data-nosnippet>241</a>            vocabulary: <span class="prelude-val">Some</span>(frensense_engine::analysis::taint::facts::FACT_VOCABULARY_FINGERPRINT),
+<a href=#242 id=242 data-nosnippet>242</a>            requires_engine: <span class="prelude-val">None</span>,
+<a href=#243 id=243 data-nosnippet>243</a>            built_by_engine: <span class="prelude-val">Some</span>(frensense_engine::VERSION.to_string()),
+<a href=#244 id=244 data-nosnippet>244</a>            trust: BundleTrust::Certified,
+<a href=#245 id=245 data-nosnippet>245</a>        }
+<a href=#246 id=246 data-nosnippet>246</a>    }
+<a href=#247 id=247 data-nosnippet>247</a>
+<a href=#248 id=248 data-nosnippet>248</a>    <span class="doccomment">/// A v6-shaped header, for tests and for round-tripping an existing
+<a href=#249 id=249 data-nosnippet>249</a>    /// bundle's metadata through a rewrite.
+<a href=#250 id=250 data-nosnippet>250</a>    </span><span class="attr">#[must_use]
+<a href=#251 id=251 data-nosnippet>251</a>    </span><span class="kw">pub fn </span>legacy(pattern_count: u32, checksum: [u8; <span class="number">32</span>]) -&gt; <span class="self">Self </span>{
+<a href=#252 id=252 data-nosnippet>252</a>        <span class="self">Self </span>{
+<a href=#253 id=253 data-nosnippet>253</a>            magic: <span class="kw-2">*</span>BUNDLE_MAGIC,
+<a href=#254 id=254 data-nosnippet>254</a>            version: <span class="number">6</span>,
+<a href=#255 id=255 data-nosnippet>255</a>            pattern_count,
+<a href=#256 id=256 data-nosnippet>256</a>            checksum,
+<a href=#257 id=257 data-nosnippet>257</a>            vocabulary: <span class="prelude-val">None</span>,
+<a href=#258 id=258 data-nosnippet>258</a>            requires_engine: <span class="prelude-val">None</span>,
+<a href=#259 id=259 data-nosnippet>259</a>            built_by_engine: <span class="prelude-val">None</span>,
+<a href=#260 id=260 data-nosnippet>260</a>            trust: BundleTrust::Community,
+<a href=#261 id=261 data-nosnippet>261</a>        }
+<a href=#262 id=262 data-nosnippet>262</a>    }
+<a href=#263 id=263 data-nosnippet>263</a>
+<a href=#264 id=264 data-nosnippet>264</a>    <span class="doccomment">/// Whether this header predates the vocabulary fingerprint. Such a bundle
+<a href=#265 id=265 data-nosnippet>265</a>    /// loads (nothing to compare) but is not pinned to an engine.
+<a href=#266 id=266 data-nosnippet>266</a>    </span><span class="attr">#[must_use]
+<a href=#267 id=267 data-nosnippet>267</a>    </span><span class="kw">pub fn </span>is_legacy(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#268 id=268 data-nosnippet>268</a>        <span class="self">self</span>.vocabulary.is_none()
+<a href=#269 id=269 data-nosnippet>269</a>    }
+<a href=#270 id=270 data-nosnippet>270</a>}
+<a href=#271 id=271 data-nosnippet>271</a>
+<a href=#272 id=272 data-nosnippet>272</a><span class="doccomment">/// Serialize a payload into the .frc binary format, recording the current
+<a href=#273 id=273 data-nosnippet>273</a>/// engine's fact-vocabulary fingerprint.
+<a href=#274 id=274 data-nosnippet>274</a>///
+<a href=#275 id=275 data-nosnippet>275</a>/// Use [`write_bundle_pinned`] when the bundle should also carry a coarse
+<a href=#276 id=276 data-nosnippet>276</a>/// engine range for distribution.
+<a href=#277 id=277 data-nosnippet>277</a></span><span class="kw">pub fn </span>write_bundle&lt;T: serde::Serialize&gt;(
+<a href=#278 id=278 data-nosnippet>278</a>    payload: <span class="kw-2">&amp;</span>T,
+<a href=#279 id=279 data-nosnippet>279</a>    pattern_count: u32,
+<a href=#280 id=280 data-nosnippet>280</a>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, String&gt; {
+<a href=#281 id=281 data-nosnippet>281</a>    write_bundle_with_header(payload, BundleHeader::current(pattern_count, [<span class="number">0</span>; <span class="number">32</span>]))
+<a href=#282 id=282 data-nosnippet>282</a>}
+<a href=#283 id=283 data-nosnippet>283</a>
+<a href=#284 id=284 data-nosnippet>284</a><span class="doccomment">/// Like [`write_bundle`], but stamps an engine range so a consumer can refuse
+<a href=#285 id=285 data-nosnippet>285</a>/// the bundle before decoding it. This is what corpus-repo publishing should
+<a href=#286 id=286 data-nosnippet>286</a>/// use: the range names the engine the families were replay-gated against.
+<a href=#287 id=287 data-nosnippet>287</a></span><span class="kw">pub fn </span>write_bundle_pinned&lt;T: serde::Serialize&gt;(
+<a href=#288 id=288 data-nosnippet>288</a>    payload: <span class="kw-2">&amp;</span>T,
+<a href=#289 id=289 data-nosnippet>289</a>    pattern_count: u32,
+<a href=#290 id=290 data-nosnippet>290</a>    requires_engine: EngineRequirement,
+<a href=#291 id=291 data-nosnippet>291</a>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, String&gt; {
+<a href=#292 id=292 data-nosnippet>292</a>    write_bundle_pinned_with_trust(
+<a href=#293 id=293 data-nosnippet>293</a>        payload,
+<a href=#294 id=294 data-nosnippet>294</a>        pattern_count,
+<a href=#295 id=295 data-nosnippet>295</a>        requires_engine,
+<a href=#296 id=296 data-nosnippet>296</a>        BundleTrust::Certified,
+<a href=#297 id=297 data-nosnippet>297</a>    )
+<a href=#298 id=298 data-nosnippet>298</a>}
+<a href=#299 id=299 data-nosnippet>299</a>
+<a href=#300 id=300 data-nosnippet>300</a><span class="doccomment">/// [`write_bundle_pinned`] with an explicit trust tier. A `Community` bundle
+<a href=#301 id=301 data-nosnippet>301</a>/// is subject to the loader's tier rules (class- and name-scoped sanitizers,
+<a href=#302 id=302 data-nosnippet>302</a>/// policies capped at Hygiene).
+<a href=#303 id=303 data-nosnippet>303</a></span><span class="kw">pub fn </span>write_bundle_pinned_with_trust&lt;T: serde::Serialize&gt;(
+<a href=#304 id=304 data-nosnippet>304</a>    payload: <span class="kw-2">&amp;</span>T,
+<a href=#305 id=305 data-nosnippet>305</a>    pattern_count: u32,
+<a href=#306 id=306 data-nosnippet>306</a>    requires_engine: EngineRequirement,
+<a href=#307 id=307 data-nosnippet>307</a>    trust: BundleTrust,
+<a href=#308 id=308 data-nosnippet>308</a>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, String&gt; {
+<a href=#309 id=309 data-nosnippet>309</a>    <span class="kw">let </span><span class="kw-2">mut </span>header = BundleHeader::current(pattern_count, [<span class="number">0</span>; <span class="number">32</span>]);
+<a href=#310 id=310 data-nosnippet>310</a>    header.requires_engine = <span class="prelude-val">Some</span>(requires_engine);
+<a href=#311 id=311 data-nosnippet>311</a>    header.trust = trust;
+<a href=#312 id=312 data-nosnippet>312</a>    write_bundle_with_header(payload, header)
+<a href=#313 id=313 data-nosnippet>313</a>}
+<a href=#314 id=314 data-nosnippet>314</a>
+<a href=#315 id=315 data-nosnippet>315</a><span class="kw">fn </span>write_bundle_with_header&lt;T: serde::Serialize&gt;(
+<a href=#316 id=316 data-nosnippet>316</a>    payload: <span class="kw-2">&amp;</span>T,
+<a href=#317 id=317 data-nosnippet>317</a>    <span class="kw-2">mut </span>header: BundleHeader,
+<a href=#318 id=318 data-nosnippet>318</a>) -&gt; <span class="prelude-ty">Result</span>&lt;Vec&lt;u8&gt;, String&gt; {
+<a href=#319 id=319 data-nosnippet>319</a>    <span class="kw">let </span>data = bincode::serialize(payload).map_err(|e| e.to_string())<span class="question-mark">?</span>;
+<a href=#320 id=320 data-nosnippet>320</a>    <span class="kw">let </span>checksum = blake3::hash(<span class="kw-2">&amp;</span>data);
+<a href=#321 id=321 data-nosnippet>321</a>    header.checksum = <span class="kw-2">*</span>checksum.as_bytes();
+<a href=#322 id=322 data-nosnippet>322</a>
+<a href=#323 id=323 data-nosnippet>323</a>    <span class="kw">let </span><span class="kw-2">mut </span>output = Vec::new();
+<a href=#324 id=324 data-nosnippet>324</a>    <span class="kw">let </span>header_bytes = bincode::serialize(<span class="kw-2">&amp;</span>header).map_err(|e| e.to_string())<span class="question-mark">?</span>;
+<a href=#325 id=325 data-nosnippet>325</a>
+<a href=#326 id=326 data-nosnippet>326</a>    <span class="comment">// Write header length as 4-byte LE
+<a href=#327 id=327 data-nosnippet>327</a>    </span>output.extend_from_slice(<span class="kw-2">&amp;</span>(header_bytes.len() <span class="kw">as </span>u32).to_le_bytes());
+<a href=#328 id=328 data-nosnippet>328</a>    output.extend_from_slice(<span class="kw-2">&amp;</span>header_bytes);
+<a href=#329 id=329 data-nosnippet>329</a>    output.extend_from_slice(<span class="kw-2">&amp;</span>data);
+<a href=#330 id=330 data-nosnippet>330</a>
+<a href=#331 id=331 data-nosnippet>331</a>    <span class="prelude-val">Ok</span>(output)
+<a href=#332 id=332 data-nosnippet>332</a>}
+<a href=#333 id=333 data-nosnippet>333</a>
+<a href=#334 id=334 data-nosnippet>334</a><span class="doccomment">/// Hand-write an envelope in the *pre-v7* header shape.
+<a href=#335 id=335 data-nosnippet>335</a>///
+<a href=#336 id=336 data-nosnippet>336</a>/// Test-only, for exercising the reader's version branching against a header
+<a href=#337 id=337 data-nosnippet>337</a>/// that really is 4 fields wide - patching the version inside a v7 header
+<a href=#338 id=338 data-nosnippet>338</a>/// would leave the extra fields on the wire and prove nothing.
+<a href=#339 id=339 data-nosnippet>339</a></span><span class="attr">#[cfg(test)]
+<a href=#340 id=340 data-nosnippet>340</a></span><span class="kw">pub</span>(<span class="kw">crate</span>) <span class="kw">fn </span>write_legacy_envelope(version: u32, payload: <span class="kw-2">&amp;</span>[u8]) -&gt; Vec&lt;u8&gt; {
+<a href=#341 id=341 data-nosnippet>341</a>    <span class="kw">let </span>header = BundleHeaderV6 {
+<a href=#342 id=342 data-nosnippet>342</a>        magic: <span class="kw-2">*</span>BUNDLE_MAGIC,
+<a href=#343 id=343 data-nosnippet>343</a>        version,
+<a href=#344 id=344 data-nosnippet>344</a>        pattern_count: <span class="number">0</span>,
+<a href=#345 id=345 data-nosnippet>345</a>        checksum: <span class="kw-2">*</span>blake3::hash(payload).as_bytes(),
+<a href=#346 id=346 data-nosnippet>346</a>    };
+<a href=#347 id=347 data-nosnippet>347</a>    <span class="kw">let </span>header_bytes = bincode::serialize(<span class="kw-2">&amp;</span>header).expect(<span class="string">"legacy header serializes"</span>);
+<a href=#348 id=348 data-nosnippet>348</a>    <span class="kw">let </span><span class="kw-2">mut </span>bytes = (header_bytes.len() <span class="kw">as </span>u32).to_le_bytes().to_vec();
+<a href=#349 id=349 data-nosnippet>349</a>    bytes.extend_from_slice(<span class="kw-2">&amp;</span>header_bytes);
+<a href=#350 id=350 data-nosnippet>350</a>    bytes.extend_from_slice(payload);
+<a href=#351 id=351 data-nosnippet>351</a>    bytes
+<a href=#352 id=352 data-nosnippet>352</a>}
+<a href=#353 id=353 data-nosnippet>353</a>
+<a href=#354 id=354 data-nosnippet>354</a><span class="doccomment">/// Split the `.frc` envelope: verify magic, gate the version against
+<a href=#355 id=355 data-nosnippet>355</a>/// [`BUNDLE_VERSION`], verify the checksum, and return the header with the
+<a href=#356 id=356 data-nosnippet>356</a>/// payload bytes (not yet deserialized).
+<a href=#357 id=357 data-nosnippet>357</a>///
+<a href=#358 id=358 data-nosnippet>358</a>/// Compatibility is checked here, before any payload decode, so a bundle that
+<a href=#359 id=359 data-nosnippet>359</a>/// cannot be understood is refused with a message naming both sides rather
+<a href=#360 id=360 data-nosnippet>360</a>/// than surfacing as a serde error halfway through a scan.
+<a href=#361 id=361 data-nosnippet>361</a>///
+<a href=#362 id=362 data-nosnippet>362</a>/// The version gate rejects *newer* bundles with a clean error; which
+<a href=#363 id=363 data-nosnippet>363</a>/// payload shape the bytes hold is the caller's decision (see the
+<a href=#364 id=364 data-nosnippet>364</a>/// version-branched load in `format::load_bundle`).
+<a href=#365 id=365 data-nosnippet>365</a></span><span class="kw">pub fn </span>read_bundle_parts(bytes: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;(BundleHeader, <span class="kw-2">&amp;</span>[u8]), String&gt; {
+<a href=#366 id=366 data-nosnippet>366</a>    <span class="kw">if </span>bytes.len() &lt; <span class="number">4 </span>{
+<a href=#367 id=367 data-nosnippet>367</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="string">"Bundle too small (missing header length)"</span>.to_string());
+<a href=#368 id=368 data-nosnippet>368</a>    }
+<a href=#369 id=369 data-nosnippet>369</a>
+<a href=#370 id=370 data-nosnippet>370</a>    <span class="kw">let </span><span class="kw-2">mut </span>len_bytes = [<span class="number">0u8</span>; <span class="number">4</span>];
+<a href=#371 id=371 data-nosnippet>371</a>    len_bytes.copy_from_slice(<span class="kw-2">&amp;</span>bytes[<span class="number">0</span>..<span class="number">4</span>]);
+<a href=#372 id=372 data-nosnippet>372</a>    <span class="kw">let </span>header_len = u32::from_le_bytes(len_bytes) <span class="kw">as </span>usize;
+<a href=#373 id=373 data-nosnippet>373</a>
+<a href=#374 id=374 data-nosnippet>374</a>    <span class="kw">if </span>bytes.len() &lt; <span class="number">4 </span>+ header_len {
+<a href=#375 id=375 data-nosnippet>375</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="string">"Bundle truncated (header incomplete)"</span>.to_string());
+<a href=#376 id=376 data-nosnippet>376</a>    }
+<a href=#377 id=377 data-nosnippet>377</a>
+<a href=#378 id=378 data-nosnippet>378</a>    <span class="kw">let </span>header_data = <span class="kw-2">&amp;</span>bytes[<span class="number">4</span>..<span class="number">4 </span>+ header_len];
+<a href=#379 id=379 data-nosnippet>379</a>
+<a href=#380 id=380 data-nosnippet>380</a>    <span class="comment">// Peek magic + version without committing to a header shape: they are the
+<a href=#381 id=381 data-nosnippet>381</a>    // first two fields of every version, so the prefix decodes identically.
+<a href=#382 id=382 data-nosnippet>382</a>    </span><span class="kw">let </span>(magic, version) = peek_header_prefix(header_data)<span class="question-mark">?</span>;
+<a href=#383 id=383 data-nosnippet>383</a>    <span class="kw">if </span>magic != <span class="kw-2">*</span>BUNDLE_MAGIC {
+<a href=#384 id=384 data-nosnippet>384</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="string">"Invalid magic bytes, expected FRC1"</span>.to_string());
+<a href=#385 id=385 data-nosnippet>385</a>    }
+<a href=#386 id=386 data-nosnippet>386</a>    <span class="kw">if </span>version &gt; BUNDLE_VERSION {
+<a href=#387 id=387 data-nosnippet>387</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">format!</span>(
+<a href=#388 id=388 data-nosnippet>388</a>            <span class="string">"Unsupported bundle version {} (this engine supports up to {})"</span>,
+<a href=#389 id=389 data-nosnippet>389</a>            version, BUNDLE_VERSION
+<a href=#390 id=390 data-nosnippet>390</a>        ));
+<a href=#391 id=391 data-nosnippet>391</a>    }
+<a href=#392 id=392 data-nosnippet>392</a>    <span class="kw">if </span>version &lt; MIN_SUPPORTED_VERSION {
+<a href=#393 id=393 data-nosnippet>393</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">format!</span>(
+<a href=#394 id=394 data-nosnippet>394</a>            <span class="string">"Bundle version {version} is no longer supported (oldest readable is \
+<a href=#395 id=395 data-nosnippet>395</a>             {MIN_SUPPORTED_VERSION}); rebuild it with a current `frensense bundle`"
+<a href=#396 id=396 data-nosnippet>396</a>        </span>));
+<a href=#397 id=397 data-nosnippet>397</a>    }
+<a href=#398 id=398 data-nosnippet>398</a>
+<a href=#399 id=399 data-nosnippet>399</a>    <span class="kw">let </span>header: BundleHeader = <span class="kw">if </span>version == <span class="number">7 </span>{
+<a href=#400 id=400 data-nosnippet>400</a>        <span class="comment">// v7 layout: the pre-trust shape, widened with the conservative
+<a href=#401 id=401 data-nosnippet>401</a>        // community default (no bundle written before v8 was certified).
+<a href=#402 id=402 data-nosnippet>402</a>        </span><span class="kw">let </span>legacy: BundleHeaderV7 =
+<a href=#403 id=403 data-nosnippet>403</a>            bincode::deserialize(header_data).map_err(|e| e.to_string())<span class="question-mark">?</span>;
+<a href=#404 id=404 data-nosnippet>404</a>        BundleHeader {
+<a href=#405 id=405 data-nosnippet>405</a>            magic: legacy.magic,
+<a href=#406 id=406 data-nosnippet>406</a>            version: legacy.version,
+<a href=#407 id=407 data-nosnippet>407</a>            pattern_count: legacy.pattern_count,
+<a href=#408 id=408 data-nosnippet>408</a>            checksum: legacy.checksum,
+<a href=#409 id=409 data-nosnippet>409</a>            vocabulary: legacy.vocabulary,
+<a href=#410 id=410 data-nosnippet>410</a>            requires_engine: legacy.requires_engine,
+<a href=#411 id=411 data-nosnippet>411</a>            built_by_engine: legacy.built_by_engine,
+<a href=#412 id=412 data-nosnippet>412</a>            trust: BundleTrust::Community,
+<a href=#413 id=413 data-nosnippet>413</a>        }
+<a href=#414 id=414 data-nosnippet>414</a>    } <span class="kw">else if </span>version &lt; <span class="number">7 </span>{
+<a href=#415 id=415 data-nosnippet>415</a>        <span class="comment">// v6-and-earlier layout: decode the frozen shape, then widen it.
+<a href=#416 id=416 data-nosnippet>416</a>        </span><span class="kw">let </span>legacy: BundleHeaderV6 =
+<a href=#417 id=417 data-nosnippet>417</a>            bincode::deserialize(header_data).map_err(|e| e.to_string())<span class="question-mark">?</span>;
+<a href=#418 id=418 data-nosnippet>418</a>        BundleHeader {
+<a href=#419 id=419 data-nosnippet>419</a>            magic: legacy.magic,
+<a href=#420 id=420 data-nosnippet>420</a>            version: legacy.version,
+<a href=#421 id=421 data-nosnippet>421</a>            pattern_count: legacy.pattern_count,
+<a href=#422 id=422 data-nosnippet>422</a>            checksum: legacy.checksum,
+<a href=#423 id=423 data-nosnippet>423</a>            vocabulary: <span class="prelude-val">None</span>,
+<a href=#424 id=424 data-nosnippet>424</a>            requires_engine: <span class="prelude-val">None</span>,
+<a href=#425 id=425 data-nosnippet>425</a>            built_by_engine: <span class="prelude-val">None</span>,
+<a href=#426 id=426 data-nosnippet>426</a>            trust: BundleTrust::Community,
+<a href=#427 id=427 data-nosnippet>427</a>        }
+<a href=#428 id=428 data-nosnippet>428</a>    } <span class="kw">else </span>{
+<a href=#429 id=429 data-nosnippet>429</a>        bincode::deserialize(header_data).map_err(|e| e.to_string())<span class="question-mark">?
+<a href=#430 id=430 data-nosnippet>430</a>    </span>};
+<a href=#431 id=431 data-nosnippet>431</a>
+<a href=#432 id=432 data-nosnippet>432</a>    <span class="kw">let </span>payload_data = <span class="kw-2">&amp;</span>bytes[<span class="number">4 </span>+ header_len..];
+<a href=#433 id=433 data-nosnippet>433</a>    <span class="kw">let </span>actual_checksum = blake3::hash(payload_data);
+<a href=#434 id=434 data-nosnippet>434</a>    <span class="kw">if </span>actual_checksum.as_bytes() != <span class="kw-2">&amp;</span>header.checksum {
+<a href=#435 id=435 data-nosnippet>435</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="string">"Bundle checksum mismatch (corrupted data)"</span>.to_string());
+<a href=#436 id=436 data-nosnippet>436</a>    }
+<a href=#437 id=437 data-nosnippet>437</a>
+<a href=#438 id=438 data-nosnippet>438</a>    check_engine_compatibility(<span class="kw-2">&amp;</span>header)<span class="question-mark">?</span>;
+<a href=#439 id=439 data-nosnippet>439</a>
+<a href=#440 id=440 data-nosnippet>440</a>    <span class="prelude-val">Ok</span>((header, payload_data))
+<a href=#441 id=441 data-nosnippet>441</a>}
+<a href=#442 id=442 data-nosnippet>442</a>
+<a href=#443 id=443 data-nosnippet>443</a><span class="doccomment">/// Enforce the header's engine compatibility claims against this binary.
+<a href=#444 id=444 data-nosnippet>444</a>///
+<a href=#445 id=445 data-nosnippet>445</a>/// The vocabulary fingerprint is the strict check: it is derived from the
+<a href=#446 id=446 data-nosnippet>446</a>/// serialized fact vocabulary itself, so it moves exactly when a bundle's
+<a href=#447 id=447 data-nosnippet>447</a>/// bytes would stop decoding. The engine range is a coarser, author-declared
+<a href=#448 id=448 data-nosnippet>448</a>/// policy bound on top of it.
+<a href=#449 id=449 data-nosnippet>449</a>///
+<a href=#450 id=450 data-nosnippet>450</a>/// # Errors
+<a href=#451 id=451 data-nosnippet>451</a>/// Returns a message naming both sides whenever the bundle cannot be loaded
+<a href=#452 id=452 data-nosnippet>452</a>/// by this engine.
+<a href=#453 id=453 data-nosnippet>453</a></span><span class="kw">pub fn </span>check_engine_compatibility(header: <span class="kw-2">&amp;</span>BundleHeader) -&gt; <span class="prelude-ty">Result</span>&lt;(), String&gt; {
+<a href=#454 id=454 data-nosnippet>454</a>    <span class="kw">let </span>engine_version = frensense_engine::VERSION;
+<a href=#455 id=455 data-nosnippet>455</a>    <span class="kw">let </span>engine_triple = EngineRequirement::parse_triple(engine_version);
+<a href=#456 id=456 data-nosnippet>456</a>
+<a href=#457 id=457 data-nosnippet>457</a>    <span class="kw">if let </span><span class="prelude-val">Some</span>(required) = header.requires_engine {
+<a href=#458 id=458 data-nosnippet>458</a>        <span class="kw">match </span>engine_triple {
+<a href=#459 id=459 data-nosnippet>459</a>            <span class="prelude-val">Some</span>(triple) <span class="kw">if </span>required.accepts(triple) =&gt; {}
+<a href=#460 id=460 data-nosnippet>460</a>            <span class="prelude-val">Some</span>(triple) =&gt; {
+<a href=#461 id=461 data-nosnippet>461</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">format!</span>(
+<a href=#462 id=462 data-nosnippet>462</a>                    <span class="string">"Bundle requires frensense {required} but this engine is \
+<a href=#463 id=463 data-nosnippet>463</a>                     {engine_version} ({}.{}.{}). Rebuild the bundle with a \
+<a href=#464 id=464 data-nosnippet>464</a>                     matching engine, or upgrade."</span>,
+<a href=#465 id=465 data-nosnippet>465</a>                    triple[<span class="number">0</span>], triple[<span class="number">1</span>], triple[<span class="number">2</span>]
+<a href=#466 id=466 data-nosnippet>466</a>                ));
+<a href=#467 id=467 data-nosnippet>467</a>            }
+<a href=#468 id=468 data-nosnippet>468</a>            <span class="prelude-val">None </span>=&gt; {
+<a href=#469 id=469 data-nosnippet>469</a>                <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">format!</span>(
+<a href=#470 id=470 data-nosnippet>470</a>                    <span class="string">"Bundle declares an engine requirement ({required}) but this \
+<a href=#471 id=471 data-nosnippet>471</a>                     engine's version {engine_version} is not a parseable version; \
+<a href=#472 id=472 data-nosnippet>472</a>                     refusing rather than guessing"
+<a href=#473 id=473 data-nosnippet>473</a>                </span>));
+<a href=#474 id=474 data-nosnippet>474</a>            }
+<a href=#475 id=475 data-nosnippet>475</a>        }
+<a href=#476 id=476 data-nosnippet>476</a>    }
+<a href=#477 id=477 data-nosnippet>477</a>
+<a href=#478 id=478 data-nosnippet>478</a>    <span class="comment">// `built_by_engine` is diagnostics only: a bundle written by an older
+<a href=#479 id=479 data-nosnippet>479</a>    // patch of the same series carries the same vocabulary fingerprint and is
+<a href=#480 id=480 data-nosnippet>480</a>    // perfectly loadable, so nothing is checked against it here.
+<a href=#481 id=481 data-nosnippet>481</a>    </span><span class="kw">if let </span><span class="prelude-val">Some</span>(recorded) = header.vocabulary {
+<a href=#482 id=482 data-nosnippet>482</a>        <span class="kw">let </span>current = frensense_engine::analysis::taint::facts::FACT_VOCABULARY_FINGERPRINT;
+<a href=#483 id=483 data-nosnippet>483</a>        <span class="kw">if </span>recorded != current {
+<a href=#484 id=484 data-nosnippet>484</a>            <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">format!</span>(
+<a href=#485 id=485 data-nosnippet>485</a>                <span class="string">"Bundle was built for fact vocabulary {recorded:#018x} but this \
+<a href=#486 id=486 data-nosnippet>486</a>                 engine speaks {current:#018x}. The engine's fact vocabulary has \
+<a href=#487 id=487 data-nosnippet>487</a>                 changed since it was written; rebuild the bundle with this engine \
+<a href=#488 id=488 data-nosnippet>488</a>                 (`frensense bundle &lt;corpus&gt; &lt;out&gt;.frc`)."
+<a href=#489 id=489 data-nosnippet>489</a>            </span>));
+<a href=#490 id=490 data-nosnippet>490</a>        }
+<a href=#491 id=491 data-nosnippet>491</a>    }
+<a href=#492 id=492 data-nosnippet>492</a>
+<a href=#493 id=493 data-nosnippet>493</a>    <span class="prelude-val">Ok</span>(())
+<a href=#494 id=494 data-nosnippet>494</a>}
+<a href=#495 id=495 data-nosnippet>495</a>
+<a href=#496 id=496 data-nosnippet>496</a><span class="doccomment">/// Decode magic and version from a header without knowing its full shape.
+<a href=#497 id=497 data-nosnippet>497</a>///
+<a href=#498 id=498 data-nosnippet>498</a>/// Both are the first fields of every version of [`BundleHeader`], and bincode
+<a href=#499 id=499 data-nosnippet>499</a>/// 1.x encodes them fixed-width little-endian, so the prefix is stable.
+<a href=#500 id=500 data-nosnippet>500</a></span><span class="kw">fn </span>peek_header_prefix(header_data: <span class="kw-2">&amp;</span>[u8]) -&gt; <span class="prelude-ty">Result</span>&lt;([u8; <span class="number">4</span>], u32), String&gt; {
+<a href=#501 id=501 data-nosnippet>501</a>    <span class="kw">if </span>header_data.len() &lt; <span class="number">8 </span>{
+<a href=#502 id=502 data-nosnippet>502</a>        <span class="kw">return </span><span class="prelude-val">Err</span>(<span class="macro">format!</span>(
+<a href=#503 id=503 data-nosnippet>503</a>            <span class="string">"Bundle header truncated ({} bytes, need at least 8)"</span>,
+<a href=#504 id=504 data-nosnippet>504</a>            header_data.len()
+<a href=#505 id=505 data-nosnippet>505</a>        ));
+<a href=#506 id=506 data-nosnippet>506</a>    }
+<a href=#507 id=507 data-nosnippet>507</a>    <span class="kw">let </span><span class="kw-2">mut </span>magic = [<span class="number">0u8</span>; <span class="number">4</span>];
+<a href=#508 id=508 data-nosnippet>508</a>    magic.copy_from_slice(<span class="kw-2">&amp;</span>header_data[<span class="number">0</span>..<span class="number">4</span>]);
+<a href=#509 id=509 data-nosnippet>509</a>    <span class="kw">let </span><span class="kw-2">mut </span>version_bytes = [<span class="number">0u8</span>; <span class="number">4</span>];
+<a href=#510 id=510 data-nosnippet>510</a>    version_bytes.copy_from_slice(<span class="kw-2">&amp;</span>header_data[<span class="number">4</span>..<span class="number">8</span>]);
+<a href=#511 id=511 data-nosnippet>511</a>    <span class="prelude-val">Ok</span>((magic, u32::from_le_bytes(version_bytes)))
+<a href=#512 id=512 data-nosnippet>512</a>}
+<a href=#513 id=513 data-nosnippet>513</a>
+<a href=#514 id=514 data-nosnippet>514</a><span class="doccomment">/// Deserialize a payload from the .frc binary format.
+<a href=#515 id=515 data-nosnippet>515</a></span><span class="kw">pub fn </span>read_bundle&lt;T: serde::de::DeserializeOwned&gt;(
+<a href=#516 id=516 data-nosnippet>516</a>    bytes: <span class="kw-2">&amp;</span>[u8],
+<a href=#517 id=517 data-nosnippet>517</a>) -&gt; <span class="prelude-ty">Result</span>&lt;(BundleHeader, T), String&gt; {
+<a href=#518 id=518 data-nosnippet>518</a>    <span class="kw">let </span>(header, payload_data) = read_bundle_parts(bytes)<span class="question-mark">?</span>;
+<a href=#519 id=519 data-nosnippet>519</a>    <span class="kw">let </span>payload: T = bincode::deserialize(payload_data).map_err(|e| e.to_string())<span class="question-mark">?</span>;
+<a href=#520 id=520 data-nosnippet>520</a>    <span class="prelude-val">Ok</span>((header, payload))
+<a href=#521 id=521 data-nosnippet>521</a>}
+<a href=#522 id=522 data-nosnippet>522</a>
+<a href=#523 id=523 data-nosnippet>523</a><span class="attr">#[cfg(test)]
+<a href=#524 id=524 data-nosnippet>524</a></span><span class="kw">mod </span>tests {
+<a href=#525 id=525 data-nosnippet>525</a>    <span class="kw">use super</span>::<span class="kw-2">*</span>;
+<a href=#526 id=526 data-nosnippet>526</a>
+<a href=#527 id=527 data-nosnippet>527</a>    <span class="doccomment">/// Hand-write an envelope at a chosen version, bypassing the writer so
+<a href=#528 id=528 data-nosnippet>528</a>    /// the *reader* is what is under test.
+<a href=#529 id=529 data-nosnippet>529</a>    </span><span class="kw">fn </span>raw_envelope(header_bytes: <span class="kw-2">&amp;</span>[u8], payload: <span class="kw-2">&amp;</span>[u8]) -&gt; Vec&lt;u8&gt; {
+<a href=#530 id=530 data-nosnippet>530</a>        <span class="kw">let </span><span class="kw-2">mut </span>bytes = (header_bytes.len() <span class="kw">as </span>u32).to_le_bytes().to_vec();
+<a href=#531 id=531 data-nosnippet>531</a>        bytes.extend_from_slice(header_bytes);
+<a href=#532 id=532 data-nosnippet>532</a>        bytes.extend_from_slice(payload);
+<a href=#533 id=533 data-nosnippet>533</a>        bytes
+<a href=#534 id=534 data-nosnippet>534</a>    }
+<a href=#535 id=535 data-nosnippet>535</a>
+<a href=#536 id=536 data-nosnippet>536</a>    <span class="doccomment">/// A v7 bundle records the fingerprint and the writing engine, and loads.
+<a href=#537 id=537 data-nosnippet>537</a>    </span><span class="attr">#[test]
+<a href=#538 id=538 data-nosnippet>538</a>    </span><span class="kw">fn </span>v7_write_records_vocabulary_and_engine() {
+<a href=#539 id=539 data-nosnippet>539</a>        <span class="kw">let </span>bytes = write_bundle(<span class="kw-2">&amp;</span><span class="macro">vec!</span>[<span class="number">1u32</span>, <span class="number">2</span>, <span class="number">3</span>], <span class="number">0</span>).expect(<span class="string">"write"</span>);
+<a href=#540 id=540 data-nosnippet>540</a>        <span class="kw">let </span>(header, payload) = read_bundle::&lt;Vec&lt;u32&gt;&gt;(<span class="kw-2">&amp;</span>bytes).expect(<span class="string">"v7 round-trips"</span>);
+<a href=#541 id=541 data-nosnippet>541</a>        <span class="macro">assert_eq!</span>(header.version, BUNDLE_VERSION);
+<a href=#542 id=542 data-nosnippet>542</a>        <span class="macro">assert_eq!</span>(
+<a href=#543 id=543 data-nosnippet>543</a>            header.vocabulary,
+<a href=#544 id=544 data-nosnippet>544</a>            <span class="prelude-val">Some</span>(frensense_engine::analysis::taint::facts::FACT_VOCABULARY_FINGERPRINT)
+<a href=#545 id=545 data-nosnippet>545</a>        );
+<a href=#546 id=546 data-nosnippet>546</a>        <span class="macro">assert_eq!</span>(
+<a href=#547 id=547 data-nosnippet>547</a>            header.built_by_engine.as_deref(),
+<a href=#548 id=548 data-nosnippet>548</a>            <span class="prelude-val">Some</span>(frensense_engine::VERSION)
+<a href=#549 id=549 data-nosnippet>549</a>        );
+<a href=#550 id=550 data-nosnippet>550</a>        <span class="macro">assert_eq!</span>(payload, <span class="macro">vec!</span>[<span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>]);
+<a href=#551 id=551 data-nosnippet>551</a>    }
+<a href=#552 id=552 data-nosnippet>552</a>
+<a href=#553 id=553 data-nosnippet>553</a>    <span class="doccomment">/// A v6 header (no vocabulary fields) still loads, marked legacy.
+<a href=#554 id=554 data-nosnippet>554</a>    </span><span class="attr">#[test]
+<a href=#555 id=555 data-nosnippet>555</a>    </span><span class="kw">fn </span>v6_envelope_still_loads() {
+<a href=#556 id=556 data-nosnippet>556</a>        <span class="kw">let </span>payload = bincode::serialize(<span class="kw-2">&amp;</span><span class="macro">vec!</span>[<span class="number">7u8</span>]).expect(<span class="string">"payload"</span>);
+<a href=#557 id=557 data-nosnippet>557</a>        <span class="kw">let </span>legacy = BundleHeaderV6 {
+<a href=#558 id=558 data-nosnippet>558</a>            magic: <span class="kw-2">*</span>BUNDLE_MAGIC,
+<a href=#559 id=559 data-nosnippet>559</a>            version: <span class="number">6</span>,
+<a href=#560 id=560 data-nosnippet>560</a>            pattern_count: <span class="number">0</span>,
+<a href=#561 id=561 data-nosnippet>561</a>            checksum: <span class="kw-2">*</span>blake3::hash(<span class="kw-2">&amp;</span>payload).as_bytes(),
+<a href=#562 id=562 data-nosnippet>562</a>        };
+<a href=#563 id=563 data-nosnippet>563</a>        <span class="kw">let </span>header_bytes = bincode::serialize(<span class="kw-2">&amp;</span>legacy).expect(<span class="string">"header"</span>);
+<a href=#564 id=564 data-nosnippet>564</a>        <span class="kw">let </span>bytes = raw_envelope(<span class="kw-2">&amp;</span>header_bytes, <span class="kw-2">&amp;</span>payload);
+<a href=#565 id=565 data-nosnippet>565</a>
+<a href=#566 id=566 data-nosnippet>566</a>        <span class="kw">let </span>(header, loaded) = read_bundle::&lt;Vec&lt;u8&gt;&gt;(<span class="kw-2">&amp;</span>bytes).expect(<span class="string">"v6 loads"</span>);
+<a href=#567 id=567 data-nosnippet>567</a>        <span class="macro">assert_eq!</span>(header.version, <span class="number">6</span>);
+<a href=#568 id=568 data-nosnippet>568</a>        <span class="macro">assert!</span>(header.is_legacy(), <span class="string">"v6 bundles predate the fingerprint"</span>);
+<a href=#569 id=569 data-nosnippet>569</a>        <span class="macro">assert_eq!</span>(header.vocabulary, <span class="prelude-val">None</span>);
+<a href=#570 id=570 data-nosnippet>570</a>        <span class="macro">assert_eq!</span>(loaded, <span class="macro">vec!</span>[<span class="number">7u8</span>]);
+<a href=#571 id=571 data-nosnippet>571</a>    }
+<a href=#572 id=572 data-nosnippet>572</a>
+<a href=#573 id=573 data-nosnippet>573</a>    <span class="doccomment">/// The prefix peek agrees with the decoded header for every shape.
+<a href=#574 id=574 data-nosnippet>574</a>    </span><span class="attr">#[test]
+<a href=#575 id=575 data-nosnippet>575</a>    </span><span class="kw">fn </span>version_prefix_matches_decoded_header() {
+<a href=#576 id=576 data-nosnippet>576</a>        <span class="kw">for </span>version <span class="kw">in </span>[<span class="number">6u32</span>, <span class="number">8</span>] {
+<a href=#577 id=577 data-nosnippet>577</a>            <span class="kw">let </span>header = <span class="kw">if </span>version == <span class="number">6 </span>{
+<a href=#578 id=578 data-nosnippet>578</a>                BundleHeader::legacy(<span class="number">3</span>, [<span class="number">0</span>; <span class="number">32</span>])
+<a href=#579 id=579 data-nosnippet>579</a>            } <span class="kw">else </span>{
+<a href=#580 id=580 data-nosnippet>580</a>                BundleHeader::current(<span class="number">3</span>, [<span class="number">0</span>; <span class="number">32</span>])
+<a href=#581 id=581 data-nosnippet>581</a>            };
+<a href=#582 id=582 data-nosnippet>582</a>            <span class="kw">let </span>bytes = bincode::serialize(<span class="kw-2">&amp;</span>header).expect(<span class="string">"serialize"</span>);
+<a href=#583 id=583 data-nosnippet>583</a>            <span class="kw">let </span>(magic, peeked) = peek_header_prefix(<span class="kw-2">&amp;</span>bytes).expect(<span class="string">"peek"</span>);
+<a href=#584 id=584 data-nosnippet>584</a>            <span class="macro">assert_eq!</span>(magic, <span class="kw-2">*</span>BUNDLE_MAGIC);
+<a href=#585 id=585 data-nosnippet>585</a>            <span class="macro">assert_eq!</span>(peeked, version, <span class="string">"byte offsets differ from bincode layout"</span>);
+<a href=#586 id=586 data-nosnippet>586</a>        }
+<a href=#587 id=587 data-nosnippet>587</a>    }
+<a href=#588 id=588 data-nosnippet>588</a>
+<a href=#589 id=589 data-nosnippet>589</a>    <span class="doccomment">/// A newer-than-known envelope is refused by version, before decoding.
+<a href=#590 id=590 data-nosnippet>590</a>    </span><span class="attr">#[test]
+<a href=#591 id=591 data-nosnippet>591</a>    </span><span class="kw">fn </span>newer_bundle_version_rejected_with_clean_error() {
+<a href=#592 id=592 data-nosnippet>592</a>        <span class="kw">let </span><span class="kw-2">mut </span>header = BundleHeader::current(<span class="number">0</span>, [<span class="number">0</span>; <span class="number">32</span>]);
+<a href=#593 id=593 data-nosnippet>593</a>        header.version = BUNDLE_VERSION + <span class="number">1</span>;
+<a href=#594 id=594 data-nosnippet>594</a>        <span class="kw">let </span>header_bytes = bincode::serialize(<span class="kw-2">&amp;</span>header).expect(<span class="string">"serialize"</span>);
+<a href=#595 id=595 data-nosnippet>595</a>        <span class="kw">let </span>bytes = raw_envelope(<span class="kw-2">&amp;</span>header_bytes, <span class="kw-2">&amp;</span>[]);
+<a href=#596 id=596 data-nosnippet>596</a>
+<a href=#597 id=597 data-nosnippet>597</a>        <span class="kw">let </span>err = read_bundle_parts(<span class="kw-2">&amp;</span>bytes).expect_err(<span class="string">"newer version must fail"</span>);
+<a href=#598 id=598 data-nosnippet>598</a>        <span class="macro">assert!</span>(err.contains(<span class="string">"Unsupported bundle version"</span>), <span class="string">"{err}"</span>);
+<a href=#599 id=599 data-nosnippet>599</a>        <span class="macro">assert!</span>(err.contains(<span class="kw-2">&amp;</span>BUNDLE_VERSION.to_string()), <span class="string">"{err}"</span>);
+<a href=#600 id=600 data-nosnippet>600</a>    }
+<a href=#601 id=601 data-nosnippet>601</a>
+<a href=#602 id=602 data-nosnippet>602</a>    <span class="doccomment">/// A too-old envelope is refused with a rebuild instruction rather than a
+<a href=#603 id=603 data-nosnippet>603</a>    /// parse error.
+<a href=#604 id=604 data-nosnippet>604</a>    </span><span class="attr">#[test]
+<a href=#605 id=605 data-nosnippet>605</a>    </span><span class="kw">fn </span>pre_min_supported_version_rejected() {
+<a href=#606 id=606 data-nosnippet>606</a>        <span class="kw">let </span>header = BundleHeader::legacy(<span class="number">0</span>, [<span class="number">0</span>; <span class="number">32</span>]);
+<a href=#607 id=607 data-nosnippet>607</a>        <span class="kw">let </span><span class="kw-2">mut </span>bytes_header = bincode::serialize(<span class="kw-2">&amp;</span>header).expect(<span class="string">"serialize"</span>);
+<a href=#608 id=608 data-nosnippet>608</a>        <span class="comment">// Rewrite the version field to 3 (prefix bytes 4..8).
+<a href=#609 id=609 data-nosnippet>609</a>        </span>bytes_header[<span class="number">4</span>..<span class="number">8</span>].copy_from_slice(<span class="kw-2">&amp;</span><span class="number">3u32</span>.to_le_bytes());
+<a href=#610 id=610 data-nosnippet>610</a>        <span class="kw">let </span>bytes = raw_envelope(<span class="kw-2">&amp;</span>bytes_header, <span class="kw-2">&amp;</span>[]);
+<a href=#611 id=611 data-nosnippet>611</a>
+<a href=#612 id=612 data-nosnippet>612</a>        <span class="kw">let </span>err = read_bundle_parts(<span class="kw-2">&amp;</span>bytes).expect_err(<span class="string">"must fail"</span>);
+<a href=#613 id=613 data-nosnippet>613</a>        <span class="macro">assert!</span>(err.contains(<span class="string">"no longer supported"</span>), <span class="string">"{err}"</span>);
+<a href=#614 id=614 data-nosnippet>614</a>    }
+<a href=#615 id=615 data-nosnippet>615</a>
+<a href=#616 id=616 data-nosnippet>616</a>    <span class="doccomment">/// A bundle built for a different vocabulary is refused with both values
+<a href=#617 id=617 data-nosnippet>617</a>    /// named - the check that makes corpus distribution safe.
+<a href=#618 id=618 data-nosnippet>618</a>    </span><span class="attr">#[test]
+<a href=#619 id=619 data-nosnippet>619</a>    </span><span class="kw">fn </span>vocabulary_mismatch_rejected() {
+<a href=#620 id=620 data-nosnippet>620</a>        <span class="kw">let </span><span class="kw-2">mut </span>header = BundleHeader::current(<span class="number">0</span>, [<span class="number">0</span>; <span class="number">32</span>]);
+<a href=#621 id=621 data-nosnippet>621</a>        header.vocabulary = <span class="prelude-val">Some</span>(<span class="number">0xdead_beef_dead_beef</span>);
+<a href=#622 id=622 data-nosnippet>622</a>        <span class="kw">let </span>checksum = blake3::hash(<span class="string">b"payload"</span>);
+<a href=#623 id=623 data-nosnippet>623</a>        header.checksum = <span class="kw-2">*</span>checksum.as_bytes();
+<a href=#624 id=624 data-nosnippet>624</a>        <span class="kw">let </span>header_bytes = bincode::serialize(<span class="kw-2">&amp;</span>header).expect(<span class="string">"serialize"</span>);
+<a href=#625 id=625 data-nosnippet>625</a>        <span class="kw">let </span>bytes = raw_envelope(<span class="kw-2">&amp;</span>header_bytes, <span class="string">b"payload"</span>);
+<a href=#626 id=626 data-nosnippet>626</a>
+<a href=#627 id=627 data-nosnippet>627</a>        <span class="kw">let </span>err = read_bundle_parts(<span class="kw-2">&amp;</span>bytes).expect_err(<span class="string">"must fail"</span>);
+<a href=#628 id=628 data-nosnippet>628</a>        <span class="macro">assert!</span>(err.contains(<span class="string">"fact vocabulary"</span>), <span class="string">"{err}"</span>);
+<a href=#629 id=629 data-nosnippet>629</a>        <span class="macro">assert!</span>(err.contains(<span class="string">"rebuild the bundle"</span>), <span class="string">"{err}"</span>);
+<a href=#630 id=630 data-nosnippet>630</a>    }
+<a href=#631 id=631 data-nosnippet>631</a>
+<a href=#632 id=632 data-nosnippet>632</a>    <span class="doccomment">/// An out-of-range engine requirement is refused with both sides named.
+<a href=#633 id=633 data-nosnippet>633</a>    </span><span class="attr">#[test]
+<a href=#634 id=634 data-nosnippet>634</a>    </span><span class="kw">fn </span>engine_requirement_rejected_when_out_of_range() {
+<a href=#635 id=635 data-nosnippet>635</a>        <span class="kw">let </span><span class="kw-2">mut </span>header = BundleHeader::current(<span class="number">0</span>, [<span class="number">0</span>; <span class="number">32</span>]);
+<a href=#636 id=636 data-nosnippet>636</a>        <span class="kw">let </span>checksum = blake3::hash(<span class="string">b"payload"</span>);
+<a href=#637 id=637 data-nosnippet>637</a>        header.checksum = <span class="kw-2">*</span>checksum.as_bytes();
+<a href=#638 id=638 data-nosnippet>638</a>        <span class="comment">// A series far in the future.
+<a href=#639 id=639 data-nosnippet>639</a>        </span>header.requires_engine = <span class="prelude-val">Some</span>(EngineRequirement {
+<a href=#640 id=640 data-nosnippet>640</a>            min: [<span class="number">99</span>, <span class="number">0</span>, <span class="number">0</span>],
+<a href=#641 id=641 data-nosnippet>641</a>            max_exclusive: <span class="prelude-val">None</span>,
+<a href=#642 id=642 data-nosnippet>642</a>        });
+<a href=#643 id=643 data-nosnippet>643</a>        <span class="kw">let </span>header_bytes = bincode::serialize(<span class="kw-2">&amp;</span>header).expect(<span class="string">"serialize"</span>);
+<a href=#644 id=644 data-nosnippet>644</a>        <span class="kw">let </span>bytes = raw_envelope(<span class="kw-2">&amp;</span>header_bytes, <span class="string">b"payload"</span>);
+<a href=#645 id=645 data-nosnippet>645</a>
+<a href=#646 id=646 data-nosnippet>646</a>        <span class="kw">let </span>err = read_bundle_parts(<span class="kw-2">&amp;</span>bytes).expect_err(<span class="string">"must fail"</span>);
+<a href=#647 id=647 data-nosnippet>647</a>        <span class="macro">assert!</span>(err.contains(<span class="string">"requires frensense &gt;="</span>), <span class="string">"{err}"</span>);
+<a href=#648 id=648 data-nosnippet>648</a>        <span class="macro">assert!</span>(err.contains(frensense_engine::VERSION), <span class="string">"{err}"</span>);
+<a href=#649 id=649 data-nosnippet>649</a>    }
+<a href=#650 id=650 data-nosnippet>650</a>
+<a href=#651 id=651 data-nosnippet>651</a>    <span class="doccomment">/// `write_bundle_pinned` stamps the range, and a bundle for this engine's
+<a href=#652 id=652 data-nosnippet>652</a>    /// own series loads.
+<a href=#653 id=653 data-nosnippet>653</a>    </span><span class="attr">#[test]
+<a href=#654 id=654 data-nosnippet>654</a>    </span><span class="kw">fn </span>pinned_bundle_for_current_series_loads() {
+<a href=#655 id=655 data-nosnippet>655</a>        <span class="kw">let </span>current = EngineRequirement::parse_triple(frensense_engine::VERSION)
+<a href=#656 id=656 data-nosnippet>656</a>            .expect(<span class="string">"engine version parses"</span>);
+<a href=#657 id=657 data-nosnippet>657</a>        <span class="kw">let </span>bytes = write_bundle_pinned(<span class="kw-2">&amp;</span><span class="macro">vec!</span>[<span class="number">1u8</span>], <span class="number">0</span>, EngineRequirement::same_series(current))
+<a href=#658 id=658 data-nosnippet>658</a>            .expect(<span class="string">"write"</span>);
+<a href=#659 id=659 data-nosnippet>659</a>        <span class="kw">let </span>(header, <span class="kw">_</span>) = read_bundle::&lt;Vec&lt;u8&gt;&gt;(<span class="kw-2">&amp;</span>bytes).expect(<span class="string">"loads"</span>);
+<a href=#660 id=660 data-nosnippet>660</a>        <span class="macro">assert!</span>(header.requires_engine.is_some());
+<a href=#661 id=661 data-nosnippet>661</a>        <span class="macro">assert!</span>(header.requires_engine.expect(<span class="string">"range"</span>).accepts(current));
+<a href=#662 id=662 data-nosnippet>662</a>    }
+<a href=#663 id=663 data-nosnippet>663</a>
+<a href=#664 id=664 data-nosnippet>664</a>    <span class="doccomment">/// Version parsing ignores pre-release and build suffixes.
+<a href=#665 id=665 data-nosnippet>665</a>    </span><span class="attr">#[test]
+<a href=#666 id=666 data-nosnippet>666</a>    </span><span class="kw">fn </span>engine_version_parsing() {
+<a href=#667 id=667 data-nosnippet>667</a>        <span class="macro">assert_eq!</span>(
+<a href=#668 id=668 data-nosnippet>668</a>            EngineRequirement::parse_triple(<span class="string">"0.8.0-beta"</span>),
+<a href=#669 id=669 data-nosnippet>669</a>            <span class="prelude-val">Some</span>([<span class="number">0</span>, <span class="number">8</span>, <span class="number">0</span>])
+<a href=#670 id=670 data-nosnippet>670</a>        );
+<a href=#671 id=671 data-nosnippet>671</a>        <span class="macro">assert_eq!</span>(
+<a href=#672 id=672 data-nosnippet>672</a>            EngineRequirement::parse_triple(<span class="string">"1.2.3+build"</span>),
+<a href=#673 id=673 data-nosnippet>673</a>            <span class="prelude-val">Some</span>([<span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>])
+<a href=#674 id=674 data-nosnippet>674</a>        );
+<a href=#675 id=675 data-nosnippet>675</a>        <span class="macro">assert_eq!</span>(EngineRequirement::parse_triple(<span class="string">"0.9"</span>), <span class="prelude-val">Some</span>([<span class="number">0</span>, <span class="number">9</span>, <span class="number">0</span>]));
+<a href=#676 id=676 data-nosnippet>676</a>        <span class="macro">assert_eq!</span>(EngineRequirement::parse_triple(<span class="string">"nonsense"</span>), <span class="prelude-val">None</span>);
+<a href=#677 id=677 data-nosnippet>677</a>    }
+<a href=#678 id=678 data-nosnippet>678</a>
+<a href=#679 id=679 data-nosnippet>679</a>    <span class="doccomment">/// The same-series range includes the current patch and excludes the next
+<a href=#680 id=680 data-nosnippet>680</a>    /// minor.
+<a href=#681 id=681 data-nosnippet>681</a>    </span><span class="attr">#[test]
+<a href=#682 id=682 data-nosnippet>682</a>    </span><span class="kw">fn </span>same_series_bounds() {
+<a href=#683 id=683 data-nosnippet>683</a>        <span class="kw">let </span>req = EngineRequirement::same_series([<span class="number">0</span>, <span class="number">8</span>, <span class="number">0</span>]);
+<a href=#684 id=684 data-nosnippet>684</a>        <span class="macro">assert!</span>(req.accepts([<span class="number">0</span>, <span class="number">8</span>, <span class="number">0</span>]));
+<a href=#685 id=685 data-nosnippet>685</a>        <span class="macro">assert!</span>(req.accepts([<span class="number">0</span>, <span class="number">8</span>, <span class="number">5</span>]));
+<a href=#686 id=686 data-nosnippet>686</a>        <span class="macro">assert!</span>(!req.accepts([<span class="number">0</span>, <span class="number">7</span>, <span class="number">9</span>]));
+<a href=#687 id=687 data-nosnippet>687</a>        <span class="macro">assert!</span>(!req.accepts([<span class="number">0</span>, <span class="number">9</span>, <span class="number">0</span>]));
+<a href=#688 id=688 data-nosnippet>688</a>        <span class="macro">assert_eq!</span>(req.to_string(), <span class="string">"&gt;=0.8.0,&lt;0.9.0"</span>);
+<a href=#689 id=689 data-nosnippet>689</a>    }
+<a href=#690 id=690 data-nosnippet>690</a>}
+</code></pre></div></section></main></body></html>

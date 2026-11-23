@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["COVERAGE_SAMPLE"],"fn":["apply","apply_with_profile","apply_with_profile_and_hygiene","apply_with_profile_and_hygiene_counted","reports_finding","severity_from_label"],"struct":["Coverage","Exclusions","UnresolvedSite"]};

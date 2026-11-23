@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["added_lines","changed_scan_files","is_added","map_from_patch","relative_to_repo"],"type":["AddedLines"]};

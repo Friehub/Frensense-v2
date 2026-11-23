@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["collect_files","collect_files_detailed","collect_files_with"],"struct":["CollectOptions","CollectedFiles","CollectedTree","ExcludedPath","UnsupportedSourceFile"]};

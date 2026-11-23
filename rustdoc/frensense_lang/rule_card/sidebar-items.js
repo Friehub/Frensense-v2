@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["all_cards","card_by_id","checker_card","checker_key","cwe_url","names_vulnerability_class","taint_card","taint_class_for_cwe","taint_slugs"],"struct":["RuleCard"]};

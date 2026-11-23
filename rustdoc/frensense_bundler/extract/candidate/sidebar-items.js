@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Candidate"],"fn":["apply_candidate","fact_key"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["JsDialect"],"struct":["JavaScriptSpec","TypeScriptSpec","VueSpec"],"trait":["JsFamily"]};

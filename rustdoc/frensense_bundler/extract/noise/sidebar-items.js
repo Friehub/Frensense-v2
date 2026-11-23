@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["guard_priority","is_exception_name","looks_taint_relevant"]};

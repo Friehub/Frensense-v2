@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["FACT_VOCABULARY_FINGERPRINT"],"fn":["fact_vocabulary_fingerprint"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"constant":["POLL_INTERVAL"],"fn":["format_watch_finding","new_advisories","run_watch_loop","snapshot_mtimes"],"struct":["FileWatcher"]};

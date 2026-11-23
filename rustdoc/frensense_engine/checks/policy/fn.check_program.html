@@ -1,0 +1,42 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Evaluate every policy fact in `facts` over the scanned program."><title>check_program in frensense_engine::checks::policy - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../../" data-static-root-path="../../../static.files/" data-current-crate="frensense_engine" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../../static.files/favicon-044be391.svg"></head><body class="rustdoc fn"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">check_program</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../../frensense_engine/index.html">frensense_<wbr>engine</a><span class="version">0.9.1</span></h2></div><div class="sidebar-elems"><div id="rustdoc-modnav"><h2><a href="index.html">In frensense_<wbr>engine::<wbr>checks::<wbr>policy</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../../index.html">frensense_engine</a>::<wbr><a href="../index.html">checks</a>::<wbr><a href="index.html">policy</a></div><h1>Function <span class="fn">check_<wbr>program</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../../src/frensense_engine/checks/policy.rs.html#137-139">Source</a> </span></div><pre class="rust item-decl"><code>pub fn check_program(
+    irs: &amp;[&amp;<a class="struct" href="../../ir/function/struct.FunctionIR.html" title="struct frensense_engine::ir::function::FunctionIR">FunctionIR</a>],
+    facts: &amp;<a class="struct" href="../../analysis/taint/facts/table/struct.FactTable.html" title="struct frensense_engine::analysis::taint::facts::table::FactTable">FactTable</a>,
+) -&gt; <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/vec/struct.Vec.html" title="struct alloc::vec::Vec">Vec</a>&lt;<a class="struct" href="../struct.CheckerFinding.html" title="struct frensense_engine::checks::CheckerFinding">CheckerFinding</a>&gt;</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Evaluate every policy fact in <code>facts</code> over the scanned program.</p>
+<p>Function-scoped policies evaluate per function; module-scoped policies
+evaluate against the union of all scanned functions (the check pipeline
+passes one scan’s IR set here, which is the module the policy author
+refers to). Active <code>learned_checks</code> participate alongside native policies,
+ensuring both check representations fire harmoniously.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>frensense_engine::analysis::taint::facts::{FactTable, PolicyFact, PolicyRequirement, PolicyScope};
+<span class="kw">use </span>frensense_engine::checks::policy::check_program;
+<span class="kw">use </span>frensense_engine::checks::Provenance;
+<span class="kw">use </span>frensense_engine::harness::lower_source;
+<span class="kw">use </span>frensense_engine::ir::function::FunctionIR;
+
+<span class="comment">// Rule: a call to `deleteUser` requires an `authorize` call.
+</span><span class="kw">let </span><span class="kw-2">mut </span>facts = FactTable::default();
+facts.policy_facts.push((
+    PolicyFact {
+        package: <span class="prelude-val">None</span>,
+        rule: <span class="string">"missing_authorize"</span>.into(),
+        when_call: <span class="string">"deleteUser"</span>.into(),
+        require: <span class="macro">vec!</span>[PolicyRequirement::GuardCall { call: <span class="string">"authorize"</span>.into() }],
+        scope: PolicyScope::Function,
+        message: String::new(),
+        severity: <span class="string">"warning"</span>.into(),
+    },
+    Provenance::Spec,
+));
+<span class="kw">let </span>src = <span class="string">"declare function authorize(): void\n\
+           declare function deleteUser(): void\n\
+           function guarded() { authorize(); deleteUser() }\n\
+           function unguarded() { deleteUser() }\n\
+           function guard_after() { deleteUser(); authorize() }\n\
+           function guard_on_one_path(c: boolean) { if (c) { authorize() } deleteUser() }"</span>;
+<span class="kw">let </span>fns = lower_source(<span class="string">"t.ts"</span>, src, <span class="string">"ts"</span>).unwrap();
+<span class="kw">let </span>irs: Vec&lt;<span class="kw-2">&amp;</span>FunctionIR&gt; = fns.values().collect();
+<span class="kw">let </span><span class="kw-2">mut </span>flagged: Vec&lt;String&gt; = check_program(<span class="kw-2">&amp;</span>irs, <span class="kw-2">&amp;</span>facts).into_iter().map(|f| f.function).collect();
+flagged.sort();
+<span class="comment">// Only a guard that runs before the trigger on every path counts.
+</span><span class="macro">assert_eq!</span>(flagged, [<span class="string">"guard_after"</span>, <span class="string">"guard_on_one_path"</span>, <span class="string">"unguarded"</span>]);</code></pre></div></div></details></section></div></main></body></html>

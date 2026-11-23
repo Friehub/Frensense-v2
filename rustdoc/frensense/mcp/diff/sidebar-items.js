@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["added_ranges","diff_file_paths","filter_advisories","in_added_lines","result_payload","run_diff","run_diff_detailed","run_diff_tool","tool_definition"],"struct":["AddedRange","DiffScan"],"type":["DiffScanOutcome"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["LearnedFactEntry"],"fn":["fact_table_from_entries","fact_table_from_entries_with"]};

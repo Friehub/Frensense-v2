@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["get_input_paths","parse_options","read_rule_config"],"struct":["CliOptions"]};

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["Provenance"],"mod":["authored","config","entries","kinds","signatures","table","vocabulary"]};

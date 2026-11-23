@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["extract_facts","extract_facts_with_tables","family_tables"],"mod":["call_analysis","candidate","family","gate","noise","propose"]};

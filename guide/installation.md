@@ -59,9 +59,11 @@ chmod +x frensense
 sudo mv frensense /usr/local/bin/
 ```
 
-Releases are built by a GitHub Actions workflow that also produces a SLSA
-provenance file (`*.intoto.jsonl`) for the binaries. You can check a download
-against it with [slsa-verifier](https://github.com/slsa-framework/slsa-verifier).
+Releases are built by a GitHub Actions workflow. To audit exactly what you run,
+build from source with `cargo install frensense`. When a release attaches a
+`*.intoto.jsonl` provenance file you can check the binary against it with
+[slsa-verifier](https://github.com/slsa-framework/slsa-verifier); look at the
+release's file list before relying on it.
 
 ## Check the install
 

@@ -1,0 +1,245 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="frensense-lang"><title>frensense_lang - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="frensense_lang" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate frensense_lang</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../frensense_lang/index.html">frensense_<wbr>lang</a><span class="version">0.8.3</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#frensense-lang" title="frensense-lang">frensense-lang</a><ul><li><a href="#the-problem-this-crate-solves" title="The Problem This Crate Solves">The Problem This Crate Solves</a></li><li><a href="#the-fix-one-call-per-decision" title="The Fix: One Call Per Decision">The Fix: One Call Per Decision</a></li><li><a href="#the-javascript-family-one-spec-three-dialects" title="The JavaScript family: one spec, three dialects">The JavaScript family: one spec, three dialects</a></li><li><a href="#migration-guide-for-each-engine-subsystem" title="Migration Guide for Each Engine Subsystem">Migration Guide for Each Engine Subsystem</a></li></ul></li></ul><h3><a href="#reexports">Crate Items</a></h3><ul class="block"><li><a href="#reexports" title="Re-exports">Re-exports</a></li><li><a href="#modules" title="Modules">Modules</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>frensense_<wbr>lang</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/frensense_lang/lib.rs.html#1-351">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><h2 id="frensense-lang"><a class="doc-anchor" href="#frensense-lang">§</a>frensense-lang</h2>
+<p>Per-language AST knowledge for the frensense static analysis engine.</p>
+<h3 id="the-problem-this-crate-solves"><a class="doc-anchor" href="#the-problem-this-crate-solves">§</a>The Problem This Crate Solves</h3>
+<p>Before this crate, frensense had language-specific knowledge scattered
+across nine source files as raw tree-sitter node-kind strings:</p>
+<div class="example-wrap"><pre class="language-text"><code>fingerprint.rs:997   matches!(kind, &quot;function_item&quot; | &quot;function_declaration&quot; | ...)
+flow_fingerprint.rs  kind == &quot;variable_declarator&quot; || kind == &quot;assignment_expression&quot;
+cfg/mod.rs           &quot;if_statement&quot; | &quot;try_statement&quot; | &quot;catch_clause&quot; | ...
+cfg/def_use.rs       &quot;let_declaration&quot; | &quot;call_expression&quot; | &quot;member_expression&quot;
+parser.rs            match ext { &quot;go&quot; =&gt; None, ... }   ← no call_query for Go
+import_resolver.rs   &quot;import_statement&quot; only (no Go/Python/Rust imports)
+route_registry.rs    Express-only route patterns
+function_role.rs     JS-centric parameter name lists
+context/mod.rs       Text strings for JS/TS context detection</code></pre></div>
+<p>The result: Python produced <strong>zero fingerprints</strong> (function_definition not in
+the match), Go methods were silently skipped (method_declaration not in the
+match), and data-flow taint tracking silently produced empty paths for both
+(wrong member-access and call node kinds).</p>
+<h3 id="the-fix-one-call-per-decision"><a class="doc-anchor" href="#the-fix-one-call-per-decision">§</a>The Fix: One Call Per Decision</h3>
+<p>Every engine subsystem now calls the spec once:</p>
+<div class="example-wrap"><pre class="language-text"><code>use frensense_lang::registry::spec_for_ext;
+use frensense_lang::spec::NodeRole;
+
+fn process_node(node: tree_sitter::Node, source: &amp;str, ext: &amp;str) {
+    let spec = spec_for_ext(ext).expect(&quot;unsupported extension&quot;);
+
+    match spec.classify(node.kind()) {
+        NodeRole::Function { name_field, params_field, body_field, .. } =&gt; {
+            // Works for Go method_declaration, Python function_definition,
+            // Rust function_item, JS arrow_function - all correct.
+            let name = name_field.and_then(|f| node.child_by_field_name(f));
+        }
+        NodeRole::Declaration { name_field, value_field } =&gt; {
+            // Works for `x := expr` (Go), `x = expr` (Python),
+            // `let x = expr` (Rust), `const x = expr` (JS).
+        }
+        NodeRole::Call { callee_field, args_field } =&gt; {
+            // Covers `call_expression` (JS/Go/Rust) AND `call` (Python).
+        }
+        NodeRole::MemberAccess { object_field, property_field } =&gt; {
+            // Covers `member_expression` (JS), `selector_expression` (Go),
+            // `attribute` (Python), `field_expression` (Rust).
+        }
+        _ =&gt; {}
+    }
+}</code></pre></div><h3 id="the-javascript-family-one-spec-three-dialects"><a class="doc-anchor" href="#the-javascript-family-one-spec-three-dialects">§</a>The JavaScript family: one spec, three dialects</h3>
+<p>JavaScript, TypeScript and a Vue SFC’s script block share one tree-sitter
+grammar family, one node classification and one import/export extractor, so
+they are implemented once: <a href="providers/javascript/trait.JsFamily.html" title="trait frensense_lang::providers::javascript::JsFamily"><code>providers::javascript::JsFamily</code></a> asks a member
+for its <a href="providers/javascript/enum.JsDialect.html" title="enum frensense_lang::providers::javascript::JsDialect"><code>providers::javascript::JsDialect</code></a> — the grammar, extensions,
+symbol query and region wrapper that actually differ — and a blanket impl
+supplies the rest of <a href="spec/trait.LanguageSpec.html" title="trait frensense_lang::spec::LanguageSpec"><code>spec::LanguageSpec</code></a>.</p>
+<div class="example-wrap"><pre class="language-text"><code>use frensense_lang::providers::javascript::{JavaScriptSpec, JsDialect, JsFamily};
+
+// A family member states its dialect and nothing else.
+impl JsFamily for JavaScriptSpec {
+    const DIALECT: JsDialect = JsDialect::JavaScript;
+}</code></pre></div>
+<p>A new single-file container (Svelte, Astro) adds a
+<a href="providers/javascript/enum.JsDialect.html" title="enum frensense_lang::providers::javascript::JsDialect"><code>providers::javascript::JsDialect</code></a> arm and overrides <code>preprocess_source</code>
+when the file wraps script code; it does not restate the grammar-facing
+contract. See <a href="providers/javascript/trait.JsFamily.html" title="trait frensense_lang::providers::javascript::JsFamily"><code>providers::javascript::JsFamily</code></a> for the full contract.</p>
+<h3 id="migration-guide-for-each-engine-subsystem"><a class="doc-anchor" href="#migration-guide-for-each-engine-subsystem">§</a>Migration Guide for Each Engine Subsystem</h3><h4 id="1-fingerprintrs---function-detection"><a class="doc-anchor" href="#1-fingerprintrs---function-detection">§</a>1. <code>fingerprint.rs</code> - function detection</h4>
+<p><strong>Before:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>if matches!(kind, &quot;function_item&quot; | &quot;function_declaration&quot; | &quot;method_definition&quot; | &quot;arrow_function&quot;)</code></pre></div>
+<p><strong>After:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>if spec.is_function_node(kind) { … }
+// or for the full match with field names:
+if let NodeRole::Function { name_field, params_field, body_field, .. } = spec.classify(kind) { … }</code></pre></div>
+<p><strong>Region wrapping:</strong>
+<strong>Before:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>let code = match lang {
+    Language::Rust   =&gt; format!(&quot;fn _region() {{\n{}\n}}&quot;, src),
+    Language::Python =&gt; { let indented = …; format!(&quot;def _region():\n{}&quot;, indented) }
+    _                =&gt; format!(&quot;function _region() {{\n{}\n}}&quot;, src),
+};</code></pre></div>
+<p><strong>After:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>let code = spec.wrap_region(src);</code></pre></div><h4 id="2-corpusflow_fingerprintrs---taint-propagation"><a class="doc-anchor" href="#2-corpusflow_fingerprintrs---taint-propagation">§</a>2. <code>corpus/flow_fingerprint.rs</code> - taint propagation</h4>
+<p><strong>Before:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>if kind == &quot;variable_declarator&quot; || kind == &quot;assignment_expression&quot; {
+    let name  = node.child_by_field_name(&quot;name&quot;).or_else(|| node.child_by_field_name(&quot;left&quot;));
+    let value = node.child_by_field_name(&quot;value&quot;).or_else(|| node.child_by_field_name(&quot;right&quot;));
+}
+// …
+if node.kind() == &quot;call_expression&quot; { … }
+// …
+&quot;member_expression&quot; =&gt; { … }</code></pre></div>
+<p><strong>After:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>match spec.classify(node.kind()) {
+    NodeRole::Declaration { name_field, value_field }
+    | NodeRole::Assignment { lhs_field: name_field, rhs_field: value_field } =&gt; {
+        let name  = node.child_by_field_name(name_field);
+        let value = node.child_by_field_name(value_field);
+    }
+    NodeRole::Call { callee_field, args_field } =&gt; { … }
+    NodeRole::MemberAccess { object_field, property_field } =&gt; { … }
+    NodeRole::ContextManager =&gt; {
+        // Python `with open(path) as f:` - new, was invisible before
+        if let Some(path_text) = spec.context_manager_call(node, source) { … }
+    }
+    _ =&gt; {}
+}</code></pre></div><h4 id="3-cfgmodrs---cfg-construction"><a class="doc-anchor" href="#3-cfgmodrs---cfg-construction">§</a>3. <code>cfg/mod.rs</code> - CFG construction</h4>
+<p><strong>Before:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>match kind {
+    &quot;if_statement&quot; | &quot;if_expression&quot; | &quot;ternary_expression&quot; =&gt; { … }
+    &quot;try_statement&quot; =&gt; { … }
+    &quot;catch_clause&quot; =&gt; { … }   // wrong for Python (except_clause)
+    &quot;finally_clause&quot; =&gt; { … }
+    _ =&gt; {}
+}</code></pre></div>
+<p><strong>After:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>match spec.classify(node.kind()) {
+    NodeRole::Branch          =&gt; { /* add branch edges */ }
+    NodeRole::Loop            =&gt; { /* add back-edge */ }
+    NodeRole::Try             =&gt; { /* add exception edge */ }
+    NodeRole::Catch           =&gt; { /* exception handler entry */ }
+    NodeRole::Finally         =&gt; { /* finally block */ }
+    NodeRole::ErrorGuard      =&gt; {
+        // Go `if err != nil { return }` - confirmed via spec.is_error_guard()
+        if spec.is_error_guard(node, source) { /* exception-like edge */ }
+    }
+    NodeRole::ErrorPropagation =&gt; {
+        // Rust `?` operator - propagates error out of current scope
+    }
+    _ =&gt; {}
+}</code></pre></div><h4 id="4-cfgdef_users---def-use-chains"><a class="doc-anchor" href="#4-cfgdef_users---def-use-chains">§</a>4. <code>cfg/def_use.rs</code> - def-use chains</h4>
+<p><strong>Before:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>match kind {
+    &quot;let_declaration&quot; | &quot;lexical_declaration&quot; | &quot;variable_declaration&quot; =&gt; { … }
+    &quot;assignment_expression&quot; | &quot;assignment&quot; =&gt; { … }
+    &quot;call_expression&quot; =&gt; { … }
+}
+// extract_ref_names used &quot;member_expression&quot; (wrong for Go/Python/Rust)</code></pre></div>
+<p><strong>After:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>match spec.classify(kind) {
+    NodeRole::Declaration { name_field, value_field } =&gt; { … }
+    NodeRole::Assignment  { lhs_field, rhs_field }   =&gt; { … }
+    NodeRole::Call        { callee_field, args_field }=&gt; { … }
+    NodeRole::MemberAccess{ object_field, .. }        =&gt; {
+        // Now covers selector_expression (Go), attribute (Python),
+        // field_expression (Rust) - all were silently skipped before.
+    }
+    _ =&gt; {}
+}</code></pre></div><h4 id="5-import_resolverrs---import-extraction"><a class="doc-anchor" href="#5-import_resolverrs---import-extraction">§</a>5. <code>import_resolver.rs</code> - import extraction</h4>
+<p><strong>Before:</strong> only <code>import_statement</code> (ESM) and <code>require()</code> (CJS).</p>
+<p><strong>After:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>// Call once per file. Replaces the manual walk in import_resolver.rs.
+let imports: Vec&lt;Import&gt; = spec.extract_imports(root_node, source);
+for import in imports {
+    import_map.bind(import.local_name, import.package);
+}</code></pre></div>
+<p>Go <code>import_declaration</code>, Python <code>import_from_statement</code>, Rust <code>use_declaration</code>
+are all handled by the respective spec’s <code>extract_imports</code> implementation.</p>
+<h4 id="6-parserrs---tree-sitter-queries"><a class="doc-anchor" href="#6-parserrs---tree-sitter-queries">§</a>6. <code>parser.rs</code> - tree-sitter queries</h4>
+<p><strong>Before:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>pub fn call_query_for_ext(ext: &amp;str) -&gt; Option&lt;&amp;&#39;static str&gt; {
+    match ext {
+        &quot;rs&quot; =&gt; Some(&quot;…&quot;),
+        &quot;ts&quot; | &quot;tsx&quot; | &quot;js&quot; | &quot;jsx&quot; =&gt; Some(&quot;…&quot;),
+        &quot;py&quot; | &quot;pyi&quot; =&gt; Some(&quot;…&quot;),
+        &quot;go&quot; =&gt; None,   // ← no call graph for Go
+        _ =&gt; None,
+    }
+}</code></pre></div>
+<p><strong>After:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>let call_query = spec_for_ext(ext).and_then(|s| s.call_query());</code></pre></div>
+<p>Go now has a full call query; Python’s is improved to cover class methods.</p>
+<h4 id="7-semantic-providers-semanticrs"><a class="doc-anchor" href="#7-semantic-providers-semanticrs">§</a>7. Semantic providers (<code>semantic.rs</code>)</h4>
+<p><strong>Before:</strong> <code>ImportMapProvider</code> (heuristic) only worked for JS/TS because
+the import map was always empty for Go/Python/Rust files.</p>
+<p><strong>After:</strong> use <code>spec.extract_imports()</code> to build the import map, then
+<code>spec.package_category(pkg)</code> to classify the package:</p>
+<div class="example-wrap"><pre class="language-text"><code>fn classify_sink(&amp;self, call_text: &amp;str, _resolved: Option&lt;&amp;str&gt;) -&gt; Option&lt;SinkCategory&gt; {
+    let receiver = call_text.split(&#39;.&#39;).next()?;
+    let pkg      = self.import_map.resolve(receiver)?;
+    match self.spec.package_category(pkg)? {
+        PackageCategory::SqlDatabase      =&gt; Some(SinkCategory::SqlInjection),
+        PackageCategory::CommandExecution =&gt; Some(SinkCategory::CommandInjection),
+        PackageCategory::HttpClient       =&gt; Some(SinkCategory::Ssrf),
+        PackageCategory::FileSystem       =&gt; Some(SinkCategory::PathTraversal),
+        PackageCategory::TemplateEngine   =&gt; Some(SinkCategory::TemplateSsti),
+        PackageCategory::Deserialization  =&gt; Some(SinkCategory::UnsafeDeserialize),
+        _ =&gt; None,
+    }
+}</code></pre></div><h4 id="8-route-detection-route_registryrs-function_rolers-contextmodrs"><a class="doc-anchor" href="#8-route-detection-route_registryrs-function_rolers-contextmodrs">§</a>8. Route detection (<code>route_registry.rs</code>, <code>function_role.rs</code>, <code>context/mod.rs</code>)</h4>
+<p><strong>Before:</strong> Express-only static arrays.</p>
+<p><strong>After:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>// Route detection - Express-style registration patterns come from the
+// default pack (FactTable::route_patterns) since Phase 6.4; the spec
+// keeps only the mechanism-adjacent verb suffix list
+let is_route = spec.known_route_verbs().iter()
+    .any(|s| callee_text.ends_with(s))
+    || facts.route_patterns.get(spec.name()).is_some_and(|pats|
+        pats.iter().any(|p| callee_text.ends_with(p.trim_end_matches(&#39;(&#39;))));
+
+// Decorator detection - replaces hardcoded NestJS decorator list
+let is_route = spec.is_http_route_decorator(decorator_name);
+
+// Parameter taint - replaces REQUEST_PARAM_NAMES
+let origin = spec.classify_param_taint(Some(param_name), type_annotation);</code></pre></div><h4 id="9-motif-call-name-collection-fingerprintrscollect_raw_call_names"><a class="doc-anchor" href="#9-motif-call-name-collection-fingerprintrscollect_raw_call_names">§</a>9. Motif call-name collection (<code>fingerprint.rs::collect_raw_call_names</code>)</h4>
+<p><strong>Before:</strong> only extracted call names from <code>call_expression</code> and
+<code>member_expression</code> - Python <code>call</code> and Go <code>selector_expression</code> were silently
+skipped, so motif hashes were never computed for those languages.</p>
+<p><strong>After:</strong></p>
+<div class="example-wrap"><pre class="language-text"><code>match spec.classify(node.kind()) {
+    NodeRole::Call { callee_field, .. } =&gt; {
+        let callee = node.child_by_field_name(callee_field)?;
+        // recurse into callee to build &quot;object.method&quot; string
+    }
+    NodeRole::MemberAccess { object_field, property_field } =&gt; {
+        let obj  = node.child_by_field_name(object_field)?;
+        let prop = node.child_by_field_name(property_field)?;
+        // covers selector_expression (Go), attribute (Python), etc.
+    }
+    _ =&gt; {}
+}</code></pre></div><h4 id="10-ir-lowering-irlowering-harnessrs"><a class="doc-anchor" href="#10-ir-lowering-irlowering-harnessrs">§</a>10. IR lowering (<code>ir/lowering/*</code>, <code>harness.rs</code>)</h4>
+<p><strong>Before:</strong> lowering compared node kinds inline - <code>k.contains("statement")</code>,
+<code>matches!(kind, "case_pattern" | "union_pattern")</code>, <code>node.kind() == "preproc_else"</code>, <code>"arrow_function" | "function_expression"</code> for bindable
+function values, <code>"break"</code>/<code>"continue"</code> special-cased at each site - and C’s
+declarator chain was hand-walked (once for parameters, once for names).</p>
+<p><strong>After:</strong> lowering asks the vocabulary layer and never spells a kind. A
+shape question is a predicate, a dispatch is a role or a table:</p>
+<div class="example-wrap"><pre class="language-text"><code>// shape: is this child a block/statement body?
+if self.spec.is_block_or_statement(child.kind()) { ... }
+// dispatch: what is this node, and what are its fields called?
+if let NodeRole::Call { callee_field, args_field } = spec.classify(node.kind()) { ... }
+// structured answer: which jump is this?
+match self.spec.jump_kind(node.kind()) {
+    Some(JumpKind::Break) =&gt; ...,
+    Some(JumpKind::Continue) =&gt; ...,
+    _ =&gt; {}
+}</code></pre></div>
+<p>A new grammar implements the trait and its lowering works; before, every
+engine file needed its own new arm. <code>spec.rs</code> documents the three layers
+(roles, predicates, tables), and the engine’s
+<code>ir/lowering/kind_migration_tests.rs</code> pins each query against the comparison
+it replaced by walking real parse trees, so an empty walk cannot pass.</p>
+</div></details><h2 id="reexports" class="section-header">Re-exports<a href="#reexports" class="anchor">§</a></h2><dl class="item-table reexports"><dt id="reexport.is_container_verb"><code>pub use intrinsics::<a class="fn" href="intrinsics/fn.is_container_verb.html" title="fn frensense_lang::intrinsics::is_container_verb">is_container_verb</a>;</code></dt><dt id="reexport.all_specs"><code>pub use registry::<a class="fn" href="registry/fn.all_specs.html" title="fn frensense_lang::registry::all_specs">all_specs</a>;</code></dt><dt id="reexport.spec_for_ext"><code>pub use registry::<a class="fn" href="registry/fn.spec_for_ext.html" title="fn frensense_lang::registry::spec_for_ext">spec_for_ext</a>;</code></dt><dt id="reexport.spec_for_path"><code>pub use registry::<a class="fn" href="registry/fn.spec_for_path.html" title="fn frensense_lang::registry::spec_for_path">spec_for_path</a>;</code></dt><dt id="reexport.LanguageRegistry"><code>pub use registry::<a class="struct" href="registry/struct.LanguageRegistry.html" title="struct frensense_lang::registry::LanguageRegistry">LanguageRegistry</a>;</code></dt><dt id="reexport.checker_rule_tier"><code>pub use severity::<a class="fn" href="severity/fn.checker_rule_tier.html" title="fn frensense_lang::severity::checker_rule_tier">checker_rule_tier</a>;</code></dt><dt id="reexport.Profile"><code>pub use severity::<a class="enum" href="severity/enum.Profile.html" title="enum frensense_lang::severity::Profile">Profile</a>;</code></dt><dt id="reexport.RuleTier"><code>pub use severity::<a class="enum" href="severity/enum.RuleTier.html" title="enum frensense_lang::severity::RuleTier">RuleTier</a>;</code></dt><dt id="reexport.SanitizerKind"><code>pub use severity::<a class="enum" href="severity/enum.SanitizerKind.html" title="enum frensense_lang::severity::SanitizerKind">SanitizerKind</a>;</code></dt><dt id="reexport.Severity"><code>pub use severity::<a class="enum" href="severity/enum.Severity.html" title="enum frensense_lang::severity::Severity">Severity</a>;</code></dt><dt id="reexport.SinkRole"><code>pub use severity::<a class="enum" href="severity/enum.SinkRole.html" title="enum frensense_lang::severity::SinkRole">SinkRole</a>;</code></dt><dt id="reexport.SEVERITY_LABELS"><code>pub use severity::<a class="constant" href="severity/constant.SEVERITY_LABELS.html" title="constant frensense_lang::severity::SEVERITY_LABELS">SEVERITY_LABELS</a>;</code></dt><dt id="reexport.Import"><code>pub use spec::<a class="struct" href="spec/struct.Import.html" title="struct frensense_lang::spec::Import">Import</a>;</code></dt><dt id="reexport.JsxPart"><code>pub use spec::<a class="enum" href="spec/enum.JsxPart.html" title="enum frensense_lang::spec::JsxPart">JsxPart</a>;</code></dt><dt id="reexport.JumpKind"><code>pub use spec::<a class="enum" href="spec/enum.JumpKind.html" title="enum frensense_lang::spec::JumpKind">JumpKind</a>;</code></dt><dt id="reexport.LanguageSpec"><code>pub use spec::<a class="trait" href="spec/trait.LanguageSpec.html" title="trait frensense_lang::spec::LanguageSpec">LanguageSpec</a>;</code></dt><dt id="reexport.LiteralShape"><code>pub use spec::<a class="enum" href="spec/enum.LiteralShape.html" title="enum frensense_lang::spec::LiteralShape">LiteralShape</a>;</code></dt><dt id="reexport.NodeRole"><code>pub use spec::<a class="enum" href="spec/enum.NodeRole.html" title="enum frensense_lang::spec::NodeRole">NodeRole</a>;</code></dt><dt id="reexport.PackageCategory"><code>pub use spec::<a class="enum" href="spec/enum.PackageCategory.html" title="enum frensense_lang::spec::PackageCategory">PackageCategory</a>;</code></dt><dt id="reexport.TaintOrigin"><code>pub use spec::<a class="enum" href="spec/enum.TaintOrigin.html" title="enum frensense_lang::spec::TaintOrigin">TaintOrigin</a>;</code></dt></dl><h2 id="modules" class="section-header">Modules<a href="#modules" class="anchor">§</a></h2><dl class="item-table"><dt><a class="mod" href="intrinsics/index.html" title="mod frensense_lang::intrinsics">intrinsics</a></dt><dd>Method names the languages’ own builtin types carry.</dd><dt><a class="mod" href="providers/index.html" title="mod frensense_lang::providers">providers</a></dt><dd>Built-in <a href="spec/trait.LanguageSpec.html" title="trait frensense_lang::spec::LanguageSpec"><code>LanguageSpec</code></a> providers.</dd><dt><a class="mod" href="registry/index.html" title="mod frensense_lang::registry">registry</a></dt><dd>A thread-safe registry that maps file extensions and language names to
+<a href="spec/trait.LanguageSpec.html" title="trait frensense_lang::spec::LanguageSpec"><code>LanguageSpec</code></a> implementations.</dd><dt><a class="mod" href="rule_card/index.html" title="mod frensense_lang::rule_card">rule_<wbr>card</a></dt><dd>Rule cards: the one place a finding’s identity, title, CWE and advice
+live. Terminal, SARIF, JSON and <code>explain</code> all render from here, so the
+surfaces cannot drift and a built-in rule cannot ship without a CWE
+(see the coverage tests here and in <code>frensense-packgen</code>).</dd><dt><a class="mod" href="rules/index.html" title="mod frensense_lang::rules">rules</a></dt><dd>Stable rule identifiers emitted by engine checkers.</dd><dt><a class="mod" href="severity/index.html" title="mod frensense_lang::severity">severity</a></dt><dd>Severity declarations, the tier ladder, and advisory registries.</dd><dt><a class="mod" href="spec/index.html" title="mod frensense_lang::spec">spec</a></dt><dd>The <a href="spec/trait.LanguageSpec.html" title="trait frensense_lang::spec::LanguageSpec"><code>LanguageSpec</code></a> trait is the single contract every language must
+satisfy. All engine subsystems (fingerprint, CFG, def-use, flow-fingerprint,
+import resolver, semantic provider) call <em>this</em> trait instead of containing
+their own hardcoded <code>match kind { "call_expression" | … }</code> arms.</dd></dl></section></div></main></body></html>

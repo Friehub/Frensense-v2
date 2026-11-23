@@ -1,0 +1,30 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Lower a single source file into a set of SSA’d `FunctionIR`s keyed by function name."><title>lower_source in frensense_engine::harness - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../../static.files/rustdoc-203241e4.css"><meta name="rustdoc-vars" data-root-path="../../" data-static-root-path="../../static.files/" data-current-crate="frensense_engine" data-themes="" data-resource-suffix="" data-rustdoc-version="1.100.0 (0ef1bc386 2026-11-09)" data-channel="1.100.0" data-search-js="search-b167f383.js" data-stringdex-js="stringdex-b5109af9.js" data-settings-js="settings-170eb4bf.js" ><script src="../../static.files/storage-41dd4d93.js"></script><script defer src="sidebar-items.js"></script><script defer src="../../static.files/main-1814ead3.js"></script><noscript><link rel="stylesheet" href="../../static.files/noscript-9f56287d.css"></noscript><link rel="alternate icon" type="image/png" href="../../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../../static.files/favicon-044be391.svg"></head><body class="rustdoc fn"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">lower_source</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../../frensense_engine/index.html">frensense_<wbr>engine</a><span class="version">0.9.1</span></h2></div><div class="sidebar-elems"><div id="rustdoc-modnav"><h2><a href="index.html">In frensense_<wbr>engine::<wbr>harness</a></h2></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="../index.html">frensense_engine</a>::<wbr><a href="index.html">harness</a></div><h1>Function <span class="fn">lower_<wbr>source</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../../src/frensense_engine/harness.rs.html#48-54">Source</a> </span></div><pre class="rust item-decl"><code>pub fn lower_source(
+    path: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.str.html">str</a>,
+    source: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.str.html">str</a>,
+    ext: &amp;<a class="primitive" href="https://doc.rust-lang.org/1.100.0/std/primitive.str.html">str</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/1.100.0/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;FxHashMap&lt;<a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>, <a class="struct" href="../ir/function/struct.FunctionIR.html" title="struct frensense_engine::ir::function::FunctionIR">FunctionIR</a>&gt;, <a class="struct" href="https://doc.rust-lang.org/1.100.0/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>&gt;</code></pre><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Lower a single source file into a set of SSA’d <code>FunctionIR</code>s keyed by
+function name.</p>
+<p>Handles the module shapes that matter for app code:</p>
+<ul>
+<li><code>function_declaration</code> / <code>method_definition</code> bodies,</li>
+<li>arrow/function-expression handlers registered via
+<code>app.get|post|put|delete|use|all(path, handler)</code>, the dominant
+Express-style shape,</li>
+<li>nested arrows inside those handlers.</li>
+</ul>
+<p>Handler names are synthetic and file-position-stable
+(<code>&lt;path:handler@byte&gt;</code>), so bundles derived from the same file hash to the
+same keys.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>frensense_engine::harness::lower_source;
+
+<span class="kw">let </span>src = <span class="string">"declare const app: any\n\
+           app.get('/x', (req: any, res: any) =&gt; { res.send(req.query.a) })\n\
+           function f() { return 1 }"</span>;
+<span class="kw">let </span>fns = lower_source(<span class="string">"t.ts"</span>, src, <span class="string">"ts"</span>).unwrap();
+<span class="comment">// Ordinary declarations are keyed by their name.
+</span><span class="macro">assert!</span>(fns.contains_key(<span class="string">"f"</span>));
+<span class="comment">// The route handler gets a synthetic name built from the path and the byte
+// offset of the handler, here the start of the arrow function's parameters.
+</span><span class="kw">let </span>offset = src.find(<span class="string">"(req"</span>).unwrap();
+<span class="macro">assert!</span>(fns.contains_key(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"&lt;t.ts:handler@{offset}&gt;"</span>)));</code></pre></div></div></details></section></div></main></body></html>

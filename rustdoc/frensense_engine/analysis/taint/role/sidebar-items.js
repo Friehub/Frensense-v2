@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["SinkRole"],"fn":["sink_role_name"]};
