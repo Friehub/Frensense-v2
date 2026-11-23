@@ -387,9 +387,11 @@ jobs:
           jq -s '[.[] | select(.reason == "benchmark-complete") | {name: .id, unit: .unit, value: .median.estimate, range: (.median_abs_dev.estimate | tostring)}]' raw_output.json > output.txt
 
       - name: Store and Compare Benchmark Results
-        uses: benchmark-action/github-action-benchmark@fd31771ce86cc65eab85653da103f71ab1b4479c # v1.9.0
+        uses: benchmark-action/github-action-benchmark@d48d326b4ca9ba73ca0cd0d59f108f9e02a381c7 # v1.20.4
         with:
           name: FrenSense Engine Benchmarks
+          # The custom* tools only exist from v1.20; the old v1.9.0 pin
+          # rejected this value as an invalid `tool` input.
           tool: customSmallerIsBetter
           output-file-path: output.txt
           github-token: ${{ secrets.GITHUB_TOKEN }}
