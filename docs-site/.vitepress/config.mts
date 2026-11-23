@@ -379,10 +379,10 @@ export default defineConfig({
         ]
       },
       { text: 'Blog', link: '/blog/', activeMatch: '^/blog/' },
+      { text: "What's New", link: '/whats-new', activeMatch: '^/whats-new' },
       {
         text: `v${currentVersion}`,
         items: [
-          { text: "What's New", link: '/whats-new' },
           { text: 'Changelog', link: '/changelog' },
           { text: 'All releases', link: 'https://github.com/Friehub/frensense-v2/releases' },
           { text: 'v1 documentation (archive)', link: '/v1/' }
