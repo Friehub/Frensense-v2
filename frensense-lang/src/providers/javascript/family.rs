@@ -37,8 +37,9 @@ use crate::spec::{
 
 use super::{
     ast::{
-        classify_js, is_js_cast, is_js_destructuring_pattern, is_js_pair_entry, is_js_pair_pattern,
-        is_js_template_literal_fragment, is_js_template_string, is_js_ternary_straight_line,
+        classify_js, is_js_cast, is_js_destructuring_pattern, is_js_method, is_js_pair_entry,
+        is_js_pair_pattern, is_js_template_literal_fragment, is_js_template_string,
+        is_js_ternary_straight_line,
     },
     imports::{extract_js_exports, extract_js_imports, extract_js_module_items},
     packages::js_package_category,
@@ -242,6 +243,10 @@ impl<T: JsFamily> LanguageSpec for T {
 
     fn is_cast(&self, kind: &str) -> bool {
         is_js_cast(kind)
+    }
+
+    fn implicit_receiver_name(&self, fn_kind: &str) -> Option<&'static str> {
+        is_js_method(fn_kind).then_some("this")
     }
 
     fn is_template_string(&self, kind: &str) -> bool {

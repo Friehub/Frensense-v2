@@ -94,3 +94,4 @@ mod path_sensitivity_tests;
 mod receiver_qualification_tests;
 mod sanitizer_matrix_tests;
 mod sink_identity_tests;
+mod this_receiver_tests;
