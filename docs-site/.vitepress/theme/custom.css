@@ -83,7 +83,7 @@ body {
   padding-top: calc(
     var(--vp-layout-top-height, 0px) + var(--vp-nav-height, 64px) + 64px
   ) !important;
-  padding-bottom: 72px !important;
+  padding-bottom: 32px !important;
 }
 .VPHomeHero .name,
 .VPHomeHero .text {
@@ -179,7 +179,7 @@ body {
 .download-strip {
   max-width: 1080px;
   margin: 0 auto;
-  padding: 40px 24px 8px;
+  padding: 16px 24px 8px;
   text-align: left;
 }
 /* the strip lives in the home markdown container; zero its default top
