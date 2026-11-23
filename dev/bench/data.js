@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1795373348224,
+  "lastUpdate": 1795428853215,
   "repoUrl": "https://github.com/Friehub/Frensense-v2",
   "entries": {
     "Benchmark": [
@@ -3358,6 +3358,55 @@ window.BENCHMARK_DATA = {
           "url": "https://github.com/Friehub/Frensense-v2/commit/393caea379d714a8bdb4dc519ef7ac332db54ad9"
         },
         "date": 1795373346470,
+        "tool": "customBiggerIsBetter",
+        "benches": [
+          {
+            "name": "OWASP Benchmark Score (TPR - FPR)",
+            "value": 47,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positive Rate (TPR)",
+            "value": 49.3,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark False Positive Rate (FPR)",
+            "value": 2.3,
+            "unit": "%"
+          },
+          {
+            "name": "OWASP Benchmark True Positives (TP)",
+            "value": 223,
+            "unit": "cases"
+          },
+          {
+            "name": "OWASP Benchmark False Positives (FP)",
+            "value": 18,
+            "unit": "cases"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "76975899+0xademola@users.noreply.github.com",
+            "name": "0xademola",
+            "username": "0xademola"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "a80f4eda0784e2e332e90eb51fcc922b36bc386e",
+          "message": "Merge pull request #188 from Friehub/chore/0032-0033-report-and-rustdoc\n\nfeat(scan): report skipped files; publish crate API docs; fix benchmark action pin",
+          "timestamp": "2026-11-23T11:13:05+01:00",
+          "tree_id": "f463330312c925a49c65ef0ad7397f0411a28602",
+          "url": "https://github.com/Friehub/Frensense-v2/commit/a80f4eda0784e2e332e90eb51fcc922b36bc386e"
+        },
+        "date": 1795428852116,
         "tool": "customBiggerIsBetter",
         "benches": [
           {
