@@ -262,12 +262,17 @@ pub struct CapHit {
     pub effect: String,
 }
 
+/// Suppression reason for a finding that could not be pinned to a file: its
+/// function has no file entry, or its file has no source text. Reported
+/// rather than dropped so `located + unlocated == found` always holds.
+pub const UNLOCATED_FINDING: &str = "unlocated-finding";
+
 /// A finding that reached the reporting gate and was dropped, by reason.
 #[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SuppressionCount {
     /// `not-reportable`, `exact-duplicate`, `shape-duplicate`, `below-tier`,
-    /// `below-confidence`, or `below-severity`.
+    /// `below-confidence`, `below-severity`, or `unlocated-finding`.
     pub reason: String,
     /// How many findings were dropped for it.
     pub count: usize,

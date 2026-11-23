@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2024-2026 Friehub
 // Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
+#![allow(clippy::too_many_arguments)]
 
 use crate::engine::files::UnsupportedSourceFile;
 use crate::explain::{ExplainRecord, slot_label};
-use crate::policy::Coverage;
+use crate::policy::{Coverage, Exclusions};
+
+pub mod exclusions;
 use crate::reporter::Reporter;
 use crate::{Advisory, FrensenseError, Result};
+pub use exclusions::*;
 use std::collections::HashSet;
 
 /// How many skipped-file paths a report embeds. The counts are complete; the
@@ -106,7 +110,7 @@ impl ScanStatus {
     ///
     /// Without coverage this cannot tell that the walk skipped a file, so a
     /// partial tree can still read `Complete`; the rendering entry points add
-    /// the walk's accounting through [`status_with_coverage`].
+    /// the walk's accounting through `status_with_coverage`.
     #[must_use]
     pub fn compute(
         telemetry: &frensense_engine::telemetry::ScanTelemetry,
@@ -216,7 +220,7 @@ fn status_label(
 /// The coverage line is the denominator behind "no findings": without it a
 /// scan that analyzed 3 of 40 files is indistinguishable from one that
 /// analyzed all 40 and found nothing.
-pub fn print_scan_summary_detailed_with_coverage(
+fn print_scan_summary_detailed_impl(
     advisories: &[Advisory],
     input_path: &std::path::Path,
     duration: std::time::Duration,
@@ -224,7 +228,10 @@ pub fn print_scan_summary_detailed_with_coverage(
     telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
     incomplete: &[frensense_engine::scan::IncompleteFunction],
     coverage: Option<&Coverage>,
+    exclusions: Option<&Exclusions>,
 ) {
+    let empty_exclusions = Exclusions::default();
+    let exclusions = exclusions.unwrap_or(&empty_exclusions);
     let mut critical = 0;
     let mut warning = 0;
     let mut info = 0;
@@ -259,11 +266,15 @@ pub fn print_scan_summary_detailed_with_coverage(
             println!("Files Scanned:      {}/{}", c.files_analyzed, c.files_found);
             if c.files_not_analyzed() > 0 {
                 println!(
-                    "Not Analyzed:       {} ({} unsupported language, {} failed)",
+                    "Not Analyzed:       {} ({} unsupported language, {} failed, {} excluded)",
                     c.files_not_analyzed(),
                     c.files_unsupported,
-                    c.files_failed
+                    c.files_failed,
+                    c.files_excluded()
                 );
+                for line in exclusions::excluded_lines(exclusions) {
+                    println!("                    {line}");
+                }
             }
         }
         _ if telem.input.submitted > 0 => {
@@ -381,9 +392,11 @@ pub fn print_scan_summary_detailed_with_coverage(
                     c.files_unsupported
                 );
                 println!(
-                    "        language, {} failed); findings there cannot be ruled out.",
-                    c.files_failed
+                    "        language, {} failed, {} excluded); findings there cannot be",
+                    c.files_failed,
+                    c.files_excluded()
                 );
+                println!("        ruled out.");
             }
             if !c.recognized_anything() {
                 println!("        No sink site was recognized in any scanned file: this scan says");
@@ -467,7 +480,7 @@ pub fn json_report_with_skips(
     telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
     skipped: &[UnsupportedSourceFile],
 ) -> serde_json::Value {
-    json_report_with_coverage(advisories, incomplete, telemetry, skipped, None)
+    json_report_with_coverage_impl(advisories, incomplete, telemetry, skipped, None, None)
 }
 
 /// The `analysis.graph` block: the sizes of the program the taint phase
@@ -505,17 +518,20 @@ fn funnel_json(f: &frensense_engine::telemetry::TaintFunnel) -> serde_json::Valu
 /// for "we inspected and found nothing". There is deliberately no `clean`
 /// boolean: no single flag may stand in for a safety claim.
 #[must_use]
-pub fn json_report_with_coverage(
+fn json_report_with_coverage_impl(
     advisories: &[Advisory],
     incomplete: &[frensense_engine::scan::IncompleteFunction],
     telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
     skipped: &[UnsupportedSourceFile],
     coverage: Option<&Coverage>,
+    exclusions: Option<&Exclusions>,
 ) -> serde_json::Value {
     let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
     let telem = telemetry.unwrap_or(&empty_telem);
     let status = status_with_coverage(telem, incomplete, coverage);
     let cov = coverage.cloned().unwrap_or_default();
+    let empty_exclusions = Exclusions::default();
+    let exclusions = exclusions.unwrap_or(&empty_exclusions);
     // Without engine-derived coverage (the compatibility entry points),
     // fall back to the input accounting so the denominator is still honest
     // about unsupported inputs and read failures.
@@ -540,6 +556,13 @@ pub fn json_report_with_coverage(
             "files_scanned": telem.input.scanned,
             "files_not_analyzed": files_not_analyzed,
             "files_unsupported": files_unsupported,
+            "files_excluded": cov.files_excluded(),
+            "excluded_by_reason": exclusions.by_reason,
+            "excluded_sample": exclusions.sample.iter().map(|e| serde_json::json!({
+                "path": e.path,
+                "reason": e.reason,
+                "source_files": e.source_files,
+            })).collect::<Vec<_>>(),
             "files_failed": telem.input.failed,
             "failed_files": telem.input.failed_files,
             "unsupported_inputs": telem.input.unsupported,
@@ -636,8 +659,7 @@ pub fn json_report_with_coverage(
 /// A no-findings headline without coverage cannot be falsified, because a scan
 /// that recognized no sink at all looks exactly like one that inspected the
 /// code and found nothing.
-#[allow(clippy::too_many_arguments)]
-pub fn print_results_with_coverage(
+fn print_results_impl(
     advisories: &[Advisory],
     incomplete: &[frensense_engine::scan::IncompleteFunction],
     telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
@@ -647,7 +669,10 @@ pub fn print_results_with_coverage(
     input_path: &std::path::Path,
     duration: Option<std::time::Duration>,
     output_path: Option<&std::path::Path>,
+    exclusions: Option<&Exclusions>,
 ) -> Result<()> {
+    let empty_exclusions = Exclusions::default();
+    let exclusions = exclusions.unwrap_or(&empty_exclusions);
     if !skipped.is_empty() {
         let languages = skipped_language_counts(skipped)
             .iter()
@@ -711,9 +736,11 @@ pub fn print_results_with_coverage(
     }
     match format {
         "json" => {
-            let rendered = serde_json::to_string_pretty(&json_report_with_coverage(
-                advisories, incomplete, telemetry, skipped, coverage,
-            ))
+            let rendered = serde_json::to_string_pretty(
+                &exclusions::json_report_with_coverage_and_exclusions(
+                    advisories, incomplete, telemetry, skipped, coverage, exclusions,
+                ),
+            )
             .map_err(|e| FrensenseError::Config(format!("JSON error: {e}")))?;
             if let Some(out) = output_path {
                 std::fs::write(out, rendered).map_err(|e| {
@@ -723,7 +750,7 @@ pub fn print_results_with_coverage(
                     ))
                 })?;
                 if let Some(d) = duration {
-                    print_scan_summary_detailed_with_coverage(
+                    exclusions::print_scan_summary_detailed_with_coverage_and_exclusions(
                         advisories,
                         input_path,
                         d,
@@ -731,6 +758,7 @@ pub fn print_results_with_coverage(
                         telemetry,
                         incomplete,
                         coverage,
+                        exclusions,
                     );
                 }
                 println!("JSON report written to: {}", out.display());
@@ -752,7 +780,7 @@ pub fn print_results_with_coverage(
                     ))
                 })?;
                 if let Some(d) = duration {
-                    print_scan_summary_detailed_with_coverage(
+                    exclusions::print_scan_summary_detailed_with_coverage_and_exclusions(
                         advisories,
                         input_path,
                         d,
@@ -760,6 +788,7 @@ pub fn print_results_with_coverage(
                         telemetry,
                         incomplete,
                         coverage,
+                        exclusions,
                     );
                 }
                 println!("SARIF report written to: {}", out.display());
@@ -777,7 +806,7 @@ pub fn print_results_with_coverage(
                     ))
                 })?;
                 if let Some(d) = duration {
-                    print_scan_summary_detailed_with_coverage(
+                    exclusions::print_scan_summary_detailed_with_coverage_and_exclusions(
                         advisories,
                         input_path,
                         d,
@@ -785,6 +814,7 @@ pub fn print_results_with_coverage(
                         telemetry,
                         incomplete,
                         coverage,
+                        exclusions,
                     );
                 }
                 println!("GitHub annotations written to: {}", out.display());
@@ -824,7 +854,7 @@ pub fn print_results_with_coverage(
                 })?;
 
                 if let Some(d) = duration {
-                    print_scan_summary_detailed_with_coverage(
+                    exclusions::print_scan_summary_detailed_with_coverage_and_exclusions(
                         advisories,
                         input_path,
                         d,
@@ -832,6 +862,7 @@ pub fn print_results_with_coverage(
                         telemetry,
                         incomplete,
                         coverage,
+                        exclusions,
                     );
                 }
                 println!("Text report written to: {}", out.display());
@@ -840,8 +871,9 @@ pub fn print_results_with_coverage(
                     println!("{headline}");
                     if let Some(d) = duration {
                         println!();
-                        print_scan_summary_detailed_with_coverage(
+                        exclusions::print_scan_summary_detailed_with_coverage_and_exclusions(
                             advisories, input_path, d, None, telemetry, incomplete, coverage,
+                            exclusions,
                         );
                     }
                 } else {
@@ -853,8 +885,9 @@ pub fn print_results_with_coverage(
                     println!("Total Findings: {}", advisories.len());
                     if let Some(d) = duration {
                         println!();
-                        print_scan_summary_detailed_with_coverage(
+                        exclusions::print_scan_summary_detailed_with_coverage_and_exclusions(
                             advisories, input_path, d, None, telemetry, incomplete, coverage,
+                            exclusions,
                         );
                     }
                 }
@@ -1728,7 +1761,7 @@ mod explain_rule_tests {
 /// `REPORT_SCHEMA_VERSION` and this test move together.
 #[cfg(test)]
 mod json_report_schema_tests {
-    use super::json_report_with_coverage;
+    use super::exclusions::json_report_with_coverage;
     use crate::Advisory;
     use crate::engine::files::UnsupportedSourceFile;
     use frensense_engine::telemetry::{GraphSize, ScanTelemetry, TaintFunnel};

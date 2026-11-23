@@ -7,7 +7,7 @@
 
 use frensense::cli::{
     compare_baseline, parse_options, print_explain, print_explain_coverage,
-    print_results_with_coverage, print_scan_banner, save_baseline,
+    print_results_with_coverage_and_exclusions, print_scan_banner, save_baseline,
 };
 use frensense::engine::Engine;
 use frensense::{FRENSENSE_VERSION, Result};
@@ -283,6 +283,12 @@ fn print_help() {
     );
     println!(
         "  --show-suppressed          Show flows silenced by a bundle sanitizer fact, naming the fact, family and class"
+    );
+    println!(
+        "  --include-dir <name>       Scan a directory a default rule skips (build, vendor, out, cache, ...); repeatable"
+    );
+    println!(
+        "  --no-default-excludes      Scan everything: no directory, size (500 KB) or minified-file exclusions"
     );
     println!(
         "  --disable-rule <id>        Suppress a rule id (repeatable or comma-separated); per bundle/rule"
@@ -917,22 +923,12 @@ fn main() -> Result<()> {
     let start_time = std::time::Instant::now();
 
     let mut engine = Engine::new();
-    if let Some(ref path) = options.corpus_bundle_path {
-        engine.set_corpus_bundle_path(path.clone());
-    }
+    frensense::cli::configure_engine(&mut engine, &options);
     if let Some(ref lang) = options.language_filter
         && let Some(exts) = frensense::parser::extensions_for(lang)
     {
         engine.set_language_filter(exts.to_vec());
     }
-    engine.set_severity_filter(options.severity_filter);
-    engine.set_profile(options.profile);
-    engine.set_enable_hygiene(options.enable_hygiene);
-    engine.set_max_complexity(options.max_complexity);
-    engine.set_explain(options.explain);
-    engine.set_show_suppressed(options.show_suppressed);
-    engine.set_rule_filters(options.disable_rules.clone(), options.only_rules.clone());
-    engine.set_show_flows(options.show_flows);
 
     let show_progress = !options.no_progress;
     let mut progress = frensense::cli::ProgressReporter::new(show_progress);
@@ -943,6 +939,7 @@ fn main() -> Result<()> {
     let mut skipped_unsupported: Vec<frensense::engine::files::UnsupportedSourceFile> = Vec::new();
     let mut telemetry = frensense_engine::telemetry::ScanTelemetry::default();
     let mut coverage = frensense::policy::Coverage::default();
+    let mut excluded_paths: Vec<frensense::engine::files::ExcludedPath> = Vec::new();
     let advisories = if options.diff_only {
         let repo_dir = if input_path.is_dir() {
             input_path.clone()
@@ -965,21 +962,13 @@ fn main() -> Result<()> {
             let mut all = Vec::new();
             for f in &diff_files {
                 let mut e2 = Engine::new();
-                if let Some(ref path) = options.corpus_bundle_path {
-                    e2.set_corpus_bundle_path(path.clone());
-                }
-                e2.set_profile(options.profile);
-                e2.set_enable_hygiene(options.enable_hygiene);
-                e2.set_max_complexity(options.max_complexity);
-                e2.set_explain(options.explain);
-                e2.set_show_suppressed(options.show_suppressed);
-                e2.set_rule_filters(options.disable_rules.clone(), options.only_rules.clone());
-                e2.set_show_flows(options.show_flows);
+                frensense::cli::configure_engine(&mut e2, &options);
                 all.extend(e2.run_observed(f, &mut progress)?);
                 incomplete.extend(e2.take_incomplete());
                 skipped_unsupported.extend(e2.take_skipped_unsupported());
                 telemetry.merge(e2.take_telemetry());
                 coverage.merge(e2.take_coverage());
+                excluded_paths.extend(e2.take_excluded());
                 if options.explain || options.show_suppressed {
                     explain_records.extend(e2.take_explain());
                     for (tier, count) in e2.take_hidden_by_tier() {
@@ -1010,6 +999,7 @@ fn main() -> Result<()> {
             skipped_unsupported.extend(engine.take_skipped_unsupported());
             telemetry.merge(engine.take_telemetry());
             coverage.merge(engine.take_coverage());
+            excluded_paths.extend(engine.take_excluded());
             if options.explain || options.show_suppressed {
                 explain_records.extend(engine.take_explain());
                 for (tier, count) in engine.take_hidden_by_tier() {
@@ -1027,6 +1017,9 @@ fn main() -> Result<()> {
     // the ones the summary will count.
     skipped_unsupported.sort();
     skipped_unsupported.dedup();
+    excluded_paths.sort();
+    excluded_paths.dedup();
+    let exclusions = frensense::policy::Exclusions::from_paths(&excluded_paths);
 
     if options.explain || options.show_suppressed {
         print_explain(&explain_records, &hidden_by_tier);
@@ -1048,7 +1041,7 @@ fn main() -> Result<()> {
         status = frensense::cli::ScanStatus::Partial;
     }
 
-    print_results_with_coverage(
+    print_results_with_coverage_and_exclusions(
         &advisories,
         &incomplete,
         Some(&telemetry),
@@ -1058,6 +1051,7 @@ fn main() -> Result<()> {
         &input_path,
         Some(start_time.elapsed()),
         options.output_path.as_deref(),
+        &exclusions,
     )?;
 
     if let Some(profile_path) = &options.profile_output {

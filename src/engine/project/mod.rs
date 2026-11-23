@@ -44,6 +44,8 @@ pub struct Engine {
     pub(crate) max_complexity: Option<usize>,
     /// Rule ids suppressed by `--disable-rule` or `[rules] disable`.
     pub(crate) disabled_rules: std::collections::BTreeSet<String>,
+    /// Overrides for the default file-collection exclusions.
+    pub(crate) collect_options: crate::engine::files::CollectOptions,
     /// When set, only these rule ids are reported (`--only`).
     pub(crate) only_rules: Option<std::collections::BTreeSet<String>>,
     /// Silent-finding records from the most recent `run` (when `explain`).
@@ -69,6 +71,9 @@ pub struct Engine {
     /// findings" report can say whether it means "inspected, no finding" or
     /// "nothing recognized".
     pub(crate) coverage: crate::policy::Coverage,
+    /// Paths the most recent run skipped by the default exclusion rules, with
+    /// the source files each hid. Surfaced via [`Engine::take_excluded`].
+    pub(crate) excluded: Vec<crate::engine::files::ExcludedPath>,
 }
 
 impl Engine {
@@ -88,12 +93,14 @@ impl Engine {
             max_complexity: None,
             disabled_rules: std::collections::BTreeSet::new(),
             only_rules: None,
+            collect_options: crate::engine::files::CollectOptions::default(),
             explain_records: Vec::new(),
             analysis_incomplete: Vec::new(),
             skipped_unsupported: Vec::new(),
             hidden_by_tier: std::collections::BTreeMap::new(),
             telemetry: frensense_engine::telemetry::ScanTelemetry::default(),
             coverage: crate::policy::Coverage::default(),
+            excluded: Vec::new(),
         }
     }
 
@@ -125,6 +132,15 @@ impl Engine {
     /// [`Engine::take_explain`].
     pub fn set_explain(&mut self, on: bool) {
         self.explain = on;
+    }
+
+    /// Adjust the default file exclusions (`--include-dir`,
+    /// `--no-default-excludes`).
+    pub fn set_collect_options(&mut self, include_dirs: Vec<String>, no_default_excludes: bool) {
+        self.collect_options = crate::engine::files::CollectOptions {
+            include_dirs,
+            no_default_excludes,
+        };
     }
 
     /// Set the user's rule filters (`--disable-rule`, `--only`, config).
@@ -220,6 +236,16 @@ impl Engine {
     #[must_use]
     pub fn take_coverage(&mut self) -> crate::policy::Coverage {
         std::mem::take(&mut self.coverage)
+    }
+
+    /// Take the paths the most recent `run` skipped by the default exclusion
+    /// rules, with the reason and the source files each hid. [`Coverage`]
+    /// counts them; this names them.
+    ///
+    /// [`Coverage`]: crate::policy::Coverage
+    #[must_use]
+    pub fn take_excluded(&mut self) -> Vec<crate::engine::files::ExcludedPath> {
+        std::mem::take(&mut self.excluded)
     }
 
     /// Register a synthetic file id for a scanned path (used by the runner

@@ -35,6 +35,20 @@ echo -e "\n${BLUE}[1/12] Engine purity ratchet (debt must not grow)...${NC}"
 python3 .github/scripts/purity-ratchet.py
 echo -e "${GREEN}OK Purity debt within baseline${NC}"
 
+# 1a. File-size ratchet (ci.yml `qa` job): no new Rust file over 500 lines
+echo -e "\n${BLUE}[1a/12] File-size ratchet (no file over 500 lines; existing ones may only shrink)...${NC}"
+python3 .github/scripts/file-size-ratchet.py
+echo -e "${GREEN}OK File sizes within baseline${NC}"
+
+# 1c. Public API snapshots (ci.yml `public-api` job): api/*.txt must match the code
+echo -e "\n${BLUE}[1c/12] Public API snapshots (api/*.txt)...${NC}"
+if command -v cargo-public-api >/dev/null; then
+    ./.github/scripts/public-api.sh --check
+    echo -e "${GREEN}OK api/*.txt current${NC}"
+else
+    echo -e "${RED}SKIPPED${NC} cargo-public-api not installed (cargo install cargo-public-api --version 0.52.0 --locked); CI will check this"
+fi
+
 # 1b. Blog provenance gate (ci.yml `qa` job): version-pinned claims, fresh audits
 echo -e "\n${BLUE}[2/12] Blog provenance gate (--strict)...${NC}"
 python3 .github/scripts/blog_provenance.py check --strict

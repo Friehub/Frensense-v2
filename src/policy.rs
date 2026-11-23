@@ -17,7 +17,12 @@
 //! The `--explain` "why the engine stayed silent" map lives in
 //! [`crate::explain`].
 
+use crate::engine::files::ExcludedPath;
+
+mod exclusions;
+
 use crate::{Advisory, Profile, RuleTier, Severity};
+pub use exclusions::Exclusions;
 use frensense_engine::analysis::taint::engine::{BackwardVerdict, FindingClass, SinkFinding};
 use frensense_engine::scan::ScanResult;
 use frensense_lang::rule_card;
@@ -288,11 +293,31 @@ impl Coverage {
         }
     }
 
-    /// Source files the scan found but did not analyze: unsupported languages
-    /// plus read/parse/lower failures. The "M - N" in "N of M files scanned".
+    /// Record what the default exclusion rules skipped. Source files inside
+    /// excluded paths join the denominator (`files_found`) and count as not
+    /// analyzed, so a scan that skipped real code cannot read as complete.
+    #[must_use]
+    pub fn with_excluded(mut self, excluded: &[ExcludedPath]) -> Self {
+        let hidden: usize = excluded.iter().map(|e| e.source_files.unwrap_or(0)).sum();
+        self.files_found += hidden;
+        self
+    }
+
+    /// Source files the walk found but never analyzed because a default
+    /// exclusion rule skipped their directory or the file itself, as distinct
+    /// from files that failed and files whose language has no spec.
+    #[must_use]
+    pub fn files_excluded(&self) -> usize {
+        self.files_not_analyzed()
+            .saturating_sub(self.files_failed + self.files_unsupported)
+    }
+
+    /// Source files the scan found but did not analyze: unsupported languages,
+    /// read/parse/lower failures, and files the default exclusion rules
+    /// skipped. The "M - N" in "N of M files scanned".
     #[must_use]
     pub fn files_not_analyzed(&self) -> usize {
-        self.files_failed + self.files_unsupported
+        self.files_found.saturating_sub(self.files_analyzed)
     }
 
     /// Fold one scan's coverage into a running total. Multi-path and
@@ -603,5 +628,36 @@ mod tests {
         assert_eq!(a.files_without_sink_sites, 1);
         assert_eq!(a.no_sink_files, vec!["b.py".to_string()]);
         assert!(!a.fully_resolved());
+    }
+    /// #172: files the exclusion rules skipped join the denominator and count
+    /// as not analyzed; dependency directories are listed but not counted.
+    #[test]
+    fn excluded_source_files_count_as_not_analyzed() {
+        let excluded = vec![
+            ExcludedPath {
+                path: "p/cache".into(),
+                reason: "dir:cache".into(),
+                source_files: Some(4),
+            },
+            ExcludedPath {
+                path: "p/big.py".into(),
+                reason: "size>500k".into(),
+                source_files: Some(1),
+            },
+            ExcludedPath {
+                path: "p/node_modules".into(),
+                reason: "dir:node_modules".into(),
+                source_files: None,
+            },
+        ];
+        let detail = Exclusions::from_paths(&excluded);
+        let coverage = coverage_for(&[("a.py", "x = 1\n")]).with_excluded(&excluded);
+        assert_eq!(coverage.files_excluded(), 5);
+        assert_eq!(coverage.files_not_analyzed(), 5);
+        assert_eq!(coverage.files_found, 6);
+        assert_eq!(detail.files_excluded, 5);
+        assert_eq!(detail.by_reason.len(), 3);
+        assert_eq!(detail.sample.len(), 3);
+        assert_eq!(detail.sample[2].reason, "dir:node_modules");
     }
 }

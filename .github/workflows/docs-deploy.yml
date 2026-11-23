@@ -2,6 +2,7 @@ name: Deploy Docs (v2 + v1 archive)
 
 # Builds the frensense-v2 docs site and publishes it to the gh-pages branch:
 #   /        -> v2 docs (this repo's docs-site)
+#   /rustdoc/ -> `cargo doc` for the four publishable crates (current main)
 #   /v1/     -> frozen copy of the legacy v1 site (Friehub/Frensense gh-pages)
 #   CNAME    -> frensense.friehub.cloud
 #
@@ -19,6 +20,14 @@ on:
     paths:
       - 'docs-site/**'
       - '.github/workflows/docs-deploy.yml'
+      - '.github/pages/**'
+      # The Rust API docs are built from source, so a code change republishes them.
+      - 'src/**'
+      - 'frensense-engine/**'
+      - 'frensense-lang/**'
+      - 'frensense-bundler/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
   workflow_dispatch:
 
 permissions:
@@ -54,6 +63,23 @@ jobs:
           npm ci
           npm run build
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: stable
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+
+      - name: Build Rust API docs
+        # Public items only (no --document-private-items), no dependencies.
+        # Broken intra-doc links fail the build, as in CI.
+        env:
+          RUSTDOCFLAGS: -D rustdoc::broken_intra_doc_links
+        run: |
+          cargo doc --no-deps --all-features \
+            -p frensense -p frensense-engine -p frensense-lang -p frensense-bundler
+
       - name: Fetch v1 docs archive
         # Pull the legacy site (Friehub/Frensense gh-pages) and place it
         # under /v1/ so the v1 documentation stays reachable. The v1 site
@@ -75,6 +101,11 @@ jobs:
           # because dist never contains a v1/ directory.
           cp -r deploy/v1 deploy-root/v1
           echo "frensense.friehub.cloud" > deploy-root/CNAME
+          # Rust API docs: one directory per crate plus our own landing page
+          # (cargo doc does not write a workspace index).
+          mkdir -p deploy-root/rustdoc
+          cp -r target/doc/. deploy-root/rustdoc/
+          cp .github/pages/rustdoc-index.html deploy-root/rustdoc/index.html
           touch deploy-root/.nojekyll
 
       - name: Deploy to GitHub Pages (branch archive)

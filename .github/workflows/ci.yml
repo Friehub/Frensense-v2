@@ -38,6 +38,9 @@ jobs:
       - name: Purity debt ratchet (engine policy debt must not grow)
         run: python3 .github/scripts/purity-ratchet.py
 
+      - name: File-size ratchet (no Rust file over 500 lines; existing ones may only shrink)
+        run: python3 .github/scripts/file-size-ratchet.py
+
       - name: Install Rust (stable, with rustfmt)
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
@@ -190,6 +193,33 @@ jobs:
         # breaking changes in 0.8.0). This is the correct baseline: pre-release
         # git SHAs on main are never published and must not be used as anchors.
         run: python3 .github/scripts/semver-gate.py --published
+
+  # --- Public API snapshots ---
+  public-api:
+    name: Public API snapshots
+    runs-on: ubuntu-latest
+    needs: [qa]
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.16.1
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v4.3.0
+      - name: Install Rust
+        # Pinned: rustdoc JSON changes between releases, and the snapshots
+        # must be produced by the same toolchain that wrote them. Keep this in
+        # step with API_RUSTC in .github/scripts/public-api.sh.
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: 1.97.0
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+      - name: Install cargo-public-api
+        run: cargo install cargo-public-api --version 0.52.0 --locked
+      - name: api/*.txt must match the code (run .github/scripts/public-api.sh to refresh)
+        run: .github/scripts/public-api.sh --check
 
   # --- Release Graph Validation ---
   release-graph:
@@ -357,9 +387,11 @@ jobs:
           jq -s '[.[] | select(.reason == "benchmark-complete") | {name: .id, unit: .unit, value: .median.estimate, range: (.median_abs_dev.estimate | tostring)}]' raw_output.json > output.txt
 
       - name: Store and Compare Benchmark Results
-        uses: benchmark-action/github-action-benchmark@fd31771ce86cc65eab85653da103f71ab1b4479c # v1.9.0
+        uses: benchmark-action/github-action-benchmark@d48d326b4ca9ba73ca0cd0d59f108f9e02a381c7 # v1.20.4
         with:
           name: FrenSense Engine Benchmarks
+          # The custom* tools only exist from v1.20; the old v1.9.0 pin
+          # rejected this value as an invalid `tool` input.
           tool: customSmallerIsBetter
           output-file-path: output.txt
           github-token: ${{ secrets.GITHUB_TOKEN }}

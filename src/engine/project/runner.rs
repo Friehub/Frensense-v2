@@ -11,7 +11,7 @@
 //! severity, impact, and tags (plus observation on the checker path).
 
 use super::Engine;
-use crate::engine::files::{UnsupportedSourceFile, collect_files_detailed};
+use crate::engine::files::{UnsupportedSourceFile, collect_files_with};
 use crate::{Advisory, Result, Severity};
 use std::path::Path;
 
@@ -59,9 +59,11 @@ impl Engine {
         self.explain_records.clear();
         self.skipped_unsupported.clear();
 
-        let collected = collect_files_detailed(root, self.language_filter.as_ref());
-        let paths = collected.supported;
-        let mut skipped_unsupported: Vec<UnsupportedSourceFile> = collected.unsupported;
+        let collected =
+            collect_files_with(root, self.language_filter.as_ref(), &self.collect_options);
+        self.excluded = collected.excluded;
+        let paths = collected.files.supported;
+        let mut skipped_unsupported: Vec<UnsupportedSourceFile> = collected.files.unsupported;
 
         // Track unsupported explicit inputs and read failures instead of
         // letting either surface as a successful empty scan. Directory walks
@@ -389,7 +391,8 @@ impl Engine {
         let absent_input =
             usize::from(self.skipped_unsupported.is_empty() && unsupported > 0 && root.is_file());
         let files_unsupported = self.skipped_unsupported.len() + absent_input;
-        self.coverage = crate::policy::Coverage::from_scan(&result, &considered, files_unsupported);
+        self.coverage = crate::policy::Coverage::from_scan(&result, &considered, files_unsupported)
+            .with_excluded(&self.excluded);
         for err in &result.errors {
             tracing::warn!("scan error: {err}");
         }
@@ -398,9 +401,13 @@ impl Engine {
         // Non-dataflow policy findings (weak crypto, insecure config):
         // these are assertions about API/constant choices, no taint path
         // exists, so they bypass the flow machinery entirely.
+        // A located finding whose file was never submitted has no file id to
+        // report under. It is counted below, never dropped silently.
+        let mut unlocated = 0usize;
         for lc in &result.located_checker {
             let (c, path, line, col) = (&lc.finding, &lc.file, lc.line, lc.column);
             let Some(&seq) = id_by_path.get(path) else {
+                unlocated += 1;
                 continue;
             };
             advisories.push(
@@ -471,6 +478,7 @@ impl Engine {
         for i in kept {
             let loc = candidates[i];
             let Some(&seq) = id_by_path.get(&loc.file) else {
+                unlocated += 1;
                 continue;
             };
             advisories.push(advisory_from_finding(
@@ -534,6 +542,15 @@ impl Engine {
                 .push(frensense_engine::telemetry::SuppressionCount {
                     reason: "not-reportable".into(),
                     count: not_reportable,
+                });
+        }
+        if unlocated > 0 {
+            result
+                .telemetry
+                .suppressed
+                .push(frensense_engine::telemetry::SuppressionCount {
+                    reason: frensense_engine::telemetry::UNLOCATED_FINDING.into(),
+                    count: unlocated,
                 });
         }
         if exact_duplicates > 0 {

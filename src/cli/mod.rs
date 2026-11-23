@@ -5,6 +5,7 @@
 #[cfg(test)]
 #[path = "baseline_tests.rs"]
 mod baseline_tests;
+pub mod engine_setup;
 pub mod git;
 pub mod options;
 pub mod progress;
@@ -13,6 +14,7 @@ pub mod watch;
 #[cfg(test)]
 mod watch_tests;
 
+pub use engine_setup::configure_engine;
 pub use options::*;
 pub use progress::*;
 pub use reporting::*;

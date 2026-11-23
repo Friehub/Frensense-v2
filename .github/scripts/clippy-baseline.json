@@ -51,8 +51,8 @@
   "frensense-packgen::clippy::print_stdout": 2,
   "frensense-packgen::clippy::too_many_lines": 4,
   "frensense-packgen::clippy::type_complexity": 6,
-  "frensense::clippy::allow_attributes": 4,
-  "frensense::clippy::disallowed_methods": 11,
+  "frensense::clippy::allow_attributes": 3,
+  "frensense::clippy::disallowed_methods": 10,
   "frensense::clippy::disallowed_types": 16,
   "frensense::clippy::exhaustive_enums": 3,
   "frensense::clippy::exhaustive_structs": 11,
@@ -60,10 +60,10 @@
   "frensense::clippy::expect_used": 2,
   "frensense::clippy::float_arithmetic": 2,
   "frensense::clippy::indexing_slicing": 16,
-  "frensense::clippy::missing_errors_doc": 6,
+  "frensense::clippy::missing_errors_doc": 5,
   "frensense::clippy::needless_pass_by_value": 3,
   "frensense::clippy::print_stderr": 60,
-  "frensense::clippy::print_stdout": 203,
+  "frensense::clippy::print_stdout": 207,
   "frensense::clippy::too_many_lines": 10,
   "frensense::clippy::type_complexity": 10
 }
