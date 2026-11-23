@@ -67,6 +67,12 @@ pub struct CliOptions {
     pub only_rules: Vec<String>,
     /// Project config file (`--config`); defaults to `.frensense.toml` in cwd.
     pub config_path: Option<PathBuf>,
+    /// Directory names to scan even though a default rule skips them
+    /// (`--include-dir`, repeatable or comma-separated).
+    pub include_dirs: Vec<String>,
+    /// Scan without the default directory, size and minified-file
+    /// exclusions (`--no-default-excludes`).
+    pub no_default_excludes: bool,
 }
 
 /// Parse CLI arguments into structured scan options.
@@ -96,6 +102,8 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
         disable_rules: Vec::new(),
         only_rules: Vec::new(),
         config_path: None,
+        include_dirs: Vec::new(),
+        no_default_excludes: false,
     };
 
     let mut i = 1;
@@ -134,6 +142,16 @@ pub fn parse_options(args: &[String]) -> std::result::Result<CliOptions, String>
             "--diff-only" => options.diff_only = true,
             "--explain" => options.explain = true,
             "--show-suppressed" => options.show_suppressed = true,
+            "--no-default-excludes" => options.no_default_excludes = true,
+            "--include-dir" => {
+                let val = args
+                    .get(i + 1)
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                for name in val.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    options.include_dirs.push(name.to_string());
+                }
+                i += 1;
+            }
             "--disable-rule" => {
                 let val = args
                     .get(i + 1)
@@ -560,5 +578,18 @@ mod tests {
         assert_eq!(opts.profile_output, Some(PathBuf::from("timing.json")));
         // The precision profile must remain at its default.
         assert_eq!(opts.profile, crate::Profile::Default);
+    }
+    #[test]
+    fn include_dir_and_no_default_excludes_parse() {
+        let opts = parse_options(&to_args(&[
+            "--include-dir",
+            "cache,build",
+            "--include-dir",
+            "out",
+            "--no-default-excludes",
+        ]))
+        .expect("options parse");
+        assert_eq!(opts.include_dirs, vec!["cache", "build", "out"]);
+        assert!(opts.no_default_excludes);
     }
 }

@@ -106,7 +106,7 @@ impl ScanStatus {
     ///
     /// Without coverage this cannot tell that the walk skipped a file, so a
     /// partial tree can still read `Complete`; the rendering entry points add
-    /// the walk's accounting through [`status_with_coverage`].
+    /// the walk's accounting through `status_with_coverage`.
     #[must_use]
     pub fn compute(
         telemetry: &frensense_engine::telemetry::ScanTelemetry,
@@ -161,6 +161,27 @@ pub(crate) fn status_with_coverage(
     } else {
         status
     }
+}
+
+/// Text lines naming what the default exclusion rules skipped and how to
+/// opt back in. Empty when nothing source-bearing was excluded.
+fn excluded_lines(c: &Coverage) -> Vec<String> {
+    if c.files_excluded == 0 {
+        return Vec::new();
+    }
+    let mut lines = vec![format!(
+        "Excluded by default rules: {}",
+        c.excluded_by_reason
+            .iter()
+            .map(|(reason, n)| format!("{reason} x{n}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )];
+    lines.push(
+        "Scan them with --include-dir <name>, or everything with --no-default-excludes."
+            .to_string(),
+    );
+    lines
 }
 
 /// The one-line answer the summary prints.
@@ -259,11 +280,15 @@ pub fn print_scan_summary_detailed_with_coverage(
             println!("Files Scanned:      {}/{}", c.files_analyzed, c.files_found);
             if c.files_not_analyzed() > 0 {
                 println!(
-                    "Not Analyzed:       {} ({} unsupported language, {} failed)",
+                    "Not Analyzed:       {} ({} unsupported language, {} failed, {} excluded)",
                     c.files_not_analyzed(),
                     c.files_unsupported,
-                    c.files_failed
+                    c.files_failed,
+                    c.files_excluded
                 );
+                for line in excluded_lines(c) {
+                    println!("                    {line}");
+                }
             }
         }
         _ if telem.input.submitted > 0 => {
@@ -381,9 +406,10 @@ pub fn print_scan_summary_detailed_with_coverage(
                     c.files_unsupported
                 );
                 println!(
-                    "        language, {} failed); findings there cannot be ruled out.",
-                    c.files_failed
+                    "        language, {} failed, {} excluded); findings there cannot be",
+                    c.files_failed, c.files_excluded
                 );
+                println!("        ruled out.");
             }
             if !c.recognized_anything() {
                 println!("        No sink site was recognized in any scanned file: this scan says");
@@ -540,6 +566,13 @@ pub fn json_report_with_coverage(
             "files_scanned": telem.input.scanned,
             "files_not_analyzed": files_not_analyzed,
             "files_unsupported": files_unsupported,
+            "files_excluded": cov.files_excluded,
+            "excluded_by_reason": cov.excluded_by_reason,
+            "excluded_sample": cov.excluded_sample.iter().map(|e| serde_json::json!({
+                "path": e.path,
+                "reason": e.reason,
+                "source_files": e.source_files,
+            })).collect::<Vec<_>>(),
             "files_failed": telem.input.failed,
             "failed_files": telem.input.failed_files,
             "unsupported_inputs": telem.input.unsupported,

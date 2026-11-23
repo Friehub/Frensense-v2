@@ -44,6 +44,8 @@ pub struct Engine {
     pub(crate) max_complexity: Option<usize>,
     /// Rule ids suppressed by `--disable-rule` or `[rules] disable`.
     pub(crate) disabled_rules: std::collections::BTreeSet<String>,
+    /// Overrides for the default file-collection exclusions.
+    pub(crate) collect_options: crate::engine::files::CollectOptions,
     /// When set, only these rule ids are reported (`--only`).
     pub(crate) only_rules: Option<std::collections::BTreeSet<String>>,
     /// Silent-finding records from the most recent `run` (when `explain`).
@@ -88,6 +90,7 @@ impl Engine {
             max_complexity: None,
             disabled_rules: std::collections::BTreeSet::new(),
             only_rules: None,
+            collect_options: crate::engine::files::CollectOptions::default(),
             explain_records: Vec::new(),
             analysis_incomplete: Vec::new(),
             skipped_unsupported: Vec::new(),
@@ -125,6 +128,15 @@ impl Engine {
     /// [`Engine::take_explain`].
     pub fn set_explain(&mut self, on: bool) {
         self.explain = on;
+    }
+
+    /// Adjust the default file exclusions (`--include-dir`,
+    /// `--no-default-excludes`).
+    pub fn set_collect_options(&mut self, include_dirs: Vec<String>, no_default_excludes: bool) {
+        self.collect_options = crate::engine::files::CollectOptions {
+            include_dirs,
+            no_default_excludes,
+        };
     }
 
     /// Set the user's rule filters (`--disable-rule`, `--only`, config).

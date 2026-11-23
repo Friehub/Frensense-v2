@@ -19,7 +19,8 @@ use crate::analysis::taint::facts::FactTable;
 use crate::checks::{self, CheckerFinding};
 use crate::ir::function::FunctionIR;
 use crate::telemetry::{
-    CapHit, FileTiming, FunctionTiming, InputAccounting, PhaseTiming, ScanTelemetry, millis_since,
+    CapHit, FileTiming, FunctionTiming, InputAccounting, PhaseTiming, ScanTelemetry,
+    SuppressionCount, millis_since,
 };
 use frensense_lang::spec::{Export, Import, ModuleItem};
 
@@ -680,81 +681,14 @@ pub fn scan_prepared(
     let slowest_functions = slowest_functions(&engine, &prepared.fn_file);
 
     // Resolve each finding to a file + line/column from the sink's byte span.
-    let located: Vec<LocatedFinding> = engine
-        .findings
-        .iter()
-        .filter_map(|f| {
-            let file = fn_file.get(&f.function)?;
-            let source = file_source.get(file)?;
-            let (line, col) = f
-                .sink_span
-                .map(|(start, _)| {
-                    let before = &source[..start.min(source.len())];
-                    let line = before.matches('\n').count() as u32 + 1;
-                    let col = before
-                        .rfind('\n')
-                        .map_or(before.len(), |i| before.len() - i - 1)
-                        as u32
-                        + 1;
-                    (line, col)
-                })
-                .unwrap_or((0, 0));
-            let cut_sites = f
-                .cut_sites
-                .iter()
-                .map(|c| {
-                    let cfile = fn_file.get(&c.function).cloned().unwrap_or_default();
-                    let cline = c
-                        .span
-                        .and_then(|(start, _)| Some(line_at(file_source.get(&cfile)?, start)))
-                        .unwrap_or(0);
-                    LocatedCutSite {
-                        kind: c.kind,
-                        function: c.function.clone(),
-                        detail: c.detail.clone(),
-                        file: cfile,
-                        line: cline,
-                    }
-                })
-                .collect();
-            Some(LocatedFinding {
-                finding: f.clone(),
-                file: file.clone(),
-                line,
-                column: col,
-                cut_sites,
-            })
-        })
-        .collect();
+    // A finding whose function has no file (or whose file has no source text)
+    // cannot be pinned to a location; it is counted, never silently dropped.
+    let (located, unlocated_sinks) = locate_findings(&engine.findings, fn_file, file_source);
 
     // Locate checker findings the same way: function → file, span → line/col.
-    let located_checker: Vec<LocatedChecker> = checker_findings
-        .iter()
-        .filter_map(|c| {
-            let file = fn_file.get(&c.function)?;
-            let source = file_source.get(file)?;
-            let (line, col, end_line) = c
-                .span
-                .map(|(start, end)| {
-                    let before = &source[..start.min(source.len())];
-                    let line = before.matches('\n').count() as u32 + 1;
-                    let col = before
-                        .rfind('\n')
-                        .map_or(before.len(), |i| before.len() - i - 1)
-                        as u32
-                        + 1;
-                    (line, col, line_at(source, end))
-                })
-                .unwrap_or((0, 0, 0));
-            Some(LocatedChecker {
-                finding: c.clone(),
-                file: file.clone(),
-                line,
-                column: col,
-                end_line: end_line.max(line),
-            })
-        })
-        .collect();
+    let (located_checker, unlocated_checks) =
+        locate_checker_findings(&checker_findings, fn_file, file_source);
+    let unlocated = unlocated_sinks + unlocated_checks;
 
     // Functions the per-function work budget pushed into the degraded
     // (flow-insensitive) form during lowering: the report names them under
@@ -799,7 +733,14 @@ pub fn scan_prepared(
         slowest_functions,
         caps,
         checks: check_telemetry,
-        suppressed: Vec::new(),
+        suppressed: if unlocated > 0 {
+            vec![SuppressionCount {
+                reason: crate::telemetry::UNLOCATED_FINDING.into(),
+                count: unlocated,
+            }]
+        } else {
+            Vec::new()
+        },
         errors: prepared.lower_errors.clone(),
         input: InputAccounting {
             submitted: prepared.submitted,
@@ -944,6 +885,106 @@ pub struct LocatedChecker {
 /// 1-based line of byte `offset` in `source` (clamped to its end).
 fn line_at(source: &str, offset: usize) -> u32 {
     source[..offset.min(source.len())].matches('\n').count() as u32 + 1
+}
+
+/// Resolve sink findings to file/line/column.
+///
+/// Returns the located findings and how many could not be located (their
+/// function has no file entry, or their file has no source text). The two
+/// always sum to `findings.len()`: nothing is dropped without being counted.
+fn locate_findings(
+    findings: &[SinkFinding],
+    fn_file: &FxHashMap<String, String>,
+    file_source: &FxHashMap<String, String>,
+) -> (Vec<LocatedFinding>, usize) {
+    let mut located = Vec::with_capacity(findings.len());
+    for f in findings {
+        let Some(file) = fn_file.get(&f.function) else {
+            continue;
+        };
+        let Some(source) = file_source.get(file) else {
+            continue;
+        };
+        let (line, col) = f
+            .sink_span
+            .map(|(start, _)| {
+                let before = &source[..start.min(source.len())];
+                let line = before.matches('\n').count() as u32 + 1;
+                let col = before
+                    .rfind('\n')
+                    .map_or(before.len(), |i| before.len() - i - 1)
+                    as u32
+                    + 1;
+                (line, col)
+            })
+            .unwrap_or((0, 0));
+        let cut_sites = f
+            .cut_sites
+            .iter()
+            .map(|c| {
+                let cfile = fn_file.get(&c.function).cloned().unwrap_or_default();
+                let cline = c
+                    .span
+                    .and_then(|(start, _)| Some(line_at(file_source.get(&cfile)?, start)))
+                    .unwrap_or(0);
+                LocatedCutSite {
+                    kind: c.kind,
+                    function: c.function.clone(),
+                    detail: c.detail.clone(),
+                    file: cfile,
+                    line: cline,
+                }
+            })
+            .collect();
+        located.push(LocatedFinding {
+            finding: f.clone(),
+            file: file.clone(),
+            line,
+            column: col,
+            cut_sites,
+        });
+    }
+    let unlocated = findings.len() - located.len();
+    (located, unlocated)
+}
+
+/// Resolve checker findings to file/line/column; see [`locate_findings`].
+fn locate_checker_findings(
+    findings: &[CheckerFinding],
+    fn_file: &FxHashMap<String, String>,
+    file_source: &FxHashMap<String, String>,
+) -> (Vec<LocatedChecker>, usize) {
+    let mut located = Vec::with_capacity(findings.len());
+    for c in findings {
+        let Some(file) = fn_file.get(&c.function) else {
+            continue;
+        };
+        let Some(source) = file_source.get(file) else {
+            continue;
+        };
+        let (line, col, end_line) = c
+            .span
+            .map(|(start, end)| {
+                let before = &source[..start.min(source.len())];
+                let line = before.matches('\n').count() as u32 + 1;
+                let col = before
+                    .rfind('\n')
+                    .map_or(before.len(), |i| before.len() - i - 1)
+                    as u32
+                    + 1;
+                (line, col, line_at(source, end))
+            })
+            .unwrap_or((0, 0, 0));
+        located.push(LocatedChecker {
+            finding: c.clone(),
+            file: file.clone(),
+            line,
+            column: col,
+            end_line: end_line.max(line),
+        });
+    }
+    let unlocated = findings.len() - located.len();
+    (located, unlocated)
 }
 
 /// A `crate::analysis::taint::engine::CutSite` pinned to its file and line.
@@ -1189,5 +1230,87 @@ mod program_builder_tests {
         let result = scan_prepared(&builder.finish(), &config, &facts);
         assert_eq!(result.telemetry.input.failed, 1);
         assert_eq!(result.telemetry.input.scanned, 1);
+    }
+}
+
+#[cfg(test)]
+mod accounting_tests {
+    use super::{
+        FxHashMap, ProgramBuilder, locate_checker_findings, locate_findings, scan_prepared,
+    };
+    use crate::analysis::taint::facts::seeded_tables;
+    use crate::telemetry::UNLOCATED_FINDING;
+
+    const VULNERABLE: &str =
+        "export function wrap () {\n  return (req) => {\n    exec(req)\n  }\n}\n";
+    const CLEAN: &str = "export function wrap () {\n  return (req) => {\n    noop(1)\n  }\n}\n";
+
+    fn unlocated(result: &super::ScanResult) -> usize {
+        result
+            .telemetry
+            .suppressed
+            .iter()
+            .filter(|s| s.reason == UNLOCATED_FINDING)
+            .map(|s| s.count)
+            .sum()
+    }
+
+    /// Every sink and checker finding the engine produced is either located
+    /// or counted as unlocated: `found == located + unlocated`, on a scan
+    /// that spans several files.
+    #[test]
+    fn every_finding_is_located_or_counted() {
+        let (config, facts) = seeded_tables(["ts"]);
+        let mut builder = ProgramBuilder::new();
+        builder.add_file("app/a.ts", CLEAN, "ts", Some(&facts));
+        builder.add_file("app/b.ts", VULNERABLE, "ts", Some(&facts));
+        builder.add_file("app/c.ts", VULNERABLE, "ts", Some(&facts));
+        let result = scan_prepared(&builder.finish(), &config, &facts);
+
+        assert!(!result.findings.is_empty(), "fixture must produce findings");
+        assert_eq!(
+            result.findings.len() + result.checker.len(),
+            result.located.len() + result.located_checker.len() + unlocated(&result),
+        );
+    }
+
+    /// A finding whose function has no file entry is counted, not lost.
+    #[test]
+    fn finding_without_a_file_is_counted_as_unlocated() {
+        let (config, facts) = seeded_tables(["ts"]);
+        let mut builder = ProgramBuilder::new();
+        builder.add_file("app/b.ts", VULNERABLE, "ts", Some(&facts));
+        let result = scan_prepared(&builder.finish(), &config, &facts);
+        assert!(!result.findings.is_empty(), "fixture must produce findings");
+
+        let no_files: FxHashMap<String, String> = FxHashMap::default();
+        let (located, lost) = locate_findings(&result.findings, &no_files, &no_files);
+        assert!(located.is_empty());
+        assert_eq!(lost, result.findings.len());
+
+        let (located, lost) = locate_checker_findings(&result.checker, &no_files, &no_files);
+        assert!(located.is_empty());
+        assert_eq!(lost, result.checker.len());
+    }
+
+    /// A function mapped to a file whose source text is absent is also
+    /// counted.
+    #[test]
+    fn finding_without_source_text_is_counted_as_unlocated() {
+        let (config, facts) = seeded_tables(["ts"]);
+        let mut builder = ProgramBuilder::new();
+        builder.add_file("app/b.ts", VULNERABLE, "ts", Some(&facts));
+        let result = scan_prepared(&builder.finish(), &config, &facts);
+        assert!(!result.findings.is_empty(), "fixture must produce findings");
+
+        let fn_file: FxHashMap<String, String> = result
+            .findings
+            .iter()
+            .map(|f| (f.function.clone(), "app/b.ts".to_string()))
+            .collect();
+        let no_source: FxHashMap<String, String> = FxHashMap::default();
+        let (located, lost) = locate_findings(&result.findings, &fn_file, &no_source);
+        assert!(located.is_empty());
+        assert_eq!(lost, result.findings.len());
     }
 }

@@ -285,6 +285,12 @@ fn print_help() {
         "  --show-suppressed          Show flows silenced by a bundle sanitizer fact, naming the fact, family and class"
     );
     println!(
+        "  --include-dir <name>       Scan a directory a default rule skips (build, vendor, out, cache, ...); repeatable"
+    );
+    println!(
+        "  --no-default-excludes      Scan everything: no directory, size (500 KB) or minified-file exclusions"
+    );
+    println!(
         "  --disable-rule <id>        Suppress a rule id (repeatable or comma-separated); per bundle/rule"
     );
     println!(
@@ -932,6 +938,7 @@ fn main() -> Result<()> {
     engine.set_explain(options.explain);
     engine.set_show_suppressed(options.show_suppressed);
     engine.set_rule_filters(options.disable_rules.clone(), options.only_rules.clone());
+    engine.set_collect_options(options.include_dirs.clone(), options.no_default_excludes);
     engine.set_show_flows(options.show_flows);
 
     let show_progress = !options.no_progress;
@@ -974,6 +981,7 @@ fn main() -> Result<()> {
                 e2.set_explain(options.explain);
                 e2.set_show_suppressed(options.show_suppressed);
                 e2.set_rule_filters(options.disable_rules.clone(), options.only_rules.clone());
+                e2.set_collect_options(options.include_dirs.clone(), options.no_default_excludes);
                 e2.set_show_flows(options.show_flows);
                 all.extend(e2.run_observed(f, &mut progress)?);
                 incomplete.extend(e2.take_incomplete());

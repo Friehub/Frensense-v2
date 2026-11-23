@@ -27,6 +27,11 @@ mechanisms are not automatically stable merely because they currently use
 needs it and whether it belongs to the supported API, an extension API, or an
 unstable/internal surface. Do not widen visibility to make a refactor easier.
 
+The committed list of what the engine exports today is
+[`api/frensense-engine.txt`](../api/frensense-engine.txt); the root `AGENTS.md`
+§1B (extend before you add; a breaking change must shrink the surface), §1C (no
+file over 500 lines) and §1D (leave warnings lower) apply here in full.
+
 ## 2. Preserve the architecture and knowledge lanes
 
 The allowed pipeline is:

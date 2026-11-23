@@ -10,6 +10,18 @@ Built-in vocabulary tables live in `frensense-packgen`; the `.frc` envelope
 lives in `frensense-bundler`. Their changes appear here only when they alter
 what this crate does.
 
+## [0.9.2]
+
+### Fixed
+
+- A finding whose function has no file entry, or whose file has no source
+  text, was dropped without a trace when results were located. They are now
+  counted in `ScanTelemetry::suppressed` under the new reason
+  `telemetry::UNLOCATED_FINDING` (`"unlocated-finding"`), so every sink and
+  checker finding is either located or counted (#173). Locating is split into
+  `locate_findings` / `locate_checker_findings`, with tests that force the
+  unlocated cases.
+
 ## [0.9.1]
 
 ### Added

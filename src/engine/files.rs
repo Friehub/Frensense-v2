@@ -108,6 +108,59 @@ pub struct UnsupportedSourceFile {
     pub language: &'static str,
 }
 
+/// A path the walk deliberately did not scan, and why.
+///
+/// Exclusions exist because scanning `node_modules` or a minified bundle is
+/// noise, but a report that does not say so lets a project whose real code
+/// lives in `build/` or `cache/` read as scanned when most of it never was.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
+pub struct ExcludedPath {
+    /// Path as the scanner knows it.
+    pub path: String,
+    /// Why it was skipped: `dir:<name>`, `hidden-dir`, `size>500k` or
+    /// `minified`.
+    pub reason: String,
+    /// Supported source files that were not scanned because of this
+    /// exclusion. `None` for dependency and tool directories (`node_modules`,
+    /// `target`, hidden directories): they are listed, but their contents are
+    /// neither counted nor treated as a coverage gap.
+    pub source_files: Option<usize>,
+}
+
+/// Overrides for the default exclusion rules.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CollectOptions {
+    /// Directory names that must be scanned even though a default rule would
+    /// skip them (`--include-dir cache`).
+    pub include_dirs: Vec<String>,
+    /// Scan everything the extension filter allows: no directory, size or
+    /// minified-file exclusions (`--no-default-excludes`).
+    pub no_default_excludes: bool,
+}
+
+/// Directories whose names are also ordinary package names. Skipping one can
+/// hide real application code (`cmd/go/internal/cache`), so its source files
+/// are counted and the scan is reported partial.
+const AMBIGUOUS_DIRS: &[&str] = &["build", "vendor", "out", "cache", "cypress", "playwright"];
+
+/// Directories that are build output, dependencies or tool state by
+/// convention. Listed in the report, never counted as a gap.
+const DEPENDENCY_DIRS: &[&str] = &[
+    "target",
+    "node_modules",
+    "dist",
+    ".next",
+    ".nuxt",
+    ".cache",
+    "coverage",
+    "storybook-static",
+];
+
+/// Files larger than this are skipped (generated or data-like).
+const MAX_FILE_BYTES: u64 = 500_000;
+
 /// Result of one directory walk: what can be scanned and what was skipped
 /// because its language is not supported.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -117,6 +170,8 @@ pub struct CollectedFiles {
     /// Source files skipped solely because the engine has no spec for the
     /// language. Empty when a language filter scoped the scan.
     pub unsupported: Vec<UnsupportedSourceFile>,
+    /// Paths skipped by the default exclusion rules, with the reason.
+    pub excluded: Vec<ExcludedPath>,
 }
 
 /// Collects all files reachable from `root` that match supported extensions
@@ -130,7 +185,7 @@ pub fn collect_files(root: &Path, language_filter: Option<&Vec<&'static str>>) -
 }
 
 /// Like [`collect_files`], but also reports source files skipped because the
-/// engine has no language spec for them.
+/// engine has no language spec for them, and paths the default rules excluded.
 ///
 /// A single-file root is supported only when its extension is; an unsupported
 /// file contributes one entry to `unsupported` (when its language is known)
@@ -141,35 +196,55 @@ pub fn collect_files_detailed(
     root: &Path,
     language_filter: Option<&Vec<&'static str>>,
 ) -> CollectedFiles {
+    collect_files_with(root, language_filter, &CollectOptions::default())
+}
+
+/// [`collect_files_detailed`] with the default exclusion rules adjusted.
+#[must_use]
+pub fn collect_files_with(
+    root: &Path,
+    language_filter: Option<&Vec<&'static str>>,
+    options: &CollectOptions,
+) -> CollectedFiles {
     if root.is_file() {
         if crate::parser::is_supported(root) {
             return CollectedFiles {
                 supported: vec![root.to_path_buf()],
-                unsupported: Vec::new(),
+                ..CollectedFiles::default()
             };
         }
         return CollectedFiles {
-            supported: Vec::new(),
             unsupported: unsupported_source_file(root).into_iter().collect(),
+            ..CollectedFiles::default()
         };
     }
 
     let mut collected = CollectedFiles::default();
-    for path in walk_source_candidates(root) {
+    let mut excluded: Vec<ExcludedPath> = Vec::new();
+    let candidates = walk_source_candidates(root, options, &mut excluded);
+    for path in candidates {
         if crate::parser::is_supported(&path) {
             let matches_filter = language_filter.is_none_or(|allowed| {
                 let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
                 allowed.contains(&ext)
             });
+            if !matches_filter {
+                continue;
+            }
+            if !options.no_default_excludes && looks_minified(&path) {
+                excluded.push(ExcludedPath {
+                    path: path.to_string_lossy().into_owned(),
+                    reason: "minified".into(),
+                    source_files: Some(1),
+                });
+                continue;
+            }
             // Test classification is relative to the scan root: a project
             // that happens to live under a `tests/` path component (an
             // absolute path such as /ci/tests/app, or a root the user pointed
             // at directly) is production code for this scan. Absolute and
             // relative invocations must see the same files.
-            if matches_filter
-                && !looks_minified(&path)
-                && !is_test_file(path.strip_prefix(root).unwrap_or(&path))
-            {
+            if !is_test_file(path.strip_prefix(root).unwrap_or(&path)) {
                 collected.supported.push(path);
             }
         } else if language_filter.is_none()
@@ -178,52 +253,110 @@ pub fn collect_files_detailed(
             collected.unsupported.push(file);
         }
     }
+    // A language filter scopes the scan: files it leaves out are the user's
+    // choice, not exclusions. Exclusions are only meaningful unscoped.
+    if language_filter.is_none() {
+        excluded.sort();
+        excluded.dedup();
+        collected.excluded = excluded;
+    }
     collected
 }
 
+/// Why `entry` is skipped by the default rules, if it is.
+fn exclusion_reason(entry: &walkdir::DirEntry, options: &CollectOptions) -> Option<ExcludedPath> {
+    let name = entry.file_name().to_string_lossy();
+    let path = entry.path().to_string_lossy().into_owned();
+    if entry.file_type().is_dir() {
+        if options.include_dirs.iter().any(|d| d.as_str() == name) {
+            return None;
+        }
+        let ambiguous = AMBIGUOUS_DIRS.contains(&name.as_ref());
+        let dependency = DEPENDENCY_DIRS.contains(&name.as_ref());
+        let hidden = name.starts_with('.') && !HIDDEN_SOURCE_DIRS.contains(&name.as_ref());
+        if !(ambiguous || dependency || hidden) {
+            return None;
+        }
+        let reason = if ambiguous || dependency {
+            format!("dir:{name}")
+        } else {
+            "hidden-dir".to_string()
+        };
+        let source_files = ambiguous.then(|| count_source_files(entry.path()));
+        return Some(ExcludedPath {
+            path,
+            reason,
+            source_files,
+        });
+    }
+    if entry.file_type().is_file() {
+        let supported = crate::parser::is_supported(entry.path());
+        if let Ok(meta) = entry.metadata()
+            && meta.len() > MAX_FILE_BYTES
+        {
+            return Some(ExcludedPath {
+                path,
+                reason: "size>500k".into(),
+                source_files: Some(usize::from(supported)),
+            });
+        }
+        if name.ends_with(".min.js")
+            || name.ends_with(".bundle.js")
+            || name.ends_with(".chunk.js")
+            || name.ends_with(".debug.js")
+        {
+            return Some(ExcludedPath {
+                path,
+                reason: "minified".into(),
+                source_files: Some(usize::from(supported)),
+            });
+        }
+    }
+    None
+}
+
+/// Supported source files under an excluded directory. Bounded: a vendored
+/// tree can be enormous, and a lower bound is enough to call the gap real.
+fn count_source_files(dir: &Path) -> usize {
+    const WALK_LIMIT: usize = 100_000;
+    WalkDir::new(dir)
+        .into_iter()
+        .filter_entry(|e| {
+            let n = e.file_name().to_string_lossy();
+            !(e.file_type().is_dir() && (n == "node_modules" || n == ".git"))
+        })
+        .filter_map(std::result::Result::ok)
+        .take(WALK_LIMIT)
+        .filter(|e| e.file_type().is_file() && crate::parser::is_supported(e.path()))
+        .count()
+}
+
 /// The source candidates under `root`: directories that are not build/VCS
-/// output, files that are not oversized or machine-compacted.
-fn walk_source_candidates(root: &Path) -> impl Iterator<Item = PathBuf> + '_ {
+/// output, files that are not oversized or machine-compacted. Everything the
+/// default rules skip is pushed to `excluded` with its reason.
+fn walk_source_candidates(
+    root: &Path,
+    options: &CollectOptions,
+    excluded: &mut Vec<ExcludedPath>,
+) -> Vec<PathBuf> {
     WalkDir::new(root)
         .into_iter()
         .filter_entry(move |e| {
-            let name = e.file_name().to_string_lossy();
-            if e.file_type().is_dir() && e.path() != root {
-                return name != "target"
-                    && name != "node_modules"
-                    && name != "dist"
-                    && name != "build"
-                    && name != "vendor"
-                    && name != "out"
-                    && name != ".next"
-                    && name != ".nuxt"
-                    && name != ".cache"
-                    && name != "cache"
-                    && name != "coverage"
-                    && name != "cypress"
-                    && name != "playwright"
-                    && name != "storybook-static"
-                    && (!name.starts_with('.') || HIDDEN_SOURCE_DIRS.contains(&name.as_ref()));
+            if options.no_default_excludes || (e.file_type().is_dir() && e.path() == root) {
+                return true;
             }
-            if e.file_type().is_file() {
-                if let Ok(meta) = e.metadata()
-                    && meta.len() > 500_000
-                {
-                    return false;
+            match exclusion_reason(e, options) {
+                Some(reason) => {
+                    excluded.push(reason);
+                    false
                 }
-                if name.ends_with(".min.js")
-                    || name.ends_with(".bundle.js")
-                    || name.ends_with(".chunk.js")
-                    || name.ends_with(".debug.js")
-                {
-                    return false;
-                }
+                None => true,
             }
-            true
         })
         .filter_map(std::result::Result::ok)
         .filter(|e| e.file_type().is_file())
         .map(|e| e.path().to_path_buf())
+        .collect()
 }
 
 /// Build the skipped-language entry for `path`, or `None` when the extension
@@ -505,5 +638,117 @@ mod tests {
             unsupported_source_file(Path::new("x.rb")).map(|f| f.language),
             Some("Ruby")
         );
+    }
+    fn detailed(root: &Path, options: &CollectOptions) -> CollectedFiles {
+        collect_files_with(root, None, options)
+    }
+
+    fn rel(root: &Path, p: &str) -> String {
+        Path::new(p)
+            .strip_prefix(root)
+            .unwrap_or(Path::new(p))
+            .to_string_lossy()
+            .replace('\\', "/")
+    }
+
+    /// #172: a package that happens to be called `cache` is skipped, but the
+    /// skip is recorded with the number of source files it hid.
+    #[test]
+    fn ambiguous_dir_exclusion_is_recorded_with_its_source_count() {
+        let tree = Tree::new("excl-cache");
+        tree.file("proj/main.rs");
+        tree.file("proj/cache/a.rs");
+        tree.file("proj/cache/b.rs");
+        let root = tree.0.join("proj");
+        let got = detailed(&root, &CollectOptions::default());
+        assert_eq!(got.supported.len(), 1);
+        assert_eq!(got.excluded.len(), 1);
+        assert_eq!(rel(&root, &got.excluded[0].path), "cache");
+        assert_eq!(got.excluded[0].reason, "dir:cache");
+        assert_eq!(got.excluded[0].source_files, Some(2));
+    }
+
+    /// Dependency directories are listed but their contents are not counted:
+    /// `node_modules` is not a coverage gap.
+    #[test]
+    fn dependency_dirs_are_listed_without_a_count() {
+        let tree = Tree::new("excl-deps");
+        tree.file("proj/main.rs");
+        tree.file("proj/node_modules/dep/index.rs");
+        tree.file("proj/.git/hooks.rs");
+        let root = tree.0.join("proj");
+        let got = detailed(&root, &CollectOptions::default());
+        let mut found: Vec<(String, Option<usize>)> = got
+            .excluded
+            .iter()
+            .map(|e| (e.reason.clone(), e.source_files))
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            vec![
+                ("dir:node_modules".to_string(), None),
+                ("hidden-dir".to_string(), None)
+            ]
+        );
+    }
+
+    #[test]
+    fn oversize_files_are_recorded() {
+        let tree = Tree::new("excl-size");
+        tree.file("proj/main.rs");
+        let big = tree.file("proj/big.rs");
+        fs::write(&big, "// pad\n".repeat(80_000)).expect("write big file");
+        let root = tree.0.join("proj");
+        let got = detailed(&root, &CollectOptions::default());
+        assert_eq!(got.supported.len(), 1);
+        assert_eq!(got.excluded.len(), 1);
+        assert_eq!(got.excluded[0].reason, "size>500k");
+        assert_eq!(got.excluded[0].source_files, Some(1));
+    }
+
+    #[test]
+    fn include_dir_scans_the_named_directory() {
+        let tree = Tree::new("excl-include");
+        tree.file("proj/main.rs");
+        tree.file("proj/cache/a.rs");
+        tree.file("proj/vendor/v.rs");
+        let root = tree.0.join("proj");
+        let options = CollectOptions {
+            include_dirs: vec!["cache".into()],
+            no_default_excludes: false,
+        };
+        let got = detailed(&root, &options);
+        assert_eq!(got.supported.len(), 2, "main.rs and cache/a.rs");
+        let reasons: Vec<&str> = got.excluded.iter().map(|e| e.reason.as_str()).collect();
+        assert_eq!(reasons, vec!["dir:vendor"]);
+    }
+
+    #[test]
+    fn no_default_excludes_scans_everything_and_records_nothing() {
+        let tree = Tree::new("excl-none");
+        tree.file("proj/main.rs");
+        tree.file("proj/cache/a.rs");
+        tree.file("proj/vendor/v.rs");
+        let root = tree.0.join("proj");
+        let options = CollectOptions {
+            include_dirs: Vec::new(),
+            no_default_excludes: true,
+        };
+        let got = detailed(&root, &options);
+        assert_eq!(got.supported.len(), 3);
+        assert!(got.excluded.is_empty());
+    }
+
+    /// A `--lang` scope is the user's own filter, not an exclusion.
+    #[test]
+    fn language_filter_records_no_exclusions() {
+        let tree = Tree::new("excl-lang");
+        tree.file("proj/main.rs");
+        tree.file("proj/cache/a.rs");
+        let root = tree.0.join("proj");
+        let filter = vec!["rs"];
+        let got = collect_files_with(&root, Some(&filter), &CollectOptions::default());
+        assert!(got.excluded.is_empty());
     }
 }
