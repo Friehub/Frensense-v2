@@ -5,6 +5,15 @@ pub use frensense::Profile
 pub use frensense::RuleTier
 pub use frensense::Severity
 pub mod frensense::cli
+pub mod frensense::cli::engine_setup
+pub fn frensense::cli::engine_setup::configure_engine(&mut frensense::engine::project::Engine, &frensense::cli::CliOptions)
+pub mod frensense::cli::exclusions
+pub fn frensense::cli::exclusions::json_report_with_coverage(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>) -> serde_json::value::Value
+pub fn frensense::cli::exclusions::json_report_with_coverage_and_exclusions(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>, &frensense::policy::Exclusions) -> serde_json::value::Value
+pub fn frensense::cli::exclusions::print_results_with_coverage(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>, &str, &std::path::Path, core::option::Option<core::time::Duration>, core::option::Option<&std::path::Path>) -> frensense::Result<()>
+pub fn frensense::cli::exclusions::print_results_with_coverage_and_exclusions(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>, &str, &std::path::Path, core::option::Option<core::time::Duration>, core::option::Option<&std::path::Path>, &frensense::policy::Exclusions) -> frensense::Result<()>
+pub fn frensense::cli::exclusions::print_scan_summary_detailed_with_coverage(&[frensense::Advisory], &std::path::Path, core::time::Duration, core::option::Option<&std::path::Path>, core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense::policy::Coverage>)
+pub fn frensense::cli::exclusions::print_scan_summary_detailed_with_coverage_and_exclusions(&[frensense::Advisory], &std::path::Path, core::time::Duration, core::option::Option<&std::path::Path>, core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense::policy::Coverage>, &frensense::policy::Exclusions)
 pub mod frensense::cli::git
 pub fn frensense::cli::git::added_lines(&std::path::Path) -> core::result::Result<frensense::cli::git::AddedLines, alloc::string::String>
 pub fn frensense::cli::git::changed_scan_files(&std::path::Path) -> core::result::Result<alloc::vec::Vec<std::path::PathBuf>, alloc::string::String>
@@ -65,6 +74,13 @@ pub fn frensense::cli::ProgressReporter::progress(&mut self, &str, usize, usize,
 pub fn frensense::cli::progress::format_rss(u64) -> alloc::string::String
 pub fn frensense::cli::progress::peak_rss_kb() -> u64
 pub mod frensense::cli::reporting
+pub mod frensense::cli::reporting::exclusions
+pub fn frensense::cli::reporting::exclusions::json_report_with_coverage(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>) -> serde_json::value::Value
+pub fn frensense::cli::reporting::exclusions::json_report_with_coverage_and_exclusions(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>, &frensense::policy::Exclusions) -> serde_json::value::Value
+pub fn frensense::cli::reporting::exclusions::print_results_with_coverage(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>, &str, &std::path::Path, core::option::Option<core::time::Duration>, core::option::Option<&std::path::Path>) -> frensense::Result<()>
+pub fn frensense::cli::reporting::exclusions::print_results_with_coverage_and_exclusions(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>, &str, &std::path::Path, core::option::Option<core::time::Duration>, core::option::Option<&std::path::Path>, &frensense::policy::Exclusions) -> frensense::Result<()>
+pub fn frensense::cli::reporting::exclusions::print_scan_summary_detailed_with_coverage(&[frensense::Advisory], &std::path::Path, core::time::Duration, core::option::Option<&std::path::Path>, core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense::policy::Coverage>)
+pub fn frensense::cli::reporting::exclusions::print_scan_summary_detailed_with_coverage_and_exclusions(&[frensense::Advisory], &std::path::Path, core::time::Duration, core::option::Option<&std::path::Path>, core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense::policy::Coverage>, &frensense::policy::Exclusions)
 pub enum frensense::cli::reporting::ScanStatus
 pub frensense::cli::reporting::ScanStatus::Complete
 pub frensense::cli::reporting::ScanStatus::Failed
@@ -82,12 +98,15 @@ pub fn frensense::cli::reporting::explain_learned_rule(&str, &[(&str, &frensense
 pub fn frensense::cli::reporting::explain_rule(&str) -> core::option::Option<alloc::string::String>
 pub fn frensense::cli::reporting::format_hidden_summary(frensense_lang::severity::RuleTier, usize) -> alloc::string::String
 pub fn frensense::cli::reporting::json_report_with_coverage(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>) -> serde_json::value::Value
+pub fn frensense::cli::reporting::json_report_with_coverage_and_exclusions(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>, &frensense::policy::Exclusions) -> serde_json::value::Value
 pub fn frensense::cli::reporting::json_report_with_skips(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile]) -> serde_json::value::Value
 pub fn frensense::cli::reporting::print_explain(&[frensense::explain::ExplainRecord], &alloc::collections::btree::map::BTreeMap<frensense_lang::severity::RuleTier, usize>)
 pub fn frensense::cli::reporting::print_explain_coverage(&frensense::policy::Coverage, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>)
 pub fn frensense::cli::reporting::print_results_with_coverage(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>, &str, &std::path::Path, core::option::Option<core::time::Duration>, core::option::Option<&std::path::Path>) -> frensense::Result<()>
+pub fn frensense::cli::reporting::print_results_with_coverage_and_exclusions(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>, &str, &std::path::Path, core::option::Option<core::time::Duration>, core::option::Option<&std::path::Path>, &frensense::policy::Exclusions) -> frensense::Result<()>
 pub fn frensense::cli::reporting::print_scan_banner(&std::path::Path, core::option::Option<&std::path::Path>, core::option::Option<&str>, core::option::Option<&std::path::Path>)
 pub fn frensense::cli::reporting::print_scan_summary_detailed_with_coverage(&[frensense::Advisory], &std::path::Path, core::time::Duration, core::option::Option<&std::path::Path>, core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense::policy::Coverage>)
+pub fn frensense::cli::reporting::print_scan_summary_detailed_with_coverage_and_exclusions(&[frensense::Advisory], &std::path::Path, core::time::Duration, core::option::Option<&std::path::Path>, core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense::policy::Coverage>, &frensense::policy::Exclusions)
 pub fn frensense::cli::reporting::rule_index() -> alloc::string::String
 pub fn frensense::cli::reporting::save_baseline(&[frensense::Advisory], &str) -> frensense::Result<()>
 pub fn frensense::cli::reporting::skipped_language_counts(&[frensense::engine::files::UnsupportedSourceFile]) -> alloc::vec::Vec<frensense::cli::SkippedLanguage>
@@ -165,6 +184,7 @@ impl frensense::cli::ScanObserver for frensense::cli::ProgressReporter
 pub fn frensense::cli::ProgressReporter::progress(&mut self, &str, usize, usize, core::option::Option<&str>, usize)
 pub fn frensense::cli::bundle_rule_index(&frensense_bundler::format::types::LoadedBundle) -> alloc::string::String
 pub fn frensense::cli::compare_baseline(&[frensense::Advisory], &str) -> frensense::Result<bool>
+pub fn frensense::cli::configure_engine(&mut frensense::engine::project::Engine, &frensense::cli::CliOptions)
 pub fn frensense::cli::explain_learned_rule(&str, &[(&str, &frensense_bundler::format::types::LoadedBundle)]) -> core::option::Option<alloc::string::String>
 pub fn frensense::cli::explain_rule(&str) -> core::option::Option<alloc::string::String>
 pub fn frensense::cli::format_hidden_summary(frensense_lang::severity::RuleTier, usize) -> alloc::string::String
@@ -172,6 +192,7 @@ pub fn frensense::cli::format_rss(u64) -> alloc::string::String
 pub fn frensense::cli::format_watch_finding(&frensense::Advisory) -> alloc::string::String
 pub fn frensense::cli::get_input_paths(&[alloc::string::String]) -> alloc::vec::Vec<std::path::PathBuf>
 pub fn frensense::cli::json_report_with_coverage(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>) -> serde_json::value::Value
+pub fn frensense::cli::json_report_with_coverage_and_exclusions(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>, &frensense::policy::Exclusions) -> serde_json::value::Value
 pub fn frensense::cli::json_report_with_skips(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile]) -> serde_json::value::Value
 pub fn frensense::cli::new_advisories(&[frensense::Advisory], &[frensense::Advisory]) -> alloc::vec::Vec<frensense::Advisory>
 pub fn frensense::cli::parse_options(&[alloc::string::String]) -> core::result::Result<frensense::cli::CliOptions, alloc::string::String>
@@ -179,8 +200,10 @@ pub fn frensense::cli::peak_rss_kb() -> u64
 pub fn frensense::cli::print_explain(&[frensense::explain::ExplainRecord], &alloc::collections::btree::map::BTreeMap<frensense_lang::severity::RuleTier, usize>)
 pub fn frensense::cli::print_explain_coverage(&frensense::policy::Coverage, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>)
 pub fn frensense::cli::print_results_with_coverage(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>, &str, &std::path::Path, core::option::Option<core::time::Duration>, core::option::Option<&std::path::Path>) -> frensense::Result<()>
+pub fn frensense::cli::print_results_with_coverage_and_exclusions(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>, &str, &std::path::Path, core::option::Option<core::time::Duration>, core::option::Option<&std::path::Path>, &frensense::policy::Exclusions) -> frensense::Result<()>
 pub fn frensense::cli::print_scan_banner(&std::path::Path, core::option::Option<&std::path::Path>, core::option::Option<&str>, core::option::Option<&std::path::Path>)
 pub fn frensense::cli::print_scan_summary_detailed_with_coverage(&[frensense::Advisory], &std::path::Path, core::time::Duration, core::option::Option<&std::path::Path>, core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense::policy::Coverage>)
+pub fn frensense::cli::print_scan_summary_detailed_with_coverage_and_exclusions(&[frensense::Advisory], &std::path::Path, core::time::Duration, core::option::Option<&std::path::Path>, core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense::policy::Coverage>, &frensense::policy::Exclusions)
 pub fn frensense::cli::read_rule_config(&std::path::Path) -> core::result::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>), alloc::string::String>
 pub fn frensense::cli::rule_index() -> alloc::string::String
 pub fn frensense::cli::run_watch_loop<S, B, F>(&std::path::Path, core::option::Option<&alloc::vec::Vec<&'static str>>, B, F, impl core::ops::function::FnMut() -> bool) -> frensense::Result<()> where B: core::ops::function::Fn() -> S, F: core::ops::function::FnMut(&mut S, &std::path::Path) -> frensense::Result<alloc::vec::Vec<frensense::Advisory>>
@@ -194,9 +217,11 @@ pub mod frensense::engine::files
 pub frensense::engine::files::CollectOptions::include_dirs: alloc::vec::Vec<alloc::string::String>
 pub frensense::engine::files::CollectOptions::no_default_excludes: bool
 pub struct frensense::engine::files::CollectedFiles
-pub frensense::engine::files::CollectedFiles::excluded: alloc::vec::Vec<frensense::engine::files::ExcludedPath>
 pub frensense::engine::files::CollectedFiles::supported: alloc::vec::Vec<std::path::PathBuf>
 pub frensense::engine::files::CollectedFiles::unsupported: alloc::vec::Vec<frensense::engine::files::UnsupportedSourceFile>
+#[non_exhaustive] pub struct frensense::engine::files::CollectedTree
+pub frensense::engine::files::CollectedTree::excluded: alloc::vec::Vec<frensense::engine::files::ExcludedPath>
+pub frensense::engine::files::CollectedTree::files: frensense::engine::files::CollectedFiles
 #[non_exhaustive] pub struct frensense::engine::files::ExcludedPath
 pub frensense::engine::files::ExcludedPath::path: alloc::string::String
 pub frensense::engine::files::ExcludedPath::reason: alloc::string::String
@@ -206,7 +231,7 @@ pub frensense::engine::files::UnsupportedSourceFile::language: &'static str
 pub frensense::engine::files::UnsupportedSourceFile::path: alloc::string::String
 pub fn frensense::engine::files::collect_files(&std::path::Path, core::option::Option<&alloc::vec::Vec<&'static str>>) -> alloc::vec::Vec<std::path::PathBuf>
 pub fn frensense::engine::files::collect_files_detailed(&std::path::Path, core::option::Option<&alloc::vec::Vec<&'static str>>) -> frensense::engine::files::CollectedFiles
-pub fn frensense::engine::files::collect_files_with(&std::path::Path, core::option::Option<&alloc::vec::Vec<&'static str>>, &frensense::engine::files::CollectOptions) -> frensense::engine::files::CollectedFiles
+pub fn frensense::engine::files::collect_files_with(&std::path::Path, core::option::Option<&alloc::vec::Vec<&'static str>>, &frensense::engine::files::CollectOptions) -> frensense::engine::files::CollectedTree
 pub mod frensense::engine::project
 pub struct frensense::engine::project::Engine
 impl frensense::engine::project::Engine
@@ -226,6 +251,7 @@ pub fn frensense::engine::project::Engine::set_severity_filter(&mut self, core::
 pub fn frensense::engine::project::Engine::set_show_flows(&mut self, bool)
 pub fn frensense::engine::project::Engine::set_show_suppressed(&mut self, bool)
 pub fn frensense::engine::project::Engine::take_coverage(&mut self) -> frensense::policy::Coverage
+pub fn frensense::engine::project::Engine::take_excluded(&mut self) -> alloc::vec::Vec<frensense::engine::files::ExcludedPath>
 pub fn frensense::engine::project::Engine::take_explain(&mut self) -> alloc::vec::Vec<frensense::explain::ExplainRecord>
 pub fn frensense::engine::project::Engine::take_hidden_by_tier(&mut self) -> alloc::collections::btree::map::BTreeMap<frensense_lang::severity::RuleTier, usize>
 pub fn frensense::engine::project::Engine::take_incomplete(&mut self) -> alloc::vec::Vec<frensense_engine::scan::IncompleteFunction>
@@ -254,6 +280,7 @@ pub fn frensense::engine::project::Engine::set_severity_filter(&mut self, core::
 pub fn frensense::engine::project::Engine::set_show_flows(&mut self, bool)
 pub fn frensense::engine::project::Engine::set_show_suppressed(&mut self, bool)
 pub fn frensense::engine::project::Engine::take_coverage(&mut self) -> frensense::policy::Coverage
+pub fn frensense::engine::project::Engine::take_excluded(&mut self) -> alloc::vec::Vec<frensense::engine::files::ExcludedPath>
 pub fn frensense::engine::project::Engine::take_explain(&mut self) -> alloc::vec::Vec<frensense::explain::ExplainRecord>
 pub fn frensense::engine::project::Engine::take_hidden_by_tier(&mut self) -> alloc::collections::btree::map::BTreeMap<frensense_lang::severity::RuleTier, usize>
 pub fn frensense::engine::project::Engine::take_incomplete(&mut self) -> alloc::vec::Vec<frensense_engine::scan::IncompleteFunction>
@@ -371,10 +398,7 @@ pub fn frensense::parser::is_supported(&std::path::Path) -> bool
 pub fn frensense::parser::language_names_help() -> alloc::string::String
 pub mod frensense::policy
 pub struct frensense::policy::Coverage
-pub frensense::policy::Coverage::excluded_by_reason: alloc::collections::btree::map::BTreeMap<alloc::string::String, usize>
-pub frensense::policy::Coverage::excluded_sample: alloc::vec::Vec<frensense::engine::files::ExcludedPath>
 pub frensense::policy::Coverage::files_analyzed: usize
-pub frensense::policy::Coverage::files_excluded: usize
 pub frensense::policy::Coverage::files_failed: usize
 pub frensense::policy::Coverage::files_found: usize
 pub frensense::policy::Coverage::files_unsupported: usize
@@ -385,12 +409,19 @@ pub frensense::policy::Coverage::sink_sites: usize
 pub frensense::policy::Coverage::unresolved_sample: alloc::vec::Vec<frensense::policy::UnresolvedSite>
 pub frensense::policy::Coverage::unresolved_sites: usize
 impl frensense::policy::Coverage
+pub fn frensense::policy::Coverage::files_excluded(&self) -> usize
 pub fn frensense::policy::Coverage::files_not_analyzed(&self) -> usize
 pub fn frensense::policy::Coverage::from_scan(&frensense_engine::scan::ScanResult, &[alloc::string::String], usize) -> Self
 pub fn frensense::policy::Coverage::fully_resolved(&self) -> bool
 pub fn frensense::policy::Coverage::merge(&mut self, frensense::policy::Coverage)
 pub fn frensense::policy::Coverage::recognized_anything(&self) -> bool
 pub fn frensense::policy::Coverage::with_excluded(self, &[frensense::engine::files::ExcludedPath]) -> Self
+#[non_exhaustive] pub struct frensense::policy::Exclusions
+pub frensense::policy::Exclusions::by_reason: alloc::collections::btree::map::BTreeMap<alloc::string::String, usize>
+pub frensense::policy::Exclusions::files_excluded: usize
+pub frensense::policy::Exclusions::sample: alloc::vec::Vec<frensense::engine::files::ExcludedPath>
+impl frensense::policy::Exclusions
+pub fn frensense::policy::Exclusions::from_paths(&[frensense::engine::files::ExcludedPath]) -> Self
 pub struct frensense::policy::UnresolvedSite
 pub frensense::policy::UnresolvedSite::file: alloc::string::String
 pub frensense::policy::UnresolvedSite::line: u32
@@ -475,6 +506,7 @@ pub fn frensense::engine::project::Engine::set_severity_filter(&mut self, core::
 pub fn frensense::engine::project::Engine::set_show_flows(&mut self, bool)
 pub fn frensense::engine::project::Engine::set_show_suppressed(&mut self, bool)
 pub fn frensense::engine::project::Engine::take_coverage(&mut self) -> frensense::policy::Coverage
+pub fn frensense::engine::project::Engine::take_excluded(&mut self) -> alloc::vec::Vec<frensense::engine::files::ExcludedPath>
 pub fn frensense::engine::project::Engine::take_explain(&mut self) -> alloc::vec::Vec<frensense::explain::ExplainRecord>
 pub fn frensense::engine::project::Engine::take_hidden_by_tier(&mut self) -> alloc::collections::btree::map::BTreeMap<frensense_lang::severity::RuleTier, usize>
 pub fn frensense::engine::project::Engine::take_incomplete(&mut self) -> alloc::vec::Vec<frensense_engine::scan::IncompleteFunction>

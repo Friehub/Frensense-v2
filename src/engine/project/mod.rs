@@ -71,6 +71,9 @@ pub struct Engine {
     /// findings" report can say whether it means "inspected, no finding" or
     /// "nothing recognized".
     pub(crate) coverage: crate::policy::Coverage,
+    /// Paths the most recent run skipped by the default exclusion rules, with
+    /// the source files each hid. Surfaced via [`Engine::take_excluded`].
+    pub(crate) excluded: Vec<crate::engine::files::ExcludedPath>,
 }
 
 impl Engine {
@@ -97,6 +100,7 @@ impl Engine {
             hidden_by_tier: std::collections::BTreeMap::new(),
             telemetry: frensense_engine::telemetry::ScanTelemetry::default(),
             coverage: crate::policy::Coverage::default(),
+            excluded: Vec::new(),
         }
     }
 
@@ -232,6 +236,16 @@ impl Engine {
     #[must_use]
     pub fn take_coverage(&mut self) -> crate::policy::Coverage {
         std::mem::take(&mut self.coverage)
+    }
+
+    /// Take the paths the most recent `run` skipped by the default exclusion
+    /// rules, with the reason and the source files each hid. [`Coverage`]
+    /// counts them; this names them.
+    ///
+    /// [`Coverage`]: crate::policy::Coverage
+    #[must_use]
+    pub fn take_excluded(&mut self) -> Vec<crate::engine::files::ExcludedPath> {
+        std::mem::take(&mut self.excluded)
     }
 
     /// Register a synthetic file id for a scanned path (used by the runner

@@ -54,12 +54,12 @@
   "frensense-lang/src/spec.rs": 1370,
   "frensense-packgen/src/lib.rs": 887,
   "frensense-packgen/src/vocab/javascript/core.rs": 670,
-  "src/bin/frensense.rs": 1364,
+  "src/bin/frensense.rs": 1350,
   "src/cli/options.rs": 595,
   "src/cli/reporting.rs": 2331,
-  "src/engine/files.rs": 754,
+  "src/engine/files.rs": 735,
   "src/engine/project/runner.rs": 1484,
   "src/mcp/diff.rs": 578,
-  "src/policy.rs": 684,
+  "src/policy.rs": 663,
   "src/reporter.rs": 996
 }

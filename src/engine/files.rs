@@ -5,6 +5,12 @@
 //! File collection: walk the target, keep supported source files.
 
 use std::path::{Component, Path, PathBuf};
+
+mod collected;
+mod exclusions;
+
+pub use collected::CollectedTree;
+pub use exclusions::{CollectOptions, ExcludedPath};
 use walkdir::WalkDir;
 
 /// Hidden directories that are still source trees. Vite/VitePress keeps
@@ -108,38 +114,6 @@ pub struct UnsupportedSourceFile {
     pub language: &'static str,
 }
 
-/// A path the walk deliberately did not scan, and why.
-///
-/// Exclusions exist because scanning `node_modules` or a minified bundle is
-/// noise, but a report that does not say so lets a project whose real code
-/// lives in `build/` or `cache/` read as scanned when most of it never was.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-#[non_exhaustive]
-pub struct ExcludedPath {
-    /// Path as the scanner knows it.
-    pub path: String,
-    /// Why it was skipped: `dir:<name>`, `hidden-dir`, `size>500k` or
-    /// `minified`.
-    pub reason: String,
-    /// Supported source files that were not scanned because of this
-    /// exclusion. `None` for dependency and tool directories (`node_modules`,
-    /// `target`, hidden directories): they are listed, but their contents are
-    /// neither counted nor treated as a coverage gap.
-    pub source_files: Option<usize>,
-}
-
-/// Overrides for the default exclusion rules.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct CollectOptions {
-    /// Directory names that must be scanned even though a default rule would
-    /// skip them (`--include-dir cache`).
-    pub include_dirs: Vec<String>,
-    /// Scan everything the extension filter allows: no directory, size or
-    /// minified-file exclusions (`--no-default-excludes`).
-    pub no_default_excludes: bool,
-}
-
 /// Directories whose names are also ordinary package names. Skipping one can
 /// hide real application code (`cmd/go/internal/cache`), so its source files
 /// are counted and the scan is reported partial.
@@ -170,8 +144,6 @@ pub struct CollectedFiles {
     /// Source files skipped solely because the engine has no spec for the
     /// language. Empty when a language filter scoped the scan.
     pub unsupported: Vec<UnsupportedSourceFile>,
-    /// Paths skipped by the default exclusion rules, with the reason.
-    pub excluded: Vec<ExcludedPath>,
 }
 
 /// Collects all files reachable from `root` that match supported extensions
@@ -196,7 +168,7 @@ pub fn collect_files_detailed(
     root: &Path,
     language_filter: Option<&Vec<&'static str>>,
 ) -> CollectedFiles {
-    collect_files_with(root, language_filter, &CollectOptions::default())
+    collect_files_with(root, language_filter, &CollectOptions::default()).files
 }
 
 /// [`collect_files_detailed`] with the default exclusion rules adjusted.
@@ -205,17 +177,23 @@ pub fn collect_files_with(
     root: &Path,
     language_filter: Option<&Vec<&'static str>>,
     options: &CollectOptions,
-) -> CollectedFiles {
+) -> CollectedTree {
     if root.is_file() {
         if crate::parser::is_supported(root) {
-            return CollectedFiles {
-                supported: vec![root.to_path_buf()],
-                ..CollectedFiles::default()
+            return CollectedTree {
+                files: CollectedFiles {
+                    supported: vec![root.to_path_buf()],
+                    ..CollectedFiles::default()
+                },
+                ..CollectedTree::default()
             };
         }
-        return CollectedFiles {
-            unsupported: unsupported_source_file(root).into_iter().collect(),
-            ..CollectedFiles::default()
+        return CollectedTree {
+            files: CollectedFiles {
+                unsupported: unsupported_source_file(root).into_iter().collect(),
+                ..CollectedFiles::default()
+            },
+            ..CollectedTree::default()
         };
     }
 
@@ -255,12 +233,15 @@ pub fn collect_files_with(
     }
     // A language filter scopes the scan: files it leaves out are the user's
     // choice, not exclusions. Exclusions are only meaningful unscoped.
-    if language_filter.is_none() {
-        excluded.sort();
-        excluded.dedup();
-        collected.excluded = excluded;
+    if language_filter.is_some() {
+        excluded.clear();
     }
-    collected
+    excluded.sort();
+    excluded.dedup();
+    CollectedTree {
+        files: collected,
+        excluded,
+    }
 }
 
 /// Why `entry` is skipped by the default rules, if it is.
@@ -639,7 +620,7 @@ mod tests {
             Some("Ruby")
         );
     }
-    fn detailed(root: &Path, options: &CollectOptions) -> CollectedFiles {
+    fn detailed(root: &Path, options: &CollectOptions) -> CollectedTree {
         collect_files_with(root, None, options)
     }
 
@@ -661,7 +642,7 @@ mod tests {
         tree.file("proj/cache/b.rs");
         let root = tree.0.join("proj");
         let got = detailed(&root, &CollectOptions::default());
-        assert_eq!(got.supported.len(), 1);
+        assert_eq!(got.files.supported.len(), 1);
         assert_eq!(got.excluded.len(), 1);
         assert_eq!(rel(&root, &got.excluded[0].path), "cache");
         assert_eq!(got.excluded[0].reason, "dir:cache");
@@ -701,7 +682,7 @@ mod tests {
         fs::write(&big, "// pad\n".repeat(80_000)).expect("write big file");
         let root = tree.0.join("proj");
         let got = detailed(&root, &CollectOptions::default());
-        assert_eq!(got.supported.len(), 1);
+        assert_eq!(got.files.supported.len(), 1);
         assert_eq!(got.excluded.len(), 1);
         assert_eq!(got.excluded[0].reason, "size>500k");
         assert_eq!(got.excluded[0].source_files, Some(1));
@@ -719,7 +700,7 @@ mod tests {
             no_default_excludes: false,
         };
         let got = detailed(&root, &options);
-        assert_eq!(got.supported.len(), 2, "main.rs and cache/a.rs");
+        assert_eq!(got.files.supported.len(), 2, "main.rs and cache/a.rs");
         let reasons: Vec<&str> = got.excluded.iter().map(|e| e.reason.as_str()).collect();
         assert_eq!(reasons, vec!["dir:vendor"]);
     }
@@ -736,7 +717,7 @@ mod tests {
             no_default_excludes: true,
         };
         let got = detailed(&root, &options);
-        assert_eq!(got.supported.len(), 3);
+        assert_eq!(got.files.supported.len(), 3);
         assert!(got.excluded.is_empty());
     }
 

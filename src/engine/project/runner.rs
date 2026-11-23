@@ -11,7 +11,7 @@
 //! severity, impact, and tags (plus observation on the checker path).
 
 use super::Engine;
-use crate::engine::files::{ExcludedPath, UnsupportedSourceFile, collect_files_with};
+use crate::engine::files::{UnsupportedSourceFile, collect_files_with};
 use crate::{Advisory, Result, Severity};
 use std::path::Path;
 
@@ -61,9 +61,9 @@ impl Engine {
 
         let collected =
             collect_files_with(root, self.language_filter.as_ref(), &self.collect_options);
-        let excluded: Vec<ExcludedPath> = collected.excluded;
-        let paths = collected.supported;
-        let mut skipped_unsupported: Vec<UnsupportedSourceFile> = collected.unsupported;
+        self.excluded = collected.excluded;
+        let paths = collected.files.supported;
+        let mut skipped_unsupported: Vec<UnsupportedSourceFile> = collected.files.unsupported;
 
         // Track unsupported explicit inputs and read failures instead of
         // letting either surface as a successful empty scan. Directory walks
@@ -392,7 +392,7 @@ impl Engine {
             usize::from(self.skipped_unsupported.is_empty() && unsupported > 0 && root.is_file());
         let files_unsupported = self.skipped_unsupported.len() + absent_input;
         self.coverage = crate::policy::Coverage::from_scan(&result, &considered, files_unsupported)
-            .with_excluded(&excluded);
+            .with_excluded(&self.excluded);
         for err in &result.errors {
             tracing::warn!("scan error: {err}");
         }
