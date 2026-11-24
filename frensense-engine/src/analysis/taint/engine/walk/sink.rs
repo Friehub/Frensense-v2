@@ -43,8 +43,15 @@ impl<'a> BackwardTaintEngine<'a> {
         };
         self.funnel.calls_examined += 1;
         let ir = self.prog.functions[fi].ir;
+        // The callee the resolver already picked, when the graph recorded one.
+        let graph_callee = self.external_callee_name(fi, block, idx);
         let pkg_import = if receiver.is_none() {
-            self.import_of(fi, name)
+            self.import_of(fi, name).or_else(|| {
+                graph_callee
+                    .as_deref()
+                    .filter(|callee| *callee != name)
+                    .and_then(|callee| self.import_of(fi, callee))
+            })
         } else {
             None
         };
@@ -70,6 +77,7 @@ impl<'a> BackwardTaintEngine<'a> {
         let effective_name = pkg_import
             .as_ref()
             .and_then(|(_, symbol)| symbol.as_deref())
+            .or_else(|| graph_callee.as_deref().filter(|callee| *callee != name))
             .unwrap_or(name);
         // Factory-call package origin (owned): the receiver var was produced by
         // a call to a symbol imported from a package with scoped sink facts
@@ -182,29 +190,6 @@ impl<'a> BackwardTaintEngine<'a> {
             NodeKey::instr(block, idx, *value),
         );
         true
-    }
-
-    /// The package (and imported symbol) a local name is bound to by an import
-    /// in this function's file, owned so the caller can keep mutating `self`.
-    ///
-    /// Falls back to the only import table when the file map has a single
-    /// entry: synthetic modules do not always carry a resolvable path key.
-    fn import_of(&self, fi: usize, symbol: &str) -> Option<(String, Option<String>)> {
-        self.fn_file
-            .get(&self.prog.functions[fi].name)
-            .and_then(|file| self.file_package_imports.get(file))
-            .and_then(|imports| imports.get(symbol))
-            .or_else(|| {
-                if self.file_package_imports.len() == 1 {
-                    self.file_package_imports
-                        .values()
-                        .next()
-                        .and_then(|m| m.get(symbol))
-                } else {
-                    None
-                }
-            })
-            .map(|pkg| (pkg.package.clone(), pkg.symbol.clone()))
     }
 
     /// Whether a receiver root can arm a sink for `name`: a declared client, a

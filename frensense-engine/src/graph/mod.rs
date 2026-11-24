@@ -18,6 +18,7 @@ pub(crate) mod steensgaard;
 pub mod svfg;
 
 #[cfg(test)]
+mod callgraph_query_tests;
 mod callgraph_tests;
 #[cfg(test)]
 mod heap_tests;

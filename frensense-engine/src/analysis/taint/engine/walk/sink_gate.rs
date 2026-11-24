@@ -53,6 +53,16 @@ impl<'a> BackwardTaintEngine<'a> {
             self.funnel.skipped_local_callable += 1;
             return true;
         }
+        // A name some function in this program dispatches to *is* a program
+        // symbol: the graph answers that from its reverse edges, so a bare
+        // call the resolver lost (an alias chain, a shadowing re-export)
+        // still reads as program code rather than as a library entry point
+        // that merely shares the spelling. The callee's own instructions are
+        // where a sink in it is reported.
+        if !self.prog.callgraph().callers_of(name).is_empty() {
+            self.funnel.skipped_local_callable += 1;
+            return true;
+        }
         // Verb sinks that strictly require a receiver object (get, post,
         // render, etc.); a bare static call without package import is not a
         // client method invocation.
