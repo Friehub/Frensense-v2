@@ -222,6 +222,29 @@ impl<'a> BackwardTaintEngine<'a> {
         cf: usize,
         key: &crate::graph::svfg::NodeKey,
     ) -> Option<String> {
+        // Origin resolution is a pure function of the SVFG and the file's
+        // import table, and a sanitizer cut site is revisited once per sink
+        // walk that reaches it. One authoritative record per call site,
+        // computed once and memoised on `(fn, block, instruction)`.
+        let Some(idx) = key.instr_idx else {
+            return self.sanitizer_origin_package_uncached(cf, key);
+        };
+        let site = (cf, key.block.0, idx);
+        if let Some(hit) = self.call_site_origins.borrow().get(&site) {
+            return hit.clone();
+        }
+        let origin = self.sanitizer_origin_package_uncached(cf, key);
+        self.call_site_origins
+            .borrow_mut()
+            .insert(site, origin.clone());
+        origin
+    }
+
+    fn sanitizer_origin_package_uncached(
+        &self,
+        cf: usize,
+        key: &crate::graph::svfg::NodeKey,
+    ) -> Option<String> {
         let ir = self.prog.functions[cf].ir;
         let ins = ir
             .blocks
@@ -269,21 +292,5 @@ impl<'a> BackwardTaintEngine<'a> {
             }
             _ => None,
         }
-    }
-
-    /// Does `name` resolve to a function defined in this program?
-    ///
-    /// Direct check via the call graph's exact-name index; the fallback
-    /// catches collision-rekeyed twins (`app/b.ts::helper`, built in
-    /// [`crate::scan::prepare_with_facts`]) and namespace-qualified keys.
-    /// Only absolute suffixes (a prefix ending in `:`) count, so
-    /// `execute_helper` is not a match for the name `helper`.
-    pub(super) fn is_program_local(&self, name: &str) -> bool {
-        if self.prog.function_index(name).is_some() {
-            return true;
-        }
-        self.prog.functions.iter().any(|f| {
-            f.name.ends_with(name) && f.name.strip_suffix(name).is_some_and(|p| p.ends_with(':'))
-        })
     }
 }

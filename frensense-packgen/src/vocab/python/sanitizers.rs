@@ -11,8 +11,10 @@ use crate::role_map::SanitizerKind;
 /// Classify a Python call as a sanitizer; returns `None` for unknown names.
 /// Mirrors the per-language `classify_sanitizer` used at pack install.
 pub(crate) fn python_classify_sanitizer(call: &str) -> Option<SanitizerKind> {
-    if call == "shlex.quote" {
-        return Some(SanitizerKind::Full);
+    // Shell quoting, not a full cut: `shlex.quote` makes the value one
+    // literal shell word and leaves SQL/HTML/path interpretation untouched.
+    if call == "shlex.quote" || call == "pipes.quote" {
+        return Some(SanitizerKind::ShellQuote);
     }
     match call.rsplit('.').next().unwrap_or(call) {
         // Numeric coercion

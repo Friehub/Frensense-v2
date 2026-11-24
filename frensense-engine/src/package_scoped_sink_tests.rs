@@ -67,6 +67,16 @@ export async function fine(id: string) {
         scan_prepared(&prepared, &config, &facts).findings
     }
 
+    fn run_files(files: &[(&str, &str, &str)]) -> Vec<crate::analysis::taint::engine::SinkFinding> {
+        let files: Vec<(String, String, String)> = files
+            .iter()
+            .map(|(p, s, e)| (p.to_string(), s.to_string(), e.to_string()))
+            .collect();
+        let (config, facts) = seeded_tables(["ts"]);
+        let prepared = prepare(&files).expect("prepare");
+        scan_prepared(&prepared, &config, &facts).findings
+    }
+
     fn has_raw_finding(findings: &[crate::analysis::taint::engine::SinkFinding]) -> bool {
         findings.iter().any(|f| f.sink.contains("queryRawUnsafe"))
     }
@@ -86,6 +96,49 @@ export async function fine(id: string) {
         assert!(
             !has_raw_finding(&findings),
             "an unrelated receiver with the same method name must stay silent; got {findings:?}"
+        );
+    }
+
+    /// The barrel re-export is the shape that used to lose provenance: the
+    /// importing file's specifier is `./lib/prisma`, a local file, so the
+    /// package origin only exists if the re-export chain carries it.
+    const PRISMA_BARREL: &str = "export { PrismaClient } from '@prisma/client';\n";
+    const LOOKALIKE_BARREL: &str = "export { PrismaClient } from 'database-js';\n";
+
+    const APP_VIA_BARREL: &str = r#"
+import { PrismaClient } from './lib/prisma'
+const prisma = new PrismaClient()
+export async function bad(req: any) {
+  const email = req.query.email
+  await prisma.$queryRawUnsafe(`SELECT * FROM users WHERE email = '${email}'`)
+}
+"#;
+
+    #[test]
+    fn scoped_sink_fires_through_a_barrel_reexport() {
+        let findings = run_files(&[
+            ("lib/prisma.ts", PRISMA_BARREL, "ts"),
+            ("app.ts", APP_VIA_BARREL, "ts"),
+        ]);
+        assert!(
+            findings.iter().any(|f| f.sink.contains("queryRawUnsafe")
+                && f.verdict == crate::analysis::taint::engine::BackwardVerdict::Vulnerable),
+            "a scoped sink reached through a local barrel re-export must fire; got {findings:?}"
+        );
+    }
+
+    /// The same barrel shape must not launder a foreign package into the
+    /// scoped fact: the origin carried is `database-js`, not "the file".
+    #[test]
+    fn barrel_reexport_carries_the_foreign_origin_not_the_file() {
+        let findings = run_files(&[
+            ("lib/prisma.ts", LOOKALIKE_BARREL, "ts"),
+            ("app.ts", APP_VIA_BARREL, "ts"),
+        ]);
+        assert!(
+            !findings.iter().any(|f| f.sink.contains("queryRawUnsafe")
+                && f.verdict == crate::analysis::taint::engine::BackwardVerdict::Vulnerable),
+            "a lookalike package reached through a barrel must stay silent; got {findings:?}"
         );
     }
 

@@ -22,7 +22,7 @@ use crate::ir::function::{FunctionIR, Instruction, Operand};
 type BuilderEntry = (String, Provenance, Option<(usize, usize)>);
 
 /// Runs the schema-policy check on one function and reports an unbounded number schema: a schema builder whose `describe`/`description` text states a numeric bound (a bounding keyword together with a digit) while the function never calls an enforcer such as `.max()` or `.min()`, so the declared bound is enforced nowhere. At most one finding is returned.
-pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
+pub(crate) fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     let mut findings = Vec::new();
     // Collect describe/description string args keyed by their receiver chain,
     // and builder+enforcer method calls with their spans.

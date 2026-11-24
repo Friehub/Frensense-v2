@@ -174,6 +174,45 @@ fn probe_qual_09_unrelated_run_method_is_not_command_injection() {
     );
 }
 
+/// Dispatch, not spelling: `from helper import run as exec` makes the call
+/// site read `exec(payload)`, the builtin sink's name, while it actually
+/// runs `helper.run`. The call graph resolves the import alias, so the site
+/// is program code and must not arm the builtin sink.
+#[test]
+fn probe_qual_11_aliased_program_function_is_not_the_builtin_sink() {
+    let helper = "def run(payload):\n    return payload\n";
+    let app = r#"
+        from flask import request
+        from helper import run as exec
+
+        def handler():
+            payload = request.args.get('cmd')
+            return exec(payload)
+    "#;
+    let res = scan_files(&[("helper.py", helper, "py"), ("app.py", app, "py")]);
+    assert_clean(
+        &res,
+        "qual_11_aliased_program_function_is_not_the_builtin_sink",
+    );
+}
+
+/// Control for the probe above: the builtin itself still fires.
+#[test]
+fn probe_qual_12_builtin_exec_is_command_injection() {
+    let src = r#"
+        from flask import request
+
+        def handler():
+            payload = request.args.get('cmd')
+            return exec(payload)
+    "#;
+    assert_detected(
+        &scan_py(src),
+        "qual_12_builtin_exec_is_command_injection",
+        "exec",
+    );
+}
+
 #[test]
 fn probe_qual_10_from_import_pickle_loads_is_unsafe_deserialization() {
     // The qualified form reached through a `from` import resolves to the

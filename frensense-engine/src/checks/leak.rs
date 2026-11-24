@@ -473,7 +473,7 @@ fn extend_leaks(
 /// // Released on the only path: no leak.
 /// assert!(rules("void f(void) { char *p = malloc(8); free(p); }").is_empty());
 /// ```
-pub fn check(
+pub(crate) fn check(
     ir: &FunctionIR,
     summaries: &MemorySummaryRegistry,
     facts: &crate::analysis::taint::facts::FactTable,

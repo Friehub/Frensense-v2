@@ -57,17 +57,20 @@ pub enum Provenance {
     Learned,
 }
 
-pub mod authored;
+pub(crate) mod authored;
 /// Seeding a taint config and fact table from language-keyed pack entries.
-pub mod config;
-pub mod entries;
+pub(crate) mod config;
+pub(crate) mod entries;
 /// The fact data types: sink signatures, sanitizer, check, policy and grammar facts.
-pub mod kinds;
+pub(crate) mod kinds;
+/// Package- and class-scoped sanitizer facts: lookup, re-scoping and the
+/// one install path every language-keyed sanitizer entry takes.
+pub(crate) mod sanitizer_scope;
 /// Lookup of sink signatures for a call site's import origin.
-pub mod signatures;
+pub(crate) mod signatures;
 /// The merged [`FactTable`] consulted during analysis.
-pub mod table;
-pub mod vocabulary;
+pub(crate) mod table;
+pub(crate) mod vocabulary;
 
 #[cfg(test)]
 mod tests;

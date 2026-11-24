@@ -52,6 +52,9 @@ use crate::graph::svfg::NodeKey;
 use crate::ir::function::*;
 
 mod context;
+mod stats;
+
+pub use stats::BackwardStats;
 mod guard;
 mod walk;
 
@@ -390,29 +393,6 @@ impl SinkFindingBuilder {
     }
 }
 
-/// Traversal statistics, proof of the demand-driven cost model.
-///
-/// `#[non_exhaustive]`: evolving metrics DTO; new counters are minor releases.
-#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Copy, Default)]
-#[non_exhaustive]
-pub struct BackwardStats {
-    /// `(function, node)` pairs visited during backward exploration.
-    pub nodes_visited: usize,
-    /// Distinct functions entered (should be ≪ total functions on big repos).
-    pub functions_visited: usize,
-    /// Number of sink arguments explored.
-    pub sink_args_explored: usize,
-    /// Per-verdict counts.
-    pub vulnerable: usize,
-    /// Sink arguments judged sanitized.
-    pub sanitized: usize,
-    /// Sink arguments the walk could not decide.
-    pub unknown: usize,
-    /// Sink arguments with no path to a source.
-    pub clean: usize,
-}
-
 // ---------------------------------------------------------------------------
 // Engine
 // ---------------------------------------------------------------------------
@@ -440,6 +420,10 @@ pub(crate) type RouteRegistration = fn(
     spec: &dyn frensense_lang::spec::LanguageSpec,
     facts: Option<&FactTable>,
 ) -> bool;
+
+/// Per-call-site origin memo key: `(fn, block, instruction) → origin`.
+pub(crate) type CallSiteOrigins =
+    std::cell::RefCell<FxHashMap<(usize, usize, usize), Option<String>>>;
 
 /// Demand-driven backward taint engine over the whole-program SVFG.
 #[derive(Debug)]
@@ -480,6 +464,8 @@ pub struct BackwardTaintEngine<'a> {
     /// Function-name → source-file mapping for path step locations
     /// (populated via [`with_fn_file`]; empty in tests without files).
     pub(crate) fn_file: FxHashMap<String, String>,
+    /// Per-call-site origin record (see [`CallSiteOrigins`]).
+    pub(crate) call_site_origins: CallSiteOrigins,
     /// Per-file external package imports: `file_path -> local_name -> PackageImport`.
     pub(crate) file_package_imports:
         FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
@@ -658,6 +644,7 @@ impl<'a> BackwardTaintEngine<'a> {
             current_root: None,
             fn_timings: Vec::new(),
             fn_file: FxHashMap::default(),
+            call_site_origins: std::cell::RefCell::new(FxHashMap::default()),
             file_package_imports: FxHashMap::default(),
             findings: Vec::new(),
             stats: BackwardStats::default(),

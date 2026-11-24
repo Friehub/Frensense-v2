@@ -19,18 +19,18 @@
 //!
 //! Line drawn: **built-in = how to look; learned = what to conclude.**
 
-pub mod guard_bypass;
-pub mod health;
+pub(crate) mod guard_bypass;
+pub(crate) mod health;
 pub(crate) mod int_overflow;
-pub mod leak;
+pub(crate) mod leak;
 pub mod memory_summary;
 pub(crate) mod noreturn;
 pub(crate) mod oob;
 pub mod policy;
-pub mod registry;
-pub mod schema_policy;
-pub mod uaf;
-pub mod weak_hash;
+pub(crate) mod registry;
+pub(crate) mod schema_policy;
+pub(crate) mod uaf;
+pub(crate) mod weak_hash;
 
 /// Text of a caught panic payload (`&str` and `String` payloads; anything else
 /// is reported as `unknown panic`).

@@ -269,6 +269,7 @@ struct SinkSite<'a> {
 mod explore;
 mod origin;
 mod sink;
+mod sink_gate;
 
 #[inline]
 fn is_receiver_only_verb(name: &str) -> bool {

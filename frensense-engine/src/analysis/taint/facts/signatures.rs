@@ -7,10 +7,10 @@ use super::*;
 /// Reserved [`FactTable::scoped_sanitizer_facts`] key prefix marking a
 /// sanitizer fact that only defeats the sink classes named after it. See
 /// [`FactTable::add_class_scoped_sanitizer`].
-pub const CLASS_SCOPED_SANITIZER_PREFIX: &str = "class:";
+pub(crate) const CLASS_SCOPED_SANITIZER_PREFIX: &str = "class:";
 
 /// Is this `scoped_sanitizer_facts` key a class scope rather than a package?
-fn is_class_scope(scope: &str) -> bool {
+pub(super) fn is_class_scope(scope: &str) -> bool {
     scope.starts_with(CLASS_SCOPED_SANITIZER_PREFIX)
 }
 
@@ -25,7 +25,10 @@ fn origin_in_package(origin: &str, package: &str) -> bool {
 /// Does a class scope's own package field match the call's origin? A
 /// package-qualified class scope is inert until the origin confirms its
 /// package (same recall-safe rule as `FactTable::sanitizer_fact_scoped`).
-fn class_scope_package_matches(fact: &SanitizerFact, origin_package: Option<&str>) -> bool {
+pub(super) fn class_scope_package_matches(
+    fact: &SanitizerFact,
+    origin_package: Option<&str>,
+) -> bool {
     match (fact.package.as_deref(), origin_package) {
         (None, _) => true,
         (Some(pkg), Some(origin)) => origin_in_package(origin, pkg),
@@ -48,7 +51,7 @@ fn class_scope_package_matches(fact: &SanitizerFact, origin_package: Option<&str
 /// partial segment (`@scope` from `@scope/pkg`) never arms anything, and
 /// a fact proven for `pkg/sub` still never arms the whole of `pkg` - the
 /// walk only ever widens a call site's origin, never a fact's scope.
-fn scoped_lookup<'a, V>(
+pub(super) fn scoped_lookup<'a, V>(
     map: &'a rustc_hash::FxHashMap<(String, String), V>,
     origin: &str,
     call: &str,
@@ -245,141 +248,6 @@ impl FactTable {
         }
         self.sink_signature_for_language(last, language)
             .and_then(|s| s.label.clone())
-    }
-
-    /// Sanitizer fact for a call, package-aware.
-    ///
-    /// Scoping semantics (recall-safe): a fact installed under
-    /// `(package, call)` applies ONLY when `origin_package` names that
-    /// package. Origin known-but-different falls back to universal
-    /// facts only, a foreign package's sanitizer must never cut this
-    /// call. Origin unknown also matches universal facts only.
-    ///
-    /// Recall-safety analysis (why unknown origin does NOT take the
-    /// any-package fallback): a sanitizer CUTS a finding, so a scoped
-    /// fact that fires on an unconfirmed origin can silence a true
-    /// finding, the one error that costs recall. The reverse error
-    /// (a genuine package sanitizer whose origin does not resolve goes
-    /// uncut) surfaces an advisory, which costs precision only.
-    /// Universal facts were proven for the bare call name regardless of
-    /// receiver, so they remain safe under any origin; a scoped fact
-    /// suppresses only once import resolution confirms its package.
-    pub(crate) fn sanitizer_fact_scoped(
-        &self,
-        call: &str,
-        origin_package: Option<&str>,
-    ) -> Option<&SanitizerFact> {
-        if let Some(pkg) = origin_package {
-            if let Some(f) = scoped_lookup(&self.scoped_sanitizer_facts, pkg, call) {
-                return Some(f);
-            }
-            let is_package_scoped = self
-                .scoped_sanitizer_facts
-                .keys()
-                .any(|(scope, c)| c == call && !is_class_scope(scope));
-            if is_package_scoped {
-                // Known-package mismatch: another package's sanitizer
-                // must never cut this call, universal facts only.
-                return self.sanitizer_facts.get(call);
-            }
-        }
-        for ((scope, scoped_call), fact) in &self.scoped_sanitizer_facts {
-            if scoped_call == call
-                && is_class_scope(scope)
-                && class_scope_package_matches(fact, origin_package)
-            {
-                return Some(fact);
-            }
-        }
-        self.sanitizer_facts.get(call)
-    }
-
-    /// Install `fact` as a sanitizer proven to defeat only the given sink
-    /// classes (`bug_classes.json` ids such as `inj.sql`; `*` is a wildcard).
-    ///
-    /// The class scope rides on the published [`FactTable::scoped_sanitizer_facts`]
-    /// map under the reserved [`CLASS_SCOPED_SANITIZER_PREFIX`] key, so the
-    /// table keeps its shape: one entry `(class:<id>, call)` per class. An
-    /// empty `classes` list is a plain, unscoped install.
-    pub fn add_class_scoped_sanitizer(&mut self, fact: SanitizerFact, classes: &[String]) {
-        if classes.is_empty() {
-            match &fact.package {
-                Some(pkg) => {
-                    self.scoped_sanitizer_facts
-                        .insert((pkg.clone(), fact.call.clone()), fact);
-                }
-                None => {
-                    self.sanitizer_facts.insert(fact.call.clone(), fact);
-                }
-            }
-            return;
-        }
-        for class in classes {
-            // A lookup key, not prose: built without `format!` so the purity
-            // ratchet's engine_prose_format count stays flat.
-            let mut scope =
-                String::with_capacity(CLASS_SCOPED_SANITIZER_PREFIX.len() + class.len());
-            scope.push_str(CLASS_SCOPED_SANITIZER_PREFIX);
-            scope.push_str(class);
-            self.scoped_sanitizer_facts
-                .insert((scope, fact.call.clone()), fact.clone());
-        }
-    }
-
-    /// Re-scope an already-installed sanitizer fact to `classes`.
-    ///
-    /// The fact is moved out of the unscoped/package-scoped slot and
-    /// re-installed under the class keys of
-    /// [`Self::add_class_scoped_sanitizer`]. Returns `false` when no fact is
-    /// installed for `(package, call)`.
-    pub fn scope_sanitizer(
-        &mut self,
-        call: &str,
-        package: Option<&str>,
-        classes: &[String],
-    ) -> bool {
-        let fact = match package {
-            Some(pkg) => self
-                .scoped_sanitizer_facts
-                .remove(&(pkg.to_string(), call.to_string())),
-            None => self.sanitizer_facts.remove(call),
-        };
-        let Some(fact) = fact else {
-            return false;
-        };
-        self.add_class_scoped_sanitizer(fact, classes);
-        true
-    }
-
-    /// The sink classes `call` was proven to defeat for `origin_package`.
-    ///
-    /// Empty means the fact is unscoped (valid for every class, the legacy
-    /// reading). A package-qualified class scope follows the same recall-safe
-    /// rule as `FactTable::sanitizer_fact_scoped` (crate-internal): it only
-    /// fires once import resolution confirms its package.
-    pub fn sanitizer_classes(&self, call: &str, origin_package: Option<&str>) -> Vec<String> {
-        let mut classes: Vec<String> = Vec::new();
-        for ((scope, scoped_call), fact) in &self.scoped_sanitizer_facts {
-            if scoped_call != call || !class_scope_package_matches(fact, origin_package) {
-                continue;
-            }
-            if let Some(class) = scope.strip_prefix(CLASS_SCOPED_SANITIZER_PREFIX) {
-                classes.push(class.to_string());
-            }
-        }
-        classes.sort();
-        classes.dedup();
-        classes
-    }
-
-    /// Sanitizer fact for a call; `None` if not a sanitizer.
-    ///
-    /// No import origin is available at this call site, so package-
-    /// scoped facts are inert here (recall-safe: they only ever suppress
-    /// under a confirmed origin). Pass `Some(origin)` via
-    /// `Self::sanitizer_fact_scoped` where import context exists.
-    pub fn sanitizer_fact(&self, call: &str) -> Option<&SanitizerFact> {
-        self.sanitizer_fact_scoped(call, None)
     }
 
     /// Receiver-aware and package-aware sink check.
@@ -661,12 +529,28 @@ mod doc_examples {
                 .is_none()
         );
 
-        // A universal fact applies under any origin.
+        // A universal fact with no competing package claim applies under
+        // any origin.
+        let mut universal = FactTable::default();
+        universal.sanitizer_facts.insert("scrub".into(), fact(None));
+        assert!(universal.sanitizer_fact_scoped("scrub", None).is_some());
+        assert!(
+            universal
+                .sanitizer_fact_scoped("scrub", Some("other-pkg"))
+                .is_some()
+        );
+
+        // Once a package claims the name, its universal entry still serves
+        // unknown-origin sites but must not resurrect a foreign origin.
         t.sanitizer_facts.insert("scrub".into(), fact(None));
         assert!(t.sanitizer_fact_scoped("scrub", None).is_some());
         assert!(
-            t.sanitizer_fact_scoped("scrub", Some("other-pkg"))
+            t.sanitizer_fact_scoped("scrub", Some("sanitize-pkg"))
                 .is_some()
+        );
+        assert!(
+            t.sanitizer_fact_scoped("scrub", Some("other-pkg"))
+                .is_none()
         );
     }
     #[test]

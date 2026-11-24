@@ -21,6 +21,10 @@
 
 use serde::{Deserialize, Serialize};
 
+mod sanitizer;
+
+pub use sanitizer::SanitizerKind;
+
 /// Every severity label [`Severity::parse_label`] accepts, highest rank
 /// first.
 ///
@@ -306,29 +310,6 @@ pub fn checker_rule_tier(rule: &str) -> RuleTier {
     }
 }
 
-/// Sanitizer strength: what kind of injection does this call defeat?
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SanitizerKind {
-    /// Completely removes taint (e.g. numeric coercion: `int(user_input)`).
-    Full,
-    /// Defeats HTML/XSS injection only.
-    HtmlEscape,
-    /// Defeats URL-based attacks only.
-    UrlEncode,
-    /// Parameterised query - defeats SQL injection only.
-    SqlParameterize,
-    /// NoSQL sanitization - defeats NoSQL injection only.
-    NoSqlParameterize,
-    /// Session-store accessor trust: `store.get(token)` returns a
-    /// server-issued session object (undefined for unknown tokens), so
-    /// identity fields read off the result are not attacker-controlled.
-    /// Receiver-aware: only applies when the receiver root is a declared
-    /// session store.
-    SessionTrust,
-    /// Path canonicalization - defeats path traversal only.
-    PathNormalize,
-}
-
 /// The vulnerability class (`bug_classes.json` id) a sink belongs to, from
 /// its reporting label and otherwise its role.
 ///
@@ -427,119 +408,6 @@ pub fn resolved_sink_class(
     sink_name: Option<&str>,
 ) -> Option<&'static str> {
     sink_class(role, label).or_else(|| sink_name.and_then(sink_name_class))
-}
-
-impl SanitizerKind {
-    /// The serialized slug stored on a sanitizer fact.
-    #[must_use]
-    pub fn slug(&self) -> &'static str {
-        match self {
-            Self::Full => "full",
-            Self::HtmlEscape => "html_escape",
-            Self::UrlEncode => "url_encode",
-            Self::SqlParameterize => "sql_parameterize",
-            Self::NoSqlParameterize => "nosql_parameterize",
-            Self::SessionTrust => "session_trust",
-            Self::PathNormalize => "path_normalize",
-        }
-    }
-
-    /// Parse a fact/bundle slug back into a kind.
-    ///
-    /// Accepts the legacy aliases (`encode`, `allowlist`, `generic`) as
-    /// [`SanitizerKind::Full`] and returns `None` for anything unknown, which
-    /// the role-qualified evaluator treats as "no cut".
-    #[must_use]
-    pub fn from_slug(slug: &str) -> Option<Self> {
-        match slug {
-            "full" => Some(Self::Full),
-            // Legacy dialect aliases: `DEFAULT_SANITIZER_KIND` ("encode")
-            // and `ALLOWLIST_SANITIZER_KIND` ("allowlist") are the labels
-            // `FactTable::from_config` and bundle-learned sanitizers emit.
-            // Map them to Full so role-qualified evaluation sees a known
-            // kind instead of falling through to the sink-agnostic path.
-            "encode" | "allowlist" | "generic" => Some(Self::Full),
-            // Anything else is a genuinely unknown slug. The role-
-            // qualified evaluator (`is_sanitizer_effective_for_role`)
-            // treats `None` as "no cut": an unrecognized label must
-            // never silence a sink it was never proven to defeat
-            // (residual #15). Producers that need an opaque full cut
-            // must emit one of the aliases above.
-            "html_escape" => Some(Self::HtmlEscape),
-            "url_encode" => Some(Self::UrlEncode),
-            "sql_parameterize" => Some(Self::SqlParameterize),
-            "nosql_parameterize" => Some(Self::NoSqlParameterize),
-            "session_trust" => Some(Self::SessionTrust),
-            "path_normalize" => Some(Self::PathNormalize),
-            _ => None,
-        }
-    }
-
-    /// Does this sanitizer defeat a sink of `classes`?
-    ///
-    /// An empty scope is the legacy universal fact (built-in table and
-    /// pre-v8 bundles): it keeps the old role/label qualification. A
-    /// non-empty scope is authoritative: the sink's class must be listed
-    /// (or the list must carry `*`), so an `isURL` sanitizer proven for SSRF
-    /// can never clear a command-injection sink.
-    #[must_use]
-    pub fn defeats_classes(&self, role: SinkRole, label: Option<&str>, classes: &[String]) -> bool {
-        if classes.is_empty() {
-            return self.defeats_role_and_label(role, label);
-        }
-        if !self.defeats_role_and_label(role, label) {
-            return false;
-        }
-        if classes.iter().any(|c| c == "*") {
-            return true;
-        }
-        match sink_class(role, label) {
-            Some(class) => classes.iter().any(|c| c == class),
-            None => false,
-        }
-    }
-
-    /// [`Self::defeats_classes`] with a fallback to the class implied by the
-    /// sink's call name. Config-declared sinks carry no vocabulary label, so
-    /// without this a class-scoped fact could never clear them.
-    #[must_use]
-    pub fn defeats_sink(
-        &self,
-        role: SinkRole,
-        label: Option<&str>,
-        sink_name: Option<&str>,
-        classes: &[String],
-    ) -> bool {
-        if classes.is_empty() {
-            return self.defeats_role_and_label(role, label);
-        }
-        if !self.defeats_role_and_label(role, label) {
-            return false;
-        }
-        if classes.iter().any(|c| c == "*") {
-            return true;
-        }
-        resolved_sink_class(role, label, sink_name)
-            .is_some_and(|class| classes.iter().any(|c| c == class))
-    }
-
-    /// Determines whether this sanitizer defeats a sink with the specified role and optional label.
-    #[must_use]
-    pub fn defeats_role_and_label(&self, role: SinkRole, label: Option<&str>) -> bool {
-        match self {
-            Self::Full => true,
-            Self::HtmlEscape => {
-                matches!(role, SinkRole::Xss | SinkRole::Response)
-            }
-            Self::UrlEncode => {
-                matches!(role, SinkRole::Response | SinkRole::Resource)
-            }
-            Self::SqlParameterize => label == Some("sql"),
-            Self::NoSqlParameterize => label == Some("nosql"),
-            Self::SessionTrust => true,
-            Self::PathNormalize => matches!(role, SinkRole::Resource) || label == Some("traversal"),
-        }
-    }
 }
 
 /// Shape classification of a dataflow finding (mirrors the engine's

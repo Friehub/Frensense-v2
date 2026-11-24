@@ -214,4 +214,70 @@ export async function bad(req: any, res: any) {
             f.cut_reasons
         );
     }
+
+    /// A package-less fact still names an origin when its call is dotted.
+    /// `shlex.quote` is installed under the derived `shlex` scope, so a site
+    /// resolved to a different package cannot inherit it, while unknown
+    /// origins keep the legacy universal reading.
+    #[test]
+    fn package_less_dotted_fact_is_scoped_to_its_own_root() {
+        let (mut config, mut facts) = seeded_tables(["python"]);
+        let entry = LearnedFactEntry::LanguageSanitizer {
+            language: "*".to_string(),
+            call: "shlex.quote".to_string(),
+            package: None,
+            kind: "shell_quote".to_string(),
+            guard_style: false,
+        };
+        apply_language_entries(&mut config, &mut facts, &[entry], &["python"]);
+
+        // Own root: the fact applies.
+        assert!(
+            facts
+                .sanitizer_fact_scoped("shlex.quote", Some("shlex"))
+                .is_some()
+        );
+        // Foreign confirmed origin: it must not.
+        assert!(
+            facts
+                .sanitizer_fact_scoped("shlex.quote", Some("sqlite3"))
+                .is_none()
+        );
+        // Unknown origin: legacy universal fallback still applies.
+        assert!(facts.sanitizer_fact_scoped("shlex.quote", None).is_some());
+    }
+
+    /// A derived scope names the package, but the import names a path whose
+    /// last segment is that package: Go imports `path/filepath` and calls
+    /// `filepath.Base`. The fact must resolve under the full import path, or
+    /// the cut goes inert and a documented-safe negation reports a finding.
+    #[test]
+    fn dotted_fact_scope_resolves_under_its_imported_path() {
+        let (mut config, mut facts) = seeded_tables(["go"]);
+        let entry = LearnedFactEntry::LanguageSanitizer {
+            language: "go".to_string(),
+            call: "filepath.Base".to_string(),
+            package: None,
+            kind: "path_normalize".to_string(),
+            guard_style: false,
+        };
+        apply_language_entries(&mut config, &mut facts, &[entry], &["go"]);
+
+        for origin in ["filepath", "path/filepath"] {
+            for call in ["filepath.Base", "Base"] {
+                assert!(
+                    facts.sanitizer_fact_scoped(call, Some(origin)).is_some(),
+                    "`{call}` must stay a sanitizer when its origin is `{origin}`"
+                );
+            }
+        }
+        // A different package's `Base` still cannot inherit the fact.
+        assert!(
+            facts
+                .sanitizer_fact_scoped("Base", Some("strings"))
+                .is_none()
+        );
+        // Unknown origin keeps the legacy universal reading of the full call.
+        assert!(facts.sanitizer_fact_scoped("filepath.Base", None).is_some());
+    }
 }

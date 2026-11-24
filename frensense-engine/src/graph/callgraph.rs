@@ -43,6 +43,8 @@ use std::collections::BTreeSet;
 
 use crate::ir::function::*;
 
+mod query;
+
 // ---------------------------------------------------------------------------
 // Targets
 // ---------------------------------------------------------------------------
@@ -102,21 +104,6 @@ pub(crate) struct CallGraph {
     /// Sites with no internal target, mapped to their best-known external
     /// name (for the fact layer and diagnostics).
     pub unresolved: FxHashMap<(String, (usize, usize)), String>,
-}
-
-impl CallGraph {
-    /// Targets for one call instruction inside `fn`.
-    pub(crate) fn targets_at(
-        &self,
-        fn_name: &str,
-        block: usize,
-        instr_idx: usize,
-    ) -> &[CallTarget] {
-        self.sites
-            .get(&(fn_name.to_string(), (block, instr_idx)))
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
-    }
 }
 
 // ---------------------------------------------------------------------------

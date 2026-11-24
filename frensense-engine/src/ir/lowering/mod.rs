@@ -11,18 +11,18 @@
 //! versioned into memory states by the SSA Builder.
 
 /// Lowering of assignments to variables, fields and elements.
-pub mod assign;
+pub(crate) mod assign;
 /// Lowering of call expressions.
-pub mod call;
+pub(crate) mod call;
 mod const_eval;
 /// The per-function lowering state.
 pub mod context;
 /// Lowering of loops, branches, conditionals, `match`, returns and jumps.
 pub(crate) mod control_flow;
 /// Lowering of declarations.
-pub mod decl;
+pub(crate) mod decl;
 /// Lowering of expressions: operators, member access, composite literals, literals and casts.
-pub mod expr;
+pub(crate) mod expr;
 /// Classification of assignment targets.
 pub(crate) mod lvalue;
 

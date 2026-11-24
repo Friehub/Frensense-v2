@@ -49,6 +49,11 @@ impl<'a> BackwardTaintEngine<'a> {
             None
         };
 
+        if self.dispatch_runs_program_code(fi, block, idx) {
+            self.funnel.skipped_program_local += 1;
+            return;
+        }
+
         if self.skip_unanchored_static(ir, name, receiver.is_none(), pkg_import.is_some()) {
             return;
         }
@@ -223,50 +228,6 @@ impl<'a> BackwardTaintEngine<'a> {
                 .scoped_sink_signatures
                 .keys()
                 .any(|(pkg, _)| pkg == root)
-    }
-
-    /// Whether a bare static call can match no configured sink: a local
-    /// callable, a function defined in this program, or a verb that requires a
-    /// receiver object.
-    fn skip_unanchored_static(
-        &mut self,
-        ir: &FunctionIR,
-        name: &str,
-        is_static: bool,
-        has_package_import: bool,
-    ) -> bool {
-        if !is_static || has_package_import {
-            return false;
-        }
-        // A static call to a local variable/closure defined in this function is
-        // not an external sink.
-        if ir
-            .var_metadata
-            .values()
-            .any(|m| m.source_name.as_deref() == Some(name))
-        {
-            self.funnel.skipped_local_callable += 1;
-            return true;
-        }
-        // A static call resolving to a function defined in this program is not
-        // an external sink either, even when the name matches a library sink (a
-        // user helper named `run` is not `subprocess.run`; a package import of
-        // that name short-circuits this guard above via `pkg_import`). The
-        // callee's own configured sinks report once with the full
-        // caller→callee path; arming the call site itself would emit the same
-        // bug twice - once as a shorter path prefix (WI-41).
-        if self.is_program_local(name) {
-            self.funnel.skipped_program_local += 1;
-            return true;
-        }
-        // Verb sinks that strictly require a receiver object (get, post,
-        // render, etc.); a bare static call without package import is not a
-        // client method invocation.
-        if is_receiver_only_verb(name) {
-            self.funnel.skipped_receiver_only_verb += 1;
-            return true;
-        }
-        false
     }
 
     /// Resolve the receiver root of a call: the variable's own root, the

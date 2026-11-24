@@ -25,7 +25,7 @@ use rustc_hash::FxHashSet;
 /// where the receiver OR the argument is a function parameter named like a
 /// URL/redirect target (`url`, `toUrl`, `redirect`, ...), the shape of an
 /// allowlist validation over attacker input.
-pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
+pub(crate) fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     let mut findings = Vec::new();
     let mut rule1_fired = false;
     let param_names: Vec<String> = ir

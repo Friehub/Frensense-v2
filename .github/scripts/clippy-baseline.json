@@ -23,7 +23,7 @@
   "frensense-engine::clippy::allow_attributes": 24,
   "frensense-engine::clippy::disallowed_methods": 9,
   "frensense-engine::clippy::exhaustive_enums": 20,
-  "frensense-engine::clippy::exhaustive_structs": 48,
+  "frensense-engine::clippy::exhaustive_structs": 46,
   "frensense-engine::clippy::expect_used": 5,
   "frensense-engine::clippy::float_arithmetic": 2,
   "frensense-engine::clippy::float_cmp": 2,
