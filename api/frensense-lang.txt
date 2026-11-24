@@ -605,6 +605,8 @@ pub frensense_lang::spec::PackageCategory::SqlDatabase
 pub frensense_lang::spec::PackageCategory::TemplateEngine
 pub frensense_lang::spec::PackageCategory::Testing
 pub frensense_lang::spec::PackageCategory::WebSocket
+impl frensense_lang::spec::PackageCategory
+pub fn frensense_lang::spec::PackageCategory::sink_role(&self) -> core::option::Option<frensense_lang::severity::SinkRole>
 pub enum frensense_lang::spec::TaintOrigin
 pub frensense_lang::spec::TaintOrigin::Custom(alloc::string::String)
 pub frensense_lang::spec::TaintOrigin::Database
@@ -1209,6 +1211,8 @@ pub frensense_lang::PackageCategory::SqlDatabase
 pub frensense_lang::PackageCategory::TemplateEngine
 pub frensense_lang::PackageCategory::Testing
 pub frensense_lang::PackageCategory::WebSocket
+impl frensense_lang::spec::PackageCategory
+pub fn frensense_lang::spec::PackageCategory::sink_role(&self) -> core::option::Option<frensense_lang::severity::SinkRole>
 #[non_exhaustive] pub enum frensense_lang::ParseError
 pub frensense_lang::ParseError::Cancelled
 pub frensense_lang::ParseError::Grammar(tree_sitter::LanguageError)

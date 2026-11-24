@@ -9,7 +9,7 @@
 
 use super::*;
 
-use crate::analysis::taint::role::SinkRole;
+use crate::analysis::taint::role::{SinkRole, category_sink_role};
 
 impl<'a> BackwardTaintEngine<'a> {
     /// Explore one call site if it is a configured sink.
@@ -415,8 +415,22 @@ impl<'a> BackwardTaintEngine<'a> {
         } else {
             scoped(call.name)
         };
+        // Last resort: the package's own category. A call the fact layer gave
+        // no role ranks by what the language knows the package does - except
+        // an IDOR finder sink, which is an access-control finding on a record
+        // identity whatever library resolves it, never "this input becomes a
+        // query".
+        let is_idor_finder = self.facts.is_idor_finder_sink(call.effective_name)
+            || self.facts.is_idor_finder_sink(call.name);
+        let category_role = (!is_idor_finder)
+            .then(|| {
+                call.language
+                    .zip(call.origin.as_deref())
+                    .and_then(|(language, origin)| category_sink_role(language, origin))
+            })
+            .flatten();
         (
-            role.or(fallback_role).unwrap_or_default(),
+            role.or(fallback_role).or(category_role).unwrap_or_default(),
             label.or(fallback_label),
         )
     }

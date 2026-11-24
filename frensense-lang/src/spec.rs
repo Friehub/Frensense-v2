@@ -43,8 +43,8 @@
 //! reproduces today's behaviour, override it per grammar where the spelling
 //! differs, and pin both in `providers/node_vocabulary_tests.rs`.
 
+mod category;
 use std::borrow::Cow;
-
 use tree_sitter::Node;
 
 // ── Supporting types ─────────────────────────────────────────────────────────
