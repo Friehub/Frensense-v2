@@ -68,6 +68,7 @@ pub(crate) mod kinds;
 pub(crate) mod sanitizer_scope;
 /// Lookup of sink signatures for a call site's import origin.
 pub(crate) mod signatures;
+pub(crate) mod sink_scope;
 /// The merged [`FactTable`] consulted during analysis.
 pub(crate) mod table;
 pub(crate) mod vocabulary;

@@ -17,7 +17,8 @@
 #[cfg(test)]
 #[allow(clippy::module_inception)] // test file convention: module name repeats parent path segment
 pub(crate) mod package_scoped_sink_tests {
-    use crate::analysis::taint::facts::seeded_tables;
+    use crate::analysis::taint::facts::{FactTable, SinkSignature, seeded_tables};
+    use crate::analysis::taint::role::SinkRole;
     use crate::scan::{prepare, scan_prepared};
 
     /// The legitimate shape: `@prisma/client` imported, client constructed,
@@ -298,5 +299,48 @@ export async function search(query: string) {
                 .any(|f| f.sink.contains("createQueryBuilder")),
             "createQueryBuilder without @nestjs/typeorm origin must stay silent; got {findings:?}"
         );
+    }
+
+    /// A sink fact proven for one package arms the same member on a *sibling*
+    /// package of the same category - and nothing else. The layout, role and
+    /// label all come from the measured fact, so a MySQL driver's
+    /// `run_query` is ranked by what SQLite's taught.
+    #[test]
+    fn taught_sink_covers_a_sibling_package_of_the_same_category() {
+        let mut facts = FactTable::default();
+        facts.scoped_sink_signatures.insert(
+            ("sqlite3".to_string(), "run_query".to_string()),
+            SinkSignature {
+                call: "run_query".to_string(),
+                package: Some("sqlite3".to_string()),
+                dangerous_args: [0].into_iter().collect(),
+                binding_args_safe: true,
+                idor_keys: Vec::new(),
+                role: SinkRole::Execution,
+                label: Some("sql".to_string()),
+                global_only: false,
+            },
+        );
+
+        // Sibling driver, same category: same layout, same role, same label.
+        let sibling = Some("pymysql");
+        assert!(facts.is_sink_call_scoped("run_query", None, sibling, Some("python")));
+        assert_eq!(
+            facts.role_for_call_scoped("run_query", None, sibling, Some("python")),
+            Some(SinkRole::Execution)
+        );
+        assert_eq!(
+            facts.label_for_call_scoped("run_query", None, sibling, Some("python")),
+            Some("sql".to_string())
+        );
+        let armed = facts
+            .sink_signature_scoped("run_query", sibling, Some("python"))
+            .expect("sibling signature");
+        assert_eq!(armed.dangerous_args.len(), 1);
+
+        // A package of a different category does not inherit it, and without
+        // a language nothing can be classified.
+        assert!(!facts.is_sink_call_scoped("run_query", None, Some("flask"), Some("python")));
+        assert!(!facts.is_sink_call_scoped("run_query", None, sibling, None));
     }
 }

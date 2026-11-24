@@ -149,54 +149,6 @@ impl FactTable {
         self.role_for_call_scoped(last, receiver_root, None, None)
     }
 
-    /// Sink signature for a call, package-aware.
-    ///
-    /// Scoping semantics (zero-FP): a fact installed under `(package, call)`
-    /// matches ONLY when `origin_package` names that package. Origin
-    /// unknown matches universal facts only for non-verb sinks; origin
-    /// known-but-different matches universal facts only (the walker arms
-    /// origin via import resolution before implying a package from the
-    /// receiver root). This is what keeps a bundle fact like
-    /// `(@prisma/client).$queryRawUnsafe` from firing on a local object
-    /// whose method happens to share the name.
-    pub(crate) fn sink_signature_scoped(
-        &self,
-        call: &str,
-        origin_package: Option<&str>,
-        language: Option<&str>,
-    ) -> Option<&SinkSignature> {
-        if let Some(pkg) = origin_package {
-            if let Some(sig) = scoped_lookup(&self.scoped_sink_signatures, pkg, call) {
-                return Some(sig);
-            }
-            // Decorated sibling of a taught operation (`extractAllToAsync`
-            // for `extractAllTo`) is the same sink under the same package.
-            if let Some(base) = super::mirror_call_base(call)
-                && let Some(sig) = scoped_lookup(&self.scoped_sink_signatures, pkg, base)
-            {
-                return Some(sig);
-            }
-            let is_package_scoped = self
-                .scoped_sink_signatures
-                .keys()
-                .any(|(_, c)| c == call || super::mirror_call_base(call) == Some(c.as_str()));
-            if is_package_scoped {
-                // Known package origin mismatch: do not fall back to other
-                // packages' scoped sinks, only the caller's own language and
-                // the language-agnostic facts.
-                return self.sink_signature_for_language(call, language);
-            }
-        }
-        // Origin unknown: universal + this language's facts only (same rule
-        // as sanitizers - a package-scoped fact applies only under a
-        // confirmed origin). Scope-separated callees
-        // (`std::fs::read_to_string`) fall back through their `::` suffixes
-        // exactly like [`Self::sink_signature`], so a qualified call matches
-        // the bare callable entry when no qualified shape was declared
-        // (WI-11); exact matches keep precedence.
-        self.sink_signature_for_language(call, language)
-    }
-
     /// Role for a sink call, receiver-aware and package-aware.
     ///
     /// Consults (in order): the (receiver-root, method) pair from dotted
@@ -211,6 +163,11 @@ impl FactTable {
     ) -> Option<crate::analysis::taint::role::SinkRole> {
         if let Some(pkg) = origin_package
             && let Some(sig) = scoped_lookup(&self.scoped_sink_signatures, pkg, last)
+        {
+            return Some(sig.role);
+        }
+        if let Some((pkg, lang)) = origin_package.zip(language)
+            && let Some(sig) = self.category_sink_signature(lang, pkg, last)
         {
             return Some(sig.role);
         }
@@ -236,6 +193,13 @@ impl FactTable {
         if let Some(pkg) = origin_package
             && let Some(sig) = scoped_lookup(&self.scoped_sink_signatures, pkg, last)
             && let Some(label) = sig.label.clone()
+        {
+            return Some(label);
+        }
+        if let Some((pkg, lang)) = origin_package.zip(language)
+            && let Some(label) = self
+                .category_sink_signature(lang, pkg, last)
+                .and_then(|sig| sig.label.clone())
         {
             return Some(label);
         }
