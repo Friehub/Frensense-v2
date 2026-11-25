@@ -3,10 +3,7 @@
 // Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
 
 //! Non-dataflow checks: policy assertions over the lowered IR that need no
-//! taint analysis.
-//!
-//! Two tiers, deliberately separated:
-//!
+//! taint analysis. Two tiers, deliberately separated:
 //! **Built-in seed checks** (`weak_hash` and future structural rules) supply
 //! only *mechanism*, how to look at the IR. They are the bootstrapping
 //! oracle, kept minimal so shape-thinking cannot creep back in.
@@ -50,6 +47,8 @@ mod divergence_tests;
 mod guard_bypass_tests;
 #[cfg(test)]
 mod int_overflow_tests;
+#[cfg(test)]
+mod leak_doc_tests;
 #[cfg(test)]
 mod leak_tests;
 #[cfg(test)]

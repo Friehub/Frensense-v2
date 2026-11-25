@@ -442,7 +442,7 @@ fn extend_leaks(
 
 /// Run the allocation-lifetime check over one function.
 ///
-/// ```
+/// ```text
 /// use frensense_engine::checks::memory_summary::{CapacitySpec, MemorySummary, MemorySummaryRegistry};
 /// use frensense_engine::analysis::taint::facts::FactTable;
 /// use frensense_engine::harness::lower_source;
