@@ -32,17 +32,17 @@ artifact compatibility.
   `sanitized-args: 1`). The build-time cross-class canary replays the fact
   with the same qualification, so a narrowed fact that stops separating a
   family's negative fails the build instead of shipping.
-- **Proven argument slots.** A guard-style sanitizer whose families author no
-  `sanitized-args:` line is probed instead of left unqualified: the published
-  fact, narrowed to one slot, is replayed against the families that taught it,
-  and a slot that still silences their negatives while they alert with no fact
-  at all is a slot the corpus proves. The probe spans the call's observed arity
-  (`max_call_arity`), so it tries every argument position the samples pass and
-  never stops at a fixed number of slots. Transform sanitizers are not probed (their
-  cut is the result node), and a fact no probe pins keeps the legacy
-  all-arguments reading, so the build never narrows a guard on a guess. This is
-  the in-tree producer of slot sets: a corpus build now ships them with no
-  authoring at all.
+- **Proven argument slots.** A sanitizer whose families author no
+  `sanitized-args:` line is probed instead of left unqualified - guard-style
+  facts through the guard map, transform facts through the argument edges
+  their cut covers. The published fact, narrowed to one slot, is replayed
+  against the families that taught it, and a slot that still silences their
+  negatives while they alert with no fact at all is a slot the corpus proves.
+  The probe spans the call's observed arity (`max_call_arity`), so it tries
+  every argument position the samples pass and never stops at a fixed number
+  of slots. A fact no probe pins keeps the legacy all-arguments reading, so the
+  build never narrows one on a guess. This is the in-tree producer of slot
+  sets: a corpus build now ships them with no authoring at all.
 - `SanitizerArgScope` and `BundlePayloadV9` payload types,
   `EffectiveSanitizerScope`, and `LoadedBundle::sanitizer_args`.
 

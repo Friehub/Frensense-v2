@@ -199,8 +199,9 @@ pub(crate) fn sanitizer_arg_evidence(
 /// is exactly what `SanitizerFact::sanitizes_args` states. Three guards keep the
 /// probe honest:
 ///
-/// * only guard-style facts are probed - a transform sanitizer cuts at its
-///   result node, where the walk does not read slots;
+/// * only sanitizer entries are probed, and both styles narrow the same way:
+///   a guard-style fact through the guard map, a transform fact through the
+///   argument edges its cut covers;
 /// * a family with no negatives proves nothing, and is skipped rather than
 ///   credited by a scan with nothing to alert on;
 /// * a family whose negatives alert with **no** fact at all proves nothing
@@ -214,12 +215,10 @@ fn probe_sanitizer_args(
     call: &str,
     package: Option<&str>,
 ) -> Vec<usize> {
-    let guard_style = match &fact.entry {
-        LearnedFactEntry::Sanitizer { guard_style, .. }
-        | LearnedFactEntry::LanguageSanitizer { guard_style, .. } => *guard_style,
-        _ => return Vec::new(),
-    };
-    if !guard_style {
+    if !matches!(
+        fact.entry,
+        LearnedFactEntry::Sanitizer { .. } | LearnedFactEntry::LanguageSanitizer { .. }
+    ) {
         return Vec::new();
     }
     let teaching: Vec<&crate::fact_extract::Family> = families
@@ -418,11 +417,17 @@ mod tests {
         );
     }
 
-    /// A transform sanitizer cuts at its result node, so its slots are not
-    /// probed: it keeps the legacy reading rather than shipping a guess.
+    /// A transform sanitizer's slots are proven too: `scrub(name, 'json')`
+    /// neutralises the argument it is given, the family's negative is silent
+    /// because of that, and the probe reports the slot it consumed rather than
+    /// the whole call.
     #[test]
-    fn a_transform_sanitizer_is_not_probed() {
-        let families = vec![sampled("f", UNGUARDED, UNGUARDED)];
+    fn a_transform_family_proves_the_argument_it_consumes() {
+        let families = vec![sampled(
+            "f",
+            UNGUARDED,
+            "export async function bad(req: any) {\n  const name = req.body.name\n  const safe = scrub(name, 'json')\n  exec(safe)\n}\n",
+        )];
         let mut transform = fact("scrub", &["f"]);
         transform.entry = LearnedFactEntry::LanguageSanitizer {
             call: "scrub".to_string(),
@@ -432,9 +437,10 @@ mod tests {
             kind: "encode".to_string(),
             guard_style: false,
         };
-        assert!(
-            probe_sanitizer_args(&families, &transform, "scrub", None).is_empty(),
-            "a non-guard fact states no slots today"
+        assert_eq!(
+            probe_sanitizer_args(&families, &transform, "scrub", None),
+            vec![0],
+            "the tainted value enters through argument 0, so that is the slot\n             the family proves"
         );
     }
 

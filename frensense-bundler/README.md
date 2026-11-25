@@ -134,8 +134,9 @@ finding it was never proven for. The build-time cross-class canary replays the
 fact with the same slot set, so a narrowed fact that stops separating a
 family's negative fails the build instead of shipping.
 
-Authoring is optional. A guard-style fact whose families declare no
-`sanitized-args:` line is **probed** by the build: the published fact, narrowed
+Authoring is optional. A fact whose families declare no `sanitized-args:` line
+is **probed** by the build - guard-style facts through the guard map, transform
+facts through the argument edges their cut covers: the published fact, narrowed
 to one slot, is replayed against the families that taught it, one slot per
 argument position those samples are seen to pass (the call's observed arity, so
 a guard on a later argument of a wide call is still found), and a slot that
