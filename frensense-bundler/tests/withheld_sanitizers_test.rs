@@ -35,7 +35,10 @@ fn build(trust: BundleTrust, scopes: Vec<SanitizerScope>) -> Option<LoadedBundle
         sanitizer_args: Vec::new(),
         policy_meta: vec![],
     };
-    let req = EngineRequirement::same_series([0, 9, 1]);
+    // Pin whatever engine this test is compiled against, not a literal: a
+    // literal silently stops loading the moment the engine's series moves.
+    let engine = EngineRequirement::parse_triple(frensense_engine::VERSION).unwrap_or([0, 0, 0]);
+    let req = EngineRequirement::same_series(engine);
     let bytes = write_bundle_pinned_with_trust(&payload, 0, req, trust).ok()?;
     load_bundle(&bytes).ok()
 }

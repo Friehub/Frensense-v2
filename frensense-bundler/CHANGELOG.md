@@ -11,9 +11,15 @@ its replay gate, the corpus `lint` checks, and the embedded default-pack asset.
 in *this* file, so a format change - not the root changelog - is what records
 artifact compatibility.
 
-## [0.9.1]
+## [0.10.0]
 
 ### Breaking
+
+- **`LoadedBundle` gained fields and `SanitizerArgScope` is `#[non_exhaustive]`.**
+  A consumer that builds or destructures either type must go through the
+  loaders; the slot table is data the payload owns, so it stays extensible.
+
+### Format
 
 - **`BUNDLE_VERSION` is now 9.** The v9 payload adds `sanitizer_args`: the
   argument slots each learned sanitizer validates, authored per corpus family

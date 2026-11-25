@@ -10,7 +10,16 @@ Built-in vocabulary tables live in `frensense-packgen`; the `.frc` envelope
 lives in `frensense-bundler`. Their changes appear here only when they alter
 what this crate does.
 
-## [0.9.2]
+## [0.10.0]
+
+### Breaking
+
+- **The forward-analysis plumbing is no longer public.**
+  `analysis::forward::{bindings, edges, predicates, summaries}` and the
+  internals of `checks::leak` are `pub(crate)`, and `SinkFinding::alert`
+  narrows with them: no workspace crate, doctest or documented consumer
+  reached those paths, and `unreachable_pub` allows narrowing rather than a
+  re-export (AGENTS.md §7.1). A narrowed surface takes the middle number.
 
 ### Added
 
