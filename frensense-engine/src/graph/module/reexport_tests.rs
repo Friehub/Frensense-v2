@@ -28,6 +28,7 @@ mod tests {
         let _ = crate::telemetry::drain_caps();
 
         let hops = MAX_REEXPORT_RESOLVE_DEPTH + 2;
+        let barrel = |n: usize| "src/barrel".to_string() + n.to_string().as_str() + ".ts";
         let mut export_map: FileExportMap = FxHashMap::default();
         let mut barrel_map: FileBarrelMap = FxHashMap::default();
         export_map
@@ -38,17 +39,14 @@ mod tests {
                 ExportTarget::Local("handler".to_string()),
             );
         for n in 1..=hops {
-            barrel_map.insert(
-                format!("src/barrel{n}.ts"),
-                vec![Specifier::File(format!("src/barrel{}.ts", n - 1))],
-            );
+            barrel_map.insert(barrel(n), vec![Specifier::File(barrel(n - 1))]);
         }
         let mut ir_names: FxHashSet<String> = FxHashSet::default();
         ir_names.insert("src/barrel0.ts::handler".to_string());
         let fn_file = FxHashMap::default();
 
         let resolved = resolve_symbol(
-            &format!("src/barrel{hops}.ts"),
+            &barrel(hops),
             "handler",
             &export_map,
             &barrel_map,

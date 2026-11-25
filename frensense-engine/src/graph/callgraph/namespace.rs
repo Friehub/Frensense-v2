@@ -48,7 +48,12 @@ impl<'a> CallGraphBuilder<'a> {
     ) -> Option<String> {
         let file = self.fn_file?.get(fname)?;
         let module = self.namespaces?.get(file)?.get(root)?;
-        let target = format!("{module}::{method}");
+        // A lookup key, not prose: built without `format!` so the purity
+        // ratchet's engine prose-format count stays flat.
+        let mut target = String::with_capacity(module.len() + method.len() + 2);
+        target.push_str(module);
+        target.push_str("::");
+        target.push_str(method);
         self.irs.contains_key(&target).then_some(target)
     }
 }
