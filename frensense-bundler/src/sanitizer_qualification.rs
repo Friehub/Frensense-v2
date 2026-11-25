@@ -191,10 +191,6 @@ pub(crate) fn sanitizer_arg_evidence(
     out
 }
 
-/// How many leading slots a probe tries. A guard that validates a later slot
-/// keeps the legacy reading rather than being narrowed on a partial scan.
-const MAX_PROBED_SANITIZER_ARGS: usize = 4;
-
 /// The slots the families that taught `fact` prove for `call`.
 ///
 /// The fact was published because, un-narrowed, it silences those families'
@@ -209,6 +205,9 @@ const MAX_PROBED_SANITIZER_ARGS: usize = 4;
 ///   credited by a scan with nothing to alert on;
 /// * a family whose negatives alert with **no** fact at all proves nothing
 ///   either, so its silence cannot be mistaken for the guard's doing.
+///
+/// The probe is exhaustive over the evidence, so its bound is the call's own
+/// observed arity (see [`probe_bound`]) rather than a fixed number of slots.
 fn probe_sanitizer_args(
     families: &[crate::fact_extract::Family],
     fact: &crate::fact_extract::LearnedFact,
@@ -232,6 +231,9 @@ fn probe_sanitizer_args(
     if teaching.is_empty() {
         return Vec::new();
     }
+    let Some(arity) = probe_bound(&teaching, call) else {
+        return Vec::new();
+    };
     // A family whose negatives alert with no fact at all proves nothing: its
     // silence later would not be the guard's doing. Resolve once per family,
     // not once per probed slot.
@@ -245,7 +247,7 @@ fn probe_sanitizer_args(
     if alerting.is_empty() {
         return Vec::new();
     }
-    (0..MAX_PROBED_SANITIZER_ARGS)
+    (0..arity)
         .filter(|slot| {
             alerting.iter().all(|family| {
                 let (config, facts) = family_probe_tables(
@@ -260,6 +262,30 @@ fn probe_sanitizer_args(
             })
         })
         .collect()
+}
+
+/// The slots worth probing for `call`: one per argument position the teaching
+/// families are seen to pass.
+///
+/// A probe has to be exhaustive over its evidence. A slot it never tries is a
+/// slot the shipped fact keeps validating - the probe's absence reads as the
+/// legacy "all arguments" - so the walk must stop exactly where the observed
+/// call sites stop passing arguments, not at a number chosen in advance: a
+/// guard on a later argument of a wide call would otherwise be narrowed
+/// silently to the first few. `None` means no sample calls `call` at all, and
+/// then nothing is probed: arity the corpus never shows is not evidence.
+fn probe_bound(families: &[&crate::fact_extract::Family], call: &str) -> Option<usize> {
+    let files: Vec<(String, String, String)> = families
+        .iter()
+        .flat_map(|family| {
+            family
+                .negatives
+                .iter()
+                .chain(family.positives.iter())
+                .cloned()
+        })
+        .collect();
+    crate::extract::call_analysis::max_call_arity(&files, call)
 }
 
 /// A family's own tables (language spec + embedded pack) with `entry`
@@ -410,6 +436,30 @@ mod tests {
             probe_sanitizer_args(&families, &transform, "scrub", None).is_empty(),
             "a non-guard fact states no slots today"
         );
+    }
+
+    /// The probe bound is the call's observed arity, so a guard on a later
+    /// argument of a wide call is still found instead of being left on the
+    /// legacy reading by a fixed cap.
+    #[test]
+    fn a_slot_past_the_first_few_arguments_is_probed() {
+        let families = vec![sampled(
+            "f",
+            UNGUARDED,
+            "export async function bad(req: any) {\n  const name = req.body.name\n  if (check('a', 'b', 'c', 'd', name, 'e')) {\n    exec(name)\n  }\n}\n",
+        )];
+        assert_eq!(
+            probe_sanitizer_args(&families, &fact("check", &["f"]), "check", None),
+            vec![4]
+        );
+    }
+
+    /// No sample calls the guard, so the corpus shows no arity and no slot is
+    /// claimed: the fact keeps the legacy all-arguments reading.
+    #[test]
+    fn a_guard_no_sample_calls_proves_no_slot() {
+        let families = vec![sampled("f", UNGUARDED, UNGUARDED)];
+        assert!(probe_sanitizer_args(&families, &fact("check", &["f"]), "check", None).is_empty());
     }
 
     /// A block that declares slots without a `sanitizer:` name speaks for

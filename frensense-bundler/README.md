@@ -136,7 +136,9 @@ family's negative fails the build instead of shipping.
 
 Authoring is optional. A guard-style fact whose families declare no
 `sanitized-args:` line is **probed** by the build: the published fact, narrowed
-to one slot, is replayed against the families that taught it, and a slot that
+to one slot, is replayed against the families that taught it, one slot per
+argument position those samples are seen to pass (the call's observed arity, so
+a guard on a later argument of a wide call is still found), and a slot that
 still silences their negatives - while those negatives alert with no fact at
 all - is a slot the corpus itself proves. So `frensense-bundler -c corpus -o
 out.frc` ships slot sets with no authoring at all, and `sanitized-args:` is
