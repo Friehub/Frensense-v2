@@ -134,6 +134,16 @@ finding it was never proven for. The build-time cross-class canary replays the
 fact with the same slot set, so a narrowed fact that stops separating a
 family's negative fails the build instead of shipping.
 
+Authoring is optional. A guard-style fact whose families declare no
+`sanitized-args:` line is **probed** by the build: the published fact, narrowed
+to one slot, is replayed against the families that taught it, and a slot that
+still silences their negatives - while those negatives alert with no fact at
+all - is a slot the corpus itself proves. So `frensense-bundler -c corpus -o
+out.frc` ships slot sets with no authoring at all, and `sanitized-args:` is
+how you state one the probe cannot infer (a transform sanitizer, or a guard
+whose evidence is thinner than one family). A fact no probe pins keeps the
+all-arguments reading rather than being narrowed on a guess.
+
 Slots ride in the bundle payload's side tables (`sanitizer_scopes` for classes,
 `sanitizer_args` for slots) rather than in a fact variant, because the engine's
 `SanitizerFact` shape is published API. Bundles written before format v9 carry

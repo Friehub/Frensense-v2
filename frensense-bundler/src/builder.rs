@@ -7,160 +7,11 @@
 use crate::fact_extract::{extract_facts, group_families};
 use crate::format::{
     write_bundle_pinned_with_trust, BundlePattern, BundlePayload, BundleTrust, EngineRequirement,
-    SanitizerArgScope,
 };
-use frensense_engine::analysis::taint::config::TaintConfig;
-use frensense_engine::analysis::taint::facts::{
-    apply_language_entries, languages_for_exts, FactTable, LearnedFactEntry,
+use crate::sanitizer_qualification::{
+    sanitizer_arg_evidence, sanitizer_tables, verify_sanitizer_class_scope,
 };
-use frensense_engine::scan;
-
-/// The per-fact cross-class canary gate.
-///
-/// A learned sanitizer is proven for the classes it names. For every other
-/// class in which the same call is applied by a corpus family, the fact must
-/// leave that family's vulnerable negative alerting: if it silences it, the
-/// fact is cross-class and the build fails. This is the probe that would have
-/// caught both sanitizer-collapse incidents automatically.
-fn verify_sanitizer_class_scope(
-    families: &[crate::fact_extract::Family],
-    published: &[crate::fact_extract::LearnedFact],
-) -> Result<(), String> {
-    for fact in published {
-        let (entry, call, package) = match &fact.entry {
-            LearnedFactEntry::Sanitizer { call, package, .. }
-            | LearnedFactEntry::LanguageSanitizer { call, package, .. } => {
-                (&fact.entry, call, package)
-            }
-            _ => continue,
-        };
-        let classes = &fact.classes;
-        if classes.is_empty() {
-            return Err(format!(
-                "sanitizer `{call}` has no class scope; refusing to publish a cross-class fact"
-            ));
-        }
-        for family in families {
-            let Some(class) = family.metadata.class.as_deref() else {
-                continue;
-            };
-            if classes.iter().any(|c| c == class || c == "*") {
-                continue;
-            }
-            // Only families in which the sanitizer is actually applied can
-            // be a counter-probe, and only when the vulnerable twin would
-            // alert without the fact.
-            let applies = family
-                .negatives
-                .iter()
-                .any(|(_, src, _)| src.contains(call.as_str()));
-            if !applies {
-                continue;
-            }
-            let exts: Vec<&str> = family
-                .negatives
-                .iter()
-                .map(|(_, _, ext)| ext.as_str())
-                .chain(family.positives.iter().map(|(_, _, ext)| ext.as_str()))
-                .collect();
-            let langs = languages_for_exts(exts);
-            let mut config = TaintConfig::default();
-            let mut facts = FactTable::default();
-            apply_language_entries(
-                &mut config,
-                &mut facts,
-                &crate::format::default_pack().learned_facts,
-                &langs,
-            );
-            let baseline = scan::scan(&family.negatives, &config, &facts);
-            if !crate::extract::gate::alerts(&baseline) {
-                continue;
-            }
-            apply_language_entries(&mut config, &mut facts, &[entry.clone()], &langs);
-            // The trial table must apply the same qualification a consumer
-            // installs - class scope and declared argument slots - or the
-            // probe would approve a fact that cuts more than the shipped one.
-            let args = declared_sanitizer_args(families, fact, call);
-            facts.qualify_sanitizer(call, package.as_deref(), classes, &args);
-            let probed = scan::scan(&family.negatives, &config, &facts);
-            if !crate::extract::gate::alerts(&probed) {
-                return Err(format!(
-                    "cross-class sanitizer `{call}` (class(es): {}) silenced family `{}` \
-                     (class {class}); a class-scoped fact must leave every other class alerting",
-                    classes.join(", "),
-                    family.id
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-/// The payload's sanitizer qualification tables: one class-scope entry and
-/// one declared-slot entry per published sanitizer fact.
-///
-/// Both ride in side tables rather than in a wire fact variant, so the
-/// engine's published `SanitizerFact` keeps its shape; the consumer applies
-/// them with `FactTable::qualify_sanitizer`.
-fn sanitizer_tables(
-    families: &[crate::fact_extract::Family],
-    published: &[crate::fact_extract::LearnedFact],
-) -> (Vec<crate::format::SanitizerScope>, Vec<SanitizerArgScope>) {
-    let mut scopes = Vec::new();
-    let mut args = Vec::new();
-    for fact in published {
-        let (LearnedFactEntry::Sanitizer { call, package, .. }
-        | LearnedFactEntry::LanguageSanitizer { call, package, .. }) = &fact.entry
-        else {
-            continue;
-        };
-        if !fact.classes.is_empty() || fact.family.is_some() {
-            scopes.push(crate::format::SanitizerScope {
-                call: call.clone(),
-                package: package.clone(),
-                classes: fact.classes.clone(),
-                family: fact.family.clone(),
-            });
-        }
-        let declared = declared_sanitizer_args(families, fact, call);
-        if !declared.is_empty() {
-            args.push(SanitizerArgScope {
-                call: call.clone(),
-                package: package.clone(),
-                args: declared,
-            });
-        }
-    }
-    (scopes, args)
-}
-
-/// The argument slots the families that taught `fact` declare for `call`
-/// (`[frensense] sanitized-args:`), unioned and sorted.
-///
-/// A `sanitized-args` line describes its whole `[frensense]` block, so it
-/// applies to the sanitizer calls that block names (`sanitizer:`); a block
-/// that declares slots without naming a call speaks for every sanitizer the
-/// family taught. Slots declared for a call the fact table did not publish are
-/// dropped, not widened onto some other call.
-fn declared_sanitizer_args(
-    families: &[crate::fact_extract::Family],
-    fact: &crate::fact_extract::LearnedFact,
-    call: &str,
-) -> Vec<usize> {
-    let mut args: Vec<usize> = fact
-        .families
-        .iter()
-        .filter_map(|id| families.iter().find(|fam| &fam.id == id))
-        .filter(|fam| {
-            fam.metadata.sanitizers.is_empty()
-                || fam.metadata.sanitizers.iter().any(|name| name == call)
-        })
-        .flat_map(|fam| fam.metadata.sanitized_args.iter().copied())
-        .collect();
-    args.sort_unstable();
-    args.dedup();
-    args
-}
+use frensense_engine::analysis::taint::facts::LearnedFactEntry;
 
 /// §9 pipeline: corpus pairs → replay-verified learned facts → bundle bytes.
 ///
@@ -186,13 +37,16 @@ pub fn build_facts_bundle_with_trust(
     );
 
     let (learned_table, published) = extract_facts(&families);
-    verify_sanitizer_class_scope(&families, &published)?;
+    // Resolve every sanitizer's argument slots first: the canary below must
+    // replay the exact qualification the payload ships.
+    let evidence = sanitizer_arg_evidence(&families, &published);
+    verify_sanitizer_class_scope(&families, &published, &evidence)?;
 
     // Payload: one metadata pattern per family + the published facts.
     let mut entries: Vec<frensense_engine::analysis::taint::facts::LearnedFactEntry> =
         Vec::with_capacity(published.len());
     let mut policy_meta: Vec<crate::format::PolicyMeta> = Vec::new();
-    let (sanitizer_scopes, sanitizer_args) = sanitizer_tables(&families, &published);
+    let (sanitizer_scopes, sanitizer_args) = sanitizer_tables(&published, &evidence);
     for f in &published {
         entries.push(f.entry.clone());
         // A policy's tier/lifecycle are authored family metadata. They ride in
@@ -299,67 +153,4 @@ pub fn build_facts_bundle_with_trust(
         trust,
     )?;
     Ok((bytes, published))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::fact_extract::{Family, FamilyMetadata, LearnedFact};
-
-    fn family(id: &str, sanitizers: &[&str], args: &[usize]) -> Family {
-        Family {
-            id: id.to_string(),
-            positives: Vec::new(),
-            negatives: Vec::new(),
-            declared_check_call: None,
-            metadata: FamilyMetadata {
-                sanitizers: sanitizers.iter().map(|s| (*s).to_string()).collect(),
-                sanitized_args: args.to_vec(),
-                ..FamilyMetadata::default()
-            },
-        }
-    }
-
-    fn fact(call: &str, families: &[&str]) -> LearnedFact {
-        LearnedFact {
-            entry: LearnedFactEntry::Sanitizer {
-                call: call.to_string(),
-                package: None,
-                kind: "allowlist".to_string(),
-                guard_style: true,
-            },
-            classes: vec!["inj.sql".to_string()],
-            family: families.first().map(|f| (*f).to_string()),
-            support: 2,
-            status: "confirmed".to_string(),
-            families: families.iter().map(|f| (*f).to_string()).collect(),
-        }
-    }
-
-    /// A `sanitized-args:` line describes its block, so it applies to the call
-    /// that block names - and to nothing else.
-    #[test]
-    fn declared_slots_attach_to_the_calls_the_block_names() {
-        let families = vec![family("f", &["check"], &[1])];
-        assert_eq!(
-            declared_sanitizer_args(&families, &fact("check", &["f"]), "check"),
-            vec![1]
-        );
-        assert!(
-            declared_sanitizer_args(&families, &fact("other", &["f"]), "other").is_empty(),
-            "a block naming `check` says nothing about `other`"
-        );
-    }
-
-    /// A block that declares slots without a `sanitizer:` name speaks for
-    /// every sanitizer its family taught.
-    #[test]
-    fn a_block_without_a_sanitizer_name_speaks_for_its_family() {
-        let families = vec![family("f", &[], &[2, 0, 2])];
-        assert_eq!(
-            declared_sanitizer_args(&families, &fact("scrub", &["f"]), "scrub"),
-            vec![0, 2],
-            "declared slots are unioned, sorted and deduplicated"
-        );
-    }
 }

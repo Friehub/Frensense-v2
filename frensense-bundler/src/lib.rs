@@ -15,5 +15,6 @@ pub mod fact_extract;
 pub mod format;
 pub mod lint;
 pub mod pipeline;
+mod sanitizer_qualification;
 
 pub use pipeline::{run_facts_pipeline, run_facts_pipeline_with_trust};
