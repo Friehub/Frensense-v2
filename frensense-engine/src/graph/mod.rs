@@ -21,6 +21,8 @@ pub mod svfg;
 mod callgraph_query_tests;
 mod callgraph_tests;
 #[cfg(test)]
+mod callgraph_this_class_tests;
+#[cfg(test)]
 mod heap_tests;
 #[cfg(test)]
 mod steensgaard_tests;

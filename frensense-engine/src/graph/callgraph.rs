@@ -44,6 +44,7 @@ use crate::graph::module::FileAliases;
 
 mod facts;
 mod namespace;
+mod receiver;
 
 use facts::FnFacts;
 use std::collections::BTreeSet;
@@ -223,8 +224,9 @@ impl<'a> CallGraphBuilder<'a> {
                                 _ => None,
                             };
                             // `this` receiver: the enclosing function's own
-                            // name may be a qualified `Class.method`.
-                            let class = class.or_else(|| this_class_of(fname));
+                            // name may be a qualified `Class.method`. A
+                            // file-qualified name names no class.
+                            let class = class.or_else(|| receiver::this_class_of(fname));
 
                             match class {
                                 Some(c) => {
@@ -393,7 +395,7 @@ impl<'a> CallGraphBuilder<'a> {
                                     Operand::Var(r) => f.classes.get(r).cloned(),
                                     _ => None,
                                 }
-                                .or_else(|| this_class_of(fname));
+                                .or_else(|| receiver::this_class_of(fname));
                                 match class {
                                     Some(c) => {
                                         let k = method_key(&c, method);
@@ -535,11 +537,6 @@ impl<'a> CallGraphBuilder<'a> {
             hops += 1;
         }
     }
-}
-
-/// If `fname` is a qualified method name (`Class.method`), return `Class`.
-fn this_class_of(fname: &str) -> Option<String> {
-    fname.rsplit_once('.').map(|(c, _)| c.to_string())
 }
 
 #[cfg(test)]

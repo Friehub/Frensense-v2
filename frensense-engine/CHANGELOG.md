@@ -30,6 +30,14 @@ what this crate does.
 
 ### Fixed
 
+- Dispatch resolution no longer reads a file qualifier as a class. Lowered
+  names are file-qualified (`app.ts::main`), and splitting such a name on `.`
+  fabricated a class `app`, which made the unknown-receiver arm unreachable for
+  every top-level function in a file whose name contains a dot: a call like
+  `client.missing()` then bound to any program function merely named `missing`
+  and the site stopped being reported as external. The enclosing class now
+  comes only from the part after the file qualifier, and only when that part is
+  a qualified method name (#193).
 - A finding whose function has no file entry, or whose file has no source
   text, was dropped without a trace when results were located. They are now
   counted in `ScanTelemetry::suppressed` under the new reason
