@@ -84,6 +84,11 @@ pub struct FamilyMetadata {
     /// An explicit declaration is what the lint can scope-check; automatic
     /// delta sanitizers are linted against their family's `class:` instead.
     pub sanitizers: Vec<String>,
+    /// Declared validated argument slots (`sanitized-args: 1` or `1,2`).
+    /// Empty = the legacy reading, every argument the call receives. The
+    /// consumer gets these on `SanitizerFact::sanitizes_args`, which narrows
+    /// a guard-style fact to the slots it really inspects.
+    pub sanitized_args: Vec<usize>,
     /// Declared identities the positive is expected to report
     /// (`expect: policy_aget_user_by_uuid`). A `policy_<call>` entry names the
     /// policy rule the family teaches, so the call after the prefix is the
@@ -194,6 +199,7 @@ impl FamilyMetadata {
                         }
                     }
                 }
+                "sanitized-args" => meta.sanitized_args = parse_slots(value),
                 "expect" => {
                     for id in split_csv_keys(value) {
                         if !meta.expect.contains(&id) {
@@ -236,6 +242,45 @@ impl FamilyMetadata {
         }
         meta
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `sanitized-args:` names the argument slots a declared sanitizer
+    /// validates; the list uses the same separators as `sanitizer:`.
+    #[test]
+    fn parse_sanitized_args() {
+        let src =
+            "// [frensense]\n// sanitizer: check\n// sanitized-args: 1, 2\n\nexport const x = 1;\n";
+        let meta = FamilyMetadata::parse(src, "ts", 30);
+        assert_eq!(meta.sanitizers, vec!["check".to_string()]);
+        assert_eq!(meta.sanitized_args, vec![1, 2]);
+    }
+
+    /// Non-numbers are ignored and a repeated slot is kept once: a typo must
+    /// not widen or silently reorder the declared set.
+    #[test]
+    fn parse_sanitized_args_ignores_junk_and_duplicates() {
+        let src = "// [frensense]\n// sanitized-args: 0 slot 0\n\nexport const x = 1;\n";
+        let meta = FamilyMetadata::parse(src, "ts", 30);
+        assert_eq!(meta.sanitized_args, vec![0]);
+    }
+}
+
+/// Parse a declared slot list (`sanitized-args: 1, 2`): non-numbers are
+/// ignored and a repeated slot is kept once, so a typo cannot widen the set.
+fn parse_slots(value: &str) -> Vec<usize> {
+    let mut slots: Vec<usize> = Vec::new();
+    for slot in split_csv_keys(value) {
+        if let Ok(slot) = slot.parse::<usize>() {
+            if !slots.contains(&slot) {
+                slots.push(slot);
+            }
+        }
+    }
+    slots
 }
 
 /// Split a declared list (`guard:`, `sanitizer:`, `expect:`): comma and/or

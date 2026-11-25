@@ -2114,9 +2114,8 @@ mod explain_learned_rule_tests {
         LearnedFactEntry, PolicyRequirement, PolicyScope,
     };
 
-    /// A hand-built bundle carrying one learned policy (raw rule name), one
-    /// check, and one advisory pattern joined to a sink name - enough to
-    /// exercise every learned card shape.
+    /// A hand-built bundle with one learned policy, one check and one
+    /// advisory pattern joined to a sink name: every learned card shape.
     fn bundle() -> LoadedBundle {
         LoadedBundle {
             header: BundleHeader {
@@ -2131,6 +2130,7 @@ mod explain_learned_rule_tests {
                 trust: frensense_bundler::format::BundleTrust::Community,
             },
             sanitizer_scopes: Vec::new(),
+            sanitizer_args: Vec::new(),
             policy_meta: Vec::new(),
             patterns: vec![frensense_bundler::format::BundlePattern {
                 id: "family-sqli".to_string(),

@@ -22,6 +22,11 @@ what this crate does.
   argument it does not inspect, and taint arriving there still reaches its
   sink. The empty set keeps the legacy reading, so every in-tree producer
   (spec seeding, language packs, bundles) behaves exactly as before.
+- `FactTable::qualify_sanitizer`: apply a sanitizer's class scope and its
+  declared argument slots in one call, onto every installed copy of the fact
+  (a class-scoped fact is stored once per class). Bundles publish the slots
+  in their payload's `sanitizer_args` table (format v9) because no wire fact
+  variant carries them.
 
 ### Fixed
 

@@ -11,6 +11,30 @@ its replay gate, the corpus `lint` checks, and the embedded default-pack asset.
 in *this* file, so a format change - not the root changelog - is what records
 artifact compatibility.
 
+## [0.9.1]
+
+### Breaking
+
+- **`BUNDLE_VERSION` is now 9.** The v9 payload adds `sanitizer_args`: the
+  argument slots each learned sanitizer validates, authored per corpus family
+  with `[frensense] sanitized-args:`. Exactly like the class scope it rides in
+  a side table, because the engine's `SanitizerFact::sanitizes_args` has no
+  wire variant. `LoadedBundle` gains `sanitizer_args`, and
+  `effective_sanitizer_scopes` now returns an `EffectiveSanitizerScope` that
+  joins the class scope with the declared slots, so a consumer applies both
+  with one `FactTable::qualify_sanitizer` call. v6, v7 and v8 bundles still
+  load unchanged, with empty tables and the legacy "all arguments" reading.
+
+### Added
+
+- `[frensense] sanitized-args: <slot>[, ...]` on a corpus family: the slots a
+  declared sanitizer actually inspects (`sanitizer: check` +
+  `sanitized-args: 1`). The build-time cross-class canary replays the fact
+  with the same qualification, so a narrowed fact that stops separating a
+  family's negative fails the build instead of shipping.
+- `SanitizerArgScope` and `BundlePayloadV9` payload types,
+  `EffectiveSanitizerScope`, and `LoadedBundle::sanitizer_args`.
+
 ## [0.9.0]
 
 ### Breaking

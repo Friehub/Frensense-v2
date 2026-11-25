@@ -2,7 +2,7 @@
   "frensense-bundler::clippy::allow_attributes": 12,
   "frensense-bundler::clippy::disallowed_methods": 1,
   "frensense-bundler::clippy::exhaustive_enums": 3,
-  "frensense-bundler::clippy::exhaustive_structs": 19,
+  "frensense-bundler::clippy::exhaustive_structs": 18,
   "frensense-bundler::clippy::expect_used": 15,
   "frensense-bundler::clippy::float_arithmetic": 4,
   "frensense-bundler::clippy::indexing_slicing": 22,

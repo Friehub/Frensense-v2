@@ -146,6 +146,42 @@ impl FactTable {
         true
     }
 
+    /// Apply a sanitizer's published qualification in one step: its class
+    /// scope (as [`Self::scope_sanitizer`]) and the argument slots it
+    /// validates.
+    ///
+    /// `args` is the bundle's `sanitized-args` declaration. No wire fact
+    /// variant carries it, so - like the class scope - it rides in a payload
+    /// side table and is applied here, onto every installed copy of the fact.
+    /// An empty slice leaves the legacy "all arguments" reading untouched.
+    /// Returns `false` when no fact is installed for `(package, call)`.
+    pub fn qualify_sanitizer(
+        &mut self,
+        call: &str,
+        package: Option<&str>,
+        classes: &[String],
+        args: &[usize],
+    ) -> bool {
+        let mut installed = self.scope_sanitizer(call, package, classes);
+        if args.is_empty() {
+            return installed;
+        }
+        let slots: std::collections::BTreeSet<usize> = args.iter().copied().collect();
+        for ((_, scoped_call), fact) in &mut self.scoped_sanitizer_facts {
+            if scoped_call == call && fact.package.as_deref() == package {
+                fact.sanitizes_args.clone_from(&slots);
+                installed = true;
+            }
+        }
+        if let Some(fact) = self.sanitizer_facts.get_mut(call)
+            && fact.package.as_deref() == package
+        {
+            fact.sanitizes_args.clone_from(&slots);
+            installed = true;
+        }
+        installed
+    }
+
     /// The sink classes `call` was proven to defeat for `origin_package`.
     ///
     /// Empty means the fact is unscoped (valid for every class, the legacy
@@ -228,4 +264,58 @@ pub(crate) fn install_language_sanitizer(
         .sanitizer_facts
         .entry(call.to_string())
         .or_insert(fact);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    fn table() -> FactTable {
+        let mut t = FactTable::default();
+        t.sanitizer_facts.insert(
+            "check".to_string(),
+            SanitizerFact {
+                call: "check".to_string(),
+                package: None,
+                kind: "allowlist".to_string(),
+                sanitizes_args: BTreeSet::new(),
+                guard_style: true,
+            },
+        );
+        t
+    }
+
+    /// Class scope and declared slots land on the same installed fact, so a
+    /// consumer cannot apply half a bundle qualification.
+    #[test]
+    fn qualification_applies_classes_and_slots_together() {
+        let mut t = table();
+        assert!(t.qualify_sanitizer("check", None, &["inj.sql".to_string()], &[1]));
+        let fact = t
+            .sanitizer_fact_scoped("check", None)
+            .expect("fact installed");
+        assert_eq!(fact.sanitizes_args, BTreeSet::from([1usize]));
+        assert_eq!(t.sanitizer_classes("check", None), ["inj.sql".to_string()]);
+    }
+
+    /// No declared slots keeps the legacy "all arguments" reading instead of
+    /// inventing slot 0.
+    #[test]
+    fn no_declared_slots_keeps_the_legacy_reading() {
+        let mut t = table();
+        assert!(t.qualify_sanitizer("check", None, &[], &[]));
+        assert!(
+            t.sanitizer_fact_scoped("check", None)
+                .expect("fact installed")
+                .sanitizes_args
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn qualifying_an_unknown_fact_reports_it() {
+        let mut t = table();
+        assert!(!t.qualify_sanitizer("nope", None, &[], &[0]));
+    }
 }

@@ -11,6 +11,7 @@
 
 mod default_pack;
 mod frc;
+mod legacy;
 mod types;
 
 pub use default_pack::{
@@ -23,5 +24,6 @@ pub use frc::{
 };
 pub use types::{
     load_bundle, BundlePattern, BundlePayload, BundlePayloadV5, BundlePayloadV6, BundlePayloadV8,
-    LoadedBundle, PolicyMeta, SanitizerScope,
+    BundlePayloadV9, EffectiveSanitizerScope, LoadedBundle, PolicyMeta, SanitizerArgScope,
+    SanitizerScope,
 };

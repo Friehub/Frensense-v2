@@ -200,11 +200,10 @@ impl Engine {
                 let permitted = loaded.effective_learned_facts();
                 apply_language_entries(&mut config, &mut facts, &permitted, &scanned_langs);
                 facts.merge(&fact_table_from_entries(&permitted));
-                // Class scopes ride beside the facts in the payload (v8+), so
-                // the installed fact keeps the engine's published shape and
-                // is re-scoped here to the classes its family proved.
-                for scope in loaded.effective_sanitizer_scopes() {
-                    facts.scope_sanitizer(&scope.call, scope.package.as_deref(), &scope.classes);
+                // Class and slot scopes ride beside the facts in the payload
+                // (v8+); the installed fact keeps the engine's shape.
+                for s in loaded.effective_sanitizer_scopes() {
+                    facts.qualify_sanitizer(s.call, s.package, s.classes, s.args);
                 }
             }
             // Bundle-learned source patterns widen the taint config.
@@ -1215,7 +1214,7 @@ mod bundle_pattern_tests {
     use super::{advisory_from_checker, apply_bundle_pattern};
     use crate::Severity;
     use crate::engine::Engine;
-    use frensense_bundler::format::{BundlePattern, BundlePayloadV8, write_bundle};
+    use frensense_bundler::format::{BundlePattern, BundlePayload, write_bundle};
     use frensense_engine::analysis::taint::facts::Provenance;
     use frensense_engine::checks::CheckerFinding;
 
@@ -1414,11 +1413,12 @@ mod bundle_pattern_tests {
     /// the load -> index -> advisory path.
     #[test]
     fn bundle_loaded_pattern_reaches_scan_advisories() {
-        let payload = BundlePayloadV8 {
+        let payload = BundlePayload {
             patterns: vec![pattern(&["weak_hash"])],
             learned_facts: vec![],
             policy_pack: vec![],
             sanitizer_scopes: vec![],
+            sanitizer_args: vec![],
             policy_meta: vec![],
         };
         let bytes: &'static [u8] = Box::leak(

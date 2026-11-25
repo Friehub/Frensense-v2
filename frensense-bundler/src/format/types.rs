@@ -89,463 +89,7 @@ impl From<V4Pattern> for BundlePattern {
     }
 }
 
-/// Frozen v5 layout of `LearnedFactEntry` for deserializing v4 and v5 bundles.
-/// Bincode is positional and non-self-describing; adding fields like `package`
-/// to `LearnedFactEntry` requires freezing this structure for backwards compatibility.
-#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
-pub enum LearnedFactEntryV5 {
-    Source {
-        pattern: String,
-    },
-    Sink {
-        call: String,
-        dangerous_args: std::collections::BTreeSet<usize>,
-        binding_args_safe: bool,
-    },
-    Sanitizer {
-        call: String,
-        kind: String,
-        guard_style: bool,
-    },
-    Policy {
-        rule: String,
-        when_call: String,
-        #[serde(default)]
-        require: Vec<frensense_engine::analysis::taint::facts::PolicyRequirement>,
-        #[serde(default)]
-        scope: frensense_engine::analysis::taint::facts::PolicyScope,
-        message: String,
-        severity: String,
-    },
-    Check {
-        rule: String,
-        call: String,
-        message: String,
-        severity: String,
-        #[serde(default)]
-        unless_guard: Option<String>,
-        #[serde(default)]
-        unless_range_check: Option<Vec<String>>,
-    },
-    MemoryContract {
-        name: String,
-        returns_fresh: bool,
-        return_capacity: frensense_engine::checks::memory_summary::CapacitySpec,
-        consumes_params: Vec<usize>,
-    },
-    WeakCrypto(frensense_engine::analysis::taint::facts::WeakCryptoFact),
-    GuardBypass(frensense_engine::analysis::taint::facts::GuardBypassFact),
-    SchemaPolicy(frensense_engine::analysis::taint::facts::SchemaPolicyFact),
-    GrammarRole {
-        language: String,
-        node_kind: String,
-        role: frensense_engine::analysis::taint::facts::TeachableNodeRole,
-    },
-    GrammarFeature {
-        language: String,
-        node_kind: String,
-        feature: frensense_engine::analysis::taint::facts::GrammarFeature,
-    },
-    Allocator {
-        name: String,
-    },
-    Deallocator {
-        name: String,
-    },
-    IdorFinderSink {
-        call: String,
-        keys: Vec<String>,
-    },
-    IdorKey {
-        key: String,
-    },
-    Propagator {
-        call: String,
-        input_args: Vec<usize>,
-        preserves_taint: bool,
-    },
-    GuardDenylistPattern {
-        pattern: String,
-    },
-    IntegerOverflowRule {
-        rule: String,
-        wrap_threshold: u128,
-        severity: String,
-        message: String,
-    },
-    Hints {
-        kind: frensense_engine::analysis::taint::facts::HintKind,
-        values: Vec<String>,
-    },
-    WeakPrimitiveRule {
-        rule_id: String,
-        selector_calls: Vec<String>,
-        bare_calls: Vec<String>,
-        selector_slot: usize,
-        weak_selectors: Vec<String>,
-        requires_credential_context: bool,
-        severity: String,
-        message: String,
-    },
-    InsecureConfigRule {
-        prefix: String,
-        selectors: Vec<String>,
-        rule_id: String,
-        severity: String,
-        message: String,
-    },
-    KeySizeRule {
-        rule_id: String,
-        call: String,
-        slot: usize,
-        min_bits: i64,
-        kind: String,
-        severity: String,
-        message: String,
-    },
-    SuspiciousHashWrappers {
-        calls: Vec<String>,
-    },
-    BufferBuiltin {
-        name: String,
-        dst_arg: Option<usize>,
-        src_arg: Option<usize>,
-        len_arg: usize,
-    },
-    LanguageSink {
-        language: String,
-        call: String,
-        role: String,
-    },
-    LanguageSinkSlots {
-        language: String,
-        call: String,
-        dangerous_args: std::collections::BTreeSet<usize>,
-        binding_args_safe: bool,
-    },
-    LanguageIdorSink {
-        language: String,
-        call: String,
-        keys: Vec<String>,
-    },
-    LanguageSource {
-        language: String,
-        pattern: String,
-    },
-    LanguageSanitizer {
-        language: String,
-        call: String,
-        kind: String,
-        guard_style: bool,
-    },
-    LanguagePropagator {
-        language: String,
-        call: String,
-        tainted_arg: Option<usize>,
-        tainted_receiver: bool,
-    },
-    LanguageSessionRoot {
-        language: String,
-        root: String,
-    },
-    LanguageRoutePattern {
-        language: String,
-        pattern: String,
-    },
-    StackAllocators {
-        values: Vec<String>,
-    },
-    CollectionConstructors {
-        values: Vec<String>,
-    },
-    SchemaDescribeMethods {
-        values: Vec<String>,
-    },
-    NullTokens {
-        values: Vec<String>,
-    },
-    SessionAccessors {
-        values: Vec<String>,
-    },
-    ReceiverParams {
-        values: Vec<String>,
-    },
-    LanguageAmbiguousVerbs {
-        language: String,
-        values: Vec<String>,
-    },
-}
-
-impl From<LearnedFactEntryV5> for LearnedFactEntry {
-    fn from(v: LearnedFactEntryV5) -> Self {
-        match v {
-            LearnedFactEntryV5::Source { pattern } => LearnedFactEntry::Source {
-                pattern,
-                package: None,
-            },
-            LearnedFactEntryV5::Sink {
-                call,
-                dangerous_args,
-                binding_args_safe,
-            } => LearnedFactEntry::Sink {
-                call,
-                package: None,
-                dangerous_args,
-                binding_args_safe,
-            },
-            LearnedFactEntryV5::Sanitizer {
-                call,
-                kind,
-                guard_style,
-            } => LearnedFactEntry::Sanitizer {
-                call,
-                package: None,
-                kind,
-                guard_style,
-            },
-            LearnedFactEntryV5::Policy {
-                rule,
-                when_call,
-                require,
-                scope,
-                message,
-                severity,
-            } => LearnedFactEntry::Policy {
-                rule,
-                when_call,
-                require,
-                scope,
-                message,
-                severity,
-            },
-            LearnedFactEntryV5::Check {
-                rule,
-                call,
-                message,
-                severity,
-                unless_guard,
-                unless_range_check,
-            } => LearnedFactEntry::Check {
-                rule,
-                call,
-                message,
-                severity,
-                unless_guard,
-                unless_range_check,
-            },
-            LearnedFactEntryV5::MemoryContract {
-                name,
-                returns_fresh,
-                return_capacity,
-                consumes_params,
-            } => LearnedFactEntry::MemoryContract {
-                name,
-                returns_fresh,
-                return_capacity,
-                consumes_params,
-            },
-            LearnedFactEntryV5::WeakCrypto(f) => LearnedFactEntry::WeakCrypto(f),
-            LearnedFactEntryV5::GuardBypass(f) => LearnedFactEntry::GuardBypass(f),
-            LearnedFactEntryV5::SchemaPolicy(f) => LearnedFactEntry::SchemaPolicy(f),
-            LearnedFactEntryV5::GrammarRole {
-                language,
-                node_kind,
-                role,
-            } => LearnedFactEntry::GrammarRole {
-                language,
-                node_kind,
-                role,
-            },
-            LearnedFactEntryV5::GrammarFeature {
-                language,
-                node_kind,
-                feature,
-            } => LearnedFactEntry::GrammarFeature {
-                language,
-                node_kind,
-                feature,
-            },
-            LearnedFactEntryV5::Allocator { name } => LearnedFactEntry::Allocator { name },
-            LearnedFactEntryV5::Deallocator { name } => LearnedFactEntry::Deallocator { name },
-            LearnedFactEntryV5::IdorFinderSink { call, keys } => {
-                LearnedFactEntry::IdorFinderSink { call, keys }
-            }
-            LearnedFactEntryV5::IdorKey { key } => LearnedFactEntry::IdorKey { key },
-            LearnedFactEntryV5::Propagator {
-                call,
-                input_args,
-                preserves_taint,
-            } => LearnedFactEntry::Propagator {
-                call,
-                input_args,
-                preserves_taint,
-            },
-            LearnedFactEntryV5::GuardDenylistPattern { pattern } => {
-                LearnedFactEntry::GuardDenylistPattern { pattern }
-            }
-            LearnedFactEntryV5::IntegerOverflowRule {
-                rule,
-                wrap_threshold,
-                severity,
-                message,
-            } => LearnedFactEntry::IntegerOverflowRule {
-                rule,
-                wrap_threshold,
-                severity,
-                message,
-            },
-            LearnedFactEntryV5::Hints { kind, values } => LearnedFactEntry::Hints { kind, values },
-            LearnedFactEntryV5::WeakPrimitiveRule {
-                rule_id,
-                selector_calls,
-                bare_calls,
-                selector_slot,
-                weak_selectors,
-                requires_credential_context,
-                severity,
-                message,
-            } => LearnedFactEntry::WeakPrimitiveRule {
-                rule_id,
-                selector_calls,
-                bare_calls,
-                selector_slot,
-                weak_selectors,
-                requires_credential_context,
-                severity,
-                message,
-            },
-            LearnedFactEntryV5::InsecureConfigRule {
-                prefix,
-                selectors,
-                rule_id,
-                severity,
-                message,
-            } => LearnedFactEntry::InsecureConfigRule {
-                prefix,
-                selectors,
-                rule_id,
-                severity,
-                message,
-            },
-            LearnedFactEntryV5::KeySizeRule {
-                rule_id,
-                call,
-                slot,
-                min_bits,
-                kind,
-                severity,
-                message,
-            } => LearnedFactEntry::KeySizeRule {
-                rule_id,
-                call,
-                slot,
-                min_bits,
-                kind,
-                severity,
-                message,
-            },
-            LearnedFactEntryV5::SuspiciousHashWrappers { calls } => {
-                LearnedFactEntry::SuspiciousHashWrappers { calls }
-            }
-            LearnedFactEntryV5::BufferBuiltin {
-                name,
-                dst_arg,
-                src_arg,
-                len_arg,
-            } => LearnedFactEntry::BufferBuiltin {
-                name,
-                dst_arg,
-                src_arg,
-                len_arg,
-            },
-            LearnedFactEntryV5::LanguageSink {
-                language,
-                call,
-                role,
-            } => LearnedFactEntry::LanguageSink {
-                language,
-                call,
-                role,
-            },
-            LearnedFactEntryV5::LanguageSinkSlots {
-                language,
-                call,
-                dangerous_args,
-                binding_args_safe,
-            } => LearnedFactEntry::LanguageSinkSlots {
-                language,
-                call,
-                package: None,
-                dangerous_args,
-                binding_args_safe,
-            },
-            LearnedFactEntryV5::LanguageIdorSink {
-                language,
-                call,
-                keys,
-            } => LearnedFactEntry::LanguageIdorSink {
-                language,
-                call,
-                keys,
-            },
-            LearnedFactEntryV5::LanguageSource { language, pattern } => {
-                LearnedFactEntry::LanguageSource {
-                    language,
-                    pattern,
-                    package: None,
-                }
-            }
-            LearnedFactEntryV5::LanguageSanitizer {
-                language,
-                call,
-                kind,
-                guard_style,
-            } => LearnedFactEntry::LanguageSanitizer {
-                language,
-                call,
-                package: None,
-                kind,
-                guard_style,
-            },
-            LearnedFactEntryV5::LanguagePropagator {
-                language,
-                call,
-                tainted_arg,
-                tainted_receiver,
-            } => LearnedFactEntry::LanguagePropagator {
-                language,
-                call,
-                tainted_arg,
-                tainted_receiver,
-            },
-            LearnedFactEntryV5::LanguageSessionRoot { language, root } => {
-                LearnedFactEntry::LanguageSessionRoot { language, root }
-            }
-            LearnedFactEntryV5::LanguageRoutePattern { language, pattern } => {
-                LearnedFactEntry::LanguageRoutePattern { language, pattern }
-            }
-            LearnedFactEntryV5::StackAllocators { values } => {
-                LearnedFactEntry::StackAllocators { values }
-            }
-            LearnedFactEntryV5::CollectionConstructors { values } => {
-                LearnedFactEntry::CollectionConstructors { values }
-            }
-            LearnedFactEntryV5::SchemaDescribeMethods { values } => {
-                LearnedFactEntry::SchemaDescribeMethods { values }
-            }
-            LearnedFactEntryV5::NullTokens { values } => LearnedFactEntry::NullTokens { values },
-            LearnedFactEntryV5::SessionAccessors { values } => {
-                LearnedFactEntry::SessionAccessors { values }
-            }
-            LearnedFactEntryV5::ReceiverParams { values } => {
-                LearnedFactEntry::ReceiverParams { values }
-            }
-            LearnedFactEntryV5::LanguageAmbiguousVerbs { language, values } => {
-                LearnedFactEntry::LanguageAmbiguousVerbs { language, values }
-            }
-        }
-    }
-}
+use super::legacy::LearnedFactEntryV5;
 
 /// The v5 payload: learned facts plus the authored-policy section.
 /// Kept frozen with `LearnedFactEntryV5` so v5 bundles keep loading cleanly.
@@ -577,6 +121,7 @@ pub struct BundlePayloadV6 {
 /// plain sanitizer, and the consumer applies the scope with
 /// [`frensense_engine::analysis::taint::facts::FactTable::scope_sanitizer`].
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SanitizerScope {
     /// Sanitizing call name the scope applies to.
     pub call: String,
@@ -588,9 +133,29 @@ pub struct SanitizerScope {
     pub family: Option<String>,
 }
 
+impl SanitizerScope {
+    /// A class scope for one sanitizer fact. `classes` may be empty (a bundle
+    /// that ships a sanitizer with no scope is withheld on load).
+    #[must_use]
+    pub fn new(
+        call: String,
+        package: Option<String>,
+        classes: Vec<String>,
+        family: Option<String>,
+    ) -> Self {
+        Self {
+            call,
+            package,
+            classes,
+            family,
+        }
+    }
+}
+
 /// Reporting metadata published for a policy fact with the same `rule` in the
 /// same payload: its precision tier and lifecycle state.
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PolicyMeta {
     /// Rule id of the policy this decorates.
     pub rule: String,
@@ -617,8 +182,44 @@ pub struct BundlePayloadV8 {
     pub policy_meta: Vec<PolicyMeta>,
 }
 
+/// Argument slots published for a sanitizer fact with the same `(call,
+/// package)` in the same payload (v9+).
+///
+/// [`frensense_engine::analysis::taint::facts::SanitizerFact::sanitizes_args`]
+/// is a published engine field that no fact variant carries, so - exactly like
+/// the class scope - it rides in a payload side table and the consumer applies
+/// it with `FactTable::scope_sanitizer_with_args`. No entry (or an empty
+/// `args`) is the legacy "all arguments" reading.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SanitizerArgScope {
+    /// Sanitizing call name the slots apply to.
+    pub call: String,
+    /// Package qualification the slots apply to (`None` = unscoped).
+    pub package: Option<String>,
+    /// Argument slots the call validates, in declaration order.
+    pub args: Vec<usize>,
+}
+
+/// The v9 payload: v8 plus the argument-slot table for sanitizer facts.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct BundlePayloadV9 {
+    pub patterns: Vec<BundlePattern>,
+    #[serde(default)]
+    pub learned_facts: Vec<LearnedFactEntry>,
+    #[serde(default)]
+    pub policy_pack: Vec<AuthoredPolicyEntry>,
+    #[serde(default)]
+    pub sanitizer_scopes: Vec<SanitizerScope>,
+    #[serde(default)]
+    pub policy_meta: Vec<PolicyMeta>,
+    /// Argument slots validated by the sanitizer facts in `learned_facts`.
+    #[serde(default)]
+    pub sanitizer_args: Vec<SanitizerArgScope>,
+}
+
 /// Alias for the latest bundle payload.
-pub type BundlePayload = BundlePayloadV8;
+pub type BundlePayload = BundlePayloadV9;
 
 #[derive(Debug, Clone)]
 pub struct LoadedBundle {
@@ -632,6 +233,28 @@ pub struct LoadedBundle {
     pub sanitizer_scopes: Vec<SanitizerScope>,
     /// Policy tier/lifecycle metadata (empty before v8).
     pub policy_meta: Vec<PolicyMeta>,
+    /// Sanitizer argument-slot scopes (empty before v9).
+    pub sanitizer_args: Vec<SanitizerArgScope>,
+}
+
+/// One sanitizer fact's published qualification, resolved for install.
+///
+/// The class scope and the argument-slot scope live in separate payload
+/// tables keyed by `(call, package)`; this view joins them once so a consumer
+/// applies both with one call and cannot apply half of a fact.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct EffectiveSanitizerScope<'a> {
+    /// Sanitizing call name.
+    pub call: &'a str,
+    /// Package qualification (`None` = unscoped).
+    pub package: Option<&'a str>,
+    /// Classes the fact was proven to defeat (empty = legacy universal).
+    pub classes: &'a [String],
+    /// Argument slots the fact validates (empty = all arguments).
+    pub args: &'a [usize],
+    /// Teaching family, for suppression provenance.
+    pub family: Option<&'a str>,
 }
 
 impl LoadedBundle {
@@ -746,14 +369,15 @@ impl LoadedBundle {
         out
     }
 
-    /// The sanitizer class scopes this bundle's trust tier permits it to ship.
+    /// The sanitizer qualifications this bundle's trust tier permits it to
+    /// ship: class scope joined with the argument-slot scope.
     ///
     /// One entry per sanitizer fact that survived
     /// [`Self::effective_learned_facts`]. A consumer installs the fact from
-    /// the entry list, then applies the scope with
-    /// [`frensense_engine::analysis::taint::facts::FactTable::scope_sanitizer`].
+    /// the entry list, then applies the qualification with
+    /// `FactTable::scope_sanitizer_with_args`.
     #[must_use]
-    pub fn effective_sanitizer_scopes(&self) -> Vec<&SanitizerScope> {
+    pub fn effective_sanitizer_scopes(&self) -> Vec<EffectiveSanitizerScope<'_>> {
         self.sanitizer_scopes
             .iter()
             .filter(|scope| {
@@ -768,6 +392,17 @@ impl LoadedBundle {
                                 if call == &scope.call && package == &scope.package
                         )
                     })
+            })
+            .map(|scope| EffectiveSanitizerScope {
+                call: &scope.call,
+                package: scope.package.as_deref(),
+                classes: &scope.classes,
+                args: self
+                    .sanitizer_args
+                    .iter()
+                    .find(|a| a.call == scope.call && a.package == scope.package)
+                    .map_or(&[], |a| a.args.as_slice()),
+                family: scope.family.as_deref(),
             })
             .collect()
     }
@@ -810,8 +445,19 @@ pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
     // - == 5: frozen v5 payload with LearnedFactEntryV5 converted to modern entries
     // - == 4: frozen v4 payload with V4Pattern and LearnedFactEntryV5 converted to modern entries
     // - < 4: legacy pattern vector
-    let (patterns, learned_facts, policy_pack, sanitizer_scopes, policy_meta) =
-        if header.version >= 8 {
+    let (patterns, learned_facts, policy_pack, sanitizer_scopes, policy_meta, sanitizer_args) =
+        if header.version >= 9 {
+            let payload: BundlePayloadV9 = bincode::deserialize(payload_bytes)
+                .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
+            (
+                payload.patterns,
+                payload.learned_facts,
+                payload.policy_pack,
+                payload.sanitizer_scopes,
+                payload.policy_meta,
+                payload.sanitizer_args,
+            )
+        } else if header.version >= 8 {
             let payload: BundlePayloadV8 = bincode::deserialize(payload_bytes)
                 .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
             (
@@ -820,6 +466,7 @@ pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
                 payload.policy_pack,
                 payload.sanitizer_scopes,
                 payload.policy_meta,
+                Vec::new(),
             )
         } else if header.version >= 6 {
             let payload: BundlePayloadV6 = bincode::deserialize(payload_bytes)
@@ -828,6 +475,7 @@ pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
                 payload.patterns,
                 payload.learned_facts,
                 payload.policy_pack,
+                Vec::new(),
                 Vec::new(),
                 Vec::new(),
             )
@@ -842,6 +490,7 @@ pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
                     .map(LearnedFactEntry::from)
                     .collect(),
                 payload.policy_pack,
+                Vec::new(),
                 Vec::new(),
                 Vec::new(),
             )
@@ -861,6 +510,7 @@ pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
                     Vec::new(),
                     Vec::new(),
                     Vec::new(),
+                    Vec::new(),
                 ),
                 Err(e) => match bincode::deserialize::<Vec<LegacyPattern>>(payload_bytes) {
                     Ok(_) => {
@@ -868,7 +518,14 @@ pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
                             "legacy fingerprint bundle loaded (version {}); no facts available",
                             header.version
                         );
-                        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new())
+                        (
+                            Vec::new(),
+                            Vec::new(),
+                            Vec::new(),
+                            Vec::new(),
+                            Vec::new(),
+                            Vec::new(),
+                        )
                     }
                     Err(_) => return Err(format!("Failed to deserialize bundle: {}", e)),
                 },
@@ -890,6 +547,7 @@ pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
         policy_pack,
         sanitizer_scopes,
         policy_meta,
+        sanitizer_args,
     })
 }
 
@@ -1000,8 +658,8 @@ mod tests {
 
     /// A payload round-trip preserves package metadata and policy pack.
     #[test]
-    fn v6_round_trip_preserves_package_and_policy_pack() {
-        let payload = BundlePayloadV8 {
+    fn payload_round_trip_preserves_package_and_policy_pack() {
+        let payload = BundlePayload {
             patterns: vec![],
             learned_facts: vec![LearnedFactEntry::Sink {
                 call: "query".to_string(),
@@ -1020,6 +678,7 @@ mod tests {
             })],
             sanitizer_scopes: Vec::new(),
             policy_meta: Vec::new(),
+            sanitizer_args: Vec::new(),
         };
         // `write_bundle` always stamps the current envelope version, so the
         // payload must be the current layout.
@@ -1061,5 +720,79 @@ mod tests {
             )),
             "{err}"
         );
+    }
+
+    fn scope(call: &str) -> SanitizerScope {
+        SanitizerScope {
+            call: call.to_string(),
+            package: None,
+            classes: vec!["inj.sql".to_string()],
+            family: Some("family-a".to_string()),
+        }
+    }
+
+    fn sanitizer(call: &str) -> LearnedFactEntry {
+        LearnedFactEntry::Sanitizer {
+            call: call.to_string(),
+            package: None,
+            kind: "allowlist".to_string(),
+            guard_style: true,
+        }
+    }
+
+    /// A v8 payload still loads: it predates the argument-slot table, so the
+    /// scope resolves with the legacy "all arguments" reading rather than
+    /// being dropped (a dropped scope would re-open cross-class cutting).
+    #[test]
+    fn v8_bundle_loads_without_argument_slots() {
+        let payload = bincode::serialize(&BundlePayloadV8 {
+            patterns: vec![],
+            learned_facts: vec![sanitizer("check")],
+            policy_pack: vec![],
+            sanitizer_scopes: vec![scope("check")],
+            policy_meta: vec![],
+        })
+        .expect("v8 payload serializes");
+        let mut header = BundleHeader::current(0, *blake3::hash(&payload).as_bytes());
+        header.version = 8;
+        let header_bytes = bincode::serialize(&header).expect("header serializes");
+        let mut bytes = (header_bytes.len() as u32).to_le_bytes().to_vec();
+        bytes.extend_from_slice(&header_bytes);
+        bytes.extend_from_slice(&payload);
+
+        let loaded = load_bundle(&bytes).expect("v8 bundle loads");
+        assert_eq!(loaded.header.version, 8);
+        assert!(loaded.sanitizer_args.is_empty());
+        let scopes = loaded.effective_sanitizer_scopes();
+        assert_eq!(scopes.len(), 1);
+        assert_eq!(scopes[0].call, "check");
+        assert_eq!(scopes[0].classes.to_vec(), vec!["inj.sql".to_string()]);
+        assert!(scopes[0].args.is_empty(), "v8 bundles carry no slots");
+    }
+
+    /// The v9 payload round-trips the argument-slot table, and the scope view
+    /// joins it with the class scope.
+    #[test]
+    fn v9_round_trip_preserves_sanitizer_args() {
+        let payload = BundlePayload {
+            patterns: vec![],
+            learned_facts: vec![sanitizer("check")],
+            policy_pack: vec![],
+            sanitizer_scopes: vec![scope("check")],
+            policy_meta: vec![],
+            sanitizer_args: vec![SanitizerArgScope {
+                call: "check".to_string(),
+                package: None,
+                args: vec![1],
+            }],
+        };
+        let bytes = write_bundle(&payload, 0).expect("write");
+        let loaded = load_bundle(&bytes).expect("bundle loads");
+        assert_eq!(loaded.header.version, crate::format::BUNDLE_VERSION);
+        let scopes = loaded.effective_sanitizer_scopes();
+        assert_eq!(scopes.len(), 1);
+        assert_eq!(scopes[0].args.to_vec(), vec![1usize]);
+        assert_eq!(scopes[0].classes.to_vec(), vec!["inj.sql".to_string()]);
+        assert_eq!(scopes[0].family, Some("family-a"));
     }
 }

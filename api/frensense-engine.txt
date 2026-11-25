@@ -447,6 +447,7 @@ pub frensense_engine::analysis::taint::facts::FactTable::weak_hash_disclaimer_to
 pub frensense_engine::analysis::taint::facts::FactTable::weak_hash_rules: alloc::vec::Vec<frensense_engine::analysis::taint::facts::WeakPrimitiveRule>
 impl frensense_engine::analysis::taint::facts::FactTable
 pub fn frensense_engine::analysis::taint::facts::FactTable::add_class_scoped_sanitizer(&mut self, frensense_engine::analysis::taint::facts::SanitizerFact, &[alloc::string::String])
+pub fn frensense_engine::analysis::taint::facts::FactTable::qualify_sanitizer(&mut self, &str, core::option::Option<&str>, &[alloc::string::String], &[usize]) -> bool
 pub fn frensense_engine::analysis::taint::facts::FactTable::sanitizer_classes(&self, &str, core::option::Option<&str>) -> alloc::vec::Vec<alloc::string::String>
 pub fn frensense_engine::analysis::taint::facts::FactTable::sanitizer_fact(&self, &str) -> core::option::Option<&frensense_engine::analysis::taint::facts::SanitizerFact>
 pub fn frensense_engine::analysis::taint::facts::FactTable::scope_sanitizer(&mut self, &str, core::option::Option<&str>, &[alloc::string::String]) -> bool
