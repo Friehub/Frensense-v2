@@ -108,8 +108,8 @@ pub struct frensense_bundler::extract::gate::PreparedFamily
 pub frensense_bundler::extract::gate::PreparedFamily::calls: alloc::collections::btree::set::BTreeSet<alloc::string::String>
 pub frensense_bundler::extract::gate::PreparedFamily::cwe: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::gate::PreparedFamily::id: alloc::string::String
-pub frensense_bundler::extract::gate::PreparedFamily::neg: frensense_engine::scan::PreparedProgram
-pub frensense_bundler::extract::gate::PreparedFamily::pos: frensense_engine::scan::PreparedProgram
+pub frensense_bundler::extract::gate::PreparedFamily::neg: frensense_engine::scan::prepared::PreparedProgram
+pub frensense_bundler::extract::gate::PreparedFamily::pos: frensense_engine::scan::prepared::PreparedProgram
 impl frensense_bundler::extract::gate::PreparedFamily
 pub fn frensense_bundler::extract::gate::PreparedFamily::alert_flags(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable) -> (bool, bool)
 pub fn frensense_bundler::extract::gate::PreparedFamily::downstream_echo(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable, &str, &alloc::collections::btree::set::BTreeSet<alloc::string::String>) -> core::option::Option<alloc::string::String>
@@ -243,8 +243,8 @@ pub struct frensense_bundler::extract::PreparedFamily
 pub frensense_bundler::extract::PreparedFamily::calls: alloc::collections::btree::set::BTreeSet<alloc::string::String>
 pub frensense_bundler::extract::PreparedFamily::cwe: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::PreparedFamily::id: alloc::string::String
-pub frensense_bundler::extract::PreparedFamily::neg: frensense_engine::scan::PreparedProgram
-pub frensense_bundler::extract::PreparedFamily::pos: frensense_engine::scan::PreparedProgram
+pub frensense_bundler::extract::PreparedFamily::neg: frensense_engine::scan::prepared::PreparedProgram
+pub frensense_bundler::extract::PreparedFamily::pos: frensense_engine::scan::prepared::PreparedProgram
 impl frensense_bundler::extract::gate::PreparedFamily
 pub fn frensense_bundler::extract::gate::PreparedFamily::alert_flags(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable) -> (bool, bool)
 pub fn frensense_bundler::extract::gate::PreparedFamily::downstream_echo(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable, &str, &alloc::collections::btree::set::BTreeSet<alloc::string::String>) -> core::option::Option<alloc::string::String>
@@ -375,8 +375,8 @@ pub struct frensense_bundler::fact_extract::gate::PreparedFamily
 pub frensense_bundler::fact_extract::gate::PreparedFamily::calls: alloc::collections::btree::set::BTreeSet<alloc::string::String>
 pub frensense_bundler::fact_extract::gate::PreparedFamily::cwe: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::gate::PreparedFamily::id: alloc::string::String
-pub frensense_bundler::fact_extract::gate::PreparedFamily::neg: frensense_engine::scan::PreparedProgram
-pub frensense_bundler::fact_extract::gate::PreparedFamily::pos: frensense_engine::scan::PreparedProgram
+pub frensense_bundler::fact_extract::gate::PreparedFamily::neg: frensense_engine::scan::prepared::PreparedProgram
+pub frensense_bundler::fact_extract::gate::PreparedFamily::pos: frensense_engine::scan::prepared::PreparedProgram
 impl frensense_bundler::extract::gate::PreparedFamily
 pub fn frensense_bundler::extract::gate::PreparedFamily::alert_flags(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable) -> (bool, bool)
 pub fn frensense_bundler::extract::gate::PreparedFamily::downstream_echo(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable, &str, &alloc::collections::btree::set::BTreeSet<alloc::string::String>) -> core::option::Option<alloc::string::String>
@@ -510,8 +510,8 @@ pub struct frensense_bundler::fact_extract::PreparedFamily
 pub frensense_bundler::fact_extract::PreparedFamily::calls: alloc::collections::btree::set::BTreeSet<alloc::string::String>
 pub frensense_bundler::fact_extract::PreparedFamily::cwe: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::PreparedFamily::id: alloc::string::String
-pub frensense_bundler::fact_extract::PreparedFamily::neg: frensense_engine::scan::PreparedProgram
-pub frensense_bundler::fact_extract::PreparedFamily::pos: frensense_engine::scan::PreparedProgram
+pub frensense_bundler::fact_extract::PreparedFamily::neg: frensense_engine::scan::prepared::PreparedProgram
+pub frensense_bundler::fact_extract::PreparedFamily::pos: frensense_engine::scan::prepared::PreparedProgram
 impl frensense_bundler::extract::gate::PreparedFamily
 pub fn frensense_bundler::extract::gate::PreparedFamily::alert_flags(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable) -> (bool, bool)
 pub fn frensense_bundler::extract::gate::PreparedFamily::downstream_echo(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable, &str, &alloc::collections::btree::set::BTreeSet<alloc::string::String>) -> core::option::Option<alloc::string::String>

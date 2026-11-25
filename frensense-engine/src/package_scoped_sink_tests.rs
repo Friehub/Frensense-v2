@@ -104,11 +104,35 @@ export async function fine(id: string) {
     /// importing file's specifier is `./lib/prisma`, a local file, so the
     /// package origin only exists if the re-export chain carries it.
     const PRISMA_BARREL: &str = "export { PrismaClient } from '@prisma/client';\n";
+    const NAMESPACE_BARREL: &str = "export * as prisma from '@prisma/client';\n";
     const LOOKALIKE_BARREL: &str = "export { PrismaClient } from 'database-js';\n";
 
     const APP_VIA_BARREL: &str = r#"
 import { PrismaClient } from './lib/prisma'
 const prisma = new PrismaClient()
+export async function bad(req: any) {
+  const email = req.query.email
+  await prisma.$queryRawUnsafe(`SELECT * FROM users WHERE email = '${email}'`)
+}
+"#;
+
+    const NAMESPACE_HELPER: &str = r#"
+import { PrismaClient } from '@prisma/client'
+const prisma = new PrismaClient()
+export async function runQuery(email: string) {
+  return prisma.$queryRawUnsafe(`SELECT * FROM users WHERE email = '${email}'`)
+}
+"#;
+
+    const APP_VIA_NAMESPACE_HELPER: &str = r#"
+import * as db from './lib/db'
+export async function bad(req: any) {
+  await db.runQuery(req.query.email)
+}
+"#;
+
+    const APP_VIA_NAMESPACE_BARREL: &str = r#"
+import { prisma } from './lib/prisma'
 export async function bad(req: any) {
   const email = req.query.email
   await prisma.$queryRawUnsafe(`SELECT * FROM users WHERE email = '${email}'`)
@@ -128,6 +152,22 @@ export async function bad(req: any) {
         );
     }
 
+    /// `export * as ns from "<pkg>"` publishes the module, not a member
+    /// called `ns`, so a call through the binding is a call on the package
+    /// and the package-scoped fact must reach it.
+    #[test]
+    fn scoped_sink_fires_through_a_namespace_reexport() {
+        let findings = run_files(&[
+            ("lib/prisma.ts", NAMESPACE_BARREL, "ts"),
+            ("app.ts", APP_VIA_NAMESPACE_BARREL, "ts"),
+        ]);
+        assert!(
+            findings.iter().any(|f| f.sink.contains("queryRawUnsafe")
+                && f.verdict == crate::analysis::taint::engine::BackwardVerdict::Vulnerable),
+            "a scoped sink reached through `export * as` must fire; got {findings:?}"
+        );
+    }
+
     /// The same barrel shape must not launder a foreign package into the
     /// scoped fact: the origin carried is `database-js`, not "the file".
     #[test]
@@ -140,6 +180,22 @@ export async function bad(req: any) {
             !findings.iter().any(|f| f.sink.contains("queryRawUnsafe")
                 && f.verdict == crate::analysis::taint::engine::BackwardVerdict::Vulnerable),
             "a lookalike package reached through a barrel must stay silent; got {findings:?}"
+        );
+    }
+
+    /// A call through a namespace binding is program code, not a library
+    /// call: taint entering the module helper's parameter reaches the sink
+    /// inside it.
+    #[test]
+    fn taint_flows_into_a_namespace_module_helper() {
+        let findings = run_files(&[
+            ("lib/db.ts", NAMESPACE_HELPER, "ts"),
+            ("app.ts", APP_VIA_NAMESPACE_HELPER, "ts"),
+        ]);
+        assert!(
+            findings.iter().any(|f| f.sink.contains("queryRawUnsafe")
+                && f.verdict == crate::analysis::taint::engine::BackwardVerdict::Vulnerable),
+            "taint passed through `import * as db` must reach the helper's sink; got {findings:?}"
         );
     }
 

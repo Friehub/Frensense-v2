@@ -69,9 +69,20 @@ pub(super) struct ResolvedExport {
     /// The imported name is the module itself (`export * as ns from ...`), so
     /// it names no member and the caller must not record one.
     pub(super) namespace: bool,
+    /// The program file a namespace binding denotes. `Some` only when the
+    /// namespace is a file of this program: a member call through the binding
+    /// resolves inside it.
+    pub(super) module: Option<String>,
 }
 
 pub(super) type FileExportMap = FxHashMap<String, FxHashMap<String, ExportTarget>>;
+/// Per file, the local names bound to a whole module, and the file each one
+/// denotes: `import * as ns from "./m"`, `export * as ns from "./m"` and the
+/// barrel chains between them.
+pub(crate) type NamespaceBindings = FxHashMap<String, FxHashMap<String, String>>;
+/// Per file, the local names an import binds to a program function, and the
+/// program-level symbol each one names.
+pub(crate) type FileAliases = FxHashMap<String, FxHashMap<String, String>>;
 pub(super) type FileBarrelMap = FxHashMap<String, Vec<Specifier>>;
 
 /// Normalized external package name for a specifier that is not a program
@@ -177,6 +188,7 @@ pub(super) fn resolve_symbol(
                     symbol: local,
                     package: None,
                     namespace: false,
+                    module: None,
                 });
             }
             ExportTarget::ReExport { target, symbol } => {
@@ -197,6 +209,7 @@ pub(super) fn resolve_symbol(
                         symbol: symbol.clone(),
                         package: Some(package.clone()),
                         namespace: false,
+                        module: None,
                     }),
                 };
             }
@@ -208,12 +221,17 @@ pub(super) fn resolve_symbol(
                         symbol: symbol.to_string(),
                         package: Some(package.clone()),
                         namespace: true,
+                        module: None,
                     }),
-                    // A namespace over a program file needs its member
-                    // resolved inside that file, which the alias table cannot
-                    // express; it stays unresolved rather than being recorded
-                    // as a member that does not exist.
-                    Specifier::File(_) => None,
+                    // A namespace over a program file: the binding denotes
+                    // that file, so a member call through it resolves to a
+                    // function declared there.
+                    Specifier::File(file) => Some(ResolvedExport {
+                        symbol: symbol.to_string(),
+                        package: None,
+                        namespace: true,
+                        module: Some(file.clone()),
+                    }),
                 };
             }
         }
@@ -241,6 +259,7 @@ pub(super) fn resolve_symbol(
                         symbol: symbol.to_string(),
                         package: Some(package.clone()),
                         namespace: false,
+                        module: None,
                     });
                 }
             }
@@ -254,6 +273,7 @@ pub(super) fn resolve_symbol(
             symbol: qual,
             package: None,
             namespace: false,
+            module: None,
         });
     }
     if ir_names.contains(symbol) && fn_file.get(symbol).map(|f| f == file).unwrap_or(false) {
@@ -261,174 +281,9 @@ pub(super) fn resolve_symbol(
             symbol: symbol.to_string(),
             package: None,
             namespace: false,
+            module: None,
         });
     }
 
     None
-}
-
-#[cfg(test)]
-mod tests {
-    use rustc_hash::{FxHashMap, FxHashSet};
-
-    use super::*;
-
-    fn files(entries: &[(&str, &str, &str)]) -> Vec<(String, String, String)> {
-        entries
-            .iter()
-            .map(|(p, s, e)| ((*p).to_string(), (*s).to_string(), (*e).to_string()))
-            .collect()
-    }
-
-    /// A barrel chain past the budget is a reported truncation, not a silent
-    /// miss: the unresolved import becomes an unknown origin downstream, so
-    /// every package-scoped fact for that call goes inert.
-    #[test]
-    fn barrel_chain_past_the_budget_reports_the_resolve_depth_cap() {
-        let _ = crate::telemetry::drain_caps();
-
-        let hops = MAX_REEXPORT_RESOLVE_DEPTH + 2;
-        let mut export_map: FileExportMap = FxHashMap::default();
-        let mut barrel_map: FileBarrelMap = FxHashMap::default();
-        export_map
-            .entry("src/barrel0.ts".to_string())
-            .or_default()
-            .insert(
-                "handler".to_string(),
-                ExportTarget::Local("handler".to_string()),
-            );
-        for n in 1..=hops {
-            barrel_map.insert(
-                format!("src/barrel{n}.ts"),
-                vec![Specifier::File(format!("src/barrel{}.ts", n - 1))],
-            );
-        }
-        let mut ir_names: FxHashSet<String> = FxHashSet::default();
-        ir_names.insert("src/barrel0.ts::handler".to_string());
-        let fn_file = FxHashMap::default();
-
-        let resolved = resolve_symbol(
-            &format!("src/barrel{hops}.ts"),
-            "handler",
-            &export_map,
-            &barrel_map,
-            &ir_names,
-            &fn_file,
-            0,
-        );
-
-        assert_eq!(resolved, None, "past the budget nothing may resolve");
-        let hits = crate::telemetry::drain_caps();
-        let hit = hits
-            .iter()
-            .find(|hit| hit.cap == "reexport_resolve_depth")
-            .unwrap_or_else(|| panic!("expected a resolve-depth cap hit: {hits:?}"));
-        assert_eq!(hit.hits, 1, "one truncation, one recorded hit: {hits:?}");
-    }
-
-    /// `import { X } from "./barrel"` where the barrel re-exports `X` from a
-    /// package: the importing file's import table must name the package, or
-    /// every package-scoped fact for `X` is unreachable from that call site.
-    #[test]
-    fn barrel_import_carries_the_package_origin() {
-        let program = files(&[
-            (
-                "src/barrel.ts",
-                "export { $queryRawUnsafe } from \"@prisma/client\";\n",
-                "ts",
-            ),
-            (
-                "src/app.ts",
-                "import { $queryRawUnsafe } from \"./barrel\";\nconst q = $queryRawUnsafe;\n",
-                "ts",
-            ),
-        ]);
-        let prepared = crate::scan::prepare(&program).expect("prepare");
-        let import = prepared
-            .file_package_imports
-            .get("src/app.ts")
-            .and_then(|m| m.get("$queryRawUnsafe"))
-            .unwrap_or_else(|| panic!("{:?}", prepared.file_package_imports));
-        assert_eq!(import.package, "@prisma/client");
-        assert_eq!(import.symbol.as_deref(), Some("$queryRawUnsafe"));
-    }
-
-    /// The exported alias is not the package's symbol: the import must record
-    /// the name the package declares, which is what sink facts are keyed on.
-    #[test]
-    fn aliased_reexport_reports_the_package_symbol() {
-        let program = files(&[
-            (
-                "src/barrel.ts",
-                "export { $queryRawUnsafe as raw } from \"@prisma/client\";\n",
-                "ts",
-            ),
-            (
-                "src/app.ts",
-                "import { raw } from \"./barrel\";\nconst q = raw;\n",
-                "ts",
-            ),
-        ]);
-        let prepared = crate::scan::prepare(&program).expect("prepare");
-        let import = prepared
-            .file_package_imports
-            .get("src/app.ts")
-            .and_then(|m| m.get("raw"))
-            .unwrap_or_else(|| panic!("{:?}", prepared.file_package_imports));
-        assert_eq!(import.package, "@prisma/client");
-        assert_eq!(import.symbol.as_deref(), Some("$queryRawUnsafe"));
-    }
-
-    /// `export * as ns from "<pkg>"` binds the package itself. Reading it as a
-    /// re-export of a member named `ns` records the namespace as the package's
-    /// symbol, and every fact keyed on the real member goes unreachable.
-    #[test]
-    fn namespace_reexport_binds_the_package_without_a_member() {
-        let program = files(&[
-            (
-                "src/barrel.ts",
-                "export * as prisma from \"@prisma/client\";\n",
-                "ts",
-            ),
-            (
-                "src/app.ts",
-                "import { prisma } from \"./barrel\";\nprisma.$queryRawUnsafe(q);\n",
-                "ts",
-            ),
-        ]);
-        let prepared = crate::scan::prepare(&program).expect("prepare");
-        let import = prepared
-            .file_package_imports
-            .get("src/app.ts")
-            .and_then(|m| m.get("prisma"))
-            .unwrap_or_else(|| panic!("{:?}", prepared.file_package_imports));
-        assert_eq!(import.package, "@prisma/client");
-        assert_eq!(import.symbol, None, "a namespace binding names no member");
-    }
-
-    /// A file that only re-exports everything from a package still gives its
-    /// importers that package's origin.
-    #[test]
-    fn wildcard_package_barrel_carries_the_package_origin() {
-        let program = files(&[
-            (
-                "src/barrel.ts",
-                "export * from \"node:child_process\";\n",
-                "ts",
-            ),
-            (
-                "src/app.ts",
-                "import { execSync } from \"./barrel\";\nexecSync(cmd);\n",
-                "ts",
-            ),
-        ]);
-        let prepared = crate::scan::prepare(&program).expect("prepare");
-        let import = prepared
-            .file_package_imports
-            .get("src/app.ts")
-            .and_then(|m| m.get("execSync"))
-            .unwrap_or_else(|| panic!("{:?}", prepared.file_package_imports));
-        assert_eq!(import.package, "child_process");
-        assert_eq!(import.symbol.as_deref(), Some("execSync"));
-    }
 }

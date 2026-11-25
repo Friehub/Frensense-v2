@@ -13,7 +13,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use frensense_lang::spec::{Export, Import, ModuleItem};
 
 mod reexport;
-use reexport::{build_export_maps, package_name, resolve_symbol};
+#[cfg(test)]
+mod reexport_tests;
+mod resolve_imports;
+use reexport::build_export_maps;
+pub(crate) use reexport::{FileAliases, NamespaceBindings};
+use resolve_imports::{ImportResolution, resolve_imports};
 
 fn concat2(a: &str, b: &str) -> String {
     let mut s = String::with_capacity(a.len() + b.len());
@@ -172,6 +177,9 @@ pub(crate) struct PackageImport {
     pub symbol: Option<String>,
 }
 
+/// Per file, the local names that bind an external package member.
+pub(crate) type PackageImportTable = FxHashMap<String, FxHashMap<String, PackageImport>>;
+
 /// Result of whole-program module resolution.
 ///
 /// Alias resolution is what taint needs; the other three maps are the
@@ -182,9 +190,11 @@ pub(crate) struct PackageImport {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ModuleResolution {
     /// Per file, the local names that an import binds to a program function.
-    pub file_aliases: FxHashMap<String, FxHashMap<String, String>>,
+    pub file_aliases: FileAliases,
     /// Per file, the local names that an import binds to an external package.
-    pub file_package_imports: FxHashMap<String, FxHashMap<String, PackageImport>>,
+    pub file_package_imports: PackageImportTable,
+    /// Per file, the local names that bind a whole module and where they point.
+    pub file_namespace_aliases: NamespaceBindings,
     /// Import declarations per file, aliases included.
     pub file_imports: FxHashMap<String, Vec<Import>>,
     /// Export and re-export declarations per file, with visibility and
@@ -236,75 +246,23 @@ impl ModuleAliasResolver {
 
         let (export_map, barrel_map) = build_export_maps(&file_exports, &known_files, fn_file);
 
-        // Resolve imports for each file
-        let mut file_aliases: FxHashMap<String, FxHashMap<String, String>> = FxHashMap::default();
-        let mut file_package_imports: FxHashMap<String, FxHashMap<String, PackageImport>> =
-            FxHashMap::default();
-
-        for (importer_path, imps) in &file_imports {
-            for imp in imps {
-                let local_name = &imp.local_name;
-                let package = &imp.package;
-                let symbol = imp.symbol.as_deref().unwrap_or(local_name.as_str());
-
-                let Some(target_file) = resolve_module_path(importer_path, package, &known_files)
-                else {
-                    file_package_imports
-                        .entry(importer_path.clone())
-                        .or_default()
-                        .insert(
-                            local_name.clone(),
-                            PackageImport {
-                                package: package_name(package),
-                                symbol: imp.symbol.clone(),
-                            },
-                        );
-                    continue;
-                };
-
-                let Some(resolved) = resolve_symbol(
-                    &target_file,
-                    symbol,
-                    &export_map,
-                    &barrel_map,
-                    ir_names,
-                    fn_file,
-                    0,
-                ) else {
-                    continue;
-                };
-                match resolved.package {
-                    // The chain left the program: record the package so
-                    // package-scoped facts still match the call site.
-                    Some(pkg) => {
-                        file_package_imports
-                            .entry(importer_path.clone())
-                            .or_default()
-                            .insert(
-                                local_name.clone(),
-                                PackageImport {
-                                    package: pkg,
-                                    // A namespace binding names the module,
-                                    // so the member is whatever the call site
-                                    // selects; naming the namespace would make
-                                    // the package's facts unmatchable.
-                                    symbol: (!resolved.namespace).then_some(resolved.symbol),
-                                },
-                            );
-                    }
-                    None => {
-                        file_aliases
-                            .entry(importer_path.clone())
-                            .or_default()
-                            .insert(local_name.clone(), resolved.symbol);
-                    }
-                }
-            }
-        }
+        let ImportResolution {
+            file_aliases,
+            file_package_imports,
+            file_namespace_aliases,
+        } = resolve_imports(
+            &file_imports,
+            &known_files,
+            &export_map,
+            &barrel_map,
+            ir_names,
+            fn_file,
+        );
 
         ModuleResolution {
             file_aliases,
             file_package_imports,
+            file_namespace_aliases,
             file_imports,
             file_exports,
             file_module_items,

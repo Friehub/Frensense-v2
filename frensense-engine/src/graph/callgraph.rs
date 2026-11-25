@@ -39,6 +39,13 @@
 //! The graph is byte-stable across runs (the corpus store hashes it).
 
 use rustc_hash::{FxHashMap, FxHashSet};
+
+use crate::graph::module::FileAliases;
+
+mod facts;
+mod namespace;
+
+use facts::FnFacts;
 use std::collections::BTreeSet;
 
 use crate::ir::function::*;
@@ -110,24 +117,14 @@ pub(crate) struct CallGraph {
 // The builder
 // ---------------------------------------------------------------------------
 
-/// Per-function value facts gathered in pass 1.
-#[derive(Default)]
-struct FnFacts {
-    /// `dest → src` copy assignments (alias chains).
-    aliases: FxHashMap<VarId, VarId>,
-    /// Vars known to hold a reference to a program function.
-    fn_refs: FxHashMap<VarId, String>,
-    /// Vars known to be instances of a class (`new Class()`).
-    classes: FxHashMap<VarId, String>,
-}
-
 /// Input: every function's IR, keyed by program-level name (the same map the
 /// `ProgramSvfg` builder consumes).
 #[derive(Debug)]
 pub(crate) struct CallGraphBuilder<'a> {
     irs: &'a FxHashMap<String, &'a FunctionIR>,
-    aliases: Option<&'a FxHashMap<String, FxHashMap<String, String>>>,
+    aliases: Option<&'a FileAliases>,
     fn_file: Option<&'a FxHashMap<String, String>>,
+    namespaces: Option<&'a FxHashMap<String, FxHashMap<String, String>>>,
 }
 
 impl<'a> CallGraphBuilder<'a> {
@@ -137,13 +134,14 @@ impl<'a> CallGraphBuilder<'a> {
             irs,
             aliases: None,
             fn_file: None,
+            namespaces: None,
         }
     }
 
     /// Supplies per-file import aliases and the function-to-file map, so a call through an imported symbol resolves to the function it names.
     pub(crate) fn with_aliases(
         mut self,
-        aliases: Option<&'a FxHashMap<String, FxHashMap<String, String>>>,
+        aliases: Option<&'a FileAliases>,
         fn_file: Option<&'a FxHashMap<String, String>>,
     ) -> Self {
         self.aliases = aliases;
@@ -167,73 +165,10 @@ impl<'a> CallGraphBuilder<'a> {
     pub(crate) fn build(&self) -> CallGraph {
         let mut functions: Vec<String> = self.irs.keys().cloned().collect();
         functions.sort();
-        let fn_set: FxHashSet<&str> = functions.iter().map(|s| s.as_str()).collect();
+        let fn_set: FxHashSet<String> = functions.iter().cloned().collect();
 
-        // ---- Pass 1: per-function value facts ------------------------------
-        let mut facts: FxHashMap<&str, FnFacts> = FxHashMap::default();
-        for (fname, ir) in self.irs {
-            let mut f = FnFacts::default();
-            for (&v, meta) in &ir.var_metadata {
-                if let Some(name) = &meta.source_name
-                    && fn_set.contains(name.as_str())
-                {
-                    f.fn_refs.insert(v, name.clone());
-                }
-            }
-            for block in ir.blocks.values() {
-                for instr in &block.instructions {
-                    match instr {
-                        Instruction::Assign { dest, src, .. } => match src {
-                            Operand::Var(s) => {
-                                f.aliases.insert(*dest, *s);
-                            }
-                            Operand::StringLiteral(name) if fn_set.contains(name.as_str()) => {
-                                f.fn_refs.insert(*dest, name.clone());
-                            }
-                            _ => {}
-                        },
-                        Instruction::AddressOf { dest, src, .. } => {
-                            // `&func`, the address-of a parameter can't be a
-                            // function; a real fn-ref lowering path lands here
-                            // when IR gains named function constants. Track it
-                            // as an alias for now (conservative no-op unless
-                            // src is later known to be a fn ref).
-                            f.aliases.insert(*dest, *src);
-                        }
-                        Instruction::Allocate {
-                            dest,
-                            kind: AllocationKind::ClassInstance(class),
-                            ..
-                        } => {
-                            f.classes.insert(*dest, class.clone());
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            facts.insert(fname.as_str(), f);
-        }
-
-        // ---- Pass 2: which formal parameters are CALLED? -------------------
-        // `(fn_name, param_slot)`, the two-step higher-order treatment.
-        let mut called_params: FxHashSet<(String, usize)> = FxHashSet::default();
-        for (fname, ir) in self.irs {
-            for block in ir.blocks.values() {
-                for instr in &block.instructions {
-                    let func_ptr: Option<&Operand> = match instr {
-                        Instruction::CallPointer { func_ptr, .. } => Some(func_ptr),
-                        _ => None,
-                    };
-                    if let Some(Operand::Var(v)) = func_ptr {
-                        for (slot, &pv) in ir.parameters.iter().enumerate() {
-                            if pv == *v {
-                                called_params.insert(((*fname).clone(), slot));
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let facts = facts::per_function_facts(self.irs, &fn_set);
+        let called_params = facts::called_parameters(self.irs);
 
         // ---- Pass 3: resolve every call site -------------------------------
         let mut graph = CallGraph {
@@ -264,6 +199,21 @@ impl<'a> CallGraphBuilder<'a> {
                             method, receiver, ..
                         } => {
                             let resolved_method = self.resolve_call_alias(fname, method);
+                            // A namespace binding carries the module it
+                            // names, stronger evidence than anything derived
+                            // from the receiver's class or the enclosing
+                            // function's name, so it is consulted first.
+                            if let Some(target) =
+                                namespace::receiver_root(ir, receiver).and_then(|root| {
+                                    self.resolve_namespace_member(fname, root, resolved_method)
+                                })
+                            {
+                                targets.push(CallTarget::Function(target));
+                                targets.sort();
+                                targets.dedup();
+                                graph.sites.insert(site_key, targets);
+                                continue;
+                            }
                             // Receiver → class:
                             let class: Option<String> = match receiver {
                                 Operand::Var(r) => f.classes.get(r).cloned().or_else(|| {

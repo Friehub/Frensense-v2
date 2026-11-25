@@ -144,7 +144,7 @@ impl<'a> ProgramSvfg<'a> {
         config: &TaintConfig,
         facts: &FactTable,
     ) -> Self {
-        Self::new_with_module_aliases(irs, config, facts, None, None)
+        Self::new_with_module_aliases(irs, config, facts, None, None, None)
     }
 
     /// Build a [`ProgramSvfg`] with explicit module aliases and function-to-file mappings.
@@ -154,6 +154,7 @@ impl<'a> ProgramSvfg<'a> {
         facts: &FactTable,
         aliases: Option<&FxHashMap<String, FxHashMap<String, String>>>,
         fn_file: Option<&FxHashMap<String, String>>,
+        namespace_aliases: Option<&FxHashMap<String, FxHashMap<String, String>>>,
     ) -> Self {
         // 1. Build per-function SVFGs (deterministic name order).
         let mut names: Vec<&String> = irs.keys().collect();
@@ -191,6 +192,7 @@ impl<'a> ProgramSvfg<'a> {
         }
         let callgraph = CallGraphBuilder::new(&borrowed)
             .with_aliases(aliases, fn_file)
+            .with_namespace_aliases(namespace_aliases)
             .build();
 
         let mut prog = Self {
