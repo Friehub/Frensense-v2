@@ -269,6 +269,7 @@ struct SinkSite<'a> {
 mod call_origin;
 mod explore;
 mod origin;
+mod sanitizer_cut;
 mod sink;
 mod sink_gate;
 

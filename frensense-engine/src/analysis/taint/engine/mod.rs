@@ -210,7 +210,7 @@ pub struct SinkFinding {
     /// Distinct reasons the backward walk was cut short on this argument
     /// (non-empty only for non-vulnerable verdicts). Each entry names a
     /// silent stop site: `"guard"`, `"value-const"`, `"sanitizer"`,
-    /// `"unresolvable"`. Surfaces *where* a flow died under `--explain`;
+    /// `"sanitizer-args"`, `"unresolvable"`. Surfaces *where* a flow died under `--explain`;
     /// empty for vulnerable findings and for walks that simply exhausted
     /// their predecessors without hitting a source.
     pub cut_reasons: Vec<&'static str>,

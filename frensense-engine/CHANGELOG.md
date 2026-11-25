@@ -27,6 +27,15 @@ what this crate does.
   (a class-scoped fact is stored once per class). Bundles publish the slots
   in their payload's `sanitizer_args` table (format v9) because no wire fact
   variant carries them.
+- `sanitizes_args` is honoured by **transform** (non-guard) sanitizers too. A
+  transform fact's cut used to be its whole result node, so the call read as
+  neutralising everything it was handed and the slots had nothing to say.
+  Declared slots now move the cut onto the incoming argument edges: the call
+  neutralises the values that enter through the slots it names, an unlisted
+  argument keeps its edge, and taint arriving there still reaches its sink.
+  The walk reports this as the `"sanitizer-args"` cut reason so `--explain`
+  distinguishes it from a whole-node cut, and an empty set keeps the legacy
+  result-node reading.
 
 ### Fixed
 

@@ -23,3 +23,5 @@ mod sibling_path_tests;
 mod engine_tests;
 #[cfg(test)]
 mod session_trust_tests;
+#[cfg(test)]
+mod transform_sanitizer_tests;

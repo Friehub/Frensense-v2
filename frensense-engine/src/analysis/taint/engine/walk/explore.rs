@@ -7,6 +7,7 @@
 //! decides whether the node ends the branch, `gather_predecessors` collects
 //! its edges and `enqueue_predecessors` pushes them with their context.
 
+use super::sanitizer_cut::WalkStop;
 use super::*;
 
 /// One step of the backward walk: the node being explored plus the state the
@@ -112,11 +113,28 @@ impl<'a> BackwardTaintEngine<'a> {
                 is_formal_param,
             };
 
-            if self.walk_stops(fi, &step, root.block, state) {
+            let stop = self.walk_stops(fi, &step, root.block, state);
+            if matches!(&stop, WalkStop::Stop) {
                 continue;
             }
 
-            let (local_preds, cross_preds) = self.gather_predecessors(&step);
+            let (mut local_preds, cross_preds) = self.gather_predecessors(&step);
+
+            // A transform sanitizer declaring argument slots cuts the edges
+            // that carried taint in through them and keeps the rest live, so
+            // taint entering the call another way still surfaces.
+            if let WalkStop::CutArgs(slots) = stop {
+                let (kept, cut) =
+                    self.split_sanitized_arg_edges(step.ir, &step.key, local_preds, &slots);
+                local_preds = kept;
+                if cut && local_preds.is_empty() && cross_preds.is_empty() {
+                    // Every way the value could have entered is a declared
+                    // slot, so this branch is clean.
+                    state.saw_sanitized_root_only = true;
+                    record_cut(&mut state.cuts, "sanitizer");
+                    continue;
+                }
+            }
 
             if local_preds.is_empty() && cross_preds.is_empty() {
                 dbg_trace!(
@@ -178,7 +196,7 @@ impl<'a> BackwardTaintEngine<'a> {
         step: &WalkStep<'_>,
         root_block: BlockId,
         state: &mut ExploreState,
-    ) -> bool {
+    ) -> WalkStop {
         let WalkStep {
             cf,
             ir,
@@ -212,7 +230,7 @@ impl<'a> BackwardTaintEngine<'a> {
             }
             state.saw_sanitized_root_only = true;
             record_cut(&mut state.cuts, "guard");
-            return true;
+            return WalkStop::Stop;
         }
 
         // Stop: source reached, vulnerable path confirmed.
@@ -222,7 +240,7 @@ impl<'a> BackwardTaintEngine<'a> {
                 state.source_node = Some((cf, key));
                 state.source_desc = source_description(ir, self.config, &self.facts, &key);
             }
-            return true;
+            return WalkStop::Stop;
         }
 
         // Stop: provably attacker-independent value (constant, string literal,
@@ -240,47 +258,15 @@ impl<'a> BackwardTaintEngine<'a> {
             .is_some_and(|info| info.converged && info.values.contains_key(&key.var));
         if provably_independent {
             record_cut(&mut state.cuts, "value-const");
-            return true;
+            return WalkStop::Stop;
         }
 
-        // Stop: sanitizer use, this branch is clean. Fact-table aware: includes
-        // learned methods like .replace()/.test() guards, qualified by sink
-        // role. Package-scoped sanitizer facts additionally require the call's
-        // own import origin to name their package; unknown origin leaves them
-        // inert.
-        let san_origin = self.sanitizer_origin_package(cf, &key);
-        if is_sanitizer_effective_for_role(
-            ir,
-            self.config,
-            &self.facts,
-            &key,
-            state.sink_role,
-            state.sink_label.as_deref(),
-            Some(state.sink_name.as_str()),
-            san_origin.as_deref(),
-        ) {
-            state.saw_sanitized_root_only = true;
-            if let Some(fact) = crate::analysis::forward::sanitizer_fact_defeating(
-                ir,
-                &self.facts,
-                &key,
-                state.sink_role,
-                state.sink_label.as_deref(),
-                Some(state.sink_name.as_str()),
-                san_origin.as_deref(),
-            ) {
-                let suppression = SanitizerSuppression {
-                    call: fact.call.clone(),
-                    classes: self
-                        .facts
-                        .sanitizer_classes(&fact.call, san_origin.as_deref()),
-                };
-                if !state.suppressions.contains(&suppression) {
-                    state.suppressions.push(suppression);
-                }
-            }
-            record_cut(&mut state.cuts, "sanitizer");
-            return true;
+        // Stop: sanitizer use. `sanitizer_cut` decides how much of the node
+        // the fact neutralises, so a transform fact can cut only the argument
+        // edges its slots declare.
+        let sanitizer = self.sanitizer_stop(cf, ir, &key, state);
+        if !matches!(sanitizer, WalkStop::Continue) {
+            return sanitizer;
         }
 
         // Stop: a field-demand walk that reached a container's allocation. The
@@ -290,7 +276,11 @@ impl<'a> BackwardTaintEngine<'a> {
         // fill edges here would union every stored property - `sink(p.other)`
         // must not see the store of `p.data` in the caller just because both
         // share the container.
-        step.field_demand && self.def_is_allocation(cf, &key)
+        if step.field_demand && self.def_is_allocation(cf, &key) {
+            WalkStop::Stop
+        } else {
+            WalkStop::Continue
+        }
     }
 
     /// The predecessors of the step's node: local value-flow edges (phi arms
