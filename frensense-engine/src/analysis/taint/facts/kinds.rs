@@ -146,7 +146,7 @@ pub struct SanitizerFact {
     /// branches on `guard_style`). One dialect across every producer:
     /// [`DEFAULT_SANITIZER_KIND`] / [`ALLOWLIST_SANITIZER_KIND`].
     pub kind: String,
-    /// Argument slots whose taint is removed. Empty = all arguments.
+    /// Slots whose taint is removed. Empty = all args (and a guard receiver).
     pub sanitizes_args: BTreeSet<usize>,
     /// If `true`, a *guard-style* sanitizer: the call only protects values on
     /// paths where it returned true / threw (e.g. `SAFE_RE.test(x)`).

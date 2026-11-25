@@ -12,6 +12,17 @@ what this crate does.
 
 ## [0.9.2]
 
+### Added
+
+- `SanitizerFact::sanitizes_args` is enforced by the guard map. The field was
+  published but ignored at every construction site, so `"all arguments and
+  the receiver"` was the only reachable reading. A fact that declares slots
+  now validates a value only when it reaches the guard call in one of them:
+  a fact proven for `check(allowlist, value)` (slot 1) no longer clears the
+  argument it does not inspect, and taint arriving there still reaches its
+  sink. The empty set keeps the legacy reading, so every in-tree producer
+  (spec seeding, language packs, bundles) behaves exactly as before.
+
 ### Fixed
 
 - A finding whose function has no file entry, or whose file has no source

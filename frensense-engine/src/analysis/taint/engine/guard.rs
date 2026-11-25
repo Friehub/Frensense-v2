@@ -76,9 +76,15 @@ impl GuardMap {
         // `x != null && SAFE.test(x)` shape fragments).
         // Find guard calls and the vars they check.
         // A guard call is a CallVirtual/CallStatic whose method has a
-        // guard-style SanitizerFact. The checked var is the first Var arg
-        // (predicate on an argument) or the receiver (predicate on the
-        // receiver, e.g. `file.includes('..')`).
+        // guard-style SanitizerFact. The checked var is each Var arg
+        // (predicate on an argument) and the receiver (predicate on the
+        // receiver, e.g. `file.includes('..')`) - the fact's default
+        // "all arguments" reading.
+        //
+        // A fact that declares `sanitizes_args` narrows that: only those
+        // argument slots are validated, and the receiver is not (the set
+        // names arguments, so a declared guard never silently validates a
+        // receiver it was not proven for).
         let checked_vars = |instr: &Instruction| -> (Vec<VarId>, Vec<String>, String) {
             let (method, receiver, args, origin) = match instr {
                 Instruction::CallVirtual {
@@ -117,10 +123,15 @@ impl GuardMap {
             // of the configured/known guards (fact table already ensures
             // this). Collect checked vars.
             let mut out = Vec::new();
-            if let Some(Operand::Var(r)) = receiver {
+            if f.sanitizes_args.is_empty()
+                && let Some(Operand::Var(r)) = receiver
+            {
                 out.push(*r);
             }
-            for a in args {
+            for (slot, a) in args.iter().enumerate() {
+                if !f.sanitizes_args.is_empty() && !f.sanitizes_args.contains(&slot) {
+                    continue;
+                }
                 if let Operand::Var(v) = a {
                     out.push(*v);
                     let mut cur_v = *v;
@@ -359,5 +370,112 @@ impl GuardMap {
                     classes: e.classes.clone(),
                 })
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::analysis::taint::config::TaintConfig;
+    use crate::analysis::taint::engine::{BackwardVerdict, SinkFinding};
+    use crate::analysis::taint::facts::{FactTable, SanitizerFact, seeded_tables};
+    use crate::scan::{prepare, scan_prepared};
+
+    /// The tainted value arrives in argument 0; the guard checks argument 1.
+    const GUARD_CHECKS_OTHER_SLOT: &str = r#"
+export async function bad(req: any, res: any) {
+  const name = req.body.name
+  if (check(name, 'literal')) {
+    exec(name)
+  }
+}
+"#;
+
+    /// The tainted value arrives in argument 1; the guard checks it there.
+    const GUARD_CHECKS_TAINTED_SLOT: &str = r#"
+export async function bad(req: any, res: any) {
+  const name = req.body.name
+  if (check('literal', name)) {
+    exec(name)
+  }
+}
+"#;
+
+    /// Production tables plus a guard-style `check` fact whose validated
+    /// slots are exactly `slots` (the shape a fact declares, installed on
+    /// the published map an embedder writes).
+    fn tables(slots: &[usize]) -> (TaintConfig, FactTable) {
+        let (config, mut facts) = seeded_tables(["ts"]);
+        facts.sanitizer_facts.insert(
+            "check".to_string(),
+            SanitizerFact {
+                call: "check".to_string(),
+                package: None,
+                kind: "allowlist".to_string(),
+                sanitizes_args: slots.iter().copied().collect(),
+                guard_style: true,
+            },
+        );
+        (config, facts)
+    }
+
+    fn exec_finding(src: &str, slots: &[usize]) -> SinkFinding {
+        let files = vec![("test.ts".to_string(), src.to_string(), "ts".to_string())];
+        let (config, facts) = tables(slots);
+        let prepared = prepare(&files).expect("prepare");
+        scan_prepared(&prepared, &config, &facts)
+            .findings
+            .into_iter()
+            .find(|f| f.sink == "exec")
+            .expect("exec sink must be reached")
+    }
+
+    /// The legacy empty set keeps the documented default: every argument the
+    /// guard call receives is validated, wherever the taint arrived.
+    #[test]
+    fn a_guard_without_a_slot_set_validates_every_argument() {
+        for src in [GUARD_CHECKS_OTHER_SLOT, GUARD_CHECKS_TAINTED_SLOT] {
+            let f = exec_finding(src, &[]);
+            assert_eq!(
+                f.verdict,
+                BackwardVerdict::Sanitized,
+                "an empty `sanitizes_args` means all arguments; got {f:?}"
+            );
+        }
+    }
+
+    /// A declared set is authoritative: the guard validates only the listed
+    /// slots, so a value arriving in an unlisted one stays live and reaches
+    /// the sink (the recall-safe direction - a narrower fact must never
+    /// silence a finding it was not proven for).
+    #[test]
+    fn a_guard_with_a_slot_set_validates_only_those_arguments() {
+        let listed = exec_finding(GUARD_CHECKS_TAINTED_SLOT, &[1]);
+        assert_eq!(
+            listed.verdict,
+            BackwardVerdict::Sanitized,
+            "the tainted value arrives in the declared slot; got {listed:?}"
+        );
+
+        let unlisted = exec_finding(GUARD_CHECKS_OTHER_SLOT, &[1]);
+        assert_eq!(
+            unlisted.verdict,
+            BackwardVerdict::Vulnerable,
+            "the tainted value arrives in a slot the fact does not declare; got {unlisted:?}"
+        );
+        assert!(
+            unlisted.alert.is_some(),
+            "an unvalidated argument must still alert; got {unlisted:?}"
+        );
+
+        // The set is honoured by membership, not merely by being non-empty:
+        // declaring slot 0 flips both fixtures.
+        assert_eq!(
+            exec_finding(GUARD_CHECKS_OTHER_SLOT, &[0]).verdict,
+            BackwardVerdict::Sanitized
+        );
+        assert_eq!(
+            exec_finding(GUARD_CHECKS_TAINTED_SLOT, &[0]).verdict,
+            BackwardVerdict::Vulnerable
+        );
     }
 }
