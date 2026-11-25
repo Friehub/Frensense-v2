@@ -4,7 +4,7 @@ version = "0.8.2"
 license = "GPL-3.0-only"
 edition = "2021"
 description = "Generates the frensense default .frc pack asset from the generator-owned vocabularies"
-readme = "../README.md"
+readme = "README.md"
 repository = "https://github.com/Friehub/Frensense-v2"
 homepage = "https://frensense.friehub.cloud"
 # Build-time generator only: the committed asset it writes is embedded by

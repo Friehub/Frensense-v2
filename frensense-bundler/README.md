@@ -2,6 +2,9 @@
 
 Compiles paired vulnerability corpus families into `.frc` knowledge bundles consumed by the Frensense engine, CLI, and MCP server.
 
+> Part of [Frensense](https://github.com/Friehub/Frensense-v2) - a
+> deterministic SAST scanner. Docs: <https://frensense.friehub.cloud>.
+
 ---
 
 ## Overview
@@ -81,6 +84,8 @@ Every positive variant must begin with a structured `[frensense]` metadata comme
 | `owasp` | String | Recommended | OWASP Top 10 category (e.g. `A01:2021`, `A03:2021`) |
 | `severity` | Enum | Yes | `Critical`, `High`, `Warning`, or `Info` |
 | `package` | String | Recommended | Framework package provenance - see [Framework Provenance Scoping](#framework-provenance-scoping-package) |
+| `sanitizer` | String list | Optional | Sanitizing calls this family declares, comma separated |
+| `sanitized-args` | Slot list | Optional | Argument slots those sanitizers validate (`1` or `1,2`); absent = every argument - see [Sanitizer slot scopes](#sanitizer-slot-scopes) |
 
 ### Formatting Constraints
 
@@ -111,6 +116,31 @@ Common values: `express`, `next`, `hono`, `fastify`, `sequelize`, `typeorm`, `js
 
 ---
 
+## Sanitizer slot scopes (`sanitized-args:`)
+
+A learned sanitizer silences taint, so the bundle has to say *what it validates*.
+By default a guard-style fact validates every argument the call receives and the
+receiver it predicates on. Declare the slots to narrow it:
+
+```python
+# [frensense]
+# sanitizer: check_policy
+# sanitized-args: 1
+```
+
+`check_policy(allowlist, value)` then validates only `value`; taint arriving in
+argument 0 (or the receiver) still reaches its sink, so a fact cannot silence a
+finding it was never proven for. The build-time cross-class canary replays the
+fact with the same slot set, so a narrowed fact that stops separating a
+family's negative fails the build instead of shipping.
+
+Slots ride in the bundle payload's side tables (`sanitizer_scopes` for classes,
+`sanitizer_args` for slots) rather than in a fact variant, because the engine's
+`SanitizerFact` shape is published API. Bundles written before format v9 carry
+no slot table and keep the all-arguments reading.
+
+---
+
 ## Quality Contract
 
 For a corpus family to compile into a published bundle, the bundler enforces:
@@ -124,4 +154,4 @@ A family that fails either condition is rejected and blocked from bundle compila
 
 ## License
 
-GPL-3.0-only - see [LICENSE](../LICENSE).
+GPL-3.0-only - see [LICENSE](https://github.com/Friehub/Frensense-v2/blob/main/LICENSE).

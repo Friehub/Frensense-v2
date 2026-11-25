@@ -2,6 +2,9 @@
 
 Internal developer tools and probe utilities for the Frensense static analysis engine.
 
+> Part of [Frensense](https://github.com/Friehub/Frensense-v2) - a
+> deterministic SAST scanner. Docs: <https://frensense.friehub.cloud>.
+
 > **Note**: This crate is marked with `publish = false` in `Cargo.toml`. It is an internal workspace package used exclusively during engine development, AST lowering debugging, and end-to-end regression verification. It is not published to crates.io.
 
 ---

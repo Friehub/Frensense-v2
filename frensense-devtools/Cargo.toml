@@ -4,6 +4,7 @@ version = "0.8.0"
 authors = ["Friehub Developers"]
 edition = "2024"
 description = "Frensense devtools: corpus end-to-end runners and IR probes (not published)"
+readme = "README.md"
 license = "GPL-3.0-only"
 publish = false
 
