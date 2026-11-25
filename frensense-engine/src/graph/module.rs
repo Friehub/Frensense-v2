@@ -284,7 +284,11 @@ impl ModuleAliasResolver {
                                 local_name.clone(),
                                 PackageImport {
                                     package: pkg,
-                                    symbol: Some(resolved.symbol),
+                                    // A namespace binding names the module,
+                                    // so the member is whatever the call site
+                                    // selects; naming the namespace would make
+                                    // the package's facts unmatchable.
+                                    symbol: (!resolved.namespace).then_some(resolved.symbol),
                                 },
                             );
                     }

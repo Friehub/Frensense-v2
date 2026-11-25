@@ -17,7 +17,7 @@
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use frensense_lang::spec::Export;
+use frensense_lang::spec::{Export, ItemKind};
 
 use super::{concat3, resolve_module_path};
 
@@ -50,6 +50,9 @@ pub(super) enum ExportTarget {
     Local(String),
     /// `export { a as b } from "<specifier>"`.
     ReExport { target: Specifier, symbol: String },
+    /// `export * as ns from "<specifier>"`: the exported name is the module
+    /// itself, not a member of it (`Export::kind` is `ItemKind::Module`).
+    Namespace(Specifier),
 }
 
 /// A symbol resolved through the re-export graph.
@@ -63,6 +66,9 @@ pub(super) struct ResolvedExport {
     pub(super) symbol: String,
     /// External package the chain ended at, if any.
     pub(super) package: Option<String>,
+    /// The imported name is the module itself (`export * as ns from ...`), so
+    /// it names no member and the caller must not record one.
+    pub(super) namespace: bool,
 }
 
 pub(super) type FileExportMap = FxHashMap<String, FxHashMap<String, ExportTarget>>;
@@ -98,6 +104,14 @@ pub(super) fn build_export_maps(
                     if !list.contains(&target) {
                         list.push(target);
                     }
+                } else if exp.kind == ItemKind::Module {
+                    // The declaration kind is what separates the two ways a
+                    // `from` re-export names a target: `export { x } from`
+                    // names a member, `export * as ns from` names the module.
+                    // Reading them alike looks up a symbol the module does
+                    // not declare, and files an external package under the
+                    // namespace's own name as if that were its member.
+                    m.insert(exp.exported_name.clone(), ExportTarget::Namespace(target));
                 } else {
                     m.insert(
                         exp.exported_name.clone(),
@@ -162,6 +176,7 @@ pub(super) fn resolve_symbol(
                 return Some(ResolvedExport {
                     symbol: local,
                     package: None,
+                    namespace: false,
                 });
             }
             ExportTarget::ReExport { target, symbol } => {
@@ -181,7 +196,24 @@ pub(super) fn resolve_symbol(
                     Specifier::Package(package) => Some(ResolvedExport {
                         symbol: symbol.clone(),
                         package: Some(package.clone()),
+                        namespace: false,
                     }),
+                };
+            }
+            ExportTarget::Namespace(target) => {
+                return match target {
+                    // The namespace is the package: the binding keeps the
+                    // package, and the member (if any) comes from the call.
+                    Specifier::Package(package) => Some(ResolvedExport {
+                        symbol: symbol.to_string(),
+                        package: Some(package.clone()),
+                        namespace: true,
+                    }),
+                    // A namespace over a program file needs its member
+                    // resolved inside that file, which the alias table cannot
+                    // express; it stays unresolved rather than being recorded
+                    // as a member that does not exist.
+                    Specifier::File(_) => None,
                 };
             }
         }
@@ -208,6 +240,7 @@ pub(super) fn resolve_symbol(
                     return Some(ResolvedExport {
                         symbol: symbol.to_string(),
                         package: Some(package.clone()),
+                        namespace: false,
                     });
                 }
             }
@@ -220,12 +253,14 @@ pub(super) fn resolve_symbol(
         return Some(ResolvedExport {
             symbol: qual,
             package: None,
+            namespace: false,
         });
     }
     if ir_names.contains(symbol) && fn_file.get(symbol).map(|f| f == file).unwrap_or(false) {
         return Some(ResolvedExport {
             symbol: symbol.to_string(),
             package: None,
+            namespace: false,
         });
     }
 
@@ -342,6 +377,33 @@ mod tests {
             .unwrap_or_else(|| panic!("{:?}", prepared.file_package_imports));
         assert_eq!(import.package, "@prisma/client");
         assert_eq!(import.symbol.as_deref(), Some("$queryRawUnsafe"));
+    }
+
+    /// `export * as ns from "<pkg>"` binds the package itself. Reading it as a
+    /// re-export of a member named `ns` records the namespace as the package's
+    /// symbol, and every fact keyed on the real member goes unreachable.
+    #[test]
+    fn namespace_reexport_binds_the_package_without_a_member() {
+        let program = files(&[
+            (
+                "src/barrel.ts",
+                "export * as prisma from \"@prisma/client\";\n",
+                "ts",
+            ),
+            (
+                "src/app.ts",
+                "import { prisma } from \"./barrel\";\nprisma.$queryRawUnsafe(q);\n",
+                "ts",
+            ),
+        ]);
+        let prepared = crate::scan::prepare(&program).expect("prepare");
+        let import = prepared
+            .file_package_imports
+            .get("src/app.ts")
+            .and_then(|m| m.get("prisma"))
+            .unwrap_or_else(|| panic!("{:?}", prepared.file_package_imports));
+        assert_eq!(import.package, "@prisma/client");
+        assert_eq!(import.symbol, None, "a namespace binding names no member");
     }
 
     /// A file that only re-exports everything from a package still gives its
