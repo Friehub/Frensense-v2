@@ -35,4 +35,6 @@ pub(crate) static PY_SINK_SIGNATURES: &[(&str, &[usize], bool)] = &[
     // while leaving the concatenated-expression findings intact.
     ("xpath", &[0], true),
     ("XPath", &[0], true),
+    // elementpath.select(root, expr): slot 1 is the expression.
+    ("elementpath.select", &[1], true),
 ];

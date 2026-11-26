@@ -79,6 +79,7 @@ pub(crate) static PY_CORE_SINKS: &[(&str, SinkLabel)] = &[
     ("os.unlink", SinkLabel::PathTraversal),
     ("os.stat", SinkLabel::PathTraversal),
     ("os.access", SinkLabel::PathTraversal),
+    ("os.path.exists", SinkLabel::PathTraversal),
     // Path CONSTRUCTORS: a tainted segment only matters where the joined
     // path reaches `open`, so these arm only under their own module. There
     // is no bare `join` entry - `str.join`, `pathlib.joinpath` and every
