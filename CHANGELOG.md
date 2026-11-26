@@ -31,6 +31,9 @@ harness and keeps no changelog.
   now builds all of them, and `--profile-out` writes
   `{schema_version, kind, collection, producer, telemetry}` where `telemetry` is
   byte-identical to a report's `analysis`.
+- **The payload names the scan.** `analysis.target` records the path the scan was
+given - `.` for `frensense .` - under the same redaction policy, so a profile is
+  attributable to the tree it measured.
 - **The payload declares itself.** `analysis.collection` is always `"local"`
   and `analysis.redaction.paths` records how much of a path was kept, so a
   reader does not have to find a doc page to learn either. The payload is

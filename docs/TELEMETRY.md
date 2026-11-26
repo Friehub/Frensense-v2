@@ -39,7 +39,7 @@ An interactive text scan prints one line on stderr before it starts:
 
 ```
 frensense: telemetry is recorded in this report and never uploaded (paths included);
-         FRENSENSE_TELEMETRY_PATHS=basename redacts them. Details: docs/TELEMETRY.md
+         FRENSENSE_TELEMETRY_PATHS=basename redacts them.
 ```
 
 There is no first-run state: no marker file in your home directory or your
@@ -52,7 +52,7 @@ format is machine-readable (`--json`, `--sarif`, `--github`) and with
 
 Counts and timings:
 
-- `status`, `coverage.files_*`, `coverage.sink_sites`,
+- `status`, `target` (the path the scan was given, `.` included), `coverage.files_*`, `coverage.sink_sites`,
   `coverage.unresolved_sites`, `coverage.functions`
 - `verdicts.{vulnerable, sanitized, unknown, no_source}`
 - `graph.{functions, nodes, edges, cross_edges}`

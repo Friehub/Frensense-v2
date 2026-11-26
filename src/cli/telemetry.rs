@@ -132,6 +132,7 @@ pub(crate) fn analysis_payload(
     skipped: &[UnsupportedSourceFile],
     exclusions: Option<&Exclusions>,
     incomplete: &[IncompleteFunction],
+    target: Option<&str>,
 ) -> Value {
     let empty_telem = ScanTelemetry::default();
     let telem = telemetry.unwrap_or(&empty_telem);
@@ -164,6 +165,7 @@ pub(crate) fn analysis_payload(
             "paths": policy.as_str(),
         },
         "status": status,
+        "target": target.map(|t| policy.apply(t)),
         "coverage": {
             "files_found": files_found,
             "files_submitted": telem.input.submitted,
@@ -265,13 +267,14 @@ pub(crate) fn profile_document(
     skipped: &[UnsupportedSourceFile],
     exclusions: Option<&Exclusions>,
     incomplete: &[IncompleteFunction],
+    target: Option<&str>,
 ) -> Value {
     json!({
         "schema_version": TELEMETRY_SCHEMA_VERSION,
         "kind": "scan-telemetry",
         "collection": "local",
         "producer": crate::identity::producer(),
-        "telemetry": analysis_payload(telemetry, coverage, skipped, exclusions, incomplete),
+        "telemetry": analysis_payload(telemetry, coverage, skipped, exclusions, incomplete, target),
     })
 }
 
@@ -289,8 +292,9 @@ pub fn write_profile(
     skipped: &[UnsupportedSourceFile],
     exclusions: Option<&Exclusions>,
     incomplete: &[IncompleteFunction],
+    target: Option<&str>,
 ) -> Result<()> {
-    let doc = profile_document(telemetry, coverage, skipped, exclusions, incomplete);
+    let doc = profile_document(telemetry, coverage, skipped, exclusions, incomplete, target);
     let text = serde_json::to_string_pretty(&doc)
         .map_err(|e| crate::FrensenseError::Config(e.to_string()))?;
     std::fs::write(path, text).map_err(|e| {
@@ -341,7 +345,7 @@ mod tests {
     use super::{PathPolicy, TELEMETRY_SCHEMA_VERSION, analysis_payload, profile_document};
 
     fn payload() -> serde_json::Value {
-        analysis_payload(None, None, &[], None, &[])
+        analysis_payload(None, None, &[], None, &[], None)
     }
 
     /// The committed inventory: adding a field is a reviewed diff, and a
@@ -372,6 +376,7 @@ mod tests {
                 "slowest_functions",
                 "status",
                 "suppressed",
+                "target",
                 "verdicts",
             ],
             "the telemetry payload gained or lost a top-level key"
@@ -427,7 +432,7 @@ mod tests {
     /// The profile document wraps the same payload rather than restating it.
     #[test]
     fn the_profile_document_embeds_the_report_payload() {
-        let doc = profile_document(None, None, &[], None, &[]);
+        let doc = profile_document(None, None, &[], None, &[], None);
         assert_eq!(doc["kind"], "scan-telemetry");
         assert_eq!(doc["collection"], "local");
         assert!(doc["producer"]["version"].is_string());

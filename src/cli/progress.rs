@@ -153,7 +153,7 @@ pub fn announce_telemetry(format: &str, quiet: bool) {
         return;
     }
     eprintln!(
-        "frensense: telemetry is recorded in this report and never uploaded (paths included);\n         FRENSENSE_TELEMETRY_PATHS=basename redacts them. Details: docs/TELEMETRY.md"
+        "frensense: telemetry is recorded in this report and never uploaded (paths included);\n         FRENSENSE_TELEMETRY_PATHS=basename redacts them."
     );
 }
 

@@ -158,8 +158,16 @@ pub(crate) fn mcp_analysis(
     coverage: &crate::policy::Coverage,
     telemetry: &frensense_engine::telemetry::ScanTelemetry,
     incomplete: &[frensense_engine::scan::IncompleteFunction],
+    target: Option<&std::path::Path>,
 ) -> Value {
-    crate::cli::telemetry::analysis_payload(Some(telemetry), Some(coverage), &[], None, incomplete)
+    crate::cli::telemetry::analysis_payload(
+        Some(telemetry),
+        Some(coverage),
+        &[],
+        None,
+        incomplete,
+        target.and_then(|p| p.to_str()),
+    )
 }
 
 /// Build the JSON-RPC `tools/call` result payload with coverage.
@@ -179,7 +187,7 @@ pub(crate) fn result_payload_detailed(
     let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
     let telem = telemetry.unwrap_or(&empty_telem);
     let cov = coverage.cloned().unwrap_or_default();
-    let analysis = mcp_analysis(&cov, telem, incomplete);
+    let analysis = mcp_analysis(&cov, telem, incomplete, Some(path));
     let message = if !advisories.is_empty() {
         None
     } else if !cov.recognized_anything() {

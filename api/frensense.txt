@@ -156,7 +156,7 @@ pub fn frensense::cli::reporting::skipped_unsupported_json(&[frensense::engine::
 pub mod frensense::cli::telemetry
 pub const frensense::cli::telemetry::PATHS_ENV: &str
 pub const frensense::cli::telemetry::TELEMETRY_SCHEMA_VERSION: u32
-pub fn frensense::cli::telemetry::write_profile(&std::path::Path, core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, core::option::Option<&frensense::policy::Coverage>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Exclusions>, &[frensense_engine::scan::IncompleteFunction]) -> frensense::Result<()>
+pub fn frensense::cli::telemetry::write_profile(&std::path::Path, core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, core::option::Option<&frensense::policy::Coverage>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Exclusions>, &[frensense_engine::scan::IncompleteFunction], core::option::Option<&str>) -> frensense::Result<()>
 pub mod frensense::cli::watch
 pub struct frensense::cli::watch::FileWatcher
 impl frensense::cli::watch::FileWatcher

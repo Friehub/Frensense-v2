@@ -136,7 +136,7 @@ pub fn run_audit_streamed(
     let coverage = engine.take_coverage();
     let telemetry = engine.take_telemetry();
     let incomplete = engine.take_incomplete();
-    let analysis = super::scan_file::mcp_analysis(&coverage, &telemetry, &incomplete);
+    let analysis = super::scan_file::mcp_analysis(&coverage, &telemetry, &incomplete, Some(target));
 
     let total = filtered.len();
     write_notification(&json!({
@@ -199,7 +199,7 @@ pub fn run_audit(path: &str, severity_threshold: &str, language: Option<&str>) -
     let coverage = engine.take_coverage();
     let telemetry = engine.take_telemetry();
     let incomplete = engine.take_incomplete();
-    let analysis = super::scan_file::mcp_analysis(&coverage, &telemetry, &incomplete);
+    let analysis = super::scan_file::mcp_analysis(&coverage, &telemetry, &incomplete, Some(target));
 
     json!({
         "advisories": serde_json::to_value(&filtered).unwrap_or_default(),

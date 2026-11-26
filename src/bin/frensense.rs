@@ -925,6 +925,7 @@ fn main() -> Result<()> {
             &skipped_unsupported,
             Some(&exclusions),
             &incomplete,
+            input_path.to_str(),
         )?;
     }
 

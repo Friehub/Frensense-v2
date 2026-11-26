@@ -350,7 +350,7 @@ fn print_scan_summary_detailed_impl(
     println!("  - Info:           {info}");
     println!("Total Findings:     {}", advisories.len());
     println!(
-        "Status:             {}\nTelemetry:          local only; `analysis` in the --json/--sarif report, or the\n                    file named by --profile-out\n                    paths and symbol names included; FRENSENSE_TELEMETRY_PATHS=basename redacts them\n                    Field inventory and sample caps: docs/TELEMETRY.md",
+        "Status:             {}\nTelemetry:          local only; `analysis` in the --json/--sarif report, or the\n                    file named by --profile-out (paths and symbols included;\n                    FRENSENSE_TELEMETRY_PATHS=basename redacts them)",
         status_label(status, advisories.len(), coverage, Some(telem))
     );
     if let Some(out) = output_path {
@@ -481,7 +481,7 @@ pub fn json_report_with_skips(
     telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
     skipped: &[UnsupportedSourceFile],
 ) -> serde_json::Value {
-    json_report_with_coverage_impl(advisories, incomplete, telemetry, skipped, None, None)
+    json_report_with_coverage_impl(advisories, incomplete, telemetry, skipped, None, None, None)
 }
 
 /// [`json_report_with_skips`] plus what the scan actually covered.
@@ -498,9 +498,16 @@ fn json_report_with_coverage_impl(
     skipped: &[UnsupportedSourceFile],
     coverage: Option<&Coverage>,
     exclusions: Option<&Exclusions>,
+    target: Option<&std::path::Path>,
 ) -> serde_json::Value {
-    let analysis_obj =
-        super::telemetry::analysis_payload(telemetry, coverage, skipped, exclusions, incomplete);
+    let analysis_obj = super::telemetry::analysis_payload(
+        telemetry,
+        coverage,
+        skipped,
+        exclusions,
+        incomplete,
+        target.and_then(|p| p.to_str()),
+    );
 
     serde_json::json!({
         "schema_version": crate::REPORT_SCHEMA_VERSION,
@@ -617,11 +624,15 @@ fn print_results_impl(
     }
     match format {
         "json" => {
-            let rendered = serde_json::to_string_pretty(
-                &exclusions::json_report_with_coverage_and_exclusions(
-                    advisories, incomplete, telemetry, skipped, coverage, exclusions,
-                ),
-            )
+            let rendered = serde_json::to_string_pretty(&json_report_with_coverage_impl(
+                advisories,
+                incomplete,
+                telemetry,
+                skipped,
+                coverage,
+                Some(exclusions),
+                Some(input_path),
+            ))
             .map_err(|e| FrensenseError::Config(format!("JSON error: {e}")))?;
             if let Some(out) = output_path {
                 std::fs::write(out, rendered).map_err(|e| {
