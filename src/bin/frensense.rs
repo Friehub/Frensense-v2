@@ -911,9 +911,8 @@ fn main() -> Result<()> {
     )?;
 
     if let Some(path) = &options.profile_output {
-        println!();
         println!(
-            "Telemetry File:     {} (local only, never uploaded)",
+            "\nTelemetry File:     {} (local only, never uploaded)",
             path.display()
         );
     }
