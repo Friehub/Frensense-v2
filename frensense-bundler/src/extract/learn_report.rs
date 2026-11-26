@@ -28,6 +28,9 @@ pub(super) struct Baseline {
 pub(super) struct CandidateReport {
     pub(super) key: String,
     pub(super) support: u32,
+    /// Independent shape cells among the voters. Confirmation needs two;
+    /// `support` alone cannot tell copies from corroboration.
+    pub(super) cells: u32,
     pub(super) voted_by: Vec<String>,
     pub(super) verdict: &'static str,
     pub(super) reason: Option<String>,
@@ -57,7 +60,23 @@ struct LearnSummary {
 struct LearnReport {
     schema: &'static str,
     summary: LearnSummary,
+    /// One row per published fact: how many witnesses backed it (`support`),
+    /// how many were *independent* (`cells`), whether that reached
+    /// `confirmed`, and the classes its voters declared. A sink's classes are
+    /// provenance here; the payload has no sink-scope table yet, so this row
+    /// is where over-reach is auditable today.
+    facts: Vec<PublishedFact>,
     families: Vec<FamilyReport>,
+}
+
+#[derive(Debug, Serialize)]
+struct PublishedFact {
+    key: String,
+    support: u32,
+    cells: u32,
+    status: String,
+    classes: Vec<String>,
+    families: Vec<String>,
 }
 
 /// Per-family outcome log: printed under `FXDBG`, written as JSON when
@@ -120,9 +139,15 @@ pub(super) fn emit_learn_report(
                     .iter()
                     .map(|c| {
                         if c.verdict == "published" {
-                            format!("{}=PUBLISHED", c.key)
+                            format!(
+                                "{}=PUBLISHED(support={}, cells={})",
+                                c.key, c.support, c.cells
+                            )
                         } else {
-                            format!("{}=rejected", c.key)
+                            format!(
+                                "{}=rejected(support={}, cells={})",
+                                c.key, c.support, c.cells
+                            )
                         }
                     })
                     .collect::<Vec<_>>()
@@ -158,7 +183,7 @@ pub(super) fn emit_learn_report(
     }
 
     let report = LearnReport {
-        schema: "frensense-learn-report/1",
+        schema: "frensense-learn-report/2",
         summary: LearnSummary {
             families: family_reports.len(),
             candidates: candidate_reports.len(),
@@ -181,6 +206,20 @@ pub(super) fn emit_learn_report(
                 .map(|f| f.id.clone())
                 .collect(),
         },
+        facts: published
+            .iter()
+            .map(|f| {
+                let (kind, name) = fact_key(&f.entry);
+                PublishedFact {
+                    key: format!("{kind}:{name}"),
+                    support: f.support,
+                    cells: f.cells,
+                    status: f.status.clone(),
+                    classes: f.classes.clone(),
+                    families: f.families.clone(),
+                }
+            })
+            .collect(),
         families: family_reports,
     };
 

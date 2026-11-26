@@ -25,6 +25,7 @@ mod learn_report;
 pub mod metadata;
 pub mod noise;
 pub mod propose;
+mod shape;
 mod trial_cache;
 
 #[cfg(test)]
@@ -121,8 +122,19 @@ fn extract_facts_with(
         .collect();
     let mut cache = TrialCache::from_env();
 
-    // votes: candidate-key -> (support, families)
-    let mut votes: FxHashMap<String, (Candidate, u32, Vec<String>)> = FxHashMap::default();
+    // votes: candidate-key -> (candidate, support, families, shape cells).
+    // `support` counts families, `cells` counts independent witnesses: two
+    // families that differ only in names, literals or formatting are one
+    // witness, so only the cell count may confirm a fact.
+    let mut votes: FxHashMap<
+        String,
+        (
+            Candidate,
+            u32,
+            Vec<String>,
+            std::collections::BTreeSet<String>,
+        ),
+    > = FxHashMap::default();
     // Guard alternatives per `check:{rule}:{call}` key: families sharing a
     // trigger verb propose the check with the helper THEIR negatives use;
     // a union lets one fact accept every voting family's guard shape.
@@ -136,12 +148,25 @@ fn extract_facts_with(
     // votes are folded below in family order, which keeps the sort input - and
     // therefore the bundle bytes - identical to a serial run.
     let mut family_notes: FxHashMap<String, Vec<String>> = FxHashMap::default();
-    let proposals: Vec<(Vec<Candidate>, Vec<String>)> = parallel::map_ordered(families, |f| {
-        let (f_config, f_builtin) = &fam_tables[&f.id];
-        propose_with_trace(f, f_config, f_builtin)
-    });
-    for (f, (cands, notes)) in families.iter().zip(proposals) {
+    let proposals: Vec<(Vec<Candidate>, Vec<String>, shape::Cell)> =
+        parallel::map_ordered(families, |f| {
+            let (f_config, f_builtin) = &fam_tables[&f.id];
+            let (cands, notes) = propose_with_trace(f, f_config, f_builtin);
+            (cands, notes, shape::family_cell(f))
+        });
+    // Diversity quota: a family beyond the cap for its shape cell (or for its
+    // class in this language) is a duplicate witness. It keeps its baseline
+    // evidence and appears in the learn report, but it does not vote.
+    let cells: Vec<shape::Cell> = proposals.iter().map(|(_, _, cell)| cell.clone()).collect();
+    let quota = shape::quota_exclusions(families, &cells);
+    for (f, (cands, notes, cell)) in families.iter().zip(proposals) {
         family_notes.insert(f.id.clone(), notes);
+        if let Some(reason) = quota.get(&f.id) {
+            if let Some(entry) = family_notes.get_mut(&f.id) {
+                entry.push(format!("quota: {reason}; this family does not vote"));
+            }
+            continue;
+        }
         for c in cands {
             let key = match &c {
                 Candidate::Sink { call, package, .. } => match package {
@@ -186,11 +211,14 @@ fn extract_facts_with(
                     .or_default()
                     .insert(guard.clone());
             }
-            let entry = votes.entry(key).or_insert_with(|| (c, 0, Vec::new()));
+            let entry = votes
+                .entry(key)
+                .or_insert_with(|| (c, 0, Vec::new(), std::collections::BTreeSet::new()));
             entry.1 += 1;
             if !entry.2.contains(&f.id) {
                 entry.2.push(f.id.clone());
             }
+            entry.3.insert(cell.id.clone());
         }
     }
 
@@ -332,9 +360,15 @@ fn extract_facts_with(
     // sanitizer that silences findings must be learned before any
     // check/policy is trialed, or the regression gate measures noise
     // against a context that the final bundle will never scan.
-    let mut ordered_votes: Vec<(String, Candidate, u32, Vec<String>)> = votes
+    let mut ordered_votes: Vec<(
+        String,
+        Candidate,
+        u32,
+        Vec<String>,
+        std::collections::BTreeSet<String>,
+    )> = votes
         .into_iter()
-        .map(|(key, (cand, support, fams))| (key, cand, support, fams))
+        .map(|(key, (cand, support, fams, cells))| (key, cand, support, fams, cells))
         .collect();
     ordered_votes.sort_by(|a, b| {
         let tier = |key: &str| {
@@ -363,7 +397,7 @@ fn extract_facts_with(
         String,
         std::collections::BTreeSet<String>,
     > = std::collections::BTreeMap::new();
-    for (key, cand, _, fams) in &ordered_votes {
+    for (key, cand, _, fams, _) in &ordered_votes {
         let Candidate::Sink { call, .. } = cand else {
             continue;
         };
@@ -407,7 +441,8 @@ fn extract_facts_with(
 
     let mut candidate_reports: Vec<CandidateReport> = Vec::new();
 
-    for (key, cand, support, fams) in ordered_votes {
+    for (key, cand, support, fams, voted_cells) in ordered_votes {
+        let cell_count = voted_cells.len() as u32;
         // The fact must be validated by at least one voting family that
         // separates under it, and must not break any family that separated
         // at baseline. Trials run under each family's own tables.
@@ -709,6 +744,7 @@ fn extract_facts_with(
             candidate_reports.push(CandidateReport {
                 key: key.clone(),
                 support,
+                cells: cell_count,
                 voted_by: fams.clone(),
                 verdict: "rejected",
                 reason: Some(reason),
@@ -721,6 +757,7 @@ fn extract_facts_with(
         candidate_reports.push(CandidateReport {
             key: key.clone(),
             support,
+            cells: cell_count,
             voted_by: fams.clone(),
             verdict: "published",
             reason: None,
@@ -757,7 +794,10 @@ fn extract_facts_with(
             classes,
             family,
             support,
-            status: if support >= 2 {
+            cells: cell_count,
+            // Confirmation needs two independent witnesses. Two families that
+            // share a shape cell are one witness, however many files they add.
+            status: if cell_count >= 2 {
                 "confirmed"
             } else {
                 "provisional"

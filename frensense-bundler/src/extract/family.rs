@@ -22,7 +22,11 @@ pub struct LearnedFact {
     pub family: Option<String>,
     /// Number of corpus variants that voted for this fact.
     pub support: u32,
-    /// `confirmed` (support >= 2) or `provisional` (support = 1).
+    /// Number of independent shape cells among those voters. Two families
+    /// that differ only in names, literals or formatting share a cell and
+    /// count once.
+    pub cells: u32,
+    /// `confirmed` (two independent cells) or `provisional` (one cell).
     pub status: String,
     /// Families that voted for this fact.
     pub families: Vec<String>,

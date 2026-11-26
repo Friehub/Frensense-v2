@@ -348,6 +348,7 @@ mod tests {
             classes: Vec::new(),
             family: families.first().map(|f| (*f).to_string()),
             support: 2,
+            cells: 2,
             status: "confirmed".to_string(),
             families: families.iter().map(|f| (*f).to_string()).collect(),
         }
