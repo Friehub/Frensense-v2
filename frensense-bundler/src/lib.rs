@@ -14,6 +14,7 @@ pub mod extract;
 pub mod fact_extract;
 pub mod format;
 pub mod lint;
+mod parallel;
 pub mod pipeline;
 mod sanitizer_qualification;
 

@@ -99,6 +99,10 @@ pub struct PreparedFamily {
     /// All call names appearing in any variant, used to skip gate trials
     /// for facts that cannot affect this family.
     pub calls: BTreeSet<String>,
+    /// Short blake3 of the family's variant sources: the trial-cache identity
+    /// of the family. A family whose files did not change keeps its verdicts
+    /// across builds.
+    pub source_hash: String,
     /// The family's declared `cwe:` - the class its feedback is reported
     /// under, and therefore the class the gate must score its findings with.
     pub cwe: Option<String>,
@@ -120,6 +124,7 @@ impl PreparedFamily {
             pos,
             neg,
             calls,
+            source_hash: family_source_hash(f),
             cwe: f.metadata.cwe.clone(),
         })
     }
@@ -189,6 +194,23 @@ impl PreparedFamily {
         }
         None
     }
+}
+
+/// Short blake3 over a family's id and every variant's name, extension and
+/// source text. Trial verdicts are a pure function of these inputs (plus the
+/// language tables and fact table, which the cache salt covers).
+fn family_source_hash(f: &Family) -> String {
+    let mut h = blake3::Hasher::new();
+    h.update(f.id.as_bytes());
+    for (name, src, ext) in f.positives.iter().chain(f.negatives.iter()) {
+        h.update(b"\0");
+        h.update(name.as_bytes());
+        h.update(b"\0");
+        h.update(ext.as_bytes());
+        h.update(b"\0");
+        h.update(src.as_bytes());
+    }
+    h.finalize().to_hex().to_string()
 }
 
 /// Family separation check under a fact table (single-shot variant; the
