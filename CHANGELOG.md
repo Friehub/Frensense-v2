@@ -21,7 +21,47 @@ harness and keeps no changelog.
 
 ## [0.9.3]
 
+### Added
+
+#### Telemetry contract and notice
+
+- **One telemetry shape, one builder.** The JSON report's `analysis` object, the
+  `--profile-out` document and the MCP `analysis` block were three hand-built
+  objects with three name sets for the same numbers. `src/cli/telemetry.rs`
+  now builds all of them, and `--profile-out` writes
+  `{schema_version, kind, collection, producer, telemetry}` where `telemetry` is
+  byte-identical to a report's `analysis`.
+- **The payload declares itself.** `analysis.collection` is always `"local"`
+  and `analysis.redaction.paths` records how much of a path was kept, so a
+  reader does not have to find a doc page to learn either. The payload is
+  versioned by `analysis.schema_version` (`1`) independently of the report
+  envelope, and a committed key-inventory test fails when a field is added
+  without updating it.
+- **`FRENSENSE_TELEMETRY_PATHS=absolute|relative|basename`** decides how much of
+  a path the payload keeps. Default stays `absolute`; an unrecognized value
+  falls back to `absolute` rather than widening redaction.
+- **A terminal notice and a docs page.** `docs/TELEMETRY.md` and a README
+  paragraph state what a report records, that it never leaves the machine, and
+  how to redact a profile before attaching it to a bug report. An interactive
+  text scan also prints one line on stderr naming the payload and the redaction
+  switch; `--json`/`--sarif`/`--github`, a redirected stderr and
+  `--no-progress` stay silent. The scan summary carries a `Telemetry:` block
+  saying where the payload is, and a `Telemetry File:` line names the
+  `--profile-out` path so it is never mistaken for the report file. The caveat
+  box no longer repeats the pointer.
+- **MCP carries the moved keys too**: `analysis.coverage.files_analyzed` and
+  `analysis.coverage.functions` replace the top-level `files_analyzed`-style
+  aliases.
+
 ### Changed
+
+- **`analysis` key renames (report schema `2` -> `3`).** `timings` -> `phases`,
+  `truncations` -> `caps`, `coverage.files_scanned` -> `coverage.files_analyzed`,
+  and the capped arrays now say so: `failed_files` -> `failed_files_sample`,
+  `partial_files` -> `partial_files_sample`, `no_sink_files` ->
+  `no_sink_files_sample`, `funnel.unmatched_callees` ->
+  `funnel.unmatched_callees_sample`. `analysis_incomplete[]` and
+  `unsupported_source_files.files` are redacted by the same policy.
 
 #### Repository & Release Tooling
 

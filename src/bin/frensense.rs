@@ -676,9 +676,7 @@ fn run_mcp() -> Result<()> {
 }
 
 fn run_lsp() -> Result<()> {
-    let bundle = std::env::var("FRENSENSE_CORPUS_BUNDLE")
-        .ok()
-        .filter(|p| !p.is_empty());
+    let bundle = frensense::cli::env_config::corpus_bundle();
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut reader = stdin.lock();
@@ -775,6 +773,7 @@ fn main() -> Result<()> {
             options.language_filter.as_deref(),
             options.output_path.as_deref(),
         );
+        frensense::cli::progress::announce_telemetry(&options.format, options.no_progress);
     }
 
     let start_time = std::time::Instant::now();
@@ -911,48 +910,23 @@ fn main() -> Result<()> {
         &exclusions,
     )?;
 
+    if let Some(path) = &options.profile_output {
+        println!();
+        println!(
+            "Telemetry File:     {} (local only, never uploaded)",
+            path.display()
+        );
+    }
+
     if let Some(profile_path) = &options.profile_output {
-        let profile_json = serde_json::json!({
-            "status": status,
-            "phases": telemetry.phases,
-            "slowest_files": telemetry.slowest_files,
-            "slowest_functions": telemetry.slowest_functions,
-            "checks": telemetry.checks,
-            "caps": telemetry.caps,
-            "errors": telemetry.errors,
-            "suppressed": telemetry.suppressed,
-            "input": {
-                "submitted": telemetry.input.submitted,
-                "scanned": telemetry.input.scanned,
-                "failed": telemetry.input.failed,
-                "failed_files": telemetry.input.failed_files,
-                "unsupported": telemetry.input.unsupported,
-                "parse_partial": telemetry.input.parse_partial,
-                "parse_partial_files": telemetry.input.parse_partial_files,
-                "functions": telemetry.input.functions,
-            },
-            "unsupported_source_files": frensense::cli::skipped_unsupported_json(&skipped_unsupported),
-            "taint": {
-                "nodes_visited": telemetry.taint.nodes_visited,
-                "functions_visited": telemetry.taint.functions_visited,
-                "sink_args_explored": telemetry.taint.sink_args_explored,
-                "vulnerable": telemetry.taint.vulnerable,
-                "sanitized": telemetry.taint.sanitized,
-                "unknown": telemetry.taint.unknown,
-                "no_source": telemetry.taint.clean,
-            }
-        });
-        std::fs::write(
+        frensense::cli::telemetry::write_profile(
             profile_path,
-            serde_json::to_string_pretty(&profile_json)
-                .map_err(|e| frensense::FrensenseError::Config(e.to_string()))?,
-        )
-        .map_err(|e| {
-            frensense::FrensenseError::Config(format!(
-                "Failed to write profile to {}: {e}",
-                profile_path.display()
-            ))
-        })?;
+            Some(&telemetry),
+            Some(&coverage),
+            &skipped_unsupported,
+            Some(&exclusions),
+            &incomplete,
+        )?;
     }
 
     if let Some(path) = &options.emit_baseline_path {

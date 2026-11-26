@@ -21,6 +21,15 @@ language server for editors are all subcommands of `frensense`. There is no
 model and no network call in a scan: the same input always gives the same
 output.
 
+Every report also carries the scan's own accounting - an `analysis` block saying
+what was read, what was skipped, which safety valve truncated and how long each
+phase took - because "nothing found" is only checkable when the report also says
+how much of the code it looked at. That telemetry is local: it goes into the
+report you asked for and nowhere else (no upload, no background sender, no
+home-directory write). A report names files and functions, so
+`FRENSENSE_TELEMETRY_PATHS=basename` redacts paths before you share one. The
+inventory is in [Telemetry](docs/TELEMETRY.md).
+
 > **Status: young, and honest about it.** Frensense reports what it can show
 > and stays quiet about what it cannot, so it **misses real vulnerabilities**.
 > The current OWASP Benchmark for Python score, the per-class breakdown and the

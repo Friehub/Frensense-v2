@@ -129,6 +129,8 @@ docs-site/.vitepress/cache/
 !SECURITY.md
 !THIRD_PARTY_LICENSES.md
 !docs/BENCHMARKING.md
+# The telemetry notice is user-facing: everyone who runs a scan reads it.
+!docs/TELEMETRY.md
 !docs/MCP_USAGE.md
 !docs/LSP_USAGE.md
 !docs/AGENT_INTEGRATION.md

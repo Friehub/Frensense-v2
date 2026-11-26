@@ -10,6 +10,7 @@ pub mod capabilities;
 #[path = "capabilities_tests.rs"]
 mod capabilities_tests;
 pub mod engine_setup;
+pub mod env_config;
 pub mod git;
 pub mod options;
 pub mod probe;
@@ -18,6 +19,7 @@ pub mod probe;
 mod probe_tests;
 pub mod progress;
 pub mod reporting;
+pub mod telemetry;
 pub mod watch;
 #[cfg(test)]
 mod watch_tests;

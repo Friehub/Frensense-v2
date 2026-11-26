@@ -115,9 +115,7 @@ pub fn run_audit_streamed(
         return;
     }
 
-    let corpus_bundle = std::env::var("FRENSENSE_CORPUS_BUNDLE")
-        .ok()
-        .filter(|p| !p.is_empty());
+    let corpus_bundle = crate::cli::env_config::corpus_bundle();
 
     let mut engine = super::scan_file::build_engine(0.0, corpus_bundle.as_deref());
 
@@ -182,9 +180,7 @@ pub fn run_audit(path: &str, severity_threshold: &str, language: Option<&str>) -
         });
     }
 
-    let corpus_bundle = std::env::var("FRENSENSE_CORPUS_BUNDLE")
-        .ok()
-        .filter(|p| !p.is_empty());
+    let corpus_bundle = crate::cli::env_config::corpus_bundle();
 
     let mut engine = super::scan_file::build_engine(0.0, corpus_bundle.as_deref());
 

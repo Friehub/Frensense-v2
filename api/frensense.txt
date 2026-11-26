@@ -11,6 +11,9 @@ pub fn frensense::cli::capabilities::render(&serde_json::value::Value) -> alloc:
 pub fn frensense::cli::capabilities::report() -> serde_json::value::Value
 pub mod frensense::cli::engine_setup
 pub fn frensense::cli::engine_setup::configure_engine(&mut frensense::engine::project::Engine, &frensense::cli::CliOptions)
+pub mod frensense::cli::env_config
+pub fn frensense::cli::env_config::corpus_bundle() -> core::option::Option<alloc::string::String>
+pub fn frensense::cli::env_config::telemetry_paths() -> core::option::Option<alloc::string::String>
 pub mod frensense::cli::exclusions
 pub fn frensense::cli::exclusions::json_report_with_coverage(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>) -> serde_json::value::Value
 pub fn frensense::cli::exclusions::json_report_with_coverage_and_exclusions(&[frensense::Advisory], &[frensense_engine::scan::IncompleteFunction], core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Coverage>, &frensense::policy::Exclusions) -> serde_json::value::Value
@@ -109,6 +112,7 @@ impl frensense::cli::ScanObserver for frensense::cli::NoopObserver
 pub fn frensense::cli::NoopObserver::progress(&mut self, &str, usize, usize, core::option::Option<&str>, usize)
 impl frensense::cli::ScanObserver for frensense::cli::ProgressReporter
 pub fn frensense::cli::ProgressReporter::progress(&mut self, &str, usize, usize, core::option::Option<&str>, usize)
+pub fn frensense::cli::progress::announce_telemetry(&str, bool)
 pub fn frensense::cli::progress::format_rss(u64) -> alloc::string::String
 pub fn frensense::cli::progress::peak_rss_kb() -> u64
 pub mod frensense::cli::reporting
@@ -149,6 +153,10 @@ pub fn frensense::cli::reporting::rule_index() -> alloc::string::String
 pub fn frensense::cli::reporting::save_baseline(&[frensense::Advisory], &str) -> frensense::Result<()>
 pub fn frensense::cli::reporting::skipped_language_counts(&[frensense::engine::files::UnsupportedSourceFile]) -> alloc::vec::Vec<frensense::cli::SkippedLanguage>
 pub fn frensense::cli::reporting::skipped_unsupported_json(&[frensense::engine::files::UnsupportedSourceFile]) -> serde_json::value::Value
+pub mod frensense::cli::telemetry
+pub const frensense::cli::telemetry::PATHS_ENV: &str
+pub const frensense::cli::telemetry::TELEMETRY_SCHEMA_VERSION: u32
+pub fn frensense::cli::telemetry::write_profile(&std::path::Path, core::option::Option<&frensense_engine::telemetry::ScanTelemetry>, core::option::Option<&frensense::policy::Coverage>, &[frensense::engine::files::UnsupportedSourceFile], core::option::Option<&frensense::policy::Exclusions>, &[frensense_engine::scan::IncompleteFunction]) -> frensense::Result<()>
 pub mod frensense::cli::watch
 pub struct frensense::cli::watch::FileWatcher
 impl frensense::cli::watch::FileWatcher
@@ -220,6 +228,7 @@ impl frensense::cli::ScanObserver for frensense::cli::NoopObserver
 pub fn frensense::cli::NoopObserver::progress(&mut self, &str, usize, usize, core::option::Option<&str>, usize)
 impl frensense::cli::ScanObserver for frensense::cli::ProgressReporter
 pub fn frensense::cli::ProgressReporter::progress(&mut self, &str, usize, usize, core::option::Option<&str>, usize)
+pub fn frensense::cli::announce_telemetry(&str, bool)
 pub fn frensense::cli::bundle_rule_index(&frensense_bundler::format::types::LoadedBundle) -> alloc::string::String
 pub fn frensense::cli::compare_baseline(&[frensense::Advisory], &str) -> frensense::Result<bool>
 pub fn frensense::cli::configure_engine(&mut frensense::engine::project::Engine, &frensense::cli::CliOptions)
