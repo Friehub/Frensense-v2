@@ -50,14 +50,15 @@ fn make_bundle(facts: Vec<LearnedFactEntry>) -> FactTable {
             .as_slice(),
     )
     .1;
-    let payload = BundlePayload {
-        patterns: vec![],
-        learned_facts: facts,
-        policy_pack: vec![],
-        sanitizer_scopes: vec![],
-        sanitizer_args: Vec::new(),
-        policy_meta: vec![],
-    };
+    let payload = BundlePayload::new(
+        vec![],
+        facts,
+        vec![],
+        vec![],
+        vec![],
+        Vec::new(),
+        Vec::new(),
+    );
     let bytes = write_bundle(&payload, 0).expect("write bundle");
     let loaded = load_bundle(&bytes).expect("load bundle");
     table.merge(&fact_table_from_entries(&loaded.learned_facts));

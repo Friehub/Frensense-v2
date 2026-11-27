@@ -218,8 +218,84 @@ pub struct BundlePayloadV9 {
     pub sanitizer_args: Vec<SanitizerArgScope>,
 }
 
+/// Base kinds a store sink may fire on (v10+).
+///
+/// `SinkSignature::base_kinds` is an engine field no entry variant carries, so
+/// - like the sanitizer class scope - it rides in a payload side table keyed by
+/// `(call, package)`. No entry (or empty `kinds`) is the legacy any-receiver
+/// reading. The consumer applies it with
+/// [`FactTable::qualify_sink_base_kinds`](frensense_engine::analysis::taint::facts::FactTable::qualify_sink_base_kinds).
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SinkBaseKindScope {
+    /// Store sink field name (`innerHTML`).
+    pub call: String,
+    /// Package qualification the kinds apply to (`None` = unscoped).
+    pub package: Option<String>,
+    /// Calls (or declared type names) a receiver must come from.
+    pub kinds: Vec<String>,
+}
+
+impl SinkBaseKindScope {
+    /// Build one hint. The struct is `non_exhaustive` so a later payload can
+    /// add a field without breaking authors.
+    #[must_use]
+    pub fn new(call: impl Into<String>, package: Option<String>, kinds: Vec<String>) -> Self {
+        Self {
+            call: call.into(),
+            package,
+            kinds,
+        }
+    }
+}
+
+/// The v10 payload: v9 plus the store-sink base-kind table.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+#[non_exhaustive]
+pub struct BundlePayloadV10 {
+    pub patterns: Vec<BundlePattern>,
+    #[serde(default)]
+    pub learned_facts: Vec<LearnedFactEntry>,
+    #[serde(default)]
+    pub policy_pack: Vec<AuthoredPolicyEntry>,
+    #[serde(default)]
+    pub sanitizer_scopes: Vec<SanitizerScope>,
+    #[serde(default)]
+    pub policy_meta: Vec<PolicyMeta>,
+    #[serde(default)]
+    pub sanitizer_args: Vec<SanitizerArgScope>,
+    /// Base kinds for store sinks in `learned_facts`.
+    #[serde(default)]
+    pub sink_base_kinds: Vec<SinkBaseKindScope>,
+}
+
+impl BundlePayloadV10 {
+    /// Build a payload. `#[non_exhaustive]` keeps later versions free to add a
+    /// table without breaking authors; this constructor is the authoring API.
+    #[must_use]
+    pub fn new(
+        patterns: Vec<BundlePattern>,
+        learned_facts: Vec<LearnedFactEntry>,
+        policy_pack: Vec<AuthoredPolicyEntry>,
+        sanitizer_scopes: Vec<SanitizerScope>,
+        policy_meta: Vec<PolicyMeta>,
+        sanitizer_args: Vec<SanitizerArgScope>,
+        sink_base_kinds: Vec<SinkBaseKindScope>,
+    ) -> Self {
+        Self {
+            patterns,
+            learned_facts,
+            policy_pack,
+            sanitizer_scopes,
+            policy_meta,
+            sanitizer_args,
+            sink_base_kinds,
+        }
+    }
+}
+
 /// Alias for the latest bundle payload.
-pub type BundlePayload = BundlePayloadV9;
+pub type BundlePayload = BundlePayloadV10;
 
 #[derive(Debug, Clone)]
 pub struct LoadedBundle {
@@ -235,6 +311,8 @@ pub struct LoadedBundle {
     pub policy_meta: Vec<PolicyMeta>,
     /// Sanitizer argument-slot scopes (empty before v9).
     pub sanitizer_args: Vec<SanitizerArgScope>,
+    /// Store-sink base kinds (empty before v10).
+    pub sink_base_kinds: Vec<SinkBaseKindScope>,
 }
 
 /// One sanitizer fact's published qualification, resolved for install.
@@ -436,101 +514,161 @@ impl LoadedBundle {
     }
 }
 
-pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
-    let (header, payload_bytes) =
-        read_bundle_parts(bytes).map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
+/// One decoded payload, whichever envelope version it came from.
+struct PayloadParts {
+    patterns: Vec<BundlePattern>,
+    learned_facts: Vec<LearnedFactEntry>,
+    policy_pack: Vec<AuthoredPolicyEntry>,
+    sanitizer_scopes: Vec<SanitizerScope>,
+    policy_meta: Vec<PolicyMeta>,
+    sanitizer_args: Vec<SanitizerArgScope>,
+    sink_base_kinds: Vec<SinkBaseKindScope>,
+}
 
+/// Decode a payload by envelope version: bincode is positional and
+/// non-self-describing, so each version has its own frozen struct and every
+/// newer field is defaulted for older bundles.
+fn decode_payload(version: u32, payload_bytes: &[u8]) -> Result<PayloadParts, String> {
     // Version-branched payload load: bincode is positional and non-self-describing.
     // - >= 6: v6 payload with package-scoped LearnedFactEntry
     // - == 5: frozen v5 payload with LearnedFactEntryV5 converted to modern entries
     // - == 4: frozen v4 payload with V4Pattern and LearnedFactEntryV5 converted to modern entries
     // - < 4: legacy pattern vector
-    let (patterns, learned_facts, policy_pack, sanitizer_scopes, policy_meta, sanitizer_args) =
-        if header.version >= 9 {
-            let payload: BundlePayloadV9 = bincode::deserialize(payload_bytes)
-                .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
-            (
-                payload.patterns,
-                payload.learned_facts,
-                payload.policy_pack,
-                payload.sanitizer_scopes,
-                payload.policy_meta,
-                payload.sanitizer_args,
-            )
-        } else if header.version >= 8 {
-            let payload: BundlePayloadV8 = bincode::deserialize(payload_bytes)
-                .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
-            (
-                payload.patterns,
-                payload.learned_facts,
-                payload.policy_pack,
-                payload.sanitizer_scopes,
-                payload.policy_meta,
-                Vec::new(),
-            )
-        } else if header.version >= 6 {
-            let payload: BundlePayloadV6 = bincode::deserialize(payload_bytes)
-                .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
-            (
-                payload.patterns,
-                payload.learned_facts,
-                payload.policy_pack,
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-            )
-        } else if header.version == 5 {
-            let payload: BundlePayloadV5 = bincode::deserialize(payload_bytes)
-                .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
-            (
-                payload.patterns,
+    let (
+        patterns,
+        learned_facts,
+        policy_pack,
+        sanitizer_scopes,
+        policy_meta,
+        sanitizer_args,
+        sink_base_kinds,
+    ) = if version >= 10 {
+        let payload: BundlePayloadV10 = bincode::deserialize(payload_bytes)
+            .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
+        (
+            payload.patterns,
+            payload.learned_facts,
+            payload.policy_pack,
+            payload.sanitizer_scopes,
+            payload.policy_meta,
+            payload.sanitizer_args,
+            payload.sink_base_kinds,
+        )
+    } else if version >= 9 {
+        let payload: BundlePayloadV9 = bincode::deserialize(payload_bytes)
+            .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
+        (
+            payload.patterns,
+            payload.learned_facts,
+            payload.policy_pack,
+            payload.sanitizer_scopes,
+            payload.policy_meta,
+            payload.sanitizer_args,
+            Vec::new(),
+        )
+    } else if version >= 8 {
+        let payload: BundlePayloadV8 = bincode::deserialize(payload_bytes)
+            .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
+        (
+            payload.patterns,
+            payload.learned_facts,
+            payload.policy_pack,
+            payload.sanitizer_scopes,
+            payload.policy_meta,
+            Vec::new(),
+            Vec::new(),
+        )
+    } else if version >= 6 {
+        let payload: BundlePayloadV6 = bincode::deserialize(payload_bytes)
+            .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
+        (
+            payload.patterns,
+            payload.learned_facts,
+            payload.policy_pack,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+    } else if version == 5 {
+        let payload: BundlePayloadV5 = bincode::deserialize(payload_bytes)
+            .map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
+        (
+            payload.patterns,
+            payload
+                .learned_facts
+                .into_iter()
+                .map(LearnedFactEntry::from)
+                .collect(),
+            payload.policy_pack,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+    } else {
+        match bincode::deserialize::<V4Payload>(payload_bytes) {
+            Ok(payload) => (
+                payload
+                    .patterns
+                    .into_iter()
+                    .map(BundlePattern::from)
+                    .collect(),
                 payload
                     .learned_facts
                     .into_iter()
                     .map(LearnedFactEntry::from)
                     .collect(),
-                payload.policy_pack,
                 Vec::new(),
                 Vec::new(),
                 Vec::new(),
-            )
-        } else {
-            match bincode::deserialize::<V4Payload>(payload_bytes) {
-                Ok(payload) => (
-                    payload
-                        .patterns
-                        .into_iter()
-                        .map(BundlePattern::from)
-                        .collect(),
-                    payload
-                        .learned_facts
-                        .into_iter()
-                        .map(LearnedFactEntry::from)
-                        .collect(),
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                ),
-                Err(e) => match bincode::deserialize::<Vec<LegacyPattern>>(payload_bytes) {
-                    Ok(_) => {
-                        tracing::warn!(
-                            "legacy fingerprint bundle loaded (version {}); no facts available",
-                            header.version
-                        );
-                        (
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                            Vec::new(),
-                        )
-                    }
-                    Err(_) => return Err(format!("Failed to deserialize bundle: {}", e)),
-                },
-            }
-        };
+                Vec::new(),
+                Vec::new(),
+            ),
+            Err(e) => match bincode::deserialize::<Vec<LegacyPattern>>(payload_bytes) {
+                Ok(_) => {
+                    tracing::warn!(
+                        "legacy fingerprint bundle loaded (version {}); no facts available",
+                        version
+                    );
+                    (
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                    )
+                }
+                Err(_) => return Err(format!("Failed to deserialize bundle: {}", e)),
+            },
+        }
+    };
+
+    Ok(PayloadParts {
+        patterns,
+        learned_facts,
+        policy_pack,
+        sanitizer_scopes,
+        policy_meta,
+        sanitizer_args,
+        sink_base_kinds,
+    })
+}
+
+pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
+    let (header, payload_bytes) =
+        read_bundle_parts(bytes).map_err(|e| format!("Failed to deserialize bundle: {}", e))?;
+
+    let parts = decode_payload(header.version, payload_bytes)?;
+    let patterns = parts.patterns;
+    let learned_facts = parts.learned_facts;
+    let policy_pack = parts.policy_pack;
+    let sanitizer_scopes = parts.sanitizer_scopes;
+    let policy_meta = parts.policy_meta;
+    let sanitizer_args = parts.sanitizer_args;
+    let sink_base_kinds = parts.sink_base_kinds;
 
     if patterns.len() < header.pattern_count as usize {
         tracing::warn!(
@@ -548,6 +686,7 @@ pub fn load_bundle(bytes: &[u8]) -> Result<LoadedBundle, String> {
         sanitizer_scopes,
         policy_meta,
         sanitizer_args,
+        sink_base_kinds,
     })
 }
 
@@ -679,6 +818,11 @@ mod tests {
             sanitizer_scopes: Vec::new(),
             policy_meta: Vec::new(),
             sanitizer_args: Vec::new(),
+            sink_base_kinds: vec![SinkBaseKindScope::new(
+                "innerHTML",
+                None,
+                vec!["querySelector".to_string()],
+            )],
         };
         // `write_bundle` always stamps the current envelope version, so the
         // payload must be the current layout.
@@ -699,6 +843,14 @@ mod tests {
         assert_eq!(*package, Some("pg".to_string()));
         assert!(*binding_args_safe);
         assert_eq!(loaded.policy_pack.len(), 1);
+        // The base-kind hint rides in its own table (v10+) because no entry
+        // variant carries the engine's `SinkSignature::base_kinds`.
+        assert_eq!(loaded.sink_base_kinds.len(), 1);
+        assert_eq!(loaded.sink_base_kinds[0].call, "innerHTML");
+        assert_eq!(
+            loaded.sink_base_kinds[0].kinds,
+            ["querySelector".to_string()]
+        );
     }
 
     /// The envelope gate rejects newer-than-known bundle versions with a clean error.
@@ -785,6 +937,7 @@ mod tests {
                 package: None,
                 args: vec![1],
             }],
+            sink_base_kinds: Vec::new(),
         };
         let bytes = write_bundle(&payload, 0).expect("write");
         let loaded = load_bundle(&bytes).expect("bundle loads");

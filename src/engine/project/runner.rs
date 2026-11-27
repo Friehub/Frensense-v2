@@ -193,6 +193,7 @@ impl Engine {
             ));
             let scanned_langs = languages_for_exts(group.iter().map(|(_, _, ext)| ext.as_str()));
             apply_language_entries(&mut config, &mut facts, pack_entries, &scanned_langs);
+            super::bundle_scopes::apply_pack(&mut facts, frensense_bundler::format::default_pack());
             if let Some(loaded) = &loaded_bundle {
                 // The trust tier filters here, once, for every consumer: a
                 // custom bundle may not ship sanitizers and a community one
@@ -200,15 +201,9 @@ impl Engine {
                 let permitted = loaded.effective_learned_facts();
                 apply_language_entries(&mut config, &mut facts, &permitted, &scanned_langs);
                 facts.merge(&fact_table_from_entries(&permitted));
-                // Class and slot scopes ride beside the facts in the payload
-                // (v8+); the installed fact keeps the engine's shape.
-                for s in loaded.effective_sanitizer_scopes() {
-                    facts.qualify_sanitizer(s.call, s.package, s.classes, s.args);
-                }
-            }
-            // Bundle-learned source patterns widen the taint config.
-            for pattern in facts.source_patterns() {
-                config.sources.insert(pattern.to_string());
+                // Scopes ride beside the facts in the payload; the installed
+                // fact keeps the engine's shape.
+                super::bundle_scopes::apply(&mut facts, &mut config, loaded);
             }
             facts.max_complexity = self.max_complexity;
             let group_offset = global_completed;
@@ -1413,14 +1408,15 @@ mod bundle_pattern_tests {
     /// the load -> index -> advisory path.
     #[test]
     fn bundle_loaded_pattern_reaches_scan_advisories() {
-        let payload = BundlePayload {
-            patterns: vec![pattern(&["weak_hash"])],
-            learned_facts: vec![],
-            policy_pack: vec![],
-            sanitizer_scopes: vec![],
-            sanitizer_args: vec![],
-            policy_meta: vec![],
-        };
+        let payload = BundlePayload::new(
+            vec![pattern(&["weak_hash"])],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
         let bytes: &'static [u8] = Box::leak(
             write_bundle(&payload, 1)
                 .expect("bundle writes")

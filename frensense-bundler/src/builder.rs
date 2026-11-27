@@ -137,6 +137,7 @@ pub fn build_facts_bundle_with_trust(
         sanitizer_scopes,
         policy_meta,
         sanitizer_args,
+        sink_base_kinds: Vec::new(),
     };
     let _ = learned_table;
 

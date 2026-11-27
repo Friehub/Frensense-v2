@@ -27,10 +27,13 @@
 //! registered spec, sorted by language name for byte-determinism.
 
 mod data;
+mod pack_bundle;
 mod role_map;
+mod store_hints;
+
+pub use pack_bundle::build_default_bundle;
 mod vocab;
 
-use frensense_bundler::format::{write_bundle, BundlePayload};
 use frensense_engine::analysis::taint::facts::{
     AllocCapacity, GuardBypassFact, HintKind, LearnedFactEntry, SchemaPolicyFact,
 };
@@ -190,21 +193,6 @@ pub fn default_pack_entries() -> Vec<LearnedFactEntry> {
         entries.extend(vocab::entries_for_static(v));
     }
     entries
-}
-
-/// Serialize [`default_pack_entries`] into the `.frc` envelope: zero patterns,
-/// empty `policy_pack` and empty metadata tables (the built-in vocabulary has
-/// no class scope, policy tier or sanitizer slots). Used by the drift tests.
-pub fn build_default_bundle() -> Vec<u8> {
-    let payload = BundlePayload {
-        patterns: Vec::new(),
-        learned_facts: default_pack_entries(),
-        policy_pack: Vec::new(),
-        sanitizer_scopes: Vec::new(),
-        sanitizer_args: Vec::new(),
-        policy_meta: Vec::new(),
-    };
-    write_bundle(&payload, 0).unwrap_or_else(|e| panic!("default pack serialization failed: {e}"))
 }
 
 /// [`default_pack_entries`] encoded alone as raw bytes.

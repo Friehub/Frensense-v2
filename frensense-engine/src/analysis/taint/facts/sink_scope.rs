@@ -99,3 +99,56 @@ impl FactTable {
             .map(|(_, sig)| sig)
     }
 }
+
+impl FactTable {
+    /// Attach store-sink base kinds to an already-installed signature.
+    ///
+    /// The hint rides in the bundle's payload side table (v10+), keyed by
+    /// `(call, package)`, because no entry variant carries it. Returns `false`
+    /// when no signature is installed for that key, so a stale table is
+    /// visible instead of silent.
+    pub fn qualify_sink_base_kinds(
+        &mut self,
+        call: &str,
+        package: Option<&str>,
+        kinds: &[String],
+    ) -> bool {
+        // A pack installs `LanguageSink` signatures into the per-language
+        // tables, so a lookup can resolve to any of them: hint every copy.
+        let mut hit = false;
+        if package.is_none() {
+            if let Some(sig) = self.sink_signatures.get_mut(call) {
+                sig.base_kinds = kinds.to_vec();
+                hit = true;
+            }
+            for table in self.lang_sink_signatures.values_mut() {
+                if let Some(sig) = table.get_mut(call) {
+                    sig.base_kinds = kinds.to_vec();
+                    hit = true;
+                }
+            }
+        } else if let Some(pkg) = package
+            && let Some(sig) = self
+                .scoped_sink_signatures
+                .get_mut(&(pkg.to_string(), call.to_string()))
+        {
+            sig.base_kinds = kinds.to_vec();
+            hit = true;
+        }
+        hit
+    }
+}
+
+impl FactTable {
+    /// Apply a whole `(call, package, kinds)` table, as a bundle payload
+    /// carries it. Returns how many installed signatures it reached.
+    pub fn apply_sink_base_kinds<'a, I>(&mut self, scopes: I) -> usize
+    where
+        I: IntoIterator<Item = (&'a str, Option<&'a str>, &'a [String])>,
+    {
+        scopes
+            .into_iter()
+            .filter(|(call, package, kinds)| self.qualify_sink_base_kinds(call, *package, kinds))
+            .count()
+    }
+}

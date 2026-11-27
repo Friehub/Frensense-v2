@@ -23,7 +23,7 @@ pub use frc::{
     BUNDLE_VERSION, MIN_SUPPORTED_VERSION,
 };
 pub use types::{
-    load_bundle, BundlePattern, BundlePayload, BundlePayloadV5, BundlePayloadV6, BundlePayloadV8,
-    BundlePayloadV9, EffectiveSanitizerScope, LoadedBundle, PolicyMeta, SanitizerArgScope,
-    SanitizerScope,
+    load_bundle, BundlePattern, BundlePayload, BundlePayloadV10, BundlePayloadV5, BundlePayloadV6,
+    BundlePayloadV8, BundlePayloadV9, EffectiveSanitizerScope, LoadedBundle, PolicyMeta,
+    SanitizerArgScope, SanitizerScope, SinkBaseKindScope,
 };

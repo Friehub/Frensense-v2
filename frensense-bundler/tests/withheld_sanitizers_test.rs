@@ -24,17 +24,18 @@ fn sanitizer(call: &str, package: Option<&str>) -> LearnedFactEntry {
 /// Build and reload a two-sanitizer bundle at `trust`. `None` means the
 /// write or reload failed, which every test below treats as a failure.
 fn build(trust: BundleTrust, scopes: Vec<SanitizerScope>) -> Option<LoadedBundle> {
-    let payload = BundlePayload {
-        patterns: vec![],
-        learned_facts: vec![
+    let payload = BundlePayload::new(
+        vec![],
+        vec![
             sanitizer("isPublicHost", Some("net-utils")),
             sanitizer("looksSafe", None),
         ],
-        policy_pack: vec![],
-        sanitizer_scopes: scopes,
-        sanitizer_args: Vec::new(),
-        policy_meta: vec![],
-    };
+        vec![],
+        scopes,
+        vec![],
+        Vec::new(),
+        Vec::new(),
+    );
     // Pin whatever engine this test is compiled against, not a literal: a
     // literal silently stops loading the moment the engine's series moves.
     let engine = EngineRequirement::parse_triple(frensense_engine::VERSION).unwrap_or([0, 0, 0]);

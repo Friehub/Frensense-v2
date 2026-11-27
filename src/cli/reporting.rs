@@ -2007,6 +2007,7 @@ mod explain_learned_rule_tests {
     /// advisory pattern joined to a sink name: every learned card shape.
     fn bundle() -> LoadedBundle {
         LoadedBundle {
+            sink_base_kinds: Vec::new(),
             header: BundleHeader {
                 magic: *frensense_bundler::format::BUNDLE_MAGIC,
                 version: 6,

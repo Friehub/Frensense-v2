@@ -42,7 +42,7 @@ use std::fmt;
 /// or the fact-entry vocabulary requires a bump here. The engine's
 /// `FACT_VOCABULARY_FINGERPRINT` ratchet catches vocabulary movement; this
 /// number catches layout movement. `docs/FORMATS.md` records both.
-pub const BUNDLE_VERSION: u32 = 9;
+pub const BUNDLE_VERSION: u32 = 10;
 
 pub const BUNDLE_MAGIC: &[u8; 4] = b"FRC1";
 

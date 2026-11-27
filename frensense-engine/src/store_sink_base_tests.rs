@@ -6,6 +6,8 @@
 //! the receiver was produced by a call the fact names (`querySelector`,
 //! `createElement`, ...), never because the field happens to be spelled
 //! `innerHTML`. The second case below is the reported false positive class.
+//! The hint reaches the installed signature through the bundle payload's
+//! `sink_base_kinds` table, joined by `FactTable::qualify_sink_base_kinds`.
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -30,19 +32,26 @@ export function render(row: any, q: string) {
 }
 "#;
 
-    fn run(src: &str) -> Vec<SinkFinding> {
+    fn run(src: &str, hint: Option<&[&str]>) -> Vec<SinkFinding> {
         let files = vec![("test.ts".to_string(), src.to_string(), "ts".to_string())];
         let (config, mut facts) = seeded_tables(["ts"]);
-        // Install the hinted signature where a bundle's language table lands.
-        // The hint replaces the bare built-in `innerHTML` entry, so a field
-        // name alone no longer arms the sink.
-        let mut sig = SinkSignature::with_args("innerHTML", &[0]);
-        sig.base_kinds = vec!["querySelector".to_string()];
+        // Install the bare signature where a pack's language table lands, then
+        // join the hint exactly as the runner joins a payload table.
         facts
             .lang_sink_signatures
             .entry("typescript".to_string())
             .or_default()
-            .insert("innerHTML".to_string(), sig);
+            .insert(
+                "innerHTML".to_string(),
+                SinkSignature::with_args("innerHTML", &[0]),
+            );
+        if let Some(kinds) = hint {
+            let kinds: Vec<String> = kinds.iter().map(|k| (*k).to_string()).collect();
+            assert!(
+                facts.qualify_sink_base_kinds("innerHTML", None, &kinds),
+                "the hint must reach the installed language signature"
+            );
+        }
         let prepared = prepare(&files).expect("prepare");
         scan_prepared(&prepared, &config, &facts).findings
     }
@@ -53,7 +62,7 @@ export function render(row: any, q: string) {
 
     #[test]
     fn store_sink_fires_on_a_matching_base() {
-        let findings = run(DOM_WRITE);
+        let findings = run(DOM_WRITE, Some(&["querySelector"]));
         assert!(
             writes(&findings) > 0,
             "an innerHTML write on a querySelector base must fire; got {findings:?}"
@@ -62,11 +71,20 @@ export function render(row: any, q: string) {
 
     #[test]
     fn store_sink_is_silent_on_a_bare_field_name_match() {
-        let findings = run(ROW_WRITE);
+        let findings = run(ROW_WRITE, Some(&["querySelector"]));
         assert_eq!(
             writes(&findings),
             0,
             "innerHTML on an unrelated receiver must stay silent; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn unhinted_signature_keeps_the_legacy_bare_name_match() {
+        let findings = run(ROW_WRITE, None);
+        assert!(
+            writes(&findings) > 0,
+            "without a hint the field name alone still arms the sink; got {findings:?}"
         );
     }
 }

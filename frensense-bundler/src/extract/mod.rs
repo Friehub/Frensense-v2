@@ -107,6 +107,14 @@ pub fn family_tables(f: &Family) -> (TaintConfig, FactTable) {
         pack_entries,
         &frensense_engine::analysis::taint::facts::languages_for_exts(exts),
     );
+    // The pack's store-sink base kinds are facts too: gate and scan must see
+    // the same hinted signatures, or the corpus learns what a scan refuses.
+    facts.apply_sink_base_kinds(
+        crate::format::default_pack()
+            .sink_base_kinds
+            .iter()
+            .map(|s| (s.call.as_str(), s.package.as_deref(), s.kinds.as_slice())),
+    );
     (config, facts)
 }
 
