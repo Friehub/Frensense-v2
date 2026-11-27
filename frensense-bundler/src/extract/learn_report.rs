@@ -69,6 +69,24 @@ struct LearnReport {
     families: Vec<FamilyReport>,
 }
 
+/// One row per published fact, in the payload's own key order.
+fn published_facts(published: &[LearnedFact]) -> Vec<PublishedFact> {
+    published
+        .iter()
+        .map(|f| {
+            let (kind, name) = fact_key(&f.entry);
+            PublishedFact {
+                key: format!("{kind}:{name}"),
+                support: f.support,
+                cells: f.cells,
+                status: f.status.clone(),
+                classes: f.classes.clone(),
+                families: f.families.clone(),
+            }
+        })
+        .collect()
+}
+
 #[derive(Debug, Serialize)]
 struct PublishedFact {
     key: String,
@@ -132,45 +150,7 @@ pub(super) fn emit_learn_report(
             .collect();
 
         if dbg {
-            let cand_summary = if fam_candidates.is_empty() {
-                "(none proposed)".to_string()
-            } else {
-                fam_candidates
-                    .iter()
-                    .map(|c| {
-                        if c.verdict == "published" {
-                            format!(
-                                "{}=PUBLISHED(support={}, cells={})",
-                                c.key, c.support, c.cells
-                            )
-                        } else {
-                            format!(
-                                "{}=rejected(support={}, cells={})",
-                                c.key, c.support, c.cells
-                            )
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
-            eprintln!(
-                "[facts] family {id}: baseline positive_alerts={} negative_alerts={} separates={} | candidates: {cand_summary} | learned {} fact(s){}",
-                baseline.positive_alerts,
-                baseline.negative_alerts,
-                baseline.separates,
-                learned.len(),
-                if learned.is_empty() { " <- TAUGHT NOTHING" } else { "" }
-            );
-            if learned.is_empty() {
-                for c in &fam_candidates {
-                    if let Some(r) = &c.reason {
-                        eprintln!("[facts]   rejected {c}: {r}", c = c.key);
-                    }
-                }
-            }
-            for n in &notes {
-                eprintln!("[facts]   note: {n}");
-            }
+            print_family(&id, baseline, &fam_candidates, &learned, &notes);
         }
 
         family_reports.push(FamilyReport {
@@ -206,20 +186,7 @@ pub(super) fn emit_learn_report(
                 .map(|f| f.id.clone())
                 .collect(),
         },
-        facts: published
-            .iter()
-            .map(|f| {
-                let (kind, name) = fact_key(&f.entry);
-                PublishedFact {
-                    key: format!("{kind}:{name}"),
-                    support: f.support,
-                    cells: f.cells,
-                    status: f.status.clone(),
-                    classes: f.classes.clone(),
-                    families: f.families.clone(),
-                }
-            })
-            .collect(),
+        facts: published_facts(published),
         families: family_reports,
     };
 
@@ -231,5 +198,50 @@ pub(super) fn emit_learn_report(
             },
             Err(e) => eprintln!("[facts] learn report serialization failed: {e}"),
         }
+    }
+}
+
+/// The `FXDBG` line for one family plus every reason it taught nothing.
+fn print_family(
+    id: &str,
+    baseline: Baseline,
+    candidates: &[CandidateReport],
+    learned: &[String],
+    notes: &[String],
+) {
+    let cand_summary = if candidates.is_empty() {
+        "(none proposed)".to_string()
+    } else {
+        candidates
+            .iter()
+            .map(|c| {
+                format!(
+                    "{}={}(support={}, cells={})",
+                    c.key,
+                    c.verdict.to_uppercase(),
+                    c.support,
+                    c.cells
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    eprintln!(
+        "[facts] family {id}: baseline positive_alerts={} negative_alerts={} separates={} | candidates: {cand_summary} | learned {} fact(s){}",
+        baseline.positive_alerts,
+        baseline.negative_alerts,
+        baseline.separates,
+        learned.len(),
+        if learned.is_empty() { " <- TAUGHT NOTHING" } else { "" }
+    );
+    if learned.is_empty() {
+        for c in candidates {
+            if let Some(reason) = &c.reason {
+                eprintln!("[facts]   rejected {}: {reason}", c.key);
+            }
+        }
+    }
+    for note in notes {
+        eprintln!("[facts]   note: {note}");
     }
 }
