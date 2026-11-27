@@ -67,6 +67,7 @@ pub(crate) mod kinds;
 /// one install path every language-keyed sanitizer entry takes.
 pub(crate) mod sanitizer_scope;
 /// Lookup of sink signatures for a call site's import origin.
+pub(crate) mod signature_build;
 pub(crate) mod signatures;
 pub(crate) mod sink_scope;
 /// The merged [`FactTable`] consulted during analysis.

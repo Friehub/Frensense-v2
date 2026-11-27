@@ -375,6 +375,7 @@ export async function search(query: string) {
                 role: SinkRole::Execution,
                 label: Some("sql".to_string()),
                 global_only: false,
+                base_kinds: Vec::new(),
             },
         );
 

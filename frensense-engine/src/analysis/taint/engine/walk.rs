@@ -272,6 +272,7 @@ mod origin;
 mod sanitizer_cut;
 mod sink;
 mod sink_gate;
+mod store_base;
 
 #[inline]
 fn is_receiver_only_verb(name: &str) -> bool {

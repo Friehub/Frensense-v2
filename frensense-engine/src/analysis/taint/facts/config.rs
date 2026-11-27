@@ -326,6 +326,7 @@ fn install_language_group(
                     role,
                     label,
                     global_only: false,
+                    base_kinds: Vec::new(),
                 };
                 match package {
                     Some(pkg) => {

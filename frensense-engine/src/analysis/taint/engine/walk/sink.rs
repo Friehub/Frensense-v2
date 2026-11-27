@@ -161,9 +161,7 @@ impl<'a> BackwardTaintEngine<'a> {
         }
     }
 
-    /// A property assignment is a write, not a call: `el.innerHTML = x` reaches
-    /// no call sink, so dispatch it to the store path. Returns whether `instr`
-    /// was such a write.
+    /// A property write reaches no call sink; dispatch it to the store path.
     fn explore_store_field(
         &mut self,
         fi: usize,
@@ -505,6 +503,9 @@ impl<'a> BackwardTaintEngine<'a> {
             language,
             true,
         ) {
+            return;
+        }
+        if !store_base::store_hint_allows(&self.facts, ir, base, field, language) {
             return;
         }
         let role = self

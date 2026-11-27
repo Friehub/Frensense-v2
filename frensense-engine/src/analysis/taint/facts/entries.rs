@@ -624,9 +624,7 @@ impl LearnedFactEntry {
                 dangerous_args,
                 binding_args_safe,
             } => {
-                // Preserve a spec-derived role (and IDOR keys) if the built-in
-                // table already classifies this call, learned facts refine
-                // *slots*, they don't reclassify *semantics*.
+                // Learned facts refine slots, not semantics: keep a spec-derived role.
                 let prior = if let Some(pkg) = package {
                     table
                         .scoped_sink_signatures
@@ -646,6 +644,7 @@ impl LearnedFactEntry {
                     idor_keys,
                     role,
                     label,
+                    base_kinds: Vec::new(),
                 };
                 if let Some(pkg) = package {
                     table
@@ -847,6 +846,7 @@ impl LearnedFactEntry {
                     },
                     role: crate::analysis::taint::role::SinkRole::Resource,
                     label: None,
+                    base_kinds: Vec::new(),
                 };
                 table.sink_signatures.insert(call.clone(), sig.clone());
                 table.sink_signatures.entry(last).or_insert(sig);
