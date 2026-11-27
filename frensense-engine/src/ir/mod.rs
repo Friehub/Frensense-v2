@@ -13,6 +13,14 @@
 //! This layer knows nothing about taint, checks, or program graphs, it is
 //! the reusable compiler frontend.
 
+/// Declared type the JSX lowering gives the props object it synthesizes.
+///
+/// It is a base *kind* for store-sink hints: an attribute written as
+/// `<div dangerouslySetInnerHTML={{ __html: html }} />` reaches the same
+/// property-write path as `el.innerHTML = html`, and this name lets a fact
+/// require a JSX base instead of matching the attribute name alone.
+pub const JSX_PROPS_BASE_KIND: &str = "JSXProps";
+
 pub(crate) mod control;
 pub mod function;
 pub mod lowering;

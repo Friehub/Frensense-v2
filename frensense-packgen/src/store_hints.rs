@@ -10,11 +10,10 @@
 //! `sink_base_kinds` table (v10+), keyed by `(call, package)`.
 
 use frensense_bundler::format::SinkBaseKindScope;
+use frensense_engine::ir::JSX_PROPS_BASE_KIND;
 
 /// The DOM store sinks whose field name alone is not evidence: a receiver
 /// must come from one of these calls, or carry the name as its declared type.
-/// `dangerouslySetInnerHTML` is deliberately absent - its base is a JSX props
-/// temp with no factory origin yet, so a hint would silence the real case.
 const JS_DOM_BASE_KINDS: &[&str] = &[
     "querySelector",
     "querySelectorAll",
@@ -24,17 +23,21 @@ const JS_DOM_BASE_KINDS: &[&str] = &[
     "createElement",
 ];
 
-/// The payload table for the hints above. Keyed by call, not language: the
-/// hint is the same for every front end that lowers the field write.
+/// The JSX attribute: JSX lowering types its props temp as
+/// [`JSX_PROPS_BASE_KIND`], so only a real JSX props object arms the sink.
+const JSX_ONLY: &[&str] = &[JSX_PROPS_BASE_KIND];
+
+/// The payload table. Keyed by call, not language: the hint is the same for
+/// every front end that lowers the field write.
 pub(crate) fn scopes() -> Vec<SinkBaseKindScope> {
-    ["innerHTML", "outerHTML"]
-        .into_iter()
-        .map(|call| {
-            SinkBaseKindScope::new(
-                call,
-                None,
-                JS_DOM_BASE_KINDS.iter().map(|k| (*k).to_string()).collect(),
-            )
-        })
-        .collect()
+    [
+        ("innerHTML", JS_DOM_BASE_KINDS),
+        ("outerHTML", JS_DOM_BASE_KINDS),
+        ("dangerouslySetInnerHTML", JSX_ONLY),
+    ]
+    .into_iter()
+    .map(|(call, kinds)| {
+        SinkBaseKindScope::new(call, None, kinds.iter().map(|k| (*k).to_string()).collect())
+    })
+    .collect()
 }

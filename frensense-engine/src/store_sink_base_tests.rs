@@ -56,6 +56,45 @@ export function render(row: any, q: string) {
         scan_prepared(&prepared, &config, &facts).findings
     }
 
+    /// A JSX attribute write. The props object is synthesized by lowering, so
+    /// its base is the type lowering gives it, not a call.
+    const JSX_WRITE: &str = r#"
+export function render(req: any) {
+  const q = req.query.q
+  return <div dangerouslySetInnerHTML={{ __html: q }} />
+}
+"#;
+
+    /// Same attribute name on an unrelated object: not a React write.
+    const JSX_NAME_LOOKALIKE: &str = r#"
+export function fill(row: any, q: string) {
+  const el = row.load()
+  el.dangerouslySetInnerHTML = q
+}
+"#;
+
+    fn jsx_findings(src: &str, hint: Option<&[&str]>) -> Vec<SinkFinding> {
+        let files = vec![("test.tsx".to_string(), src.to_string(), "tsx".to_string())];
+        let (config, mut facts) = seeded_tables(["tsx"]);
+        let signature = SinkSignature::with_args("dangerouslySetInnerHTML", &[0]);
+        for language in crate::analysis::taint::facts::languages_for_exts(["tsx"]) {
+            facts
+                .lang_sink_signatures
+                .entry(language.to_string())
+                .or_default()
+                .insert("dangerouslySetInnerHTML".to_string(), signature.clone());
+        }
+        if let Some(kinds) = hint {
+            let kinds: Vec<String> = kinds.iter().map(|k| (*k).to_string()).collect();
+            assert!(
+                facts.qualify_sink_base_kinds("dangerouslySetInnerHTML", None, &kinds),
+                "the hint must reach the installed language signature"
+            );
+        }
+        let prepared = prepare(&files).expect("prepare");
+        scan_prepared(&prepared, &config, &facts).findings
+    }
+
     fn writes(findings: &[SinkFinding]) -> usize {
         findings.iter().filter(|f| f.sink == "innerHTML").count()
     }
@@ -76,6 +115,24 @@ export function render(row: any, q: string) {
             writes(&findings),
             0,
             "innerHTML on an unrelated receiver must stay silent; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn jsx_attribute_fires_when_the_base_is_a_jsx_props_object() {
+        let findings = jsx_findings(JSX_WRITE, Some(&[crate::ir::JSX_PROPS_BASE_KIND]));
+        assert!(
+            findings.iter().any(|f| f.sink == "dangerouslySetInnerHTML"),
+            "a JSX attribute write must still fire; got {findings:?}"
+        );
+    }
+
+    #[test]
+    fn jsx_attribute_name_on_a_plain_object_stays_silent() {
+        let findings = jsx_findings(JSX_NAME_LOOKALIKE, Some(&[crate::ir::JSX_PROPS_BASE_KIND]));
+        assert!(
+            !findings.iter().any(|f| f.sink == "dangerouslySetInnerHTML"),
+            "a lookalike property on a non-JSX object must stay silent; got {findings:?}"
         );
     }
 

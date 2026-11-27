@@ -267,9 +267,16 @@ impl<'a> LoweringContext<'a> {
     /// increment/decrement). Spanned to `node` so findings on the result
     /// resolve to the statement that produced it.
     pub(crate) fn new_temp(&mut self, node: Node) -> VarId {
+        self.new_typed_temp(node, None)
+    }
+
+    /// [`Self::new_temp`] with a declared type name, for synthesized values
+    /// whose producer is a lowering construct rather than a call
+    /// ([`crate::ir::JSX_PROPS_BASE_KIND`]).
+    pub(crate) fn new_typed_temp(&mut self, node: Node, type_name: Option<&str>) -> VarId {
         self.ir.new_var(VarMetadata {
             source_name: None,
-            type_name: None,
+            type_name: type_name.map(str::to_string),
             byte_range: Some((node.start_byte(), node.end_byte())),
             is_memory_state: false,
             object_keys: Vec::new(),
