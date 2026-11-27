@@ -481,18 +481,17 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// The tree-sitter `Language` object for parsing.
     fn tree_sitter_language(&self) -> tree_sitter::Language;
 
-    /// Rewrites the source into something the grammar can parse, run
-    /// immediately before lowering. The default is the identity: the
-    /// source is parsed as-is.
-    ///
-    /// **Position contract**: the rewrite MUST preserve every byte offset
-    /// — same total length, same newline layout — so tree-sitter nodes and
-    /// every line/column derived from them still point at the original
-    /// file. Single-file-container formats (Vue SFCs, and later Svelte or
-    /// Astro) use this to blank template markup into same-length runs of
-    /// spaces instead of extracting script text to a separate buffer.
+    /// Rewrites the source before parsing. Defaults to the identity.
+    /// **Position contract**: same byte length and newlines, so parse offsets
+    /// and derived line/columns still point at the original file.
     fn preprocess<'a>(&self, source: &'a str) -> std::borrow::Cow<'a, str> {
         std::borrow::Cow::Borrowed(source)
+    }
+
+    /// Template-write expression spans in the ORIGINAL source; the engine
+    /// synthesizes the write in its IR, so no bytes are rewritten. None by default.
+    fn template_writes(&self, _source: &str) -> Vec<(usize, usize)> {
+        Vec::new()
     }
 
     /// The language key the FactTable and learned bundles key this spec's

@@ -382,7 +382,6 @@ pub mod registry;
 pub mod rule_card;
 pub mod rules;
 pub mod severity;
-pub use providers::javascript::TEMPLATE_SINK_CALL;
 
 pub mod framework;
 pub mod spec;

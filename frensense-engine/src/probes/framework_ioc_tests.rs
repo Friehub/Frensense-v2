@@ -97,12 +97,23 @@ fn probe_fw_06_ts_array_push() {
     assert_detected(&scan_ts(src), "fw_06_ts_array_push", "query");
 }
 
-/// Vue SFC: the `<script setup>` declaration and the desugared template write
-/// are both module scope. They link only because the whole module is one
-/// dataflow unit - the definition used to sit in a separate pseudo-function.
+/// Vue SFC: the `<script setup>` declaration and the synthesized template
+/// write are both module scope, so they link only because the whole module is
+/// one dataflow unit. The member chain is longer than the spare bytes next to
+/// the directive, which the old byte-budget emission silently dropped.
 #[test]
 fn probe_fw_07_vue_template_write_from_script_scope() {
-    let src = "<template>\n  <div v-html=\"a\"></div>\n</template>\n\n<script setup lang=\"ts\">\nconst a = process.argv[2];\n</script>\n";
+    let src = "<template>\n  <div v-html=\"user.profile.bio\"></div>\n</template>\n\n<script setup lang=\"ts\">\nconst user = process.argv[2];\n</script>\n";
     let res = scan_files(&[("app/Component.vue", src, "vue")]);
     assert_detected(&res, "fw_07_vue_template_write", "vhtml");
+}
+
+/// Precision pair: a literal template write is not a flow, however long it is.
+#[test]
+fn probe_fw_08_vue_template_literal_is_clean() {
+    let src = "<template>\n  <div v-html=\"'<b>static markup, no value flows here</b>'\"></div>\n</template>\n\n<script setup lang=\"ts\">\nconst unused = 1;\n</script>\n";
+    assert_clean(
+        &scan_files(&[("app/Static.vue", src, "vue")]),
+        "fw_08_vue_literal",
+    );
 }

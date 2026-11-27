@@ -84,8 +84,12 @@ pub(crate) fn lower_source_detailed(
     // before parsing: the spec blanks non-code markup into same-length
     // whitespace, so every byte offset, and every reported line/column,
     // still points at the original file.
+    let original = source;
     let rewritten = spec.preprocess(source);
     let source: &str = rewritten.as_ref();
+    // Template writes are reported against the file as written; the engine
+    // synthesizes the call instead of consuming bytes of the rewritten source.
+    let template_writes = spec.template_writes(original);
 
     let mut parser = tree_sitter::Parser::new();
     parser
@@ -103,7 +107,8 @@ pub(crate) fn lower_source_detailed(
     let mut bound_fns: FxHashSet<usize> = FxHashSet::default();
     // Whether the module IR owns the root-level declarations: `const q =
     // req.query.q; eval(q)` links only if both live in the same IR.
-    let module_owns_decls = crate::module_scope::owns_declarations(tree.root_node(), spec);
+    let module_owns_decls =
+        crate::module_scope::owns_declarations(tree.root_node(), spec, !template_writes.is_empty());
     let mut stack = vec![tree.root_node()];
     while let Some(node) = stack.pop() {
         // Language-driven function detection: JS/TS `function_declaration` /
@@ -207,9 +212,11 @@ pub(crate) fn lower_source_detailed(
     if let Some(ir) = crate::module_scope::lower_module_scope(
         tree.root_node(),
         source,
+        original,
         spec,
         facts,
         module_owns_decls,
+        &template_writes,
     ) {
         insert_ir(&mut irs, ir, tree.root_node().start_byte());
     }

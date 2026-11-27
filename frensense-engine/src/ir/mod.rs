@@ -21,6 +21,14 @@
 /// require a JSX base instead of matching the attribute name alone.
 pub const JSX_PROPS_BASE_KIND: &str = "JSXProps";
 
+/// Call the engine synthesizes for a template write (`<div v-html="q">`).
+///
+/// The spec reports the expression span and the module IR lowers the write
+/// after the script body, so the value's definition is in scope and no source
+/// bytes are consumed. `frensense-packgen` declares this name as the XSS sink;
+/// nothing else may use it.
+pub const TEMPLATE_SINK_CALL: &str = "vhtml";
+
 pub(crate) mod control;
 pub mod function;
 pub mod lowering;

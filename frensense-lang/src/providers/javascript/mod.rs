@@ -39,4 +39,4 @@ mod spec_vue;
 pub use family::{JsDialect, JsFamily};
 pub use spec_js::JavaScriptSpec;
 pub use spec_ts::TypeScriptSpec;
-pub use spec_vue::{VueSpec, TEMPLATE_SINK_CALL};
+pub use spec_vue::VueSpec;

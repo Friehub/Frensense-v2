@@ -211,6 +211,12 @@ pub trait JsFamily: Send + Sync + 'static {
     fn preprocess_source<'a>(&self, source: &'a str) -> Cow<'a, str> {
         Cow::Borrowed(source)
     }
+
+    /// Expression spans a template write renders, in the original source.
+    /// Defaults to none: only a container format has a template.
+    fn template_writes_source(&self, _source: &str) -> Vec<(usize, usize)> {
+        Vec::new()
+    }
 }
 
 // ── One implementation, every family member ──────────────────────────────────
@@ -230,6 +236,10 @@ impl<T: JsFamily> LanguageSpec for T {
 
     fn preprocess<'a>(&self, source: &'a str) -> Cow<'a, str> {
         self.preprocess_source(source)
+    }
+
+    fn template_writes(&self, source: &str) -> Vec<(usize, usize)> {
+        self.template_writes_source(source)
     }
 
     fn fact_language(&self) -> &'static str {
