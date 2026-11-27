@@ -95,6 +95,23 @@ export function fill(row: any, q: string) {
         scan_prepared(&prepared, &config, &facts).findings
     }
 
+    /// SFC templates desugar `v-html`/`v-text` onto the pack's template-sink
+    /// call, emitted after the script block so its span is a code offset.
+    #[test]
+    fn vue_template_html_directive_lowers_to_the_sink_call() {
+        let src = "<template>\n  <div v-html=\"q\"></div>\n</template>\n\n<script setup lang=\"ts\">\nconst q = location.hash\n</script>\n<style>.x{}</style>\n";
+        let files = vec![("t.vue".to_string(), src.to_string(), "vue".to_string())];
+        let (config, facts) = seeded_tables(["vue"]);
+        let prepared = prepare(&files).expect("prepare");
+        let findings = scan_prepared(&prepared, &config, &facts).findings;
+        let sink = findings
+            .iter()
+            .find(|f| f.sink == frensense_lang::TEMPLATE_SINK_CALL)
+            .unwrap_or_else(|| panic!("v-html must lower to a sink call: {findings:?}"));
+        let span = sink.sink_span.expect("the sink carries its span");
+        assert!(span.0 > src.find("const q").expect("script present"));
+    }
+
     fn writes(findings: &[SinkFinding]) -> usize {
         findings.iter().filter(|f| f.sink == "innerHTML").count()
     }

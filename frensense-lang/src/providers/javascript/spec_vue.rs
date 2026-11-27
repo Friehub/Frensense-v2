@@ -61,6 +61,14 @@ fn find_ci(bytes: &[u8], tag: &str) -> Option<usize> {
     (0..=bytes.len() - tag.len()).find(|&i| starts_with_ci(&bytes[i..], tag))
 }
 
+/// The synthetic call a template directive desugars into.
+///
+/// `<div v-html="q">` becomes `vhtml(q)` in the blanked template region, which
+/// keeps every offset and lets the ordinary taint engine follow `q` from the
+/// script block into the write. `frensense-packgen` declares `vhtml` as the
+/// XSS sink; nothing else may use that name.
+pub const TEMPLATE_SINK_CALL: &str = "vhtml";
+
 /// Rewrite an SFC: keep only bytes inside `<script>` blocks, blank the rest.
 ///
 /// Blanked bytes become spaces (newlines are kept), so the output is a valid
@@ -86,6 +94,7 @@ pub(super) fn extract_script_blocks(source: &str) -> Cow<'_, str> {
 
     // Byte mask: true = keep verbatim, false = blank to space (newline kept).
     let mut keep = vec![false; bytes.len()];
+    let mut templates: Vec<(usize, usize)> = Vec::new();
 
     let mut i = 0;
     while i < bytes.len() {
@@ -124,8 +133,109 @@ pub(super) fn extract_script_blocks(source: &str) -> Cow<'_, str> {
         }
     }
 
-    let blanked: Vec<u8> = blank(bytes, &keep);
+    templates.extend(template_spans(bytes));
+    let mut blanked = blank(bytes, &keep);
+    // Template writes are emitted after the script, not where the markup is:
+    // the script block declares the values they read, and a `<template>`
+    // usually precedes `<script setup>`, so an in-place call would resolve
+    // its argument before the declaration exists. The blanked bytes after the
+    // last script block are free, so the calls go there and every code offset
+    // stays the original file's.
+    let insert_at = keep.iter().rposition(|&kept| kept).map_or(0, |i| i + 1);
+    let mut cursor = insert_at;
+    for (_, expr_start, expr_end) in template_sinks(bytes, &templates) {
+        let Some(expr) = bytes.get(expr_start..expr_end) else {
+            break;
+        };
+        let stmt: Vec<u8> = [
+            b";".as_slice(),
+            TEMPLATE_SINK_CALL.as_bytes(),
+            b"(",
+            expr,
+            b")",
+        ]
+        .concat();
+        let Some(end) = cursor.checked_add(stmt.len()) else {
+            break;
+        };
+        let (Some(room), Some(region)) = (blanked.get_mut(cursor..end), keep.get(cursor..end))
+        else {
+            break;
+        };
+        if region.iter().any(|&kept| kept) {
+            break;
+        }
+        room.copy_from_slice(&stmt);
+        cursor = end;
+    }
     Cow::Owned(String::from_utf8(blanked).expect("blanking preserves valid UTF-8"))
+}
+
+/// Byte spans of every `<template>` element body, nesting aware.
+fn template_spans(bytes: &[u8]) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut open: Vec<usize> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let rest = bytes.get(i..).unwrap_or_default();
+        if starts_with_ci(rest, "<template") {
+            open.push(i);
+            i += 9;
+            continue;
+        }
+        if starts_with_ci(rest, "</template") {
+            if let Some(start) = open.pop() {
+                if let Some(gt) = rest.iter().position(|&c| c == b'>') {
+                    spans.push((start, i + gt + 1));
+                }
+            }
+            i += 10;
+            continue;
+        }
+        i += 1;
+    }
+    spans
+}
+
+/// Template writes: each directive marker inside `templates` that desugars
+/// into [`TEMPLATE_SINK_CALL`], as `(marker start, expression start,
+/// closing quote index)`.
+fn template_sinks(bytes: &[u8], templates: &[(usize, usize)]) -> Vec<(usize, usize, usize)> {
+    let mut sinks = Vec::new();
+    for &(start, end) in templates {
+        let mut i = start;
+        while i < end {
+            let marker = [b"v-html=".as_slice(), b"v-text=".as_slice()]
+                .into_iter()
+                .find(|m| {
+                    bytes
+                        .get(i..i + m.len())
+                        .is_some_and(|hit| hit.eq_ignore_ascii_case(m))
+                });
+            let Some(marker) = marker else {
+                i += 1;
+                continue;
+            };
+            let quote = i + marker.len();
+            if bytes.get(quote) != Some(&b'"') {
+                i += marker.len();
+                continue;
+            }
+            let expr_start = quote + 1;
+            let Some(rel_close) = bytes
+                .get(expr_start..end)
+                .and_then(|rest| rest.iter().position(|&c| c == b'"'))
+            else {
+                break;
+            };
+            let expr_end = expr_start + rel_close;
+            if expr_end > expr_start {
+                sinks.push((i, expr_start, expr_end));
+            }
+            i = expr_end + 1;
+        }
+    }
+    sinks
 }
 
 /// Blank `bytes` per `keep`: kept bytes verbatim, others space (newline kept).
@@ -147,6 +257,14 @@ mod tests {
     use crate::spec::LanguageSpec;
 
     const SFC: &str = "<template>\n  <div>{{ msg }}</div>\n</template>\n\n<script setup lang=\"ts\">\nconst msg = 'hello'\nfunction handler() {\n  return msg\n}\n</script>\n\n<style scoped>\n.x { color: red; }\n</style>\n";
+
+    /// `s` without runs of spaces, so padded desugaring reads cleanly.
+    fn squashed(s: &str) -> String {
+        s.split(' ')
+            .filter(|p| !p.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
 
     /// Byte range of the script body in `SFC`.
     fn script_body(sfc: &str) -> (usize, usize) {
@@ -254,6 +372,33 @@ mod tests {
             Cow::Borrowed(s) => assert_eq!(s, src),
             Cow::Owned(_) => panic!("plain TS must be returned borrowed"),
         }
+    }
+
+    #[test]
+    fn v_html_desugars_to_the_template_sink_call() {
+        let sfc = "<template>\n  <div v-html=\"q\"></div>\n</template>\n<script setup lang=\"ts\">\nconst q = location.search\n</script>\n";
+        let out = extract_script_blocks(sfc);
+        assert_eq!(out.len(), sfc.len(), "offsets must stay put");
+        assert!(squashed(&out).contains("vhtml(q)"), "got: {out:?}");
+        assert!(!out.contains("v-html"), "the directive must be consumed");
+        let call = out.find("vhtml(q)").expect("desugared call present");
+        let script = out.find("const q").expect("script kept");
+        assert!(call > script, "the call must follow the declaration");
+    }
+
+    #[test]
+    fn v_text_desugars_too_and_plain_markup_does_not() {
+        let sfc = "<template><p v-text=\"msg\"></p><span :title=\"x\"></span></template>\n<script>const msg = a</script>\n<style>.x { color: red; }</style>\n";
+        let out = extract_script_blocks(sfc);
+        assert!(squashed(&out).contains("vhtml(msg)"), "got: {out:?}");
+        assert!(!out.contains("title"), "only html/text directives desugar");
+    }
+
+    #[test]
+    fn directives_outside_a_template_are_left_alone() {
+        let sfc = "<script>const a = 'v-html=\"x\"';</script>\n";
+        let out = extract_script_blocks(sfc);
+        assert!(out.contains("v-html"), "script text must not be rewritten");
     }
 
     #[test]
