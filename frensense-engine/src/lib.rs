@@ -45,6 +45,7 @@ pub mod harness;
 pub mod ir;
 #[cfg(test)]
 mod language_scope_tests;
+mod module_scope;
 #[cfg(test)]
 mod package_scoped_sanitizer_tests;
 #[cfg(test)]

@@ -200,7 +200,7 @@ impl<'a> BackwardTaintEngine<'a> {
     /// factories on `client_roots` alone rejected `const client =
     /// axios.create(...)` -> `client.get(...)` even though `axios.get` is a
     /// declared sink (mre01 instance-alias false negative).
-    fn root_arms(&self, name: &str, root: &str) -> bool {
+    pub(super) fn root_arms(&self, name: &str, root: &str) -> bool {
         self.facts.client_roots.contains(root)
             || self
                 .facts
@@ -269,75 +269,6 @@ impl<'a> BackwardTaintEngine<'a> {
         }
         self.factory_root_of(ir, r, d, name)
             .or_else(|| Some(d.to_string()))
-    }
-
-    /// Root of the factory call that produced `target`: `<root>.create(..)` /
-    /// `.extend(..)` in this function, then a module-level binding of the same
-    /// name (the factory that builds a shared client).
-    fn factory_root_of(
-        &self,
-        ir: &FunctionIR,
-        target: VarId,
-        root_name: &str,
-        name: &str,
-    ) -> Option<String> {
-        for b in ir.blocks.values() {
-            for instr in &b.instructions {
-                match instr {
-                    Instruction::CallVirtual {
-                        dest: Some(d_var),
-                        method,
-                        receiver: Operand::Var(cr),
-                        ..
-                    } if *d_var == target && (method == "create" || method == "extend") => {
-                        if let Some(cr_root) = FactTable::receiver_root(ir, *cr)
-                            && self.root_arms(name, &cr_root)
-                        {
-                            return Some(cr_root);
-                        }
-                    }
-                    Instruction::CallStatic {
-                        dest: Some(d_var),
-                        func,
-                        ..
-                    } if *d_var == target
-                        && (func.ends_with(".create") || func.ends_with(".extend")) =>
-                    {
-                        if let Some(prefix) = func.split('.').next()
-                            && self.root_arms(name, prefix)
-                        {
-                            return Some(prefix.to_string());
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        for f in &self.prog.functions {
-            let is_binding = f.name == root_name
-                || f.name
-                    .strip_suffix(root_name)
-                    .is_some_and(|p| p.ends_with(':'));
-            if !is_binding {
-                continue;
-            }
-            for b in f.ir.blocks.values() {
-                for instr in &b.instructions {
-                    if let Instruction::CallVirtual {
-                        method,
-                        receiver: Operand::Var(cr),
-                        ..
-                    } = instr
-                        && (method == "create" || method == "extend")
-                        && let Some(cr_root) = FactTable::receiver_root(f.ir, *cr)
-                        && self.root_arms(name, &cr_root)
-                    {
-                        return Some(cr_root);
-                    }
-                }
-            }
-        }
-        None
     }
 
     /// Origin chain of a sink call, resolved to an OWNED string: the borrows of

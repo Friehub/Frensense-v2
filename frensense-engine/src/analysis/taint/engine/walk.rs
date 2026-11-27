@@ -274,6 +274,23 @@ mod sink;
 mod sink_gate;
 mod store_base;
 
+/// Every variable a file's merged module IR declares for `name`.
+///
+/// Once a module has module-level code, its declarations are lowered into the
+/// `<module>` pseudo-function instead of a per-binding static IR, so looking a
+/// module binding up by IR name no longer works; this finds it by source name.
+/// All SSA versions are returned because the caller's producer edge points at
+/// one specific version, not the first one the map happens to yield.
+pub(super) fn module_scope_vars<'a>(
+    ir: &'a crate::ir::function::FunctionIR,
+    name: &'a str,
+) -> impl Iterator<Item = VarId> + 'a {
+    ir.var_metadata
+        .iter()
+        .filter(move |(_, meta)| meta.source_name.as_deref() == Some(name))
+        .map(|(var, _)| *var)
+}
+
 #[inline]
 fn is_receiver_only_verb(name: &str) -> bool {
     matches!(

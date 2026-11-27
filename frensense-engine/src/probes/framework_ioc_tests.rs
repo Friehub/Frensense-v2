@@ -96,3 +96,13 @@ fn probe_fw_06_ts_array_push() {
     "#;
     assert_detected(&scan_ts(src), "fw_06_ts_array_push", "query");
 }
+
+/// Vue SFC: the `<script setup>` declaration and the desugared template write
+/// are both module scope. They link only because the whole module is one
+/// dataflow unit - the definition used to sit in a separate pseudo-function.
+#[test]
+fn probe_fw_07_vue_template_write_from_script_scope() {
+    let src = "<template>\n  <div v-html=\"a\"></div>\n</template>\n\n<script setup lang=\"ts\">\nconst a = process.argv[2];\n</script>\n";
+    let res = scan_files(&[("app/Component.vue", src, "vue")]);
+    assert_detected(&res, "fw_07_vue_template_write", "vhtml");
+}

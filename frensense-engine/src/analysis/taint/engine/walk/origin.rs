@@ -138,11 +138,23 @@ impl<'a> BackwardTaintEngine<'a> {
             .get(&recv)
             .and_then(|m| m.source_name.clone())?;
         for f in &self.prog.functions {
-            if (f.name == root
+            if self.fn_file.get(&f.name).map(|s| s.as_str()) != Some(file) {
+                continue;
+            }
+            // A declaration merged into the module IR is not named after its
+            // binding: resolve it by source name inside that one IR.
+            if f.name == crate::module_scope::MODULE_SCOPE_FN {
+                let pkg = super::module_scope_vars(f.ir, &root)
+                    .find_map(|v| self.var_package_origin(f.ir, v, file, 4, &armed));
+                if pkg.is_some() {
+                    return pkg;
+                }
+                continue;
+            }
+            if f.name == root
                 || f.name
                     .strip_suffix(root.as_str())
-                    .is_some_and(|p| p.ends_with(':')))
-                && self.fn_file.get(&f.name).map(|s| s.as_str()) == Some(file)
+                    .is_some_and(|p| p.ends_with(':'))
             {
                 for b in f.ir.blocks.values() {
                     for instr in &b.instructions {
@@ -292,5 +304,98 @@ impl<'a> BackwardTaintEngine<'a> {
             }
             _ => None,
         }
+    }
+
+    /// Root of the factory call that produced `target`: `<root>.create(..)` /
+    /// `.extend(..)` in this function, then a module-level binding of the same
+    /// name (the factory that builds a shared client).
+    pub(super) fn factory_root_of(
+        &self,
+        ir: &crate::ir::function::FunctionIR,
+        target: VarId,
+        root_name: &str,
+        name: &str,
+    ) -> Option<String> {
+        if let Some(root) = self.factory_call_root(ir, target, name) {
+            return Some(root);
+        }
+        for f in &self.prog.functions {
+            // A declaration merged into the module IR is not named after its
+            // binding: resolve it by source name inside that one IR.
+            if f.name == crate::module_scope::MODULE_SCOPE_FN {
+                let root = super::module_scope_vars(f.ir, root_name)
+                    .find_map(|v| self.factory_call_root(f.ir, v, name));
+                if root.is_some() {
+                    return root;
+                }
+                continue;
+            }
+            let is_binding = f.name == root_name
+                || f.name
+                    .strip_suffix(root_name)
+                    .is_some_and(|p| p.ends_with(':'));
+            if !is_binding {
+                continue;
+            }
+            for b in f.ir.blocks.values() {
+                for instr in &b.instructions {
+                    if let Instruction::CallVirtual {
+                        method,
+                        receiver: Operand::Var(cr),
+                        ..
+                    } = instr
+                        && (method == "create" || method == "extend")
+                        && let Some(cr_root) = FactTable::receiver_root(f.ir, *cr)
+                        && self.root_arms(name, &cr_root)
+                    {
+                        return Some(cr_root);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// A `<root>.create(..)` / `.extend(..)` call in `ir` whose result is
+    /// `target`, when the receiver root arms `name`.
+    fn factory_call_root(
+        &self,
+        ir: &crate::ir::function::FunctionIR,
+        target: VarId,
+        name: &str,
+    ) -> Option<String> {
+        for b in ir.blocks.values() {
+            for instr in &b.instructions {
+                match instr {
+                    Instruction::CallVirtual {
+                        dest: Some(d_var),
+                        method,
+                        receiver: Operand::Var(cr),
+                        ..
+                    } if *d_var == target && (method == "create" || method == "extend") => {
+                        if let Some(cr_root) = FactTable::receiver_root(ir, *cr)
+                            && self.root_arms(name, &cr_root)
+                        {
+                            return Some(cr_root);
+                        }
+                    }
+                    Instruction::CallStatic {
+                        dest: Some(d_var),
+                        func,
+                        ..
+                    } if *d_var == target
+                        && (func.ends_with(".create") || func.ends_with(".extend")) =>
+                    {
+                        if let Some(prefix) = func.split('.').next()
+                            && self.root_arms(name, prefix)
+                        {
+                            return Some(prefix.to_string());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        None
     }
 }
