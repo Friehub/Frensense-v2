@@ -17,6 +17,8 @@
 //! a write is not limited by the spare space next to a directive and always
 //! sits after the script statements that define its value.
 
+use std::borrow::Cow;
+
 use crate::analysis::taint::facts::FactTable;
 use crate::ir::function::{FunctionIR, Instruction};
 use crate::ir::lowering::LoweringContext;
@@ -40,6 +42,10 @@ pub(crate) struct TemplateSpans<'a> {
     pub(crate) expressions: &'a [(usize, usize)],
     /// Component fields the template may read: `(name, initializer span)`.
     pub(crate) bindings: &'a [TemplateBinding],
+    /// A companion component source for an external template, and its field
+    /// initializers. Their expressions are lowered into this module so the
+    /// template's bindings link to the value the component class assigned.
+    pub(crate) foreign: Option<(&'a str, &'a [TemplateBinding])>,
 }
 
 /// Lower the module-scope statements into one SSA'd, static-function IR.
@@ -64,6 +70,7 @@ pub(crate) fn lower_module_scope(
         writes: template_writes,
         expressions: template_expressions,
         bindings: template_bindings,
+        foreign,
     } = *templates;
     // The parsed tree is the blanked source; a template expression exists only
     // in the original bytes. Overlaying those bytes onto the blanked text
@@ -79,9 +86,27 @@ pub(crate) fn lower_module_scope(
     let available = overlay.is_some();
     let writes = if available { template_writes } else { &[] };
     let expressions = if available { template_expressions } else { &[] };
-    let text = overlay.as_deref().unwrap_or(source);
+    let base_text = overlay.as_deref().unwrap_or(source);
+    // An external template's fields live in another file. Append their
+    // initializers as assignments so the parser and lowering see one text; the
+    // appended region starts at `base_text.len()`.
+    let (text, foreign_start) = match foreign {
+        Some((companion, fields)) if !fields.is_empty() => {
+            let appended = foreign_assignments(companion, fields);
+            if appended.is_empty() {
+                (Cow::Borrowed(base_text), None)
+            } else {
+                let start = base_text.len();
+                let mut joined = String::with_capacity(start + appended.len());
+                joined.push_str(base_text);
+                joined.push_str(&appended);
+                (Cow::Owned(joined), Some(start))
+            }
+        }
+        _ => (Cow::Borrowed(base_text), None),
+    };
 
-    let mut ctx = LoweringContext::new_with_facts(spec, text, MODULE_SCOPE_FN.to_string(), facts);
+    let mut ctx = LoweringContext::new_with_facts(spec, &text, MODULE_SCOPE_FN.to_string(), facts);
     let mut cursor = root.walk();
     let children: Vec<_> = root.named_children(&mut cursor).collect();
     for child in children {
@@ -94,13 +119,16 @@ pub(crate) fn lower_module_scope(
     // A template reads the component instance, so its fields are bound as
     // module values before the expressions that reference them.
     if !template_bindings.is_empty() {
-        bind_template_fields(&mut ctx, text, template_bindings, spec);
+        bind_template_fields(&mut ctx, &text, template_bindings, spec);
+    }
+    if let Some(start) = foreign_start {
+        lower_foreign_bindings(&mut ctx, &text, start, spec);
     }
     // Template writes go last: the script statements that define their values
     // are lowered by now, so the sink reads the same variable the declaration
     // assigned instead of a fresh undefined one.
     if !writes.is_empty() || !expressions.is_empty() {
-        emit_template_spans(&mut ctx, text, writes, expressions, spec);
+        emit_template_spans(&mut ctx, &text, writes, expressions, spec);
     }
     if ctx.ir.blocks.values().all(|b| b.instructions.is_empty()) {
         return None;
@@ -141,6 +169,50 @@ pub(crate) fn owns_declarations(
 /// its value. An **analysis-only** span is lowered and dropped: it is not a
 /// sink itself, but a sink inside it (Angular's `bypassSecurityTrust…`) must
 /// still reach the taint engine.
+/// `name = initializer;` lines for a companion component's fields.
+fn foreign_assignments(companion: &str, fields: &[TemplateBinding]) -> String {
+    let mut appended = String::new();
+    for (name, (start, end)) in fields {
+        let Some(expr) = companion.get(*start..*end).map(str::trim) else {
+            continue;
+        };
+        if expr.is_empty() {
+            continue;
+        }
+        appended.push('\n');
+        appended.push_str(name);
+        appended.push_str(" = ");
+        appended.push_str(expr);
+        appended.push(';');
+    }
+    appended
+}
+
+/// Lower the appended foreign field assignments into this module's scope.
+fn lower_foreign_bindings(
+    ctx: &mut LoweringContext<'_>,
+    text: &str,
+    start: usize,
+    spec: &'static dyn frensense_lang::spec::LanguageSpec,
+) {
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&spec.tree_sitter_language()).is_err() {
+        return;
+    }
+    let Some(tree) = parser.parse(text, None) else {
+        return;
+    };
+    let mut cursor = tree.root_node().walk();
+    let statements: Vec<_> = tree
+        .root_node()
+        .named_children(&mut cursor)
+        .filter(|node| node.start_byte() >= start)
+        .collect();
+    for node in statements {
+        ctx.visit_node(node);
+    }
+}
+
 /// Bind each template-visible component field to its initializer's value.
 fn bind_template_fields(
     ctx: &mut LoweringContext<'_>,

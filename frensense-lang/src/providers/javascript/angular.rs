@@ -144,7 +144,21 @@ pub(super) struct InlineTemplate {
 /// the template's boundaries.
 #[must_use]
 pub(super) fn inline_templates(bytes: &[u8]) -> Vec<InlineTemplate> {
-    let mut templates = Vec::new();
+    component_decorators(bytes)
+        .into_iter()
+        .filter_map(|decorator| {
+            template_body(bytes, decorator).map(|body| InlineTemplate { decorator, body })
+        })
+        .collect()
+}
+
+/// The span of every `@Component(…)` decorator, inline template or not.
+///
+/// External templates (`templateUrl`) need their component's fields too, so
+/// this is broader than [`inline_templates`].
+#[must_use]
+fn component_decorators(bytes: &[u8]) -> Vec<(usize, usize)> {
+    let mut decorators = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
         if !bytes
@@ -169,15 +183,10 @@ pub(super) fn inline_templates(bytes: &[u8]) -> Vec<InlineTemplate> {
         let Some(close) = paren_end(bytes, open) else {
             break;
         };
-        if let Some(body) = template_body(bytes, (open, close)) {
-            templates.push(InlineTemplate {
-                decorator: (i, close + 1),
-                body,
-            });
-        }
+        decorators.push((i, close + 1));
         i = close + 1;
     }
-    templates
+    decorators
 }
 
 /// The `(start, end)` of each binding that must be lowered in an inline
@@ -207,8 +216,8 @@ pub(super) fn component_field_initializers(
     source: &str,
     language: &tree_sitter::Language,
 ) -> Vec<crate::spec::TemplateBinding> {
-    let templates = inline_templates(source.as_bytes());
-    if templates.is_empty() {
+    let decorators = component_decorators(source.as_bytes());
+    if decorators.is_empty() {
         return Vec::new();
     }
     let mut parser = tree_sitter::Parser::new();
@@ -229,17 +238,14 @@ pub(super) fn component_field_initializers(
     }
     classes.sort_by_key(|node| node.start_byte());
     let mut fields = Vec::new();
-    for template in templates {
+    for decorator in decorators {
         let class = classes
             .iter()
-            .find(|class| {
-                class.start_byte() <= template.decorator.0
-                    && class.end_byte() >= template.decorator.1
-            })
+            .find(|class| class.start_byte() <= decorator.0 && class.end_byte() >= decorator.1)
             .or_else(|| {
                 classes
                     .iter()
-                    .find(|class| class.start_byte() >= template.decorator.1)
+                    .find(|class| class.start_byte() >= decorator.1)
             });
         let Some(body) = class.and_then(|class| class.child_by_field_name("body")) else {
             continue;
@@ -465,6 +471,21 @@ mod tests {
             "@Component({ selector: 'x', templateUrl: './x.component.html' })\nexport class A {}\n";
         assert!(inline_templates(src.as_bytes()).is_empty());
         assert!(matches!(blank_component_decorators(src), Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn templateUrl_component_fields_are_still_exposed() {
+        let src = concat!(
+            "@Component({ templateUrl: './hero.component.html' })\n",
+            "export class HeroComponent {\n",
+            "  raw = process.argv[2]\n",
+            "}\n",
+        );
+        let fields =
+            component_field_initializers(src, &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into());
+        assert_eq!(fields.len(), 1, "{fields:?}");
+        assert_eq!(fields[0].0, "raw");
+        assert_eq!(&src[fields[0].1 .0..fields[0].1 .1], "process.argv[2]");
     }
 
     #[test]

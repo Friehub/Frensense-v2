@@ -61,7 +61,7 @@ pub fn lower_source_with_facts(
     ext: &str,
     facts: Option<&FactTable>,
 ) -> Result<FxHashMap<String, FunctionIR>, String> {
-    Ok(lower_source_detailed(path, source, ext, facts)?.0)
+    Ok(lower_source_detailed(path, source, ext, facts, None)?.0)
 }
 
 /// Lower one file and report whether its parse tree contained errors.
@@ -76,6 +76,7 @@ pub(crate) fn lower_source_detailed(
     source: &str,
     ext: &str,
     facts: Option<&FactTable>,
+    companion: Option<(&str, &[frensense_lang::spec::TemplateBinding])>,
 ) -> Result<(FxHashMap<String, FunctionIR>, bool), String> {
     let spec = frensense_lang::spec_for_path(std::path::Path::new(path))
         .or_else(|| frensense_lang::spec_for_ext(ext))
@@ -97,6 +98,9 @@ pub(crate) fn lower_source_detailed(
     let template_expressions = spec.template_expressions(original);
     // Component fields an inline template may read; bound before lowering.
     let template_bindings = spec.template_bindings(original);
+    // An external Angular template's fields live in the companion component
+    // file; its lowering supplies them as assignments in the template scope.
+    let foreign = companion;
 
     let mut parser = tree_sitter::Parser::new();
     parser
@@ -230,6 +234,7 @@ pub(crate) fn lower_source_detailed(
             writes: &template_writes,
             expressions: &template_expressions,
             bindings: &template_bindings,
+            foreign,
         },
     ) {
         insert_ir(&mut irs, ir, tree.root_node().start_byte());

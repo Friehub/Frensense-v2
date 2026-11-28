@@ -182,6 +182,7 @@ fn lower_isolated(
     source: &str,
     ext: &str,
     facts: Option<&FactTable>,
+    companion: Option<(&str, &[frensense_lang::spec::TemplateBinding])>,
 ) -> Result<IsolatedLowering, String> {
     type Lowered = Result<(FxHashMap<String, FunctionIR>, bool), String>;
     type JoinOutcome = Result<(Lowered, Vec<CapHit>), Box<dyn std::any::Any + Send + 'static>>;
@@ -189,7 +190,8 @@ fn lower_isolated(
         let handle = std::thread::Builder::new()
             .stack_size(LOWER_STACK_BYTES)
             .spawn_scoped(scope, || {
-                let lowered = crate::harness::lower_source_detailed(path, source, ext, facts);
+                let lowered =
+                    crate::harness::lower_source_detailed(path, source, ext, facts, companion);
                 let caps = crate::telemetry::drain_caps();
                 (lowered, caps)
             })?;
@@ -271,8 +273,22 @@ impl<'a> ProgramBuilder<'a> {
         ext: &str,
         facts: Option<&FactTable>,
     ) -> FileReport {
+        self.add_file_with_companion(path, source, ext, facts, None)
+    }
+
+    /// [`add_file`](Self::add_file) with a companion source for external
+    /// Angular templates: the sibling component file whose field initializers
+    /// become the template's component scope.
+    pub fn add_file_with_companion(
+        &mut self,
+        path: &str,
+        source: &'a str,
+        ext: &str,
+        facts: Option<&FactTable>,
+        companion: Option<(&str, &[frensense_lang::spec::TemplateBinding])>,
+    ) -> FileReport {
         let started = Instant::now();
-        let lowered = lower_isolated(path, source, ext, facts);
+        let lowered = lower_isolated(path, source, ext, facts, companion);
         let ms = millis_since(started);
         match lowered {
             Ok((functions, parse_partial, caps)) => {

@@ -11,6 +11,7 @@
 //! severity, impact, and tags (plus observation on the checker path).
 
 use super::Engine;
+use super::angular_scope;
 use crate::engine::files::{UnsupportedSourceFile, collect_files_with};
 use crate::{Advisory, Result, Severity};
 use std::path::Path;
@@ -229,9 +230,7 @@ impl Engine {
                     .name("frensense-scanner-group".into())
                     .stack_size(32 * 1024 * 1024)
                     .spawn_scoped(scope, move || {
-                        // The runner owns the per-file loop, so progress is
-                        // just the loop counter it already has; the engine
-                        // exposes per-file lowering, not a progress hook.
+                        // Progress is the loop counter; the engine exposes per-file lowering.
                         let started = std::time::Instant::now();
                         let mut builder = scan::ProgramBuilder::new();
                         let mut errors = read_failures_count;
@@ -245,7 +244,8 @@ impl Engine {
                                     errors,
                                 );
                             }
-                            let report = builder.add_file(path, source, ext, Some(&facts));
+                            let report =
+                                angular_scope::add_file(&mut builder, path, source, ext, &facts);
                             if report.error.is_some() {
                                 errors += 1;
                             }
