@@ -47,7 +47,7 @@ jobs:
           toolchain: stable
           components: rustfmt
       - name: Setup Rust Cache
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+        uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2.8.1
 
       - name: Cache Cargo dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -183,7 +183,7 @@ jobs:
         with:
           toolchain: stable
       - name: Setup Rust Cache
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+        uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2.8.1
       - name: Install cargo-semver-checks
         run: cargo install cargo-semver-checks --locked
       - name: Per-crate SemVer gate (every publishable crate)
@@ -215,7 +215,7 @@ jobs:
         with:
           toolchain: 1.97.0
       - name: Setup Rust Cache
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+        uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2.8.1
       - name: Install cargo-public-api
         run: cargo install cargo-public-api --version 0.52.0 --locked
       - name: api/*.txt must match the code (run .github/scripts/public-api.sh to refresh)
@@ -271,7 +271,7 @@ jobs:
         with:
           toolchain: stable
       - name: Setup Rust Cache
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+        uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2.8.1
 
       - name: Run Full Regression Suite
         run: cargo test --workspace --all-features
@@ -374,7 +374,7 @@ jobs:
         with:
           toolchain: stable
       - name: Setup Rust Cache
-        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2.8.1
+        uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2.8.1
 
       - name: Install cargo-criterion
         run: cargo install cargo-criterion --locked --force
