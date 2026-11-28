@@ -412,11 +412,11 @@ struct CtxLink {
 const MAX_CTX_DEPTH: usize = 8;
 const MAX_CTX_CHAINS: usize = 4096;
 
-/// Type alias for the route-registration predicate used in the engine's
-/// per-call-site framing (schema §5.1 of the framework-scope doc): the
-/// exact signature of the harness's `is_route_registration`.
+/// Route-registration predicate for the engine's per-call-site framing
+/// (schema §5.1): the harness's `is_route_registration`, file path included.
 pub(crate) type RouteRegistration = fn(
     callee_text: &str,
+    path: &str,
     spec: &dyn frensense_lang::spec::LanguageSpec,
     facts: Option<&FactTable>,
 ) -> bool;

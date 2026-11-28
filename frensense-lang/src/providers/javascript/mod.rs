@@ -21,9 +21,13 @@
 //! - `spec_ts` / `spec_js` - the two plain family members ([`TypeScriptSpec`],
 //!   [`JavaScriptSpec`])
 //! - `sfc` - shared single-file-component blanking (markup → spaces, offsets kept)
-//! - `spec_vue` / `spec_svelte` - the component members ([`VueSpec`],
-//!   [`SvelteSpec`]: markup blanked in place, script blocks parsed by the TSX
-//!   grammar, raw-HTML writes reported as expression spans)
+//! - `spec_vue` / `spec_svelte` - component members with script blocks
+//!   ([`VueSpec`], [`SvelteSpec`]: markup blanked in place, script blocks
+//!   parsed by the TSX grammar, raw-HTML writes reported as expression spans)
+//! - `spec_astro` - an Astro component ([`AstroSpec`]: `---` frontmatter kept,
+//!   template blanked, `set:html` writes)
+//! - `spec_angular` - an Angular template ([`AngularSpec`]: the whole file is
+//!   markup and blanked, `[innerHTML]`/`[outerHTML]`/`[srcdoc]` bindings)
 //!
 //! # Adding a component format
 //!
@@ -38,10 +42,12 @@
 //! 2. **A spec.** Add `spec_<name>.rs` with a unit struct implementing
 //!    [`JsFamily`], naming the dialect. Override `preprocess_source` to blank
 //!    markup via [`sfc`] (use `extract_script_blocks` when the format has an
-//!    explicit template tag, `blank_scripts` when markup is implicit) and
-//!    `template_writes_source` to report the expression spans of constructs
-//!    that render unescaped HTML. Re-export it from this module and register
-//!    it in [`LanguageRegistry::with_default_specs`](crate::registry::LanguageRegistry::with_default_specs).
+//!    explicit template tag, `blank_scripts` when markup is implicit,
+//!    `frontmatter_span` for a fenced code block, and no kept region when the
+//!    file is pure markup) and `template_writes_source` to report the
+//!    expression spans of constructs that render unescaped HTML. Re-export it
+//!    from this module and register it in
+//!    [`LanguageRegistry::with_default_specs`](crate::registry::LanguageRegistry::with_default_specs).
 //! 3. **A framework model.** Add or extend the entry in
 //!    [`crate::framework::FRAMEWORKS`] so `resolve_file` knows the extension
 //!    is a [`FileKind::Sfc`](crate::framework::FileKind::Sfc), plus resolver
@@ -61,12 +67,16 @@ mod imports;
 mod packages;
 mod params;
 mod sfc;
+mod spec_angular;
+mod spec_astro;
 mod spec_js;
 mod spec_svelte;
 mod spec_ts;
 mod spec_vue;
 
 pub use family::{JsDialect, JsFamily};
+pub use spec_angular::AngularSpec;
+pub use spec_astro::AstroSpec;
 pub use spec_js::JavaScriptSpec;
 pub use spec_svelte::SvelteSpec;
 pub use spec_ts::TypeScriptSpec;

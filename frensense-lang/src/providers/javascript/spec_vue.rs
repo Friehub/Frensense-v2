@@ -32,7 +32,7 @@
 use std::borrow::Cow;
 
 use super::family::{JsDialect, JsFamily};
-use super::sfc::{extract_script_blocks, starts_with_ci};
+use super::sfc::{comment_ranges, extract_script_blocks, in_ranges, starts_with_ci};
 
 /// A `.vue` SFC whose script blocks are parsed with the TypeScript/TSX
 /// grammar after its `preprocess` blanks the template and style sections in
@@ -60,7 +60,9 @@ impl JsFamily for VueSpec {
     /// before it is written and no spare bytes are needed.
     fn template_writes_source(&self, source: &str) -> Vec<(usize, usize)> {
         let bytes = source.as_bytes();
-        template_sinks(bytes, &template_spans(bytes))
+        let templates = template_spans(bytes);
+        let comments = comment_ranges(bytes, &templates);
+        template_sinks(bytes, &templates, &comments)
             .into_iter()
             .map(|(_, start, end)| (start, end))
             .collect()
@@ -103,7 +105,11 @@ fn template_spans(bytes: &[u8]) -> Vec<(usize, usize)> {
 /// Only quoted directives are recognised (`v-html="expr"`); a directive
 /// without a value has nothing to render, and Vue does not accept a bare
 /// `v-html` in a template anyway.
-fn template_sinks(bytes: &[u8], templates: &[(usize, usize)]) -> Vec<(usize, usize, usize)> {
+fn template_sinks(
+    bytes: &[u8],
+    templates: &[(usize, usize)],
+    comments: &[(usize, usize)],
+) -> Vec<(usize, usize, usize)> {
     let mut sinks = Vec::new();
     for &(start, end) in templates {
         let mut i = start;
@@ -119,6 +125,10 @@ fn template_sinks(bytes: &[u8], templates: &[(usize, usize)]) -> Vec<(usize, usi
                 i += 1;
                 continue;
             };
+            if in_ranges(comments, i) {
+                i += marker.len();
+                continue;
+            }
             let quote = i + marker.len();
             if bytes.get(quote) != Some(&b'"') {
                 i += marker.len();

@@ -129,6 +129,10 @@ impl LanguageRegistry {
             Arc::new(crate::providers::javascript::VueSpec),
             #[cfg(feature = "typescript")]
             Arc::new(crate::providers::javascript::SvelteSpec),
+            #[cfg(feature = "typescript")]
+            Arc::new(crate::providers::javascript::AstroSpec),
+            #[cfg(feature = "typescript")]
+            Arc::new(crate::providers::javascript::AngularSpec),
             #[cfg(feature = "javascript")]
             Arc::new(crate::providers::javascript::JavaScriptSpec),
             #[cfg(feature = "go")]

@@ -9,8 +9,8 @@
 //! answers "what am I looking at". They are separate because the same
 //! TypeScript file means different things in different trees: `route.ts`
 //! under `app/` is a Next.js route module, `.server.ts` is a server-only
-//! module in SvelteKit/SolidStart, and `.vue`/`.svelte`/`.astro` are single
-//! file components whose markup is not TypeScript at all.
+//! module in SvelteKit/SolidStart, and `.vue`/`.svelte`/`.astro`/`.html` are
+//! component templates whose markup is not TypeScript at all.
 //!
 //! Everything here is data plus a deterministic resolver, so the engine and
 //! the corpus read the same answer without a second implementation:
@@ -43,8 +43,8 @@
 pub enum FileKind {
     /// Ordinary module: no framework-specific meaning.
     Library,
-    /// A single file component whose markup is a template, not code
-    /// (`.vue`, `.svelte`, `.astro`).
+    /// A component whose markup is a template, not code (`.vue`, `.svelte`,
+    /// `.astro`, and Angular's `.html` templates).
     Sfc,
     /// A module that must not reach the client bundle (`*.server.ts`).
     ServerOnly,
@@ -140,6 +140,14 @@ pub static FRAMEWORKS: &[Framework] = &[
         ],
     },
     Framework {
+        name: "angular",
+        language: "typescript",
+        packages: &["@angular/core", "@angular/common"],
+        // Before `next`: an Angular template can live under `src/app/`,
+        // which Next's `/app/` segment rule would otherwise claim first.
+        rules: &[rule(FileMatch::Suffix(".html"), FileKind::Sfc)],
+    },
+    Framework {
         name: "next",
         language: "typescript",
         packages: &["next", "react", "react-dom"],
@@ -226,6 +234,14 @@ mod tests {
         let f = resolve_file("pages/api/hello.ts", "typescript");
         assert_eq!(f.framework, Some("next"));
         assert_eq!(f.kind, FileKind::ApiRoute);
+    }
+
+    #[test]
+    fn angular_template_is_an_sfc_before_next_claims_app_paths() {
+        let f = resolve_file("src/app/heroes/hero.component.html", "typescript");
+        assert_eq!(f.framework, Some("angular"));
+        assert_eq!(f.kind, FileKind::Sfc);
+        assert!(!f.kind.is_route(), "a template never registers routes");
     }
 
     #[test]

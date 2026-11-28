@@ -159,6 +159,166 @@ pub(super) fn blank_scripts(source: &str) -> Cow<'_, str> {
     ))
 }
 
+/// The regions of `len` bytes NOT covered by `ranges`.
+///
+/// Used to scan only markup: pass the script bodies (or frontmatter) as
+/// `ranges` and the complement is everything a template construct can occupy.
+#[must_use]
+pub(super) fn complement(len: usize, ranges: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut cursor = 0;
+    for &(start, end) in ranges {
+        if start > cursor {
+            out.push((cursor, start));
+        }
+        cursor = cursor.max(end);
+    }
+    if cursor < len {
+        out.push((cursor, len));
+    }
+    out
+}
+
+/// Byte ranges of `<!-- … -->` comments inside `regions`.
+///
+/// Markup inside a comment is inert: it is not rendered and its directives
+/// never run, so a `v-html`/`{@html}`/`set:html` in one must not become a
+/// finding. An unterminated comment runs to the end of its region, matching
+/// how the browser treats the rest of the file.
+#[must_use]
+pub(super) fn comment_ranges(bytes: &[u8], regions: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    for &(start, end) in regions {
+        let mut i = start;
+        while i < end {
+            let Some(open_rel) = find_bytes(bytes.get(i..end).unwrap_or_default(), b"<!--") else {
+                break;
+            };
+            let open = i + open_rel;
+            let close = find_bytes(bytes.get(open + 4..end).unwrap_or_default(), b"-->")
+                .map_or(end, |p| open + 4 + p + 3);
+            ranges.push((open, close));
+            i = close;
+        }
+    }
+    ranges
+}
+
+/// Whether `pos` falls inside one of `ranges`.
+#[must_use]
+pub(super) fn in_ranges(ranges: &[(usize, usize)], pos: usize) -> bool {
+    ranges.iter().any(|&(start, end)| pos >= start && pos < end)
+}
+
+/// The byte range of an Astro frontmatter block's body, fences excluded.
+///
+/// Astro's frontmatter is the `---`-fenced code at the top of a `.astro`
+/// file; everything after the closing fence is markup. `None` when the file
+/// has no frontmatter (a template-only component), so the caller blanks the
+/// whole file.
+#[must_use]
+pub(super) fn frontmatter_span(bytes: &[u8]) -> Option<(usize, usize)> {
+    let start = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        3
+    } else {
+        0
+    };
+    let first_end = line_end(bytes, start);
+    if trim_ascii(bytes.get(start..first_end).unwrap_or_default()) != b"---" {
+        return None;
+    }
+    let body_start = if first_end < bytes.len() {
+        first_end + 1
+    } else {
+        return None;
+    };
+    let mut i = body_start;
+    while i < bytes.len() {
+        let end = line_end(bytes, i);
+        if trim_ascii(bytes.get(i..end).unwrap_or_default()) == b"---" {
+            return Some((body_start, i));
+        }
+        i = if end < bytes.len() { end + 1 } else { end };
+    }
+    None
+}
+
+/// Index of the `}` closing the `{` at `open`, honouring nesting and strings.
+///
+/// Template expressions in Svelte, Astro and Angular may contain object
+/// literals, arrow bodies and template literals, so a plain `find('}')` would
+/// cut `{ a: 1 }` or `` `${a}` `` short. Quotes are tracked so a brace inside
+/// a string does not change the depth; a template literal's `${…}` nests like
+/// any other braces.
+#[must_use]
+pub(super) fn braced_end(bytes: &[u8], open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut quote = 0u8;
+    let mut i = open;
+    while let Some(&byte) = bytes.get(i) {
+        if quote != 0 {
+            if byte == b'\\' {
+                i += 2;
+                continue;
+            }
+            if byte == quote {
+                quote = 0;
+            }
+        } else {
+            match byte {
+                b'\'' | b'"' | b'`' => quote = byte,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth = depth.checked_sub(1)?;
+                    if depth == 0 {
+                        return Some(i);
+                    }
+                }
+                _ => {}
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Index just past the newline that ends the line starting at `from`.
+fn line_end(bytes: &[u8], from: usize) -> usize {
+    bytes
+        .get(from..)
+        .and_then(|rest| rest.iter().position(|&b| b == b'\n'))
+        .map_or(bytes.len(), |p| from + p)
+}
+
+/// ASCII whitespace trimming, without allocating.
+fn trim_ascii(mut bytes: &[u8]) -> &[u8] {
+    while let Some((first, rest)) = bytes.split_first() {
+        if !first.is_ascii_whitespace() {
+            break;
+        }
+        bytes = rest;
+    }
+    while let Some((last, rest)) = bytes.split_last() {
+        if !last.is_ascii_whitespace() {
+            break;
+        }
+        bytes = rest;
+    }
+    bytes
+}
+
+/// First occurrence of `needle` in `haystack`.
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    (0..=haystack.len() - needle.len()).find(|&i| {
+        haystack
+            .get(i..i + needle.len())
+            .is_some_and(|window| window == needle)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

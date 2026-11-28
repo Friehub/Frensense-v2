@@ -181,7 +181,7 @@ pub(crate) fn lower_source_detailed(
             )
         {
             let callee_text = &source[callee.start_byte()..callee.end_byte()];
-            if is_route_registration(callee_text, spec, facts) {
+            if is_route_registration(callee_text, path, spec, facts) {
                 let mut ac = args.walk();
                 let arg_nodes: Vec<_> = args.named_children(&mut ac).collect();
                 for a in &arg_nodes {
@@ -305,7 +305,12 @@ fn extracted_ancestor_name(
         && let Some(call) = args.parent()
         && let NodeRole::Call { callee_field, .. } = spec.classify(call.kind())
         && let Some(callee) = call.child_by_field_name(callee_field.as_ref())
-        && is_route_registration(&source[callee.start_byte()..callee.end_byte()], spec, facts)
+        && is_route_registration(
+            &source[callee.start_byte()..callee.end_byte()],
+            path,
+            spec,
+            facts,
+        )
     {
         return Some(format!("<{}:handler@{}>", path, fn_node.start_byte()));
     }
@@ -335,7 +340,15 @@ fn enclosing_extracted_name(
 /// Route-registration predicate: a call site is a route handler when the
 /// spec's hard verb suffixes match the callee, OR when pack vocabulary
 /// (`facts.route_patterns`) lists a registration shape for that spec's
-/// language.
+/// language - and the file it sits in may register routes at all.
+///
+/// File kind comes from [`frensense_lang::framework::resolve_file`], so the
+/// decision uses the same framework model the corpus does. A single-file
+/// component (`.vue`, `.svelte`, `.astro`, `.html` template) never registers
+/// an HTTP route: its `.get`/`.use` calls are collection, store or plugin
+/// reads, and treating them as handlers produced phantom route entries.
+/// Library and server modules keep the verb/pattern behaviour that
+/// Express-style apps rely on.
 ///
 /// Used by the harness's IR lowering to extract route handlers, and by
 /// the backward engine's per-call-site resolution (when wired via
@@ -343,9 +356,15 @@ fn enclosing_extracted_name(
 /// only at route handlers (schema §5.1).
 pub(crate) fn is_route_registration(
     callee_text: &str,
+    path: &str,
     spec: &dyn frensense_lang::spec::LanguageSpec,
     facts: Option<&FactTable>,
 ) -> bool {
+    if frensense_lang::framework::resolve_file(path, spec.fact_language()).kind
+        == frensense_lang::framework::FileKind::Sfc
+    {
+        return false;
+    }
     if spec
         .known_route_verbs()
         .iter()
@@ -660,6 +679,19 @@ app.patch("/item", (req, res) => {
         let fns = lower_source_with_facts("t.ts", src, "ts", Some(&facts)).unwrap();
         let handlers: Vec<&String> = fns.keys().filter(|k| k.contains("handler@")).collect();
         assert!(!handlers.is_empty(), "app.patch handler missing: {fns:?}");
+    }
+
+    /// A single-file component never registers an HTTP route: `store.get(…)`
+    /// in a Vue script is a collection read, not an Express handler. File
+    /// kind comes from the framework model, so no separate allowlist is kept.
+    #[test]
+    fn component_calls_are_not_route_registrations() {
+        let src = "<script>\nconst store = new Map()\nstore.get('/k', () => {})\n</script>\n";
+        let fns = lower_source("src/App.vue", src, "vue").unwrap();
+        assert!(
+            fns.keys().all(|k| !k.contains("handler@")),
+            "component call became a route handler: {fns:?}"
+        );
     }
 
     /// Regression: `const r = runTool(cmd)` nested in a handler must NOT be
