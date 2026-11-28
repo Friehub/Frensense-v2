@@ -6,45 +6,38 @@
 //!
 //! Angular keeps its template in `.component.html` (or any external `.html`
 //! referenced by `templateUrl`), separate from the component class. This spec
-//! covers that template file: the whole file is markup, so `preprocess_source`
-//! blanks all of it (newlines kept) and the engine lowers the reported
-//! property-binding expressions into the module IR.
+//! covers the `*.component.html` file: the whole file is markup, so
+//! `preprocess_source` blanks all of it (newlines kept) and the engine lowers
+//! the expressions this spec reports.
 //!
-//! # Component prop sinks
+//! # Why a binding is not a sink
 //!
-//! Angular escapes interpolation (`{{ value }}`) and sanitizes most property
-//! bindings, but the bindings that write markup are reported here:
+//! Angular sanitizes markup bindings by default: `[innerHTML]`,
+//! `[outerHTML]` and `[srcdoc]` are all the HTML security context, and
+//! interpolation is escaped. A tainted value in one of them is therefore
+//! **not** XSS, and reporting it would be a false positive. The unsafe case is
+//! `DomSanitizer.bypassSecurityTrustHtml(…)`, which marks a value as trusted;
+//! that call is a sink in `frensense-packgen`, so this spec reports a binding
+//! only when its expression contains such a call (see [`super::angular`]).
 //!
-//! - `[innerHTML]="expr"` - the HTML security context;
-//! - `[outerHTML]="expr"` - replaces the element, including its markup;
-//! - `[srcdoc]="expr"` - the `iframe` document.
+//! Inline templates in `@Component({ template: … })` are covered by the
+//! TypeScript spec, which blanks the decorator and reports the same bypass
+//! bindings; see [`super::angular`] for both paths.
 //!
-//! A flow reaching one of them is only exploitable when the value bypasses
-//! Angular's sanitizer (`DomSanitizer.bypassSecurityTrustHtml`); the sanitizer
-//! vocabulary lives in `frensense-packgen`, so a finding means "this value is
-//! bound as raw HTML", not automatically "this is exploitable".
-//!
-//! Only quoted bindings are read. A value written through an interpolated
-//! attribute is a string, not an expression. Constructs inside
-//! `<!-- … -->` comments and inside `<script>` bodies are inert.
-//!
-//! Inline templates (`@Component({ template: \`…\` })` in a `.ts` file) are
-//! not covered: their markup lives inside a string literal of an otherwise
-//! TypeScript file, which needs its own lowering.
+//! Only files ending in `.component.html` are claimed. A plain `index.html`
+//! is not an Angular template and stays outside the scan.
 //!
 //! Security vocabulary (sinks, sources, sanitizers) lives in
 //! `frensense-packgen`; this file is mechanism only.
 
 use std::borrow::Cow;
 
+use super::angular::bypass_bindings;
 use super::family::{JsDialect, JsFamily};
-use super::sfc::{blank_outside, comment_ranges, in_ranges, script_body_ranges};
-
-/// Property bindings whose value is written to the DOM as markup.
-const MARKUP_BINDINGS: &[&[u8]] = &[b"[innerHTML]", b"[outerHTML]", b"[srcdoc]"];
+use super::sfc::{blank_outside, comment_ranges, complement, script_body_ranges};
 
 /// An Angular template file: markup only, parsed with the TSX grammar because
-/// the engine lowers the bound expressions as TypeScript.
+/// the engine lowers the reported expressions as TypeScript.
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct AngularSpec;
@@ -58,83 +51,13 @@ impl JsFamily for AngularSpec {
         Cow::Owned(blank_outside(source.as_bytes(), &[]))
     }
 
-    fn template_writes_source(&self, source: &str) -> Vec<(usize, usize)> {
+    fn template_expressions_source(&self, source: &str) -> Vec<(usize, usize)> {
         let bytes = source.as_bytes();
         let scripts = script_body_ranges(bytes);
-        let markup = super::sfc::complement(bytes.len(), &scripts);
+        let markup = complement(bytes.len(), &scripts);
         let comments = comment_ranges(bytes, &markup);
-        binding_writes(bytes, &scripts, &comments)
+        bypass_bindings(bytes, &markup, &scripts, &comments)
     }
-}
-
-/// Expression spans of every quoted markup binding outside scripts and
-/// `comments`.
-fn binding_writes(
-    bytes: &[u8],
-    scripts: &[(usize, usize)],
-    comments: &[(usize, usize)],
-) -> Vec<(usize, usize)> {
-    let mut writes = Vec::new();
-    let mut i = 0;
-    while i < bytes.len() {
-        let Some(binding) = MARKUP_BINDINGS
-            .iter()
-            .find(|b| bytes.get(i..).is_some_and(|rest| rest.starts_with(*b)))
-        else {
-            i += 1;
-            continue;
-        };
-        let marker_end = i + binding.len();
-        if in_ranges(scripts, i) || in_ranges(comments, i) {
-            i = marker_end;
-            continue;
-        }
-        let Some(equals) = skip_spaces(bytes, marker_end) else {
-            break;
-        };
-        if bytes.get(equals) != Some(&b'=') {
-            i = marker_end;
-            continue;
-        }
-        let Some(quote_at) = skip_spaces(bytes, equals + 1) else {
-            break;
-        };
-        let Some(&quote) = bytes.get(quote_at) else {
-            break;
-        };
-        if quote != b'"' && quote != b'\'' {
-            i = marker_end;
-            continue;
-        }
-        let start = quote_at + 1;
-        let Some(rel_end) = bytes
-            .get(start..)
-            .and_then(|rest| rest.iter().position(|&b| b == quote))
-        else {
-            break;
-        };
-        let raw_end = start + rel_end;
-        if let Some((start, end)) = trimmed_span(bytes, start, raw_end) {
-            writes.push((start, end));
-        }
-        i = raw_end + 1;
-    }
-    writes
-}
-
-/// First non-space index at or after `from`.
-fn skip_spaces(bytes: &[u8], from: usize) -> Option<usize> {
-    let rest = bytes.get(from..)?;
-    let offset = rest.iter().position(|b| !b.is_ascii_whitespace())?;
-    Some(from + offset)
-}
-
-/// The non-whitespace span between `start` and `end`, if any.
-fn trimmed_span(bytes: &[u8], start: usize, end: usize) -> Option<(usize, usize)> {
-    let raw = bytes.get(start..end).unwrap_or_default();
-    let first = raw.iter().position(|b| !b.is_ascii_whitespace())?;
-    let last = raw.iter().rposition(|b| !b.is_ascii_whitespace())? + 1;
-    (first < last).then_some((start + first, start + last))
 }
 
 #[cfg(test)]
@@ -152,13 +75,24 @@ mod tests {
         assert_eq!(out.matches('\n').count(), TEMPLATE.matches('\n').count());
     }
 
+    /// Angular sanitizes these bindings; flagging them was the false
+    /// positive this spec now avoids.
     #[test]
-    fn markup_bindings_report_their_expressions() {
-        let writes = AngularSpec.template_writes(TEMPLATE);
-        assert_eq!(writes.len(), 3, "three bindings: {writes:?}");
-        assert_eq!(&TEMPLATE[writes[0].0..writes[0].1], "userInput");
-        assert_eq!(&TEMPLATE[writes[1].0..writes[1].1], "userInput");
-        assert_eq!(&TEMPLATE[writes[2].0..writes[2].1], "html");
+    fn sanitized_bindings_are_not_writes() {
+        assert!(AngularSpec.template_writes(TEMPLATE).is_empty());
+        assert!(AngularSpec.template_expressions(TEMPLATE).is_empty());
+    }
+
+    #[test]
+    fn a_binding_that_bypasses_the_sanitizer_is_reported() {
+        let src = "<div [innerHTML]=\"san.bypassSecurityTrustHtml(userInput)\"></div>\n";
+        assert!(AngularSpec.template_writes(src).is_empty());
+        let writes = AngularSpec.template_expressions(src);
+        assert_eq!(writes.len(), 1, "{writes:?}");
+        assert_eq!(
+            &src[writes[0].0..writes[0].1],
+            "san.bypassSecurityTrustHtml(userInput)"
+        );
     }
 
     #[test]
@@ -169,20 +103,13 @@ mod tests {
 
     #[test]
     fn commented_bindings_are_inert() {
-        let src =
-            "<!-- <div [innerHTML]=\"userInput\"></div> -->\n<div [innerHTML]=\"live\"></div>\n";
-        let writes = AngularSpec.template_writes(src);
+        let src = "<!-- <div [innerHTML]=\"san.bypassSecurityTrustHtml(x)\"></div> -->\n<div [innerHTML]=\"san.bypassSecurityTrustHtml(live)\"></div>\n";
+        let writes = AngularSpec.template_expressions(src);
         assert_eq!(writes.len(), 1, "one live binding: {writes:?}");
-        assert_eq!(&src[writes[0].0..writes[0].1], "live");
-    }
-
-    #[test]
-    fn bindings_inside_a_script_are_inert() {
-        let src =
-            "<script>const t = '[innerHTML]=\"x\"'</script>\n<div [innerHTML]=\"live\"></div>\n";
-        let writes = AngularSpec.template_writes(src);
-        assert_eq!(writes.len(), 1, "one live binding: {writes:?}");
-        assert_eq!(&src[writes[0].0..writes[0].1], "live");
+        assert_eq!(
+            &src[writes[0].0..writes[0].1],
+            "san.bypassSecurityTrustHtml(live)"
+        );
     }
 
     #[test]

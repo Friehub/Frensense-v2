@@ -145,7 +145,7 @@ pub static FRAMEWORKS: &[Framework] = &[
         packages: &["@angular/core", "@angular/common"],
         // Before `next`: an Angular template can live under `src/app/`,
         // which Next's `/app/` segment rule would otherwise claim first.
-        rules: &[rule(FileMatch::Suffix(".html"), FileKind::Sfc)],
+        rules: &[rule(FileMatch::Suffix(".component.html"), FileKind::Sfc)],
     },
     Framework {
         name: "next",
@@ -242,6 +242,13 @@ mod tests {
         assert_eq!(f.framework, Some("angular"));
         assert_eq!(f.kind, FileKind::Sfc);
         assert!(!f.kind.is_route(), "a template never registers routes");
+    }
+
+    #[test]
+    fn plain_html_is_not_an_angular_template() {
+        let f = resolve_file("public/index.html", "typescript");
+        assert_eq!(f.framework, None);
+        assert_eq!(f.kind, FileKind::Library);
     }
 
     #[test]

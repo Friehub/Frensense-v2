@@ -77,7 +77,8 @@ pub(crate) fn lower_source_detailed(
     ext: &str,
     facts: Option<&FactTable>,
 ) -> Result<(FxHashMap<String, FunctionIR>, bool), String> {
-    let spec = frensense_lang::spec_for_ext(ext)
+    let spec = frensense_lang::spec_for_path(std::path::Path::new(path))
+        .or_else(|| frensense_lang::spec_for_ext(ext))
         .ok_or_else(|| format!("no language spec for extension '{ext}'"))?;
 
     // Single-file-container formats (e.g. Vue SFCs) rewrite the source
@@ -90,6 +91,10 @@ pub(crate) fn lower_source_detailed(
     // Template writes are reported against the file as written; the engine
     // synthesizes the call instead of consuming bytes of the rewritten source.
     let template_writes = spec.template_writes(original);
+    // Sanitized template expressions are lowered but do not synthesize a
+    // write; they exist so a sink inside the expression (an Angular
+    // `bypassSecurityTrust…`) is still analysed.
+    let template_expressions = spec.template_expressions(original);
 
     let mut parser = tree_sitter::Parser::new();
     parser
@@ -107,8 +112,11 @@ pub(crate) fn lower_source_detailed(
     let mut bound_fns: FxHashSet<usize> = FxHashSet::default();
     // Whether the module IR owns the root-level declarations: `const q =
     // req.query.q; eval(q)` links only if both live in the same IR.
-    let module_owns_decls =
-        crate::module_scope::owns_declarations(tree.root_node(), spec, !template_writes.is_empty());
+    let module_owns_decls = crate::module_scope::owns_declarations(
+        tree.root_node(),
+        spec,
+        !template_writes.is_empty() || !template_expressions.is_empty(),
+    );
     let mut stack = vec![tree.root_node()];
     while let Some(node) = stack.pop() {
         // Language-driven function detection: JS/TS `function_declaration` /
@@ -216,7 +224,10 @@ pub(crate) fn lower_source_detailed(
         spec,
         facts,
         module_owns_decls,
-        &template_writes,
+        &crate::module_scope::TemplateSpans {
+            writes: &template_writes,
+            expressions: &template_expressions,
+        },
     ) {
         insert_ir(&mut irs, ir, tree.root_node().start_byte());
     }

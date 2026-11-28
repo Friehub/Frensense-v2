@@ -20,14 +20,17 @@
 //! - `params` - parameter → [`TaintOrigin`](crate::spec::TaintOrigin) classification
 //! - `spec_ts` / `spec_js` - the two plain family members ([`TypeScriptSpec`],
 //!   [`JavaScriptSpec`])
+//! - `angular` - Angular binding scanning shared by external templates and
+//!   inline `@Component({ template: … })` decorators (sanitizer-aware)
 //! - `sfc` - shared single-file-component blanking (markup → spaces, offsets kept)
 //! - `spec_vue` / `spec_svelte` - component members with script blocks
 //!   ([`VueSpec`], [`SvelteSpec`]: markup blanked in place, script blocks
 //!   parsed by the TSX grammar, raw-HTML writes reported as expression spans)
 //! - `spec_astro` - an Astro component ([`AstroSpec`]: `---` frontmatter kept,
 //!   template blanked, `set:html` writes)
-//! - `spec_angular` - an Angular template ([`AngularSpec`]: the whole file is
-//!   markup and blanked, `[innerHTML]`/`[outerHTML]`/`[srcdoc]` bindings)
+//! - `spec_angular` - an Angular `*.component.html` template ([`AngularSpec`]:
+//!   the whole file is markup and blanked; only bindings that bypass Angular's
+//!   sanitizer are reported)
 //!
 //! # Adding a component format
 //!
@@ -61,6 +64,7 @@
 //! roots, route patterns) lives in `frensense-packgen` since Phase 6.3; the
 //! specs here are mechanism-only.
 
+mod angular;
 mod ast;
 mod family;
 mod imports;

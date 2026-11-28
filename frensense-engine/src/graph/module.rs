@@ -225,7 +225,9 @@ impl ModuleAliasResolver {
         let mut file_module_items: FxHashMap<String, Vec<ModuleItem>> = FxHashMap::default();
 
         for &(path, source, ext) in files {
-            let Some(spec) = frensense_lang::spec_for_ext(ext) else {
+            let Some(spec) = frensense_lang::spec_for_path(std::path::Path::new(path))
+                .or_else(|| frensense_lang::spec_for_ext(ext))
+            else {
                 continue;
             };
             let mut parser = tree_sitter::Parser::new();

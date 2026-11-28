@@ -28,6 +28,17 @@ use tree_sitter::Node;
 /// target, so no source name can collide with it.
 pub(crate) const MODULE_SCOPE_FN: &str = "<module>";
 
+/// Template expressions the spec asked to lower alongside the module body.
+///
+/// `writes` synthesize a template-write sink; `expressions` are analysis-only
+/// (an Angular binding that Angular sanitizes but that may contain a
+/// sanitizer bypass). Keeping them in one struct keeps the lowering entry
+/// point's argument list small and the two channels visibly paired.
+pub(crate) struct TemplateSpans<'a> {
+    pub(crate) writes: &'a [(usize, usize)],
+    pub(crate) expressions: &'a [(usize, usize)],
+}
+
 /// Lower the module-scope statements into one SSA'd, static-function IR.
 ///
 /// Only *root-level* named children of the parsed tree are visited: a function
@@ -44,22 +55,26 @@ pub(crate) fn lower_module_scope(
     spec: &'static dyn frensense_lang::spec::LanguageSpec,
     facts: Option<&FactTable>,
     owns_decls: bool,
-    template_writes: &[(usize, usize)],
+    templates: &TemplateSpans<'_>,
 ) -> Option<FunctionIR> {
+    let TemplateSpans {
+        writes: template_writes,
+        expressions: template_expressions,
+    } = *templates;
     // The parsed tree is the blanked source; a template expression exists only
     // in the original bytes. Overlaying those bytes onto the blanked text
     // gives one source whose offsets match both, so an identifier inside
     // `v-html="q"` still slices to `q` while lowering the synthesized write.
-    let overlay = (!template_writes.is_empty())
-        .then(|| overlay_expressions(source, original, template_writes))
+    let mut spans: Vec<(usize, usize)> = template_writes.to_vec();
+    spans.extend_from_slice(template_expressions);
+    let overlay = (!spans.is_empty())
+        .then(|| overlay_expressions(source, original, &spans))
         .flatten();
     // Without the overlay the expressions are not in the text, so lowering
-    // them would read blanks: drop the writes rather than invent a flow.
-    let writes: &[(usize, usize)] = if overlay.is_some() {
-        template_writes
-    } else {
-        &[]
-    };
+    // them would read blanks: drop them rather than invent a flow.
+    let available = overlay.is_some();
+    let writes = if available { template_writes } else { &[] };
+    let expressions = if available { template_expressions } else { &[] };
     let text = overlay.as_deref().unwrap_or(source);
 
     let mut ctx = LoweringContext::new_with_facts(spec, text, MODULE_SCOPE_FN.to_string(), facts);
@@ -75,8 +90,8 @@ pub(crate) fn lower_module_scope(
     // Template writes go last: the script statements that define their values
     // are lowered by now, so the sink reads the same variable the declaration
     // assigned instead of a fresh undefined one.
-    if !writes.is_empty() {
-        emit_template_writes(&mut ctx, text, writes, spec);
+    if !writes.is_empty() || !expressions.is_empty() {
+        emit_template_spans(&mut ctx, text, writes, expressions, spec);
     }
     if ctx.ir.blocks.values().all(|b| b.instructions.is_empty()) {
         return None;
@@ -106,16 +121,22 @@ pub(crate) fn owns_declarations(
         && children.iter().any(|c| declares_at_module_scope(*c, spec))
 }
 
-/// Emit one template-write call per reported expression span.
+/// Lower the reported template spans from the overlaid text.
 ///
-/// The expression is parsed from the overlaid text at its own offsets, so the
-/// identifiers and member chains inside it lower exactly as if they had been
-/// written in the script. A span whose parse does not cover it exactly is
-/// skipped: a missing finding is honest, a call on the wrong expression is not.
-fn emit_template_writes(
+/// Each expression is parsed at its own offsets, so identifiers and member
+/// chains inside it lower exactly as if they had been written in the script.
+/// A span whose parse does not cover it exactly is skipped: a missing finding
+/// is honest, a call on the wrong expression is not.
+///
+/// A **write** span also gets a synthesized [`TEMPLATE_SINK_CALL`] carrying
+/// its value. An **analysis-only** span is lowered and dropped: it is not a
+/// sink itself, but a sink inside it (Angular's `bypassSecurityTrust…`) must
+/// still reach the taint engine.
+fn emit_template_spans(
     ctx: &mut LoweringContext<'_>,
     text: &str,
-    spans: &[(usize, usize)],
+    writes: &[(usize, usize)],
+    expressions: &[(usize, usize)],
     spec: &'static dyn frensense_lang::spec::LanguageSpec,
 ) {
     let mut parser = tree_sitter::Parser::new();
@@ -125,31 +146,37 @@ fn emit_template_writes(
     let Some(tree) = parser.parse(text, None) else {
         return;
     };
-    for &(start, end) in spans {
-        let node = tree
-            .root_node()
-            .descendant_for_byte_range(start, end)
-            .filter(|n| n.start_byte() == start && n.end_byte() == end);
-        let Some(node) = node else {
-            continue;
-        };
-        let Some(value) = ctx.visit_node(node) else {
-            continue;
-        };
-        // The result temp carries the expression's range, and a call's span is
-        // its result's range, so the finding points at the template expression.
-        let dest = ctx.new_temp(node);
-        ctx.ir.push_instruction(
-            ctx.current_block,
-            Instruction::CallStatic {
-                dest: Some(dest),
-                mem_out: ctx.memory_var,
-                mem_in: ctx.memory_var,
-                func: crate::ir::TEMPLATE_SINK_CALL.to_string(),
-                args: vec![value],
-                arg_names: vec![String::new()],
-            },
-        );
+    for (spans, is_write) in [(writes, true), (expressions, false)] {
+        for &(start, end) in spans {
+            let node = tree
+                .root_node()
+                .descendant_for_byte_range(start, end)
+                .filter(|n| n.start_byte() == start && n.end_byte() == end);
+            let Some(node) = node else {
+                continue;
+            };
+            let Some(value) = ctx.visit_node(node) else {
+                continue;
+            };
+            if !is_write {
+                continue;
+            }
+            // The result temp carries the expression's range, and a call's
+            // span is its result's range, so the finding points at the
+            // template expression.
+            let dest = ctx.new_temp(node);
+            ctx.ir.push_instruction(
+                ctx.current_block,
+                Instruction::CallStatic {
+                    dest: Some(dest),
+                    mem_out: ctx.memory_var,
+                    mem_in: ctx.memory_var,
+                    func: crate::ir::TEMPLATE_SINK_CALL.to_string(),
+                    args: vec![value],
+                    arg_names: vec![String::new()],
+                },
+            );
+        }
     }
 }
 

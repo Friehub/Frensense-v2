@@ -80,7 +80,7 @@ impl Engine {
                 .and_then(|e| e.to_str())
                 .map(str::to_lowercase)
                 .unwrap_or_default();
-            if frensense_lang::spec_for_ext(&ext).is_none() {
+            if frensense_lang::spec_for_path(p).is_none() {
                 if root.is_file() {
                     unsupported += 1;
                 }
@@ -142,7 +142,7 @@ impl Engine {
         let mut groups: std::collections::BTreeMap<&'static str, Vec<(String, String, String)>> =
             std::collections::BTreeMap::new();
         for f in &files {
-            if let Some(spec) = frensense_lang::spec_for_ext(&f.2) {
+            if let Some(spec) = frensense_lang::spec_for_path(std::path::Path::new(&f.0)) {
                 let family = match spec.name() {
                     "javascript" | "typescript" | "vue" | "svelte" | "astro" | "angular" => {
                         "javascript"

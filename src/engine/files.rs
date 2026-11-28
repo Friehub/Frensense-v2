@@ -13,6 +13,8 @@ pub use collected::CollectedTree;
 pub use exclusions::{CollectOptions, ExcludedPath};
 use walkdir::WalkDir;
 
+use crate::parser::path_has_extension;
+
 /// Hidden directories that are still source trees. Vite/VitePress keeps
 /// a site's real application code — the theme (Vue SFCs), config and
 /// types — under `.vitepress`, so scanning a docs project root must not
@@ -202,10 +204,8 @@ pub fn collect_files_with(
     let candidates = walk_source_candidates(root, options, &mut excluded);
     for path in candidates {
         if crate::parser::is_supported(&path) {
-            let matches_filter = language_filter.is_none_or(|allowed| {
-                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-                allowed.contains(&ext)
-            });
+            let matches_filter = language_filter
+                .is_none_or(|allowed| allowed.iter().any(|ext| path_has_extension(&path, ext)));
             if !matches_filter {
                 continue;
             }

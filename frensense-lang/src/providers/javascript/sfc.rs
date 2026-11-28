@@ -307,8 +307,14 @@ fn trim_ascii(mut bytes: &[u8]) -> &[u8] {
     bytes
 }
 
+/// Whether `needle` occurs in `haystack`.
+#[must_use]
+pub(super) fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    find_bytes(haystack, needle).is_some()
+}
+
 /// First occurrence of `needle` in `haystack`.
-fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+pub(super) fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || haystack.len() < needle.len() {
         return None;
     }

@@ -143,7 +143,9 @@ impl JsDialect {
             Self::Vue => &["vue"],
             Self::Svelte => &["svelte"],
             Self::Astro => &["astro"],
-            Self::Angular => &["html"],
+            // A compound extension: only Angular's conventional template
+            // file, not every `.html` page.
+            Self::Angular => &["component.html"],
         }
     }
 
@@ -244,6 +246,12 @@ pub trait JsFamily: Send + Sync + 'static {
     fn template_writes_source(&self, _source: &str) -> Vec<(usize, usize)> {
         Vec::new()
     }
+
+    /// Template expressions lowered for analysis only, with no write sink.
+    /// Used for sanitized bindings that may contain a bypass call.
+    fn template_expressions_source(&self, _source: &str) -> Vec<(usize, usize)> {
+        Vec::new()
+    }
 }
 
 // ── One implementation, every family member ──────────────────────────────────
@@ -267,6 +275,10 @@ impl<T: JsFamily> LanguageSpec for T {
 
     fn template_writes(&self, source: &str) -> Vec<(usize, usize)> {
         self.template_writes_source(source)
+    }
+
+    fn template_expressions(&self, source: &str) -> Vec<(usize, usize)> {
+        self.template_expressions_source(source)
     }
 
     fn fact_language(&self) -> &'static str {

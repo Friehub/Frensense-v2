@@ -214,8 +214,6 @@ pub enum NodeRole {
     Other,
 }
 
-impl NodeRole {}
-
 /// A statement that transfers control to a labelled block or out of the
 /// current loop/switch.
 ///
@@ -488,9 +486,13 @@ pub trait LanguageSpec: Send + Sync + 'static {
         std::borrow::Cow::Borrowed(source)
     }
 
-    /// Spans of unescaped template writes (one expression each) in the
-    /// ORIGINAL source; the engine lowers them. See `javascript::sfc`.
+    /// Unescaped template writes to lower and report; see `javascript::sfc`.
     fn template_writes(&self, _source: &str) -> Vec<(usize, usize)> {
+        Vec::new()
+    }
+
+    /// Expressions lowered for analysis only, without a write sink.
+    fn template_expressions(&self, _source: &str) -> Vec<(usize, usize)> {
         Vec::new()
     }
 
@@ -508,8 +510,7 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// Classify a tree-sitter node kind into a [`NodeRole`].
     ///
     /// This is the single hot-path entry point for all engine subsystems.
-    /// The returned variant carries the field names needed by the caller so
-    /// no second lookup is required.
+    /// The returned variant carries the field names the caller needs.
     ///
     /// ```rust,ignore
     /// match spec.classify(node.kind()) {
