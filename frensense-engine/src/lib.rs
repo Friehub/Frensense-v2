@@ -34,6 +34,8 @@
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod analysis;
+#[cfg(test)]
+mod angular_template_tests;
 pub mod checks;
 #[cfg(test)]
 mod dataflow_probes_tests;

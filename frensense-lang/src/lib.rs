@@ -62,27 +62,24 @@
 //! }
 //! ```
 //!
-//! ## The JavaScript family: one spec, three dialects
+//! ## The JavaScript family: one spec, one dialect per syntax
 //!
-//! JavaScript, TypeScript and a Vue SFC's script block share one tree-sitter
-//! grammar family, one node classification and one import/export extractor, so
-//! they are implemented once: [`providers::javascript::JsFamily`] asks a member
-//! for its [`providers::javascript::JsDialect`] — the grammar, extensions,
-//! symbol query and region wrapper that actually differ — and a blanket impl
-//! supplies the rest of [`spec::LanguageSpec`].
+//! JavaScript, TypeScript, Vue, Svelte, Astro and Angular share one grammar
+//! family, node classification and import/export extractor, implemented once
+//! behind [`providers::javascript::JsFamily`]; a member supplies only its
+//! [`providers::javascript::JsDialect`] and container preprocessing.
 //!
-//! ```text
-//! use frensense_lang::providers::javascript::{JavaScriptSpec, JsDialect, JsFamily};
+//! Svelte and Angular are family members, not separate pipelines:
 //!
-//! // A family member states its dialect and nothing else.
-//! impl JsFamily for JavaScriptSpec {
-//!     const DIALECT: JsDialect = JsDialect::JavaScript;
-//! }
-//! ```
+//! - **Svelte** reports `{@html …}` and `innerHTML={…}` as template writes;
+//!   `{@render}` and HTML comments are inert.
+//! - **Angular** treats markup bindings as sanitized, so the sink is
+//!   `bypassSecurityTrust…`; `*.component.html` files and inline
+//!   `@Component({ template })` strings are scanned, and component fields are
+//!   bound into the template scope so a binding links to the class's value.
 //!
-//! A new single-file container (Svelte, Astro) adds a
-//! [`providers::javascript::JsDialect`] arm and overrides `preprocess_source`
-//! when the file wraps script code; it does not restate the grammar-facing
+//! A new container adds a dialect arm and overrides `preprocess_source` when
+//! the file wraps script code; it does not restate the grammar-facing
 //! contract. See [`providers::javascript::JsFamily`] for the full contract.
 //!
 //! ## Migration Guide for Each Engine Subsystem
@@ -395,4 +392,5 @@ pub use severity::{
 };
 pub use spec::{
     Import, JsxPart, JumpKind, LanguageSpec, LiteralShape, NodeRole, PackageCategory, TaintOrigin,
+    TemplateBinding,
 };

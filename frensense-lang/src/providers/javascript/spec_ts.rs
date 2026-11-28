@@ -23,7 +23,11 @@
 
 use std::borrow::Cow;
 
-use super::angular::{blank_component_decorators, inline_bypass_spans};
+use crate::spec::TemplateBinding;
+
+use super::angular::{
+    blank_component_decorators, component_field_initializers, inline_bypass_spans,
+};
 use super::family::{JsDialect, JsFamily};
 
 /// TypeScript (`ts`/`tsx`/`mts`/`cts`).
@@ -41,5 +45,11 @@ impl JsFamily for TypeScriptSpec {
         // A sanitized binding is not a write; lowering it lets a
         // `bypassSecurityTrust…` call inside it reach its sink.
         inline_bypass_spans(source)
+    }
+
+    fn template_bindings_source(&self, source: &str) -> Vec<TemplateBinding> {
+        // A template reads the component instance, not module bindings, so
+        // expose the class's field initializers under their template names.
+        component_field_initializers(source, &Self::DIALECT.language())
     }
 }

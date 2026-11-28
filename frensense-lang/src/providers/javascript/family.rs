@@ -36,6 +36,7 @@ use tree_sitter::Node;
 
 use crate::spec::{
     Export, Import, JsxPart, LanguageSpec, ModuleItem, NodeRole, PackageCategory, TaintOrigin,
+    TemplateBinding,
 };
 
 use super::{
@@ -150,7 +151,7 @@ impl JsDialect {
     }
 
     /// The grammar this dialect parses with.
-    fn language(self) -> tree_sitter::Language {
+    pub(super) fn language(self) -> tree_sitter::Language {
         match self {
             Self::JavaScript => javascript_grammar(),
             Self::TypeScript | Self::Vue | Self::Svelte | Self::Astro | Self::Angular => {
@@ -252,6 +253,12 @@ pub trait JsFamily: Send + Sync + 'static {
     fn template_expressions_source(&self, _source: &str) -> Vec<(usize, usize)> {
         Vec::new()
     }
+
+    /// Fields an inline template's expressions may read, as
+    /// `(field name, initializer span)`.
+    fn template_bindings_source(&self, _source: &str) -> Vec<TemplateBinding> {
+        Vec::new()
+    }
 }
 
 // ── One implementation, every family member ──────────────────────────────────
@@ -279,6 +286,10 @@ impl<T: JsFamily> LanguageSpec for T {
 
     fn template_expressions(&self, source: &str) -> Vec<(usize, usize)> {
         self.template_expressions_source(source)
+    }
+
+    fn template_bindings(&self, source: &str) -> Vec<TemplateBinding> {
+        self.template_bindings_source(source)
     }
 
     fn fact_language(&self) -> &'static str {

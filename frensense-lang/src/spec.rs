@@ -467,6 +467,10 @@ impl ModuleItem {
 ///
 /// The trait is object-safe: it can be stored as `Arc<dyn LanguageSpec>` in
 /// the [`LanguageRegistry`](crate::registry::LanguageRegistry).
+/// A component field visible to a template: its name and the span of its
+/// initializer in the file.
+pub type TemplateBinding = (String, (usize, usize));
+
 pub trait LanguageSpec: Send + Sync + 'static {
     // ── Identity ─────────────────────────────────────────────────────────
 
@@ -496,6 +500,11 @@ pub trait LanguageSpec: Send + Sync + 'static {
         Vec::new()
     }
 
+    /// Component fields an inline template can read (Angular).
+    fn template_bindings(&self, _source: &str) -> Vec<TemplateBinding> {
+        Vec::new()
+    }
+
     /// The language key the FactTable and learned bundles key this spec's
     /// knowledge under. Defaults to [`name`](Self::name); a container
     /// format delegating to another spec's grammar also delegates its
@@ -509,18 +518,9 @@ pub trait LanguageSpec: Send + Sync + 'static {
 
     /// Classify a tree-sitter node kind into a [`NodeRole`].
     ///
-    /// This is the single hot-path entry point for all engine subsystems.
-    /// The returned variant carries the field names the caller needs.
-    ///
+    /// The single hot-path entry point for all engine subsystems.
     /// ```rust,ignore
-    /// match spec.classify(node.kind()) {
-    ///     NodeRole::Call { callee_field, args_field } => {
-    ///         let callee = node.child_by_field_name(callee_field);
-    ///         // …
-    ///     }
-    ///     NodeRole::Assignment { lhs_field, rhs_field } => { /* … */ }
-    ///     _ => {}
-    /// }
+    /// if let NodeRole::Call { callee_field, .. } = spec.classify(node.kind()) { /* … */ }
     /// ```
     fn classify(&self, kind: &str) -> NodeRole;
 

@@ -95,6 +95,8 @@ pub(crate) fn lower_source_detailed(
     // write; they exist so a sink inside the expression (an Angular
     // `bypassSecurityTrust…`) is still analysed.
     let template_expressions = spec.template_expressions(original);
+    // Component fields an inline template may read; bound before lowering.
+    let template_bindings = spec.template_bindings(original);
 
     let mut parser = tree_sitter::Parser::new();
     parser
@@ -227,6 +229,7 @@ pub(crate) fn lower_source_detailed(
         &crate::module_scope::TemplateSpans {
             writes: &template_writes,
             expressions: &template_expressions,
+            bindings: &template_bindings,
         },
     ) {
         insert_ir(&mut irs, ir, tree.root_node().start_byte());

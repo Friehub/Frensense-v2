@@ -263,6 +263,46 @@ impl<'a> LoweringContext<'a> {
         Operand::Var(new_var)
     }
 
+    /// Bind a component field's initializer to `name` in the current scope.
+    ///
+    /// An inline template reads the component instance, not module bindings.
+    /// Binding the field before the template expressions lower makes
+    /// `resolve_identifier` find the value the class assigned instead of
+    /// creating an untainted global.
+    pub(crate) fn bind_instance_field(&mut self, name: &str, node: Node, value: Operand) -> VarId {
+        let existing = self
+            .env
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name).copied());
+        let var = match existing {
+            Some(var) => var,
+            None => {
+                let var = self.ir.new_var(VarMetadata {
+                    source_name: Some(name.to_string()),
+                    type_name: None,
+                    byte_range: Some((node.start_byte(), node.end_byte())),
+                    is_memory_state: false,
+                    object_keys: Vec::new(),
+                    declared: false,
+                });
+                if let Some(scope) = self.env.last_mut() {
+                    scope.insert(name.to_string(), var);
+                }
+                var
+            }
+        };
+        self.mark_declared(var);
+        self.ir.push_instruction(
+            self.current_block,
+            Instruction::Assign {
+                dest: var,
+                src: value,
+            },
+        );
+        var
+    }
+
     /// Fresh temporary for lowering-synthesized values (compound assignment,
     /// increment/decrement). Spanned to `node` so findings on the result
     /// resolve to the statement that produced it.

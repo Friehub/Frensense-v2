@@ -22,6 +22,7 @@ use crate::ir::function::{FunctionIR, Instruction};
 use crate::ir::lowering::LoweringContext;
 use crate::ir::ssa::SSABuilder;
 use frensense_lang::NodeRole;
+use frensense_lang::spec::TemplateBinding;
 use tree_sitter::Node;
 
 /// Program name of a file's module-scope pseudo-function. It is never a call
@@ -37,6 +38,8 @@ pub(crate) const MODULE_SCOPE_FN: &str = "<module>";
 pub(crate) struct TemplateSpans<'a> {
     pub(crate) writes: &'a [(usize, usize)],
     pub(crate) expressions: &'a [(usize, usize)],
+    /// Component fields the template may read: `(name, initializer span)`.
+    pub(crate) bindings: &'a [TemplateBinding],
 }
 
 /// Lower the module-scope statements into one SSA'd, static-function IR.
@@ -60,6 +63,7 @@ pub(crate) fn lower_module_scope(
     let TemplateSpans {
         writes: template_writes,
         expressions: template_expressions,
+        bindings: template_bindings,
     } = *templates;
     // The parsed tree is the blanked source; a template expression exists only
     // in the original bytes. Overlaying those bytes onto the blanked text
@@ -86,6 +90,11 @@ pub(crate) fn lower_module_scope(
             continue;
         }
         ctx.visit_node(child);
+    }
+    // A template reads the component instance, so its fields are bound as
+    // module values before the expressions that reference them.
+    if !template_bindings.is_empty() {
+        bind_template_fields(&mut ctx, text, template_bindings, spec);
     }
     // Template writes go last: the script statements that define their values
     // are lowered by now, so the sink reads the same variable the declaration
@@ -132,6 +141,35 @@ pub(crate) fn owns_declarations(
 /// its value. An **analysis-only** span is lowered and dropped: it is not a
 /// sink itself, but a sink inside it (Angular's `bypassSecurityTrust…`) must
 /// still reach the taint engine.
+/// Bind each template-visible component field to its initializer's value.
+fn bind_template_fields(
+    ctx: &mut LoweringContext<'_>,
+    text: &str,
+    bindings: &[TemplateBinding],
+    spec: &'static dyn frensense_lang::spec::LanguageSpec,
+) {
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&spec.tree_sitter_language()).is_err() {
+        return;
+    }
+    let Some(tree) = parser.parse(text, None) else {
+        return;
+    };
+    for (name, (start, end)) in bindings {
+        let node = tree
+            .root_node()
+            .descendant_for_byte_range(*start, *end)
+            .filter(|n| n.start_byte() == *start && n.end_byte() == *end);
+        let Some(node) = node else {
+            continue;
+        };
+        let Some(value) = ctx.visit_node(node) else {
+            continue;
+        };
+        ctx.bind_instance_field(name, node, value);
+    }
+}
+
 fn emit_template_spans(
     ctx: &mut LoweringContext<'_>,
     text: &str,

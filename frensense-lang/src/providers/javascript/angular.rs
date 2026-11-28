@@ -194,6 +194,79 @@ pub(super) fn inline_bypass_spans(source: &str) -> Vec<(usize, usize)> {
     spans
 }
 
+/// The initializer of every field declared by a class that owns an inline
+/// template: `(field name, initializer span)`.
+///
+/// A template reads the component instance, not module scope, so a binding
+/// like `[innerHTML]="san.bypassSecurityTrustHtml(raw)"` cannot link `raw` to
+/// the class's `raw = …` without this. The engine binds each name before
+/// lowering the template expressions, which keeps the template scope faithful
+/// to what Angular evaluates.
+#[must_use]
+pub(super) fn component_field_initializers(
+    source: &str,
+    language: &tree_sitter::Language,
+) -> Vec<crate::spec::TemplateBinding> {
+    let templates = inline_templates(source.as_bytes());
+    if templates.is_empty() {
+        return Vec::new();
+    }
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(language).is_err() {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(source, None) else {
+        return Vec::new();
+    };
+    let mut classes = Vec::new();
+    let mut stack = vec![tree.root_node()];
+    while let Some(node) = stack.pop() {
+        if matches!(node.kind(), "class_declaration" | "class") {
+            classes.push(node);
+        }
+        let mut cursor = node.walk();
+        stack.extend(node.named_children(&mut cursor));
+    }
+    classes.sort_by_key(|node| node.start_byte());
+    let mut fields = Vec::new();
+    for template in templates {
+        let class = classes
+            .iter()
+            .find(|class| {
+                class.start_byte() <= template.decorator.0
+                    && class.end_byte() >= template.decorator.1
+            })
+            .or_else(|| {
+                classes
+                    .iter()
+                    .find(|class| class.start_byte() >= template.decorator.1)
+            });
+        let Some(body) = class.and_then(|class| class.child_by_field_name("body")) else {
+            continue;
+        };
+        let mut cursor = body.walk();
+        for member in body.named_children(&mut cursor) {
+            if !matches!(
+                member.kind(),
+                "public_field_definition" | "property_declaration"
+            ) {
+                continue;
+            }
+            let (Some(name), Some(value)) = (
+                member.child_by_field_name("name"),
+                member.child_by_field_name("value"),
+            ) else {
+                continue;
+            };
+            let field = source.get(name.start_byte()..name.end_byte());
+            if let Some(field) = field.filter(|field| !field.is_empty()) {
+                fields.push((field.to_string(), (value.start_byte(), value.end_byte())));
+            }
+        }
+    }
+    fields
+}
+
 /// Blank every inline-template decorator in `source`.
 ///
 /// The decorator call is executable only for its side effects on the class
@@ -363,6 +436,27 @@ mod tests {
         assert!(out.contains("export class HeroComponent {}"));
         let spans = inline_bypass_spans(INLINE);
         assert_eq!(out.as_bytes()[spans[0].1], b';');
+    }
+
+    #[test]
+    fn component_fields_bind_to_their_class_initializers() {
+        let src = concat!(
+            "import { Component } from '@angular/core'\n",
+            "@Component({ template: `<div [innerHTML]=\"san.bypassSecurityTrustHtml(raw)\"></div>` })\n",
+            "export class HeroComponent {\n",
+            "  raw = process.argv[2]\n",
+            "  title = 'hero'\n",
+            "}\n",
+            "@Component({ template: `<p></p>` })\n",
+            "export class OtherComponent {\n",
+            "  other = source\n",
+            "}\n",
+        );
+        let fields =
+            component_field_initializers(src, &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into());
+        let names: Vec<&str> = fields.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["raw", "title", "other"], "{fields:?}");
+        assert_eq!(&src[fields[0].1 .0..fields[0].1 .1], "process.argv[2]");
     }
 
     #[test]
