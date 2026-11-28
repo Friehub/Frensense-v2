@@ -488,8 +488,8 @@ pub trait LanguageSpec: Send + Sync + 'static {
         std::borrow::Cow::Borrowed(source)
     }
 
-    /// Template-write expression spans in the ORIGINAL source; the engine
-    /// synthesizes the write in its IR, so no bytes are rewritten. None by default.
+    /// Spans of unescaped template writes (one expression each) in the
+    /// ORIGINAL source; the engine lowers them. See `javascript::sfc`.
     fn template_writes(&self, _source: &str) -> Vec<(usize, usize)> {
         Vec::new()
     }

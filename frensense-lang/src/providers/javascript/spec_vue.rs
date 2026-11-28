@@ -19,12 +19,20 @@
 //! the tree the parser sees is plain TS, because the Vue markup is
 //! whitespace by then.
 //!
+//! Markup that *writes* rendered HTML (`v-html`, `v-text`) is reported as
+//! expression spans by [`LanguageSpec::template_writes`] rather than rewritten
+//! into code; the engine lowers the write in its IR (see
+//! `frensense_engine::module_scope`). See [`super::sfc`] for the shared
+//! blanking mechanics and [`super::mod`] for the steps to add another
+//! component format.
+//!
 //! Security vocabulary (sinks, sources, sanitizers) lives in
 //! `frensense-packgen`; this file is mechanism only.
 
 use std::borrow::Cow;
 
 use super::family::{JsDialect, JsFamily};
+use super::sfc::{extract_script_blocks, starts_with_ci};
 
 /// A `.vue` SFC whose script blocks are parsed with the TypeScript/TSX
 /// grammar after its `preprocess` blanks the template and style sections in
@@ -32,7 +40,8 @@ use super::family::{JsDialect, JsFamily};
 ///
 /// The script blocks are TypeScript, so every behavioural method comes from
 /// the JavaScript family's blanket [`LanguageSpec`](crate::spec::LanguageSpec)
-/// implementation; this type adds only the SFC rewrite.
+/// implementation; this type adds only the SFC rewrite and its template-write
+/// vocabulary.
 #[derive(Debug)]
 pub struct VueSpec;
 
@@ -56,86 +65,6 @@ impl JsFamily for VueSpec {
             .map(|(_, start, end)| (start, end))
             .collect()
     }
-}
-
-/// True when `bytes` starts with `tag` (ASCII case-insensitive).
-fn starts_with_ci(bytes: &[u8], tag: &str) -> bool {
-    bytes.len() >= tag.len() && bytes[..tag.len()].eq_ignore_ascii_case(tag.as_bytes())
-}
-
-/// Index of the next case-insensitive occurrence of `tag` in `bytes`.
-#[must_use]
-fn find_ci(bytes: &[u8], tag: &str) -> Option<usize> {
-    if bytes.len() < tag.len() {
-        return None;
-    }
-    (0..=bytes.len() - tag.len()).find(|&i| starts_with_ci(&bytes[i..], tag))
-}
-
-/// Rewrite an SFC: keep only bytes inside `<script>` blocks, blank the rest.
-///
-/// Blanked bytes become spaces (newlines are kept), so the output is a valid
-/// TS module with exactly the same length and newline layout as the input.
-/// Every offset — and therefore every reported line/column — stays anchored
-/// to the original file.
-///
-/// Note: a `<script src="…">` block has an empty body, so its attribute
-/// string (and the empty body) stay verbatim between the (blanked) tags.
-/// That is deliberate: `src="…"` is a valid TS expression sequence of
-/// nothing once we blank it, and keeping the body region lets a stray
-/// `<script>` inside markup degrade to a parse error rather than vanish.
-#[must_use]
-pub(super) fn extract_script_blocks(source: &str) -> Cow<'_, str> {
-    let bytes = source.as_bytes();
-    // Fast path: the source is not an SFC at all (no `<script` and no
-    // `<template`), so it is ordinary TS already: return it untouched. A
-    // template-only component (no `<script`) is still an SFC and must be
-    // blanked so the parser sees an empty module, not HTML.
-    if find_ci(bytes, "<script").is_none() && find_ci(bytes, "<template").is_none() {
-        return Cow::Borrowed(source);
-    }
-
-    // Byte mask: true = keep verbatim, false = blank to space (newline kept).
-    let mut keep = vec![false; bytes.len()];
-
-    let mut i = 0;
-    while i < bytes.len() {
-        if !starts_with_ci(&bytes[i..], "<script") {
-            i += 1;
-            continue;
-        }
-        // `"<script"` must be followed by `>`, `/` or whitespace: rejects
-        // `<scriptx`-shaped markup around real code.
-        let after = bytes.get(i + 7).copied();
-        if !after.is_some_and(|c| c == b'>' || c == b'/' || c.is_ascii_whitespace()) {
-            i += 1;
-            continue;
-        }
-        // Blank the opener `<script … >`.
-        let Some(gt_rel) = bytes[i..].iter().position(|&c| c == b'>') else {
-            break; // malformed opener: nothing more to keep
-        };
-        let body_start = i + gt_rel + 1;
-        match find_ci(&bytes[body_start..], "</script") {
-            Some(rel_end) => {
-                let body_end = body_start + rel_end;
-                keep[body_start..body_end].fill(true);
-                // Blank the closer `</script … >`; resume scanning after it.
-                i = bytes[body_end..]
-                    .iter()
-                    .position(|&c| c == b'>')
-                    .map_or(bytes.len(), |p| body_end + p + 1);
-            }
-            None => {
-                // Unterminated block: keep the remainder as code; whatever
-                // the file had reached EOF is what the parser sees.
-                keep[body_start..].fill(true);
-                break;
-            }
-        }
-    }
-
-    Cow::Owned(String::from_utf8(blank(bytes, &keep)).expect("blanking preserves valid UTF-8"))
 }
 
 /// Byte spans of every `<template>` element body, nesting aware.
@@ -170,6 +99,10 @@ fn template_spans(bytes: &[u8]) -> Vec<(usize, usize)> {
 /// [`LanguageSpec::template_writes`](crate::spec::LanguageSpec::template_writes)
 /// hands the expression spans to the engine, which lowers the write in its IR;
 /// this module never rewrites the directive into code.
+///
+/// Only quoted directives are recognised (`v-html="expr"`); a directive
+/// without a value has nothing to render, and Vue does not accept a bare
+/// `v-html` in a template anyway.
 fn template_sinks(bytes: &[u8], templates: &[(usize, usize)]) -> Vec<(usize, usize, usize)> {
     let mut sinks = Vec::new();
     for &(start, end) in templates {
@@ -206,19 +139,6 @@ fn template_sinks(bytes: &[u8], templates: &[(usize, usize)]) -> Vec<(usize, usi
         }
     }
     sinks
-}
-
-/// Blank `bytes` per `keep`: kept bytes verbatim, others space (newline kept).
-///
-/// A non-ASCII blanked character becomes one space per original byte, so the
-/// byte length — and every offset after it — is unchanged, and the result
-/// stays valid UTF-8.
-fn blank(bytes: &[u8], keep: &[bool]) -> Vec<u8> {
-    bytes
-        .iter()
-        .zip(keep)
-        .map(|(&byte, &kept)| if kept || byte == b'\n' { byte } else { b' ' })
-        .collect()
 }
 
 #[cfg(test)]

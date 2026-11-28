@@ -16,6 +16,26 @@
 //! the corpus read the same answer without a second implementation:
 //! [`resolve_file`] is the one entry point, and [`ROUTE_KINDS`] the one list
 //! of kinds that declare HTTP entry points.
+//!
+//! # Adding a framework model
+//!
+//! Adding support is data, not engine code:
+//!
+//! 1. Add a [`Framework`] entry to [`FRAMEWORKS`]: its `name` (used in
+//!    provenance), the `language` its facts are keyed under, the `packages`
+//!    that mark an import as this framework's, and its ordered `rules`.
+//! 2. Order matters twice: models are tried in [`FRAMEWORKS`] order and a
+//!    model's rules are tried in their own order, first match wins. Put the
+//!    most specific model/rule first (`.server.ts` before a generic segment).
+//! 3. If the model claims single-file components, add the extension's
+//!    [`LanguageSpec`](crate::spec::LanguageSpec) (for the JS family, a
+//!    `JsDialect` plus a spec in `providers::javascript`); a file kind without
+//!    a parseable spec is skipped by the engine.
+//! 4. Add resolver tests at the bottom of this module for each new path shape,
+//!    including a Windows-separator and a false-positive case.
+//!
+//! Nothing else changes: routing reads [`FileKind::is_route`], and the corpus
+//! reads [`resolve_file`], so both see the new model immediately.
 
 /// What a file is, as far as routing and sink semantics care.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -95,11 +115,11 @@ const fn rule(matcher: FileMatch, kind: FileKind) -> FileRule {
     FileRule { matcher, kind }
 }
 
-/// Every framework model the resolver knows.
+/// Every framework model the resolver knows, in resolution order.
 ///
 /// A model is only listed here when its file shapes are a fact rather than a
 /// guess: an unknown tree resolves to [`FileKind::Library`] and keeps the
-/// language's plain semantics.
+/// language's plain semantics. See the module docs for the steps to add one.
 pub static FRAMEWORKS: &[Framework] = &[
     Framework {
         name: "vue",

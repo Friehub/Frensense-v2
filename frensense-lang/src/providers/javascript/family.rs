@@ -4,12 +4,12 @@
 
 //! One [`LanguageSpec`] implementation for the whole JavaScript family.
 //!
-//! JavaScript, TypeScript and a Vue SFC's script blocks are the *same*
-//! language to this crate: one tree-sitter grammar (TS is a superset, and a
-//! `.vue` script block is parsed with the TSX grammar after
-//! [`VueSpec`](super::VueSpec)'s `preprocess` blanks the markup), the same
-//! node classification, the same import/export extraction, the same package
-//! and parameter knowledge.
+//! JavaScript, TypeScript and the script blocks of a Vue/Svelte component are
+//! the *same* language to this crate: one tree-sitter grammar (TS is a
+//! superset of JS, and component scripts are parsed with the TSX grammar after
+//! their spec's `preprocess` blanks the markup), the same node classification,
+//! the same import/export extraction, the same package and parameter
+//! knowledge.
 //!
 //! So the family is written **once**, here, and each member states only what
 //! makes it itself — its [`JsDialect`]:
@@ -21,8 +21,10 @@
 //! ```
 //!
 //! [`JsFamily`] has a blanket [`LanguageSpec`] implementation, so a new
-//! single-file container (Svelte, Astro) needs a [`JsDialect`] arm and a
-//! `preprocess` override — not a fourth copy of the delegate ladder.
+//! single-file container (Astro, an Angular component template) needs a
+//! [`JsDialect`] arm, a small spec type and a `preprocess`/`template_writes`
+//! override — not another copy of the delegate ladder. `super::mod` lists the
+//! steps.
 //!
 //! Security vocabulary (sinks, sources, sanitizers) lives in
 //! `frensense-packgen`; this file is mechanism only.
@@ -107,6 +109,9 @@ pub enum JsDialect {
     /// A Vue SFC. Its script blocks are TypeScript, parsed by the TSX grammar
     /// after [`super::VueSpec`] blanks the markup in place.
     Vue,
+    /// A Svelte component. Its script blocks are TypeScript, parsed by the
+    /// TSX grammar after [`super::SvelteSpec`] blanks the markup in place.
+    Svelte,
 }
 
 impl JsDialect {
@@ -116,6 +121,7 @@ impl JsDialect {
             Self::JavaScript => "javascript",
             Self::TypeScript => "typescript",
             Self::Vue => "vue",
+            Self::Svelte => "svelte",
         }
     }
 
@@ -125,6 +131,7 @@ impl JsDialect {
             Self::JavaScript => &["js", "jsx", "mjs", "cjs"],
             Self::TypeScript => &["ts", "tsx", "mts", "cts"],
             Self::Vue => &["vue"],
+            Self::Svelte => &["svelte"],
         }
     }
 
@@ -132,19 +139,19 @@ impl JsDialect {
     fn language(self) -> tree_sitter::Language {
         match self {
             Self::JavaScript => javascript_grammar(),
-            Self::TypeScript | Self::Vue => typescript_grammar(),
+            Self::TypeScript | Self::Vue | Self::Svelte => typescript_grammar(),
         }
     }
 
     /// The `FactTable` / bundle section this dialect's knowledge lives in.
     ///
-    /// A Vue script block *is* TypeScript, so its facts belong in the
-    /// `typescript` section; a `vue` section is filled by nothing.
+    /// A Vue/Svelte script block *is* TypeScript, so its facts belong in
+    /// the `typescript` section; a `vue` or `svelte` section is filled by
+    /// nothing.
     fn fact_language(self) -> &'static str {
         match self {
             Self::JavaScript => "javascript",
-            Self::TypeScript => "typescript",
-            Self::Vue => "typescript",
+            Self::TypeScript | Self::Vue | Self::Svelte => "typescript",
         }
     }
 
@@ -152,7 +159,7 @@ impl JsDialect {
     fn symbol_query(self) -> &'static str {
         match self {
             Self::JavaScript => JS_SYMBOL_QUERY,
-            Self::TypeScript | Self::Vue => TS_SYMBOL_QUERY,
+            Self::TypeScript | Self::Vue | Self::Svelte => TS_SYMBOL_QUERY,
         }
     }
 
@@ -160,7 +167,9 @@ impl JsDialect {
     fn wrap_region(self, code: &str) -> String {
         match self {
             Self::JavaScript => format!("function _region() {{\n{code}\n}}"),
-            Self::TypeScript | Self::Vue => format!("function _region(): void {{\n{code}\n}}"),
+            Self::TypeScript | Self::Vue | Self::Svelte => {
+                format!("function _region(): void {{\n{code}\n}}")
+            }
         }
     }
 
@@ -171,7 +180,7 @@ impl JsDialect {
     fn http_route_decorator(self, decorator_name: &str) -> bool {
         match self {
             Self::JavaScript => false,
-            Self::TypeScript | Self::Vue => matches!(
+            Self::TypeScript | Self::Vue | Self::Svelte => matches!(
                 decorator_name,
                 "Get"
                     | "Post"

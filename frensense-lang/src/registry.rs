@@ -43,9 +43,20 @@
 //! ## Adding a new language
 //!
 //! 1. Create a new file in `src/providers/` implementing `LanguageSpec`.
+//!    A JavaScript-family member (a component container such as Vue or
+//!    Svelte) implements [`JsFamily`](crate::providers::javascript::JsFamily)
+//!    instead and names its dialect; see
+//!    [`providers::javascript`](crate::providers::javascript) for the full
+//!    checklist.
 //! 2. Call `registry.register(Arc::new(YourProvider))` inside
-//!    [`LanguageRegistry::with_default_specs`].
-//! 3. Done.  Every engine subsystem picks it up automatically.
+//!    [`LanguageRegistry::with_default_specs`]. Registration also makes the
+//!    language appear in the CLI's `--language` help, which is generated from
+//!    this registry.
+//! 3. Add its path shapes to [`crate::framework::FRAMEWORKS`] when files of
+//!    the language have framework-specific meaning (routes, server-only
+//!    modules, single-file components), so the engine and corpus resolve the
+//!    same file kind from one table.
+//! 4. Done.  Every engine subsystem picks it up automatically.
 
 use std::sync::{Arc, OnceLock};
 
@@ -116,6 +127,8 @@ impl LanguageRegistry {
             Arc::new(crate::providers::javascript::TypeScriptSpec),
             #[cfg(feature = "typescript")]
             Arc::new(crate::providers::javascript::VueSpec),
+            #[cfg(feature = "typescript")]
+            Arc::new(crate::providers::javascript::SvelteSpec),
             #[cfg(feature = "javascript")]
             Arc::new(crate::providers::javascript::JavaScriptSpec),
             #[cfg(feature = "go")]
