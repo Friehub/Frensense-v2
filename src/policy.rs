@@ -359,7 +359,7 @@ impl Coverage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use frensense_engine::analysis::forward::predicates::SinkAlert;
+    use frensense_engine::analysis::forward::SinkAlert;
     use frensense_lang::severity::SinkRole;
     use std::path::Path;
 

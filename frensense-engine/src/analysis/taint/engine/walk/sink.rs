@@ -9,7 +9,7 @@
 
 use super::*;
 
-use crate::analysis::taint::role::SinkRole;
+use crate::analysis::taint::role::{SinkRole, category_sink_role};
 
 impl<'a> BackwardTaintEngine<'a> {
     /// Explore one call site if it is a configured sink.
@@ -43,11 +43,23 @@ impl<'a> BackwardTaintEngine<'a> {
         };
         self.funnel.calls_examined += 1;
         let ir = self.prog.functions[fi].ir;
+        // The callee the resolver already picked, when the graph recorded one.
+        let graph_callee = self.external_callee_name(fi, block, idx);
         let pkg_import = if receiver.is_none() {
-            self.import_of(fi, name)
+            self.import_of(fi, name).or_else(|| {
+                graph_callee
+                    .as_deref()
+                    .filter(|callee| *callee != name)
+                    .and_then(|callee| self.import_of(fi, callee))
+            })
         } else {
             None
         };
+
+        if self.dispatch_runs_program_code(fi, block, idx) {
+            self.funnel.skipped_program_local += 1;
+            return;
+        }
 
         if self.skip_unanchored_static(ir, name, receiver.is_none(), pkg_import.is_some()) {
             return;
@@ -65,6 +77,7 @@ impl<'a> BackwardTaintEngine<'a> {
         let effective_name = pkg_import
             .as_ref()
             .and_then(|(_, symbol)| symbol.as_deref())
+            .or_else(|| graph_callee.as_deref().filter(|callee| *callee != name))
             .unwrap_or(name);
         // Factory-call package origin (owned): the receiver var was produced by
         // a call to a symbol imported from a package with scoped sink facts
@@ -148,9 +161,7 @@ impl<'a> BackwardTaintEngine<'a> {
         }
     }
 
-    /// A property assignment is a write, not a call: `el.innerHTML = x` reaches
-    /// no call sink, so dispatch it to the store path. Returns whether `instr`
-    /// was such a write.
+    /// A property write reaches no call sink; dispatch it to the store path.
     fn explore_store_field(
         &mut self,
         fi: usize,
@@ -179,29 +190,6 @@ impl<'a> BackwardTaintEngine<'a> {
         true
     }
 
-    /// The package (and imported symbol) a local name is bound to by an import
-    /// in this function's file, owned so the caller can keep mutating `self`.
-    ///
-    /// Falls back to the only import table when the file map has a single
-    /// entry: synthetic modules do not always carry a resolvable path key.
-    fn import_of(&self, fi: usize, symbol: &str) -> Option<(String, Option<String>)> {
-        self.fn_file
-            .get(&self.prog.functions[fi].name)
-            .and_then(|file| self.file_package_imports.get(file))
-            .and_then(|imports| imports.get(symbol))
-            .or_else(|| {
-                if self.file_package_imports.len() == 1 {
-                    self.file_package_imports
-                        .values()
-                        .next()
-                        .and_then(|m| m.get(symbol))
-                } else {
-                    None
-                }
-            })
-            .map(|pkg| (pkg.package.clone(), pkg.symbol.clone()))
-    }
-
     /// Whether a receiver root can arm a sink for `name`: a declared client, a
     /// dotted entry for THIS method, or a package carrying package-scoped sink
     /// facts.
@@ -212,7 +200,7 @@ impl<'a> BackwardTaintEngine<'a> {
     /// factories on `client_roots` alone rejected `const client =
     /// axios.create(...)` -> `client.get(...)` even though `axios.get` is a
     /// declared sink (mre01 instance-alias false negative).
-    fn root_arms(&self, name: &str, root: &str) -> bool {
+    pub(super) fn root_arms(&self, name: &str, root: &str) -> bool {
         self.facts.client_roots.contains(root)
             || self
                 .facts
@@ -223,50 +211,6 @@ impl<'a> BackwardTaintEngine<'a> {
                 .scoped_sink_signatures
                 .keys()
                 .any(|(pkg, _)| pkg == root)
-    }
-
-    /// Whether a bare static call can match no configured sink: a local
-    /// callable, a function defined in this program, or a verb that requires a
-    /// receiver object.
-    fn skip_unanchored_static(
-        &mut self,
-        ir: &FunctionIR,
-        name: &str,
-        is_static: bool,
-        has_package_import: bool,
-    ) -> bool {
-        if !is_static || has_package_import {
-            return false;
-        }
-        // A static call to a local variable/closure defined in this function is
-        // not an external sink.
-        if ir
-            .var_metadata
-            .values()
-            .any(|m| m.source_name.as_deref() == Some(name))
-        {
-            self.funnel.skipped_local_callable += 1;
-            return true;
-        }
-        // A static call resolving to a function defined in this program is not
-        // an external sink either, even when the name matches a library sink (a
-        // user helper named `run` is not `subprocess.run`; a package import of
-        // that name short-circuits this guard above via `pkg_import`). The
-        // callee's own configured sinks report once with the full
-        // caller→callee path; arming the call site itself would emit the same
-        // bug twice - once as a shorter path prefix (WI-41).
-        if self.is_program_local(name) {
-            self.funnel.skipped_program_local += 1;
-            return true;
-        }
-        // Verb sinks that strictly require a receiver object (get, post,
-        // render, etc.); a bare static call without package import is not a
-        // client method invocation.
-        if is_receiver_only_verb(name) {
-            self.funnel.skipped_receiver_only_verb += 1;
-            return true;
-        }
-        false
     }
 
     /// Resolve the receiver root of a call: the variable's own root, the
@@ -325,75 +269,6 @@ impl<'a> BackwardTaintEngine<'a> {
         }
         self.factory_root_of(ir, r, d, name)
             .or_else(|| Some(d.to_string()))
-    }
-
-    /// Root of the factory call that produced `target`: `<root>.create(..)` /
-    /// `.extend(..)` in this function, then a module-level binding of the same
-    /// name (the factory that builds a shared client).
-    fn factory_root_of(
-        &self,
-        ir: &FunctionIR,
-        target: VarId,
-        root_name: &str,
-        name: &str,
-    ) -> Option<String> {
-        for b in ir.blocks.values() {
-            for instr in &b.instructions {
-                match instr {
-                    Instruction::CallVirtual {
-                        dest: Some(d_var),
-                        method,
-                        receiver: Operand::Var(cr),
-                        ..
-                    } if *d_var == target && (method == "create" || method == "extend") => {
-                        if let Some(cr_root) = FactTable::receiver_root(ir, *cr)
-                            && self.root_arms(name, &cr_root)
-                        {
-                            return Some(cr_root);
-                        }
-                    }
-                    Instruction::CallStatic {
-                        dest: Some(d_var),
-                        func,
-                        ..
-                    } if *d_var == target
-                        && (func.ends_with(".create") || func.ends_with(".extend")) =>
-                    {
-                        if let Some(prefix) = func.split('.').next()
-                            && self.root_arms(name, prefix)
-                        {
-                            return Some(prefix.to_string());
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        for f in &self.prog.functions {
-            let is_binding = f.name == root_name
-                || f.name
-                    .strip_suffix(root_name)
-                    .is_some_and(|p| p.ends_with(':'));
-            if !is_binding {
-                continue;
-            }
-            for b in f.ir.blocks.values() {
-                for instr in &b.instructions {
-                    if let Instruction::CallVirtual {
-                        method,
-                        receiver: Operand::Var(cr),
-                        ..
-                    } = instr
-                        && (method == "create" || method == "extend")
-                        && let Some(cr_root) = FactTable::receiver_root(f.ir, *cr)
-                        && self.root_arms(name, &cr_root)
-                    {
-                        return Some(cr_root);
-                    }
-                }
-            }
-        }
-        None
     }
 
     /// Origin chain of a sink call, resolved to an OWNED string: the borrows of
@@ -469,8 +344,22 @@ impl<'a> BackwardTaintEngine<'a> {
         } else {
             scoped(call.name)
         };
+        // Last resort: the package's own category. A call the fact layer gave
+        // no role ranks by what the language knows the package does - except
+        // an IDOR finder sink, which is an access-control finding on a record
+        // identity whatever library resolves it, never "this input becomes a
+        // query".
+        let is_idor_finder = self.facts.is_idor_finder_sink(call.effective_name)
+            || self.facts.is_idor_finder_sink(call.name);
+        let category_role = (!is_idor_finder)
+            .then(|| {
+                call.language
+                    .zip(call.origin.as_deref())
+                    .and_then(|(language, origin)| category_sink_role(language, origin))
+            })
+            .flatten();
         (
-            role.or(fallback_role).unwrap_or_default(),
+            role.or(fallback_role).or(category_role).unwrap_or_default(),
             label.or(fallback_label),
         )
     }
@@ -545,6 +434,9 @@ impl<'a> BackwardTaintEngine<'a> {
             language,
             true,
         ) {
+            return;
+        }
+        if !store_base::store_hint_allows(&self.facts, ir, base, field, language) {
             return;
         }
         let role = self

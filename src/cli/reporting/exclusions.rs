@@ -106,6 +106,7 @@ pub fn json_report_with_coverage_and_exclusions(
         skipped,
         coverage,
         Some(exclusions),
+        None,
     )
 }
 
@@ -119,7 +120,9 @@ pub fn json_report_with_coverage(
     skipped: &[UnsupportedSourceFile],
     coverage: Option<&Coverage>,
 ) -> serde_json::Value {
-    json_report_with_coverage_impl(advisories, incomplete, telemetry, skipped, coverage, None)
+    json_report_with_coverage_impl(
+        advisories, incomplete, telemetry, skipped, coverage, None, None,
+    )
 }
 
 /// Prints the results, including the paths the default exclusion rules

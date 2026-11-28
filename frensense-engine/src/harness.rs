@@ -61,7 +61,7 @@ pub fn lower_source_with_facts(
     ext: &str,
     facts: Option<&FactTable>,
 ) -> Result<FxHashMap<String, FunctionIR>, String> {
-    Ok(lower_source_detailed(path, source, ext, facts)?.0)
+    Ok(lower_source_detailed(path, source, ext, facts, None)?.0)
 }
 
 /// Lower one file and report whether its parse tree contained errors.
@@ -76,16 +76,31 @@ pub(crate) fn lower_source_detailed(
     source: &str,
     ext: &str,
     facts: Option<&FactTable>,
+    companion: Option<(&str, &[frensense_lang::spec::TemplateBinding])>,
 ) -> Result<(FxHashMap<String, FunctionIR>, bool), String> {
-    let spec = frensense_lang::spec_for_ext(ext)
+    let spec = frensense_lang::spec_for_path(std::path::Path::new(path))
+        .or_else(|| frensense_lang::spec_for_ext(ext))
         .ok_or_else(|| format!("no language spec for extension '{ext}'"))?;
 
     // Single-file-container formats (e.g. Vue SFCs) rewrite the source
     // before parsing: the spec blanks non-code markup into same-length
     // whitespace, so every byte offset, and every reported line/column,
     // still points at the original file.
+    let original = source;
     let rewritten = spec.preprocess(source);
     let source: &str = rewritten.as_ref();
+    // Template writes are reported against the file as written; the engine
+    // synthesizes the call instead of consuming bytes of the rewritten source.
+    let template_writes = spec.template_writes(original);
+    // Sanitized template expressions are lowered but do not synthesize a
+    // write; they exist so a sink inside the expression (an Angular
+    // `bypassSecurityTrust…`) is still analysed.
+    let template_expressions = spec.template_expressions(original);
+    // Component fields an inline template may read; bound before lowering.
+    let template_bindings = spec.template_bindings(original);
+    // An external Angular template's fields live in the companion component
+    // file; its lowering supplies them as assignments in the template scope.
+    let foreign = companion;
 
     let mut parser = tree_sitter::Parser::new();
     parser
@@ -101,6 +116,13 @@ pub(crate) fn lower_source_detailed(
     // lower the same node again under a positional `<fn@N>` name: the twin
     // duplicates every finding and policy segment of the bound function.
     let mut bound_fns: FxHashSet<usize> = FxHashSet::default();
+    // Whether the module IR owns the root-level declarations: `const q =
+    // req.query.q; eval(q)` links only if both live in the same IR.
+    let module_owns_decls = crate::module_scope::owns_declarations(
+        tree.root_node(),
+        spec,
+        !template_writes.is_empty() || !template_expressions.is_empty(),
+    );
     let mut stack = vec![tree.root_node()];
     while let Some(node) = stack.pop() {
         // Language-driven function detection: JS/TS `function_declaration` /
@@ -147,7 +169,7 @@ pub(crate) fn lower_source_detailed(
                     let mut ir = lower_one(&name, value, source, spec, facts);
                     ir.enclosing_fn = enclosing_extracted_name(value, source, path, spec, facts);
                     insert_ir(&mut irs, ir, value.start_byte());
-                } else if !inside_function(node, spec) {
+                } else if !module_owns_decls && !inside_function(node, spec) {
                     // Top-level non-function static initializer: allowlist
                     // Sets, config objects, schema builders. Lowered as
                     // pseudo-IR so the checker layer can assert policy over
@@ -173,7 +195,7 @@ pub(crate) fn lower_source_detailed(
             )
         {
             let callee_text = &source[callee.start_byte()..callee.end_byte()];
-            if is_route_registration(callee_text, spec, facts) {
+            if is_route_registration(callee_text, path, spec, facts) {
                 let mut ac = args.walk();
                 let arg_nodes: Vec<_> = args.named_children(&mut ac).collect();
                 for a in &arg_nodes {
@@ -201,81 +223,23 @@ pub(crate) fn lower_source_detailed(
     // `def handler():` were silent at file scope - CLI tools, ETL/notebook
     // scripts, Django `settings.py`, and an
     // `if __name__ == "__main__": app.run(debug=True)` guard were invisible.
-    if let Some(ir) = lower_module_scope(tree.root_node(), source, spec, facts) {
+    if let Some(ir) = crate::module_scope::lower_module_scope(
+        tree.root_node(),
+        source,
+        original,
+        spec,
+        facts,
+        module_owns_decls,
+        &crate::module_scope::TemplateSpans {
+            writes: &template_writes,
+            expressions: &template_expressions,
+            bindings: &template_bindings,
+            foreign,
+        },
+    ) {
         insert_ir(&mut irs, ir, tree.root_node().start_byte());
     }
     Ok((irs, tree.root_node().has_error()))
-}
-
-/// Lower the executable statements that sit directly in a file's module scope
-/// into one pseudo-function IR.
-///
-/// Only *root-level* named children are visited:
-///
-/// * a function is its own IR (the extraction walk owns it) - lowering it
-///   here would report every finding twice under two names;
-/// * an import contributes no code;
-/// * a JS/TS `const`/`let`/`var` statement is already lowered by the binding
-///   walk (function values) or as a static pseudo-IR (everything else), which
-///   is where policy checks read module-level config today.
-///
-/// The last point is also the known limit: when a module-level binding feeds a
-/// later module-level sink (`const input = process.argv[2]; execSync(input)`),
-/// the two statements live in different IRs, so the source is not linked to
-/// that sink. That shape stays a function-only finding.
-///
-/// `None` when the file has no module-level code that produces an instruction,
-/// so a function-only file (the common case, and every corpus file) gains no
-/// empty pseudo-function.
-fn lower_module_scope(
-    root: tree_sitter::Node,
-    source: &str,
-    spec: &'static dyn frensense_lang::spec::LanguageSpec,
-    facts: Option<&FactTable>,
-) -> Option<FunctionIR> {
-    let mut ctx = LoweringContext::new_with_facts(spec, source, "<module>".to_string(), facts);
-    let mut cursor = root.walk();
-    let children: Vec<_> = root.named_children(&mut cursor).collect();
-    for child in children {
-        if module_scope_skip(child, spec) {
-            continue;
-        }
-        ctx.visit_node(child);
-    }
-    if ctx.ir.blocks.values().all(|b| b.instructions.is_empty()) {
-        return None;
-    }
-    let mut ir = SSABuilder::new(ctx.ir).build();
-    ir.language = spec.fact_language().to_string();
-    // The pseudo-function is a module's top level, never a call target:
-    // there is no source name a call site could resolve to it.
-    ir.is_static_data = true;
-    Some(ir)
-}
-
-/// Should the module-scope IR leave this root-level node to another lowering?
-fn module_scope_skip(
-    node: tree_sitter::Node<'_>,
-    spec: &dyn frensense_lang::spec::LanguageSpec,
-) -> bool {
-    let kind = node.kind();
-    if spec.is_function_node(kind) || spec.import_node_kinds().contains(&kind) {
-        return true;
-    }
-    if spec.is_variable_declaration_statement(kind) {
-        return true;
-    }
-    // `export const x = ...` / `export function f` wrap the same nodes; a
-    // default export of an expression (`export default runTool(cmd)`) does
-    // execute at import time and stays in the module IR.
-    if matches!(spec.classify(kind), NodeRole::Export) {
-        let mut cursor = node.walk();
-        return node.named_children(&mut cursor).any(|child| {
-            spec.is_function_node(child.kind())
-                || spec.is_variable_declaration_statement(child.kind())
-        });
-    }
-    false
 }
 
 /// Insert an IR keyed by its name, disambiguating on collision with the
@@ -360,7 +324,12 @@ fn extracted_ancestor_name(
         && let Some(call) = args.parent()
         && let NodeRole::Call { callee_field, .. } = spec.classify(call.kind())
         && let Some(callee) = call.child_by_field_name(callee_field.as_ref())
-        && is_route_registration(&source[callee.start_byte()..callee.end_byte()], spec, facts)
+        && is_route_registration(
+            &source[callee.start_byte()..callee.end_byte()],
+            path,
+            spec,
+            facts,
+        )
     {
         return Some(format!("<{}:handler@{}>", path, fn_node.start_byte()));
     }
@@ -390,7 +359,15 @@ fn enclosing_extracted_name(
 /// Route-registration predicate: a call site is a route handler when the
 /// spec's hard verb suffixes match the callee, OR when pack vocabulary
 /// (`facts.route_patterns`) lists a registration shape for that spec's
-/// language.
+/// language - and the file it sits in may register routes at all.
+///
+/// File kind comes from [`frensense_lang::framework::resolve_file`], so the
+/// decision uses the same framework model the corpus does. A single-file
+/// component (`.vue`, `.svelte`, `.astro`, `.html` template) never registers
+/// an HTTP route: its `.get`/`.use` calls are collection, store or plugin
+/// reads, and treating them as handlers produced phantom route entries.
+/// Library and server modules keep the verb/pattern behaviour that
+/// Express-style apps rely on.
 ///
 /// Used by the harness's IR lowering to extract route handlers, and by
 /// the backward engine's per-call-site resolution (when wired via
@@ -398,9 +375,15 @@ fn enclosing_extracted_name(
 /// only at route handlers (schema §5.1).
 pub(crate) fn is_route_registration(
     callee_text: &str,
+    path: &str,
     spec: &dyn frensense_lang::spec::LanguageSpec,
     facts: Option<&FactTable>,
 ) -> bool {
+    if frensense_lang::framework::resolve_file(path, spec.fact_language()).kind
+        == frensense_lang::framework::FileKind::Sfc
+    {
+        return false;
+    }
     if spec
         .known_route_verbs()
         .iter()
@@ -715,6 +698,19 @@ app.patch("/item", (req, res) => {
         let fns = lower_source_with_facts("t.ts", src, "ts", Some(&facts)).unwrap();
         let handlers: Vec<&String> = fns.keys().filter(|k| k.contains("handler@")).collect();
         assert!(!handlers.is_empty(), "app.patch handler missing: {fns:?}");
+    }
+
+    /// A single-file component never registers an HTTP route: `store.get(…)`
+    /// in a Vue script is a collection read, not an Express handler. File
+    /// kind comes from the framework model, so no separate allowlist is kept.
+    #[test]
+    fn component_calls_are_not_route_registrations() {
+        let src = "<script>\nconst store = new Map()\nstore.get('/k', () => {})\n</script>\n";
+        let fns = lower_source("src/App.vue", src, "vue").unwrap();
+        assert!(
+            fns.keys().all(|k| !k.contains("handler@")),
+            "component call became a route handler: {fns:?}"
+        );
     }
 
     /// Regression: `const r = runTool(cmd)` nested in a handler must NOT be

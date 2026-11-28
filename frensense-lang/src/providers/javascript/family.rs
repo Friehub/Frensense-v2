@@ -4,12 +4,14 @@
 
 //! One [`LanguageSpec`] implementation for the whole JavaScript family.
 //!
-//! JavaScript, TypeScript and a Vue SFC's script blocks are the *same*
-//! language to this crate: one tree-sitter grammar (TS is a superset, and a
-//! `.vue` script block is parsed with the TSX grammar after
-//! [`VueSpec`](super::VueSpec)'s `preprocess` blanks the markup), the same
-//! node classification, the same import/export extraction, the same package
-//! and parameter knowledge.
+//! JavaScript, TypeScript, the script blocks of a Vue/Svelte component and the
+//! frontmatter of an Astro component are the *same* language to this crate:
+//! one tree-sitter grammar (TS is a superset of JS, and a component's code is
+//! parsed with the TSX grammar after its spec's `preprocess` blanks the
+//! markup), the same node classification, the same import/export extraction,
+//! the same package and parameter knowledge. An Angular template has no code
+//! of its own, but the expressions bound in it are TypeScript too, so it uses
+//! the same dialect machinery for the spans the engine overlays.
 //!
 //! So the family is written **once**, here, and each member states only what
 //! makes it itself — its [`JsDialect`]:
@@ -21,8 +23,9 @@
 //! ```
 //!
 //! [`JsFamily`] has a blanket [`LanguageSpec`] implementation, so a new
-//! single-file container (Svelte, Astro) needs a [`JsDialect`] arm and a
-//! `preprocess` override — not a fourth copy of the delegate ladder.
+//! container format needs a [`JsDialect`] arm, a small spec type and a
+//! `preprocess`/`template_writes` override — not another copy of the delegate
+//! ladder. `super::mod` lists the steps.
 //!
 //! Security vocabulary (sinks, sources, sanitizers) lives in
 //! `frensense-packgen`; this file is mechanism only.
@@ -33,6 +36,7 @@ use tree_sitter::Node;
 
 use crate::spec::{
     Export, Import, JsxPart, LanguageSpec, ModuleItem, NodeRole, PackageCategory, TaintOrigin,
+    TemplateBinding,
 };
 
 use super::{
@@ -107,6 +111,16 @@ pub enum JsDialect {
     /// A Vue SFC. Its script blocks are TypeScript, parsed by the TSX grammar
     /// after [`super::VueSpec`] blanks the markup in place.
     Vue,
+    /// A Svelte component. Its script blocks are TypeScript, parsed by the
+    /// TSX grammar after [`super::SvelteSpec`] blanks the markup in place.
+    Svelte,
+    /// An Astro component. Its `---` frontmatter is TypeScript, parsed by the
+    /// TSX grammar after [`super::AstroSpec`] blanks the template in place.
+    Astro,
+    /// An Angular template. It has no code of its own, but its property
+    /// bindings are TypeScript expressions, lowered from spans reported by
+    /// [`super::AngularSpec`] after the whole file is blanked.
+    Angular,
 }
 
 impl JsDialect {
@@ -116,6 +130,9 @@ impl JsDialect {
             Self::JavaScript => "javascript",
             Self::TypeScript => "typescript",
             Self::Vue => "vue",
+            Self::Svelte => "svelte",
+            Self::Astro => "astro",
+            Self::Angular => "angular",
         }
     }
 
@@ -125,26 +142,35 @@ impl JsDialect {
             Self::JavaScript => &["js", "jsx", "mjs", "cjs"],
             Self::TypeScript => &["ts", "tsx", "mts", "cts"],
             Self::Vue => &["vue"],
+            Self::Svelte => &["svelte"],
+            Self::Astro => &["astro"],
+            // A compound extension: only Angular's conventional template
+            // file, not every `.html` page.
+            Self::Angular => &["component.html"],
         }
     }
 
     /// The grammar this dialect parses with.
-    fn language(self) -> tree_sitter::Language {
+    pub(super) fn language(self) -> tree_sitter::Language {
         match self {
             Self::JavaScript => javascript_grammar(),
-            Self::TypeScript | Self::Vue => typescript_grammar(),
+            Self::TypeScript | Self::Vue | Self::Svelte | Self::Astro | Self::Angular => {
+                typescript_grammar()
+            }
         }
     }
 
     /// The `FactTable` / bundle section this dialect's knowledge lives in.
     ///
-    /// A Vue script block *is* TypeScript, so its facts belong in the
-    /// `typescript` section; a `vue` section is filled by nothing.
+    /// A component's code *is* TypeScript, so its facts belong in the
+    /// `typescript` section; a `vue`, `svelte`, `astro` or `angular` section
+    /// is filled by nothing.
     fn fact_language(self) -> &'static str {
         match self {
             Self::JavaScript => "javascript",
-            Self::TypeScript => "typescript",
-            Self::Vue => "typescript",
+            Self::TypeScript | Self::Vue | Self::Svelte | Self::Astro | Self::Angular => {
+                "typescript"
+            }
         }
     }
 
@@ -152,7 +178,9 @@ impl JsDialect {
     fn symbol_query(self) -> &'static str {
         match self {
             Self::JavaScript => JS_SYMBOL_QUERY,
-            Self::TypeScript | Self::Vue => TS_SYMBOL_QUERY,
+            Self::TypeScript | Self::Vue | Self::Svelte | Self::Astro | Self::Angular => {
+                TS_SYMBOL_QUERY
+            }
         }
     }
 
@@ -160,7 +188,9 @@ impl JsDialect {
     fn wrap_region(self, code: &str) -> String {
         match self {
             Self::JavaScript => format!("function _region() {{\n{code}\n}}"),
-            Self::TypeScript | Self::Vue => format!("function _region(): void {{\n{code}\n}}"),
+            Self::TypeScript | Self::Vue | Self::Svelte | Self::Astro | Self::Angular => {
+                format!("function _region(): void {{\n{code}\n}}")
+            }
         }
     }
 
@@ -171,7 +201,7 @@ impl JsDialect {
     fn http_route_decorator(self, decorator_name: &str) -> bool {
         match self {
             Self::JavaScript => false,
-            Self::TypeScript | Self::Vue => matches!(
+            Self::TypeScript | Self::Vue | Self::Svelte | Self::Astro | Self::Angular => matches!(
                 decorator_name,
                 "Get"
                     | "Post"
@@ -211,6 +241,24 @@ pub trait JsFamily: Send + Sync + 'static {
     fn preprocess_source<'a>(&self, source: &'a str) -> Cow<'a, str> {
         Cow::Borrowed(source)
     }
+
+    /// Expression spans a template write renders, in the original source.
+    /// Defaults to none: only a container format has a template.
+    fn template_writes_source(&self, _source: &str) -> Vec<(usize, usize)> {
+        Vec::new()
+    }
+
+    /// Template expressions lowered for analysis only, with no write sink.
+    /// Used for sanitized bindings that may contain a bypass call.
+    fn template_expressions_source(&self, _source: &str) -> Vec<(usize, usize)> {
+        Vec::new()
+    }
+
+    /// Fields an inline template's expressions may read, as
+    /// `(field name, initializer span)`.
+    fn template_bindings_source(&self, _source: &str) -> Vec<TemplateBinding> {
+        Vec::new()
+    }
 }
 
 // ── One implementation, every family member ──────────────────────────────────
@@ -230,6 +278,18 @@ impl<T: JsFamily> LanguageSpec for T {
 
     fn preprocess<'a>(&self, source: &'a str) -> Cow<'a, str> {
         self.preprocess_source(source)
+    }
+
+    fn template_writes(&self, source: &str) -> Vec<(usize, usize)> {
+        self.template_writes_source(source)
+    }
+
+    fn template_expressions(&self, source: &str) -> Vec<(usize, usize)> {
+        self.template_expressions_source(source)
+    }
+
+    fn template_bindings(&self, source: &str) -> Vec<TemplateBinding> {
+        self.template_bindings_source(source)
     }
 
     fn fact_language(&self) -> &'static str {

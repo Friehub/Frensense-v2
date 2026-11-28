@@ -6,93 +6,12 @@
 
 use crate::fact_extract::{extract_facts, group_families};
 use crate::format::{
-    write_bundle_pinned_with_trust, BundlePattern, BundlePayloadV8, BundleTrust, EngineRequirement,
+    write_bundle_pinned_with_trust, BundlePattern, BundlePayload, BundleTrust, EngineRequirement,
 };
-use frensense_engine::analysis::taint::config::TaintConfig;
-use frensense_engine::analysis::taint::facts::{
-    apply_language_entries, languages_for_exts, FactTable, LearnedFactEntry,
+use crate::sanitizer_qualification::{
+    sanitizer_arg_evidence, sanitizer_tables, verify_sanitizer_class_scope,
 };
-use frensense_engine::scan;
-
-/// The per-fact cross-class canary gate.
-///
-/// A learned sanitizer is proven for the classes it names. For every other
-/// class in which the same call is applied by a corpus family, the fact must
-/// leave that family's vulnerable negative alerting: if it silences it, the
-/// fact is cross-class and the build fails. This is the probe that would have
-/// caught both sanitizer-collapse incidents automatically.
-fn verify_sanitizer_class_scope(
-    families: &[crate::fact_extract::Family],
-    published: &[crate::fact_extract::LearnedFact],
-) -> Result<(), String> {
-    for fact in published {
-        let (entry, call, package) = match &fact.entry {
-            LearnedFactEntry::Sanitizer { call, package, .. }
-            | LearnedFactEntry::LanguageSanitizer { call, package, .. } => {
-                (&fact.entry, call, package)
-            }
-            _ => continue,
-        };
-        let classes = &fact.classes;
-        if classes.is_empty() {
-            return Err(format!(
-                "sanitizer `{call}` has no class scope; refusing to publish a cross-class fact"
-            ));
-        }
-        for family in families {
-            let Some(class) = family.metadata.class.as_deref() else {
-                continue;
-            };
-            if classes.iter().any(|c| c == class || c == "*") {
-                continue;
-            }
-            // Only families in which the sanitizer is actually applied can
-            // be a counter-probe, and only when the vulnerable twin would
-            // alert without the fact.
-            let applies = family
-                .negatives
-                .iter()
-                .any(|(_, src, _)| src.contains(call.as_str()));
-            if !applies {
-                continue;
-            }
-            let exts: Vec<&str> = family
-                .negatives
-                .iter()
-                .map(|(_, _, ext)| ext.as_str())
-                .chain(family.positives.iter().map(|(_, _, ext)| ext.as_str()))
-                .collect();
-            let langs = languages_for_exts(exts);
-            let mut config = TaintConfig::default();
-            let mut facts = FactTable::default();
-            apply_language_entries(
-                &mut config,
-                &mut facts,
-                &crate::format::default_pack().learned_facts,
-                &langs,
-            );
-            let baseline = scan::scan(&family.negatives, &config, &facts);
-            if !crate::extract::gate::alerts(&baseline) {
-                continue;
-            }
-            apply_language_entries(&mut config, &mut facts, &[entry.clone()], &langs);
-            // The trial table must apply the same class scope a consumer
-            // installs, or the probe would approve a fact that cuts another
-            // class once loaded.
-            facts.scope_sanitizer(call, package.as_deref(), classes);
-            let probed = scan::scan(&family.negatives, &config, &facts);
-            if !crate::extract::gate::alerts(&probed) {
-                return Err(format!(
-                    "cross-class sanitizer `{call}` (class(es): {}) silenced family `{}` \
-                     (class {class}); a class-scoped fact must leave every other class alerting",
-                    classes.join(", "),
-                    family.id
-                ));
-            }
-        }
-    }
-    Ok(())
-}
+use frensense_engine::analysis::taint::facts::LearnedFactEntry;
 
 /// §9 pipeline: corpus pairs → replay-verified learned facts → bundle bytes.
 ///
@@ -118,13 +37,16 @@ pub fn build_facts_bundle_with_trust(
     );
 
     let (learned_table, published) = extract_facts(&families);
-    verify_sanitizer_class_scope(&families, &published)?;
+    // Resolve every sanitizer's argument slots first: the canary below must
+    // replay the exact qualification the payload ships.
+    let evidence = sanitizer_arg_evidence(&families, &published);
+    verify_sanitizer_class_scope(&families, &published, &evidence)?;
 
     // Payload: one metadata pattern per family + the published facts.
     let mut entries: Vec<frensense_engine::analysis::taint::facts::LearnedFactEntry> =
         Vec::with_capacity(published.len());
     let mut policy_meta: Vec<crate::format::PolicyMeta> = Vec::new();
-    let mut sanitizer_scopes: Vec<crate::format::SanitizerScope> = Vec::new();
+    let (sanitizer_scopes, sanitizer_args) = sanitizer_tables(&published, &evidence);
     for f in &published {
         entries.push(f.entry.clone());
         // A policy's tier/lifecycle are authored family metadata. They ride in
@@ -144,22 +66,6 @@ pub fn build_facts_bundle_with_trust(
                     rule: rule.clone(),
                     tier: meta.tier.clone().unwrap_or_default(),
                     status: meta.status.clone().unwrap_or_default(),
-                });
-            }
-        }
-        // A sanitizer's class scope and teaching family ride in the payload's
-        // `sanitizer_scopes` table: the consumer applies the scope with
-        // `FactTable::scope_sanitizer`, so the fact itself keeps the engine's
-        // published shape.
-        if let LearnedFactEntry::Sanitizer { call, package, .. }
-        | LearnedFactEntry::LanguageSanitizer { call, package, .. } = &f.entry
-        {
-            if !f.classes.is_empty() || f.family.is_some() {
-                sanitizer_scopes.push(crate::format::SanitizerScope {
-                    call: call.clone(),
-                    package: package.clone(),
-                    classes: f.classes.clone(),
-                    family: f.family.clone(),
                 });
             }
         }
@@ -224,12 +130,14 @@ pub fn build_facts_bundle_with_trust(
 
     let count = entries.len().max(patterns.len()) as u32;
     // v6 payload; package-qualified provenance facts for LTS 0.7.0.
-    let payload = BundlePayloadV8 {
+    let payload = BundlePayload {
         patterns,
         learned_facts: entries,
         policy_pack: Vec::new(),
         sanitizer_scopes,
         policy_meta,
+        sanitizer_args,
+        sink_base_kinds: Vec::new(),
     };
     let _ = learned_table;
 

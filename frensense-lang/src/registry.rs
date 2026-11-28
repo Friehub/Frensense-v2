@@ -43,9 +43,20 @@
 //! ## Adding a new language
 //!
 //! 1. Create a new file in `src/providers/` implementing `LanguageSpec`.
+//!    A JavaScript-family member (a component container such as Vue or
+//!    Svelte) implements [`JsFamily`](crate::providers::javascript::JsFamily)
+//!    instead and names its dialect; see
+//!    [`providers::javascript`](crate::providers::javascript) for the full
+//!    checklist.
 //! 2. Call `registry.register(Arc::new(YourProvider))` inside
-//!    [`LanguageRegistry::with_default_specs`].
-//! 3. Done.  Every engine subsystem picks it up automatically.
+//!    [`LanguageRegistry::with_default_specs`]. Registration also makes the
+//!    language appear in the CLI's `--language` help, which is generated from
+//!    this registry.
+//! 3. Add its path shapes to [`crate::framework::FRAMEWORKS`] when files of
+//!    the language have framework-specific meaning (routes, server-only
+//!    modules, single-file components), so the engine and corpus resolve the
+//!    same file kind from one table.
+//! 4. Done.  Every engine subsystem picks it up automatically.
 
 use std::sync::{Arc, OnceLock};
 
@@ -116,6 +127,12 @@ impl LanguageRegistry {
             Arc::new(crate::providers::javascript::TypeScriptSpec),
             #[cfg(feature = "typescript")]
             Arc::new(crate::providers::javascript::VueSpec),
+            #[cfg(feature = "typescript")]
+            Arc::new(crate::providers::javascript::SvelteSpec),
+            #[cfg(feature = "typescript")]
+            Arc::new(crate::providers::javascript::AstroSpec),
+            #[cfg(feature = "typescript")]
+            Arc::new(crate::providers::javascript::AngularSpec),
             #[cfg(feature = "javascript")]
             Arc::new(crate::providers::javascript::JavaScriptSpec),
             #[cfg(feature = "go")]
@@ -165,9 +182,28 @@ impl LanguageRegistry {
         self.by_name.get(name).map(Arc::as_ref)
     }
 
-    /// Look up the spec for a file path, extracting the extension automatically.
+    /// Look up the spec for a file path.
+    ///
+    /// Registered extensions may be compound (`component.html`), so the
+    /// **longest** registered suffix wins. That is what keeps narrow formats
+    /// narrow: Angular templates are claimed by `*.component.html` while an
+    /// ordinary `index.html` stays unsupported. A path that matches no
+    /// compound suffix falls back to its ordinary extension.
     #[must_use]
     pub fn for_path(&self, path: &std::path::Path) -> Option<&dyn LanguageSpec> {
+        let name = path.file_name()?.to_str()?.to_ascii_lowercase();
+        let mut best: Option<&'static str> = None;
+        for ext in self.by_ext.keys() {
+            let suffix = name.len() > ext.len()
+                && name.ends_with(ext)
+                && name.as_bytes().get(name.len() - ext.len() - 1) == Some(&b'.');
+            if suffix && best.is_none_or(|current| ext.len() > current.len()) {
+                best = Some(ext);
+            }
+        }
+        if let Some(ext) = best {
+            return self.for_extension(ext);
+        }
         let ext = path.extension()?.to_str()?.to_lowercase();
         self.for_extension(ext.as_str())
     }
@@ -284,6 +320,56 @@ mod tests {
             "only what was registered"
         );
         assert_eq!(reg.all_specs().count(), 1);
+    }
+
+    #[test]
+    fn the_longest_registered_suffix_wins() {
+        struct CompoundSpec;
+        impl LanguageSpec for CompoundSpec {
+            fn name(&self) -> &'static str {
+                "compound"
+            }
+            fn extensions(&self) -> &'static [&'static str] {
+                &["component.html"]
+            }
+            fn tree_sitter_language(&self) -> tree_sitter::Language {
+                crate::providers::javascript::TypeScriptSpec.tree_sitter_language()
+            }
+            fn classify(&self, _kind: &str) -> NodeRole {
+                NodeRole::Other
+            }
+            fn wrap_region(&self, code: &str) -> String {
+                code.to_owned()
+            }
+            fn import_node_kinds(&self) -> &'static [&'static str] {
+                &[]
+            }
+            fn extract_imports(&self, _root: Node<'_>, _source: &str) -> Vec<Import> {
+                Vec::new()
+            }
+            fn package_category(&self, _package: &str) -> Option<PackageCategory> {
+                None
+            }
+            fn classify_param_taint(
+                &self,
+                _name: Option<&str>,
+                _type_annotation: Option<&str>,
+            ) -> Option<TaintOrigin> {
+                None
+            }
+        }
+        let mut reg = LanguageRegistry::new();
+        reg.register(Arc::new(CompoundSpec));
+        assert_eq!(
+            reg.for_path(std::path::Path::new("src/app/hero.component.html"))
+                .map(|s| s.name()),
+            Some("compound")
+        );
+        assert!(
+            reg.for_path(std::path::Path::new("public/index.html"))
+                .is_none(),
+            "a plain .html file is not claimed"
+        );
     }
 
     #[test]

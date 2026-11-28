@@ -350,7 +350,7 @@ fn print_scan_summary_detailed_impl(
     println!("  - Info:           {info}");
     println!("Total Findings:     {}", advisories.len());
     println!(
-        "Status:             {}",
+        "Status:             {}\nTelemetry:          local only; `analysis` in the --json/--sarif report, or the\n                    file named by --profile-out (paths and symbols included;\n                    FRENSENSE_TELEMETRY_PATHS=basename redacts them)",
         status_label(status, advisories.len(), coverage, Some(telem))
     );
     if let Some(out) = output_path {
@@ -409,7 +409,9 @@ fn print_scan_summary_detailed_impl(
                     "        {} of {} analyzed file(s) yielded no recognized sink; a finding",
                     c.files_without_sink_sites, c.files_analyzed
                 );
-                println!("        there cannot be ruled out. `analysis.coverage.no_sink_files`");
+                println!(
+                    "        there cannot be ruled out. `analysis.coverage.no_sink_files_sample`"
+                );
                 println!("        names a sample.");
             }
             if !c.fully_resolved() {
@@ -420,7 +422,6 @@ fn print_scan_summary_detailed_impl(
                 println!("        the backward walk stopped.");
             }
         }
-        println!("        Run with --json to inspect the full `analysis` telemetry object.");
         println!("========================================================================");
     }
 }
@@ -480,35 +481,7 @@ pub fn json_report_with_skips(
     telemetry: Option<&frensense_engine::telemetry::ScanTelemetry>,
     skipped: &[UnsupportedSourceFile],
 ) -> serde_json::Value {
-    json_report_with_coverage_impl(advisories, incomplete, telemetry, skipped, None, None)
-}
-
-/// The `analysis.graph` block: the sizes of the program the taint phase
-/// actually walked.
-fn graph_json(graph: &frensense_engine::telemetry::GraphSize) -> serde_json::Value {
-    serde_json::json!({
-        "functions": graph.functions,
-        "nodes": graph.nodes,
-        "edges": graph.edges,
-        "cross_edges": graph.cross_edges,
-    })
-}
-
-/// The `analysis.funnel` block: where the call sites left the taint phase,
-/// including the busiest callees that matched no sink fact.
-fn funnel_json(f: &frensense_engine::telemetry::TaintFunnel) -> serde_json::Value {
-    serde_json::json!({
-        "calls_examined": f.calls_examined,
-        "skipped_local_callable": f.skipped_local_callable,
-        "skipped_program_local": f.skipped_program_local,
-        "skipped_receiver_only_verb": f.skipped_receiver_only_verb,
-        "not_a_sink": f.not_a_sink,
-        "sink_calls": f.sink_calls,
-        "unmatched_callees": f.top_unmatched().iter().map(|entry| serde_json::json!({
-            "callee": entry.callee,
-            "calls": entry.calls,
-        })).collect::<Vec<_>>(),
-    })
+    json_report_with_coverage_impl(advisories, incomplete, telemetry, skipped, None, None, None)
 }
 
 /// [`json_report_with_skips`] plus what the scan actually covered.
@@ -525,117 +498,16 @@ fn json_report_with_coverage_impl(
     skipped: &[UnsupportedSourceFile],
     coverage: Option<&Coverage>,
     exclusions: Option<&Exclusions>,
+    target: Option<&std::path::Path>,
 ) -> serde_json::Value {
-    let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
-    let telem = telemetry.unwrap_or(&empty_telem);
-    let status = status_with_coverage(telem, incomplete, coverage);
-    let cov = coverage.cloned().unwrap_or_default();
-    let empty_exclusions = Exclusions::default();
-    let exclusions = exclusions.unwrap_or(&empty_exclusions);
-    // Without engine-derived coverage (the compatibility entry points),
-    // fall back to the input accounting so the denominator is still honest
-    // about unsupported inputs and read failures.
-    let (files_found, files_not_analyzed, files_unsupported) = match coverage {
-        Some(c) => (c.files_found, c.files_not_analyzed(), c.files_unsupported),
-        None => {
-            let unsupported = skipped.len().max(telem.input.unsupported);
-            let found = telem.input.submitted + unsupported;
-            (
-                found,
-                found.saturating_sub(telem.input.scanned),
-                unsupported,
-            )
-        }
-    };
-
-    let analysis_obj = serde_json::json!({
-        "status": status,
-        "coverage": {
-            "files_found": files_found,
-            "files_submitted": telem.input.submitted,
-            "files_scanned": telem.input.scanned,
-            "files_not_analyzed": files_not_analyzed,
-            "files_unsupported": files_unsupported,
-            "files_excluded": cov.files_excluded(),
-            "excluded_by_reason": exclusions.by_reason,
-            "excluded_sample": exclusions.sample.iter().map(|e| serde_json::json!({
-                "path": e.path,
-                "reason": e.reason,
-                "source_files": e.source_files,
-            })).collect::<Vec<_>>(),
-            "files_failed": telem.input.failed,
-            "failed_files": telem.input.failed_files,
-            "unsupported_inputs": telem.input.unsupported,
-            "unsupported_source_files": skipped_unsupported_json(skipped),
-            "files_partial": telem.input.parse_partial,
-            "partial_files": telem.input.parse_partial_files,
-            "functions": telem.input.functions,
-            // What the scan recognized: the denominator behind "no
-            // findings". `files_without_sink_sites` names the files where
-            // the engine found nothing it models as dangerous, so a reader
-            // can tell "inspected and no finding" from "nothing recognized".
-            "sink_sites": cov.sink_sites,
-            "files_with_sink_sites": cov.files_with_sink_sites,
-            "files_without_sink_sites": cov.files_without_sink_sites,
-            "no_sink_files": cov.no_sink_files,
-            "unresolved_sites": cov.unresolved_sites,
-            "unresolved_sample": cov.unresolved_sample.iter().map(|s| serde_json::json!({
-                "file": s.file,
-                "line": s.line,
-                "sink": s.sink,
-            })).collect::<Vec<serde_json::Value>>(),
-        },
-        "errors": telem.errors,
-        "suppressed": telem.suppressed.iter().map(|s| serde_json::json!({
-            "reason": s.reason,
-            "count": s.count,
-        })).collect::<Vec<_>>(),
-        "verdicts": {
-            "vulnerable": telem.taint.vulnerable,
-            "sanitized": telem.taint.sanitized,
-            "unknown": telem.taint.unknown,
-            // No "clean" verdict: this counts sink arguments whose backward
-            // walk found no source, which is a statement about the walk, not
-            // about the code.
-            "no_source": telem.taint.clean,
-        },
-        // The sizes and call-site accounting behind the summary's graph and
-        // taint lines, so a JSON consumer sees the same numbers.
-        "graph": graph_json(&telem.graph),
-        "funnel": funnel_json(&telem.funnel),
-        "truncations": telem.caps.iter().map(|c| serde_json::json!({
-            "cap": c.cap,
-            "hits": c.hits,
-            "effect": c.effect,
-        })).collect::<Vec<_>>(),
-        "checks": telem.checks.iter().map(|c| serde_json::json!({
-            "id": c.id,
-            "scope": c.scope,
-            "ran": c.ran,
-            "findings": c.findings,
-            "millis": c.millis,
-            "outcome": match &c.outcome {
-                frensense_engine::telemetry::CheckOutcome::Ok => "ok".into(),
-                frensense_engine::telemetry::CheckOutcome::Panicked(p) => format!("panicked: {p}"),
-                frensense_engine::telemetry::CheckOutcome::Skipped(s) => format!("skipped: {s}"),
-            },
-        })).collect::<Vec<_>>(),
-        "timings": telem.phases.iter().map(|p| serde_json::json!({
-            "phase": p.phase,
-            "ms": p.ms,
-        })).collect::<Vec<_>>(),
-        "slowest_files": telem.slowest_files.iter().map(|f| serde_json::json!({
-            "file": f.file,
-            "ms": f.ms,
-            "functions": f.functions,
-        })).collect::<Vec<_>>(),
-        "slowest_functions": telem.slowest_functions.iter().map(|f| serde_json::json!({
-            "function": f.function,
-            "file": f.file,
-            "ms": f.ms,
-            "sink_args": f.sink_args,
-        })).collect::<Vec<_>>(),
-    });
+    let analysis_obj = super::telemetry::analysis_payload(
+        telemetry,
+        coverage,
+        skipped,
+        exclusions,
+        incomplete,
+        target.and_then(|p| p.to_str()),
+    );
 
     serde_json::json!({
         "schema_version": crate::REPORT_SCHEMA_VERSION,
@@ -645,12 +517,26 @@ fn json_report_with_coverage_impl(
             .iter()
             .map(|f| serde_json::json!({
                 "function": f.function,
-                "file": f.file,
+                "file": super::telemetry::path_in_payload(&f.file),
             }))
             .collect::<Vec<serde_json::Value>>(),
         "analysis": analysis_obj,
         "advisories": advisories,
     })
+}
+
+/// Print a capped list of `label (detail)` rows to stderr, then how many were
+/// left out.
+///
+/// The unsupported-language and degraded-function warnings have this shape, so
+/// the caps and the "and N more" wording exist once instead of twice.
+fn warn_rows(rows: &[(String, String)], limit: usize) {
+    for (label, detail) in rows.iter().take(limit) {
+        eprintln!("  {label} ({detail})");
+    }
+    if rows.len() > limit {
+        eprintln!("  ... and {} more", rows.len() - limit);
+    }
 }
 
 /// Prints the findings and the scan summary, including what the scan could recognize.
@@ -687,12 +573,13 @@ fn print_results_impl(
             "  Supported languages: {}.",
             crate::parser::language_names_help()
         );
-        for file in skipped.iter().take(10) {
-            eprintln!("  {} ({})", file.path, file.language);
-        }
-        if skipped.len() > 10 {
-            eprintln!("  ... and {} more", skipped.len() - 10);
-        }
+        warn_rows(
+            &skipped
+                .iter()
+                .map(|f| (f.path.clone(), f.language.to_string()))
+                .collect::<Vec<_>>(),
+            10,
+        );
     }
     if !incomplete.is_empty() {
         eprintln!(
@@ -700,12 +587,13 @@ fn print_results_impl(
              analyzed in degraded form (see `analysis_incomplete` in the JSON report):",
             incomplete.len()
         );
-        for f in incomplete.iter().take(20) {
-            eprintln!("  {} ({})", f.function, f.file);
-        }
-        if incomplete.len() > 20 {
-            eprintln!("  ... and {} more", incomplete.len() - 20);
-        }
+        warn_rows(
+            &incomplete
+                .iter()
+                .map(|f| (f.function.clone(), f.file.clone()))
+                .collect::<Vec<_>>(),
+            20,
+        );
     }
     if let Some(telem) = telemetry
         && !telem.is_complete()
@@ -736,11 +624,15 @@ fn print_results_impl(
     }
     match format {
         "json" => {
-            let rendered = serde_json::to_string_pretty(
-                &exclusions::json_report_with_coverage_and_exclusions(
-                    advisories, incomplete, telemetry, skipped, coverage, exclusions,
-                ),
-            )
+            let rendered = serde_json::to_string_pretty(&json_report_with_coverage_impl(
+                advisories,
+                incomplete,
+                telemetry,
+                skipped,
+                coverage,
+                Some(exclusions),
+                Some(input_path),
+            ))
             .map_err(|e| FrensenseError::Config(format!("JSON error: {e}")))?;
             if let Some(out) = output_path {
                 std::fs::write(out, rendered).map_err(|e| {
@@ -1827,12 +1719,9 @@ mod json_report_schema_tests {
             analysis["verdicts"].is_object(),
             "analysis.verdicts missing"
         );
-        assert!(
-            analysis["truncations"].is_array(),
-            "analysis.truncations missing"
-        );
+        assert!(analysis["caps"].is_array(), "analysis.caps missing");
         assert!(analysis["checks"].is_array(), "analysis.checks missing");
-        assert!(analysis["timings"].is_array(), "analysis.timings missing");
+        assert!(analysis["phases"].is_array(), "analysis.phases missing");
         assert!(
             analysis["slowest_files"].is_array(),
             "analysis.slowest_files missing"
@@ -1883,7 +1772,7 @@ mod json_report_schema_tests {
                 "skipped_local_callable",
                 "skipped_program_local",
                 "skipped_receiver_only_verb",
-                "unmatched_callees",
+                "unmatched_callees_sample",
             ]
         );
         assert_eq!(funnel["calls_examined"], 11);
@@ -1893,9 +1782,9 @@ mod json_report_schema_tests {
         assert_eq!(funnel["not_a_sink"], 6);
         assert_eq!(funnel["sink_calls"], 2);
 
-        let callees = funnel["unmatched_callees"]
+        let callees = funnel["unmatched_callees_sample"]
             .as_array()
-            .expect("analysis.funnel.unmatched_callees");
+            .expect("analysis.funnel.unmatched_callees_sample");
         assert_eq!(callees.len(), 1, "{report}");
         let entry = callees[0].as_object().expect("unmatched callee entry");
         assert_eq!(sorted_keys(entry), ["callee", "calls"]);
@@ -2114,11 +2003,11 @@ mod explain_learned_rule_tests {
         LearnedFactEntry, PolicyRequirement, PolicyScope,
     };
 
-    /// A hand-built bundle carrying one learned policy (raw rule name), one
-    /// check, and one advisory pattern joined to a sink name - enough to
-    /// exercise every learned card shape.
+    /// A hand-built bundle with one learned policy, one check and one
+    /// advisory pattern joined to a sink name: every learned card shape.
     fn bundle() -> LoadedBundle {
         LoadedBundle {
+            sink_base_kinds: Vec::new(),
             header: BundleHeader {
                 magic: *frensense_bundler::format::BUNDLE_MAGIC,
                 version: 6,
@@ -2131,6 +2020,7 @@ mod explain_learned_rule_tests {
                 trust: frensense_bundler::format::BundleTrust::Community,
             },
             sanitizer_scopes: Vec::new(),
+            sanitizer_args: Vec::new(),
             policy_meta: Vec::new(),
             patterns: vec![frensense_bundler::format::BundlePattern {
                 id: "family-sqli".to_string(),

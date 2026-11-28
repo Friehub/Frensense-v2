@@ -12,6 +12,14 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use frensense_lang::spec::{Export, Import, ModuleItem};
 
+mod reexport;
+#[cfg(test)]
+mod reexport_tests;
+mod resolve_imports;
+use reexport::build_export_maps;
+pub(crate) use reexport::{FileAliases, NamespaceBindings};
+use resolve_imports::{ImportResolution, resolve_imports};
+
 fn concat2(a: &str, b: &str) -> String {
     let mut s = String::with_capacity(a.len() + b.len());
     s.push_str(a);
@@ -137,23 +145,6 @@ pub(crate) fn resolve_module_path(
     None
 }
 
-/// Maximum recursion depth when resolving re-exports and barrel exports.
-///
-/// Deep barrel chains (e.g. `entry -> barrel1 -> barrel2 -> ... -> target`)
-/// resolve transitively across multiple hops up to this limit. The depth
-/// bound prevents infinite recursion on cyclic re-export topologies.
-pub const MAX_REEXPORT_RESOLVE_DEPTH: usize = 12;
-
-#[derive(Debug, Clone)]
-enum ExportTarget {
-    Local(String),
-    ReExport { from_file: String, symbol: String },
-    Barrel(String),
-}
-
-type FileExportMap = FxHashMap<String, FxHashMap<String, ExportTarget>>;
-type FileBarrelMap = FxHashMap<String, Vec<String>>;
-
 /// The package-import table that applies to `fn_name`: its own file's, or, when
 /// the function's file is untracked and the program has exactly one file's
 /// imports, that single table. `None` otherwise (unknown origin stays inert).
@@ -186,6 +177,9 @@ pub(crate) struct PackageImport {
     pub symbol: Option<String>,
 }
 
+/// Per file, the local names that bind an external package member.
+pub(crate) type PackageImportTable = FxHashMap<String, FxHashMap<String, PackageImport>>;
+
 /// Result of whole-program module resolution.
 ///
 /// Alias resolution is what taint needs; the other three maps are the
@@ -196,9 +190,11 @@ pub(crate) struct PackageImport {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ModuleResolution {
     /// Per file, the local names that an import binds to a program function.
-    pub file_aliases: FxHashMap<String, FxHashMap<String, String>>,
+    pub file_aliases: FileAliases,
     /// Per file, the local names that an import binds to an external package.
-    pub file_package_imports: FxHashMap<String, FxHashMap<String, PackageImport>>,
+    pub file_package_imports: PackageImportTable,
+    /// Per file, the local names that bind a whole module and where they point.
+    pub file_namespace_aliases: NamespaceBindings,
     /// Import declarations per file, aliases included.
     pub file_imports: FxHashMap<String, Vec<Import>>,
     /// Export and re-export declarations per file, with visibility and
@@ -218,56 +214,6 @@ impl ModuleAliasResolver {
     /// place each function in its file. Borrows the caller's strings instead
     /// of copying the corpus, so a per-file frontend never duplicates every
     /// source file's text.
-    fn build_export_maps(
-        file_exports: &FxHashMap<String, Vec<Export>>,
-        known_files: &[String],
-        fn_file: &FxHashMap<String, String>,
-    ) -> (FileExportMap, FileBarrelMap) {
-        let mut export_map: FileExportMap = FxHashMap::default();
-        let mut barrel_map: FileBarrelMap = FxHashMap::default();
-
-        for (path, exps) in file_exports {
-            let m = export_map.entry(path.clone()).or_default();
-            for exp in exps {
-                if let Some(from_mod) = &exp.from_module {
-                    if let Some(target_file) = resolve_module_path(path, from_mod, known_files) {
-                        if exp.exported_name == "*" {
-                            m.insert("*".to_string(), ExportTarget::Barrel(target_file.clone()));
-                            let list = barrel_map.entry(path.clone()).or_default();
-                            if !list.contains(&target_file) {
-                                list.push(target_file);
-                            }
-                        } else {
-                            m.insert(
-                                exp.exported_name.clone(),
-                                ExportTarget::ReExport {
-                                    from_file: target_file,
-                                    symbol: exp.local_name.clone(),
-                                },
-                            );
-                        }
-                    }
-                } else {
-                    m.insert(
-                        exp.exported_name.clone(),
-                        ExportTarget::Local(exp.local_name.clone()),
-                    );
-                }
-            }
-        }
-
-        for (func_name, file_path) in fn_file {
-            let bare = func_name.rsplit("::").next().unwrap_or(func_name);
-            export_map
-                .entry(file_path.clone())
-                .or_default()
-                .entry(bare.to_string())
-                .or_insert_with(|| ExportTarget::Local(bare.to_string()));
-        }
-
-        (export_map, barrel_map)
-    }
-
     pub(crate) fn build_from_refs(
         files: &[(&str, &str, &str)], // (path, source, ext)
         ir_names: &FxHashSet<String>,
@@ -279,7 +225,9 @@ impl ModuleAliasResolver {
         let mut file_module_items: FxHashMap<String, Vec<ModuleItem>> = FxHashMap::default();
 
         for &(path, source, ext) in files {
-            let Some(spec) = frensense_lang::spec_for_ext(ext) else {
+            let Some(spec) = frensense_lang::spec_for_path(std::path::Path::new(path))
+                .or_else(|| frensense_lang::spec_for_ext(ext))
+            else {
                 continue;
             };
             let mut parser = tree_sitter::Parser::new();
@@ -298,157 +246,31 @@ impl ModuleAliasResolver {
             file_module_items.insert(path.to_owned(), items);
         }
 
-        let (export_map, barrel_map) =
-            Self::build_export_maps(&file_exports, &known_files, fn_file);
+        let (export_map, barrel_map) = build_export_maps(&file_exports, &known_files, fn_file);
 
-        // Resolve imports for each file
-        let mut file_aliases: FxHashMap<String, FxHashMap<String, String>> = FxHashMap::default();
-        let mut file_package_imports: FxHashMap<String, FxHashMap<String, PackageImport>> =
-            FxHashMap::default();
-
-        for (importer_path, imps) in &file_imports {
-            for imp in imps {
-                let local_name = &imp.local_name;
-                let package = &imp.package;
-                let symbol = imp.symbol.as_deref().unwrap_or(local_name.as_str());
-
-                let Some(target_file) = resolve_module_path(importer_path, package, &known_files)
-                else {
-                    let normalized_pkg = package
-                        .strip_prefix("node:")
-                        .unwrap_or(package.as_str())
-                        .to_string();
-                    file_package_imports
-                        .entry(importer_path.clone())
-                        .or_default()
-                        .insert(
-                            local_name.clone(),
-                            PackageImport {
-                                package: normalized_pkg,
-                                symbol: imp.symbol.clone(),
-                            },
-                        );
-                    continue;
-                };
-
-                if let Some(canonical) = Self::resolve_symbol(
-                    &target_file,
-                    symbol,
-                    &export_map,
-                    &barrel_map,
-                    ir_names,
-                    fn_file,
-                    0,
-                ) {
-                    file_aliases
-                        .entry(importer_path.clone())
-                        .or_default()
-                        .insert(local_name.clone(), canonical);
-                }
-            }
-        }
+        let ImportResolution {
+            file_aliases,
+            file_package_imports,
+            file_namespace_aliases,
+        } = resolve_imports(
+            &file_imports,
+            &known_files,
+            &export_map,
+            &barrel_map,
+            ir_names,
+            fn_file,
+        );
 
         ModuleResolution {
             file_aliases,
             file_package_imports,
+            file_namespace_aliases,
             file_imports,
             file_exports,
             file_module_items,
         }
     }
-
-    /// Recursively resolve an imported `symbol` from `file` across re-exports and barrel files.
-    ///
-    /// Resolution order:
-    /// 1. Directly declared local export in `file` (`export function foo()`)
-    /// 2. Explicit named re-export (`export { foo } from "./other"`)
-    /// 3. Wildcard barrel exports (`export * from "./submodule"`), searching all barrels declared in `file`
-    /// 4. Direct match in `ir_names` qualified or bare for the file
-    ///
-    /// The search recurses across multi-hop re-export chains up to [`MAX_REEXPORT_RESOLVE_DEPTH`].
-    fn resolve_symbol(
-        file: &str,
-        symbol: &str,
-        export_map: &FileExportMap,
-        barrel_map: &FileBarrelMap,
-        ir_names: &FxHashSet<String>,
-        fn_file: &FxHashMap<String, String>,
-        depth: usize,
-    ) -> Option<String> {
-        if depth > MAX_REEXPORT_RESOLVE_DEPTH {
-            return None;
-        }
-
-        if let Some(target) = export_map.get(file).and_then(|m| m.get(symbol)) {
-            match target {
-                ExportTarget::Local(local_sym) => {
-                    let qual = concat3(file, "::", local_sym);
-                    if ir_names.contains(&qual) {
-                        return Some(qual);
-                    }
-                    if ir_names.contains(local_sym) {
-                        return Some(local_sym.clone());
-                    }
-                    return Some(local_sym.clone());
-                }
-                ExportTarget::ReExport {
-                    from_file,
-                    symbol: target_sym,
-                } => {
-                    return Self::resolve_symbol(
-                        from_file,
-                        target_sym,
-                        export_map,
-                        barrel_map,
-                        ir_names,
-                        fn_file,
-                        depth + 1,
-                    );
-                }
-                ExportTarget::Barrel(from_file) => {
-                    return Self::resolve_symbol(
-                        from_file,
-                        symbol,
-                        export_map,
-                        barrel_map,
-                        ir_names,
-                        fn_file,
-                        depth + 1,
-                    );
-                }
-            }
-        }
-
-        // Check all wildcard barrel exports for this file (multi-barrel support)
-        if let Some(barrels) = barrel_map.get(file) {
-            for barrel_file in barrels {
-                if let Some(resolved) = Self::resolve_symbol(
-                    barrel_file,
-                    symbol,
-                    export_map,
-                    barrel_map,
-                    ir_names,
-                    fn_file,
-                    depth + 1,
-                ) {
-                    return Some(resolved);
-                }
-            }
-        }
-
-        // Check if directly in ir_names
-        let qual = concat3(file, "::", symbol);
-        if ir_names.contains(&qual) {
-            return Some(qual);
-        }
-        if ir_names.contains(symbol) && fn_file.get(symbol).map(|f| f == file).unwrap_or(false) {
-            return Some(symbol.to_string());
-        }
-
-        None
-    }
 }
-
 #[cfg(test)]
 mod tests {
     use crate::scan;

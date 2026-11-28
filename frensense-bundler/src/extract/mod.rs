@@ -21,14 +21,19 @@ pub mod call_analysis;
 pub mod candidate;
 pub mod family;
 pub mod gate;
+mod learn_report;
+pub mod metadata;
 pub mod noise;
 pub mod propose;
+mod shape;
+mod trial_cache;
 
+#[cfg(test)]
+mod expect_identity_tests;
 #[cfg(test)]
 pub mod tests;
 
 use rustc_hash::FxHashMap;
-use serde::Serialize;
 
 use frensense_engine::analysis::taint::config::TaintConfig;
 use frensense_engine::analysis::taint::facts::FactTable;
@@ -43,6 +48,11 @@ pub use family::{group_families, Family, FamilyMetadata, LearnedFact};
 pub use gate::{alerts, alerts_with_cwe, scan_variant, separates, PreparedFamily};
 pub use noise::{guard_priority, is_exception_name, looks_taint_relevant};
 pub use propose::{propose, propose_with_trace};
+
+use learn_report::{emit_learn_report, Baseline, CandidateReport};
+use trial_cache::TrialCache;
+
+use crate::parallel;
 
 /// Full extraction: propose per family -> replay-gate -> merged learned table.
 ///
@@ -97,6 +107,14 @@ pub fn family_tables(f: &Family) -> (TaintConfig, FactTable) {
         pack_entries,
         &frensense_engine::analysis::taint::facts::languages_for_exts(exts),
     );
+    // The pack's store-sink base kinds are facts too: gate and scan must see
+    // the same hinted signatures, or the corpus learns what a scan refuses.
+    facts.apply_sink_base_kinds(
+        crate::format::default_pack()
+            .sink_base_kinds
+            .iter()
+            .map(|s| (s.call.as_str(), s.package.as_deref(), s.kinds.as_slice())),
+    );
     (config, facts)
 }
 
@@ -110,9 +128,21 @@ fn extract_facts_with(
         .iter()
         .map(|f| (f.id.clone(), tables_for(f)))
         .collect();
+    let mut cache = TrialCache::from_env();
 
-    // votes: candidate-key -> (support, families)
-    let mut votes: FxHashMap<String, (Candidate, u32, Vec<String>)> = FxHashMap::default();
+    // votes: candidate-key -> (candidate, support, families, shape cells).
+    // `support` counts families, `cells` counts independent witnesses: two
+    // families that differ only in names, literals or formatting are one
+    // witness, so only the cell count may confirm a fact.
+    let mut votes: FxHashMap<
+        String,
+        (
+            Candidate,
+            u32,
+            Vec<String>,
+            std::collections::BTreeSet<String>,
+        ),
+    > = FxHashMap::default();
     // Guard alternatives per `check:{rule}:{call}` key: families sharing a
     // trigger verb propose the check with the helper THEIR negatives use;
     // a union lets one fact accept every voting family's guard shape.
@@ -122,11 +152,29 @@ fn extract_facts_with(
     // Pass 1: proposals per family (accumulate votes). The trace notes are
     // kept alongside so a family that teaches nothing can explain itself in
     // the learn report instead of the pipeline staying silent.
+    // Proposals are per-family and read-only, so the pass runs across cores;
+    // votes are folded below in family order, which keeps the sort input - and
+    // therefore the bundle bytes - identical to a serial run.
     let mut family_notes: FxHashMap<String, Vec<String>> = FxHashMap::default();
-    for f in families {
-        let (f_config, f_builtin) = &fam_tables[&f.id];
-        let (cands, notes) = propose_with_trace(f, f_config, f_builtin);
+    let proposals: Vec<(Vec<Candidate>, Vec<String>, shape::Cell)> =
+        parallel::map_ordered(families, |f| {
+            let (f_config, f_builtin) = &fam_tables[&f.id];
+            let (cands, notes) = propose_with_trace(f, f_config, f_builtin);
+            (cands, notes, shape::family_cell(f))
+        });
+    // Diversity quota: a family beyond the cap for its shape cell (or for its
+    // class in this language) is a duplicate witness. It keeps its baseline
+    // evidence and appears in the learn report, but it does not vote.
+    let cells: Vec<shape::Cell> = proposals.iter().map(|(_, _, cell)| cell.clone()).collect();
+    let quota = shape::quota_exclusions(families, &cells);
+    for (f, (cands, notes, cell)) in families.iter().zip(proposals) {
         family_notes.insert(f.id.clone(), notes);
+        if let Some(reason) = quota.get(&f.id) {
+            if let Some(entry) = family_notes.get_mut(&f.id) {
+                entry.push(format!("quota: {reason}; this family does not vote"));
+            }
+            continue;
+        }
         for c in cands {
             let key = match &c {
                 Candidate::Sink { call, package, .. } => match package {
@@ -171,11 +219,14 @@ fn extract_facts_with(
                     .or_default()
                     .insert(guard.clone());
             }
-            let entry = votes.entry(key).or_insert_with(|| (c, 0, Vec::new()));
+            let entry = votes
+                .entry(key)
+                .or_insert_with(|| (c, 0, Vec::new(), std::collections::BTreeSet::new()));
             entry.1 += 1;
             if !entry.2.contains(&f.id) {
                 entry.2.push(f.id.clone());
             }
+            entry.3.insert(cell.id.clone());
         }
     }
 
@@ -234,38 +285,67 @@ fn extract_facts_with(
     // baseline negative ALREADY alerts are exempt from the regression
     // check: their noise predates the fact and gating on it would reject
     // every fact.
-    let prepared: Vec<PreparedFamily> = families
-        .iter()
-        .filter_map(|f| {
-            let Some((_, facts)) = fam_tables.get(&f.id) else {
-                eprintln!("[facts] skip family {}: no seeded tables", f.id);
-                return None;
-            };
-            match PreparedFamily::new(f, facts) {
-                Ok(p) => Some(p),
-                Err(e) => {
-                    eprintln!("[facts] skip family {}: {e}", f.id);
-                    None
-                }
+    let prepared: Vec<PreparedFamily> = parallel::map_ordered(families, |f| {
+        let Some((_, facts)) = fam_tables.get(&f.id) else {
+            eprintln!("[facts] skip family {}: no seeded tables", f.id);
+            return None;
+        };
+        match PreparedFamily::new(f, facts) {
+            Ok(p) => Some(p),
+            Err(e) => {
+                eprintln!("[facts] skip family {}: {e}", f.id);
+                None
             }
-        })
-        .collect();
+        }
+    })
+    .into_iter()
+    .flatten()
+    .collect();
 
     // Baseline per family under its own language tables: both alert flags,
     // not just the boolean verdict, so every report line can say whether
     // the positive is silent or the negative is noisy.
-    let mut baseline: FxHashMap<String, Baseline> = FxHashMap::default();
+    // Baseline verdicts are a pure function of (family sources, language
+    // tables), so they survive across builds exactly like trial verdicts.
+    // Misses are scanned across cores; hits never touch the engine.
+    let mut baseline_flags: FxHashMap<String, (bool, bool)> = FxHashMap::default();
+    let mut to_scan: Vec<(&PreparedFamily, String)> = Vec::new();
     for p in &prepared {
-        let (f_config, f_builtin) = &fam_tables[&p.id];
-        let (pos_alerts, neg_alerts) = p.alert_flags(f_config, f_builtin);
-        baseline.insert(
-            p.id.clone(),
-            Baseline {
-                positive_alerts: pos_alerts,
-                negative_alerts: neg_alerts,
-                separates: pos_alerts && !neg_alerts,
-            },
-        );
+        let key = format!("baseline|{}", p.source_hash);
+        match cache.get(&key) {
+            Some(flags) => {
+                baseline_flags.insert(p.id.clone(), flags);
+            }
+            None => to_scan.push((p, key)),
+        }
+    }
+    let scanned: Vec<(&PreparedFamily, String, (bool, bool))> =
+        parallel::map_ordered(&to_scan, |(p, key)| {
+            let (f_config, f_builtin) = &fam_tables[&p.id];
+            (*p, key.clone(), p.alert_flags(f_config, f_builtin))
+        });
+    for (p, key, flags) in scanned {
+        cache.put(key, flags);
+        baseline_flags.insert(p.id.clone(), flags);
+    }
+    let baselines: Vec<(String, Baseline)> = prepared
+        .iter()
+        .map(|p| {
+            let (pos_alerts, neg_alerts) =
+                baseline_flags.get(&p.id).copied().unwrap_or((false, false));
+            (
+                p.id.clone(),
+                Baseline {
+                    positive_alerts: pos_alerts,
+                    negative_alerts: neg_alerts,
+                    separates: pos_alerts && !neg_alerts,
+                },
+            )
+        })
+        .collect();
+    let mut baseline: FxHashMap<String, Baseline> = FxHashMap::default();
+    for (id, entry) in baselines {
+        baseline.insert(id, entry);
     }
     if std::env::var("FXDBG").is_ok() {
         for p in &prepared {
@@ -288,9 +368,15 @@ fn extract_facts_with(
     // sanitizer that silences findings must be learned before any
     // check/policy is trialed, or the regression gate measures noise
     // against a context that the final bundle will never scan.
-    let mut ordered_votes: Vec<(String, Candidate, u32, Vec<String>)> = votes
+    let mut ordered_votes: Vec<(
+        String,
+        Candidate,
+        u32,
+        Vec<String>,
+        std::collections::BTreeSet<String>,
+    )> = votes
         .into_iter()
-        .map(|(key, (cand, support, fams))| (key, cand, support, fams))
+        .map(|(key, (cand, support, fams, cells))| (key, cand, support, fams, cells))
         .collect();
     ordered_votes.sort_by(|a, b| {
         let tier = |key: &str| {
@@ -319,20 +405,39 @@ fn extract_facts_with(
         String,
         std::collections::BTreeSet<String>,
     > = std::collections::BTreeMap::new();
-    for (_, cand, _, fams) in &ordered_votes {
+    for (key, cand, _, fams, _) in &ordered_votes {
         let Candidate::Sink { call, .. } = cand else {
             continue;
         };
+        // Same table as the voter trial below (family tables + candidate), so
+        // both share one cache entry instead of scanning twice.
+        let mut pending: Vec<&PreparedFamily> = Vec::new();
+        let mut verdicts: Vec<(String, bool)> = Vec::new();
         for fam in fams {
             let Some(p) = prepared.iter().find(|p| &p.id == fam) else {
                 continue;
             };
+            match cache.get(&format!("vote|{}|{key}", p.source_hash)) {
+                Some((pos, neg)) => verdicts.push((p.id.clone(), pos && !neg)),
+                None => pending.push(p),
+            }
+        }
+        // Scans run across cores in family order; the map insert stays serial,
+        // so the published order never depends on scheduling.
+        let scanned: Vec<(&PreparedFamily, (bool, bool))> = parallel::map_ordered(&pending, |p| {
             let (f_config, f_builtin) = &fam_tables[&p.id];
             let mut trial = f_builtin.clone();
             apply_candidate(&mut trial, cand);
-            if p.separates(f_config, &trial) {
+            (*p, p.alert_flags(f_config, &trial))
+        });
+        for (p, flags) in scanned {
+            cache.put(format!("vote|{}|{key}", p.source_hash), flags);
+            verdicts.push((p.id.clone(), flags.0 && !flags.1));
+        }
+        for (fam, separates) in verdicts {
+            if separates {
                 separating_sinks_by_family
-                    .entry(fam.clone())
+                    .entry(fam)
                     .or_default()
                     .insert(call.clone());
             }
@@ -344,7 +449,8 @@ fn extract_facts_with(
 
     let mut candidate_reports: Vec<CandidateReport> = Vec::new();
 
-    for (key, cand, support, fams) in ordered_votes {
+    for (key, cand, support, fams, voted_cells) in ordered_votes {
+        let cell_count = voted_cells.len() as u32;
         // The fact must be validated by at least one voting family that
         // separates under it, and must not break any family that separated
         // at baseline. Trials run under each family's own tables.
@@ -417,15 +523,29 @@ fn extract_facts_with(
         // separating still rejects: an unvalidated fact must not publish.
         let mut any_voter_separates = false;
         let mut first_failing_voter: Option<(String, bool, bool)> = None;
+        let pub_fp = trial_cache::hash_str(&format!("{published_cands:?}"));
         for p in &prepared {
             let (f_config, f_builtin) = &fam_tables[&p.id];
             let voted = fams.contains(&p.id);
             let relevant =
                 voted || cand_calls.is_empty() || cand_calls.iter().any(|c| p.calls.contains(*c));
-            let sep = if relevant {
+            // Voter table: the family's own tables plus the candidate, with
+            // no published context. It depends only on (family, candidate),
+            // so it is memoised across the pass and across builds.
+            let vote_key = format!("vote|{}|{key}", p.source_hash);
+            let (vote_pos, vote_neg) = if !relevant {
+                (false, false)
+            } else if let Some(v) = cache.get(&vote_key) {
+                v
+            } else {
                 let mut trial = f_builtin.clone();
                 apply_candidate(&mut trial, &cand);
-                p.separates(f_config, &trial)
+                let v = p.alert_flags(f_config, &trial);
+                cache.put(vote_key, v);
+                v
+            };
+            let sep = if relevant {
+                vote_pos && !vote_neg
             } else {
                 baseline.get(&p.id).map(|b| b.separates).unwrap_or(false)
             };
@@ -454,11 +574,9 @@ fn extract_facts_with(
                     any_voter_separates = true;
                 } else if first_failing_voter.is_none() {
                     // Remember which side still fails: "does not separate"
-                    // alone cannot be acted on in the learn report.
-                    let mut trial = f_builtin.clone();
-                    apply_candidate(&mut trial, &cand);
-                    let (pos_alerts, neg_alerts) = p.alert_flags(f_config, &trial);
-                    first_failing_voter = Some((p.id.clone(), pos_alerts, neg_alerts));
+                    // alone cannot be acted on in the learn report. The voter
+                    // table was just measured above, so report those flags.
+                    first_failing_voter = Some((p.id.clone(), vote_pos, vote_neg));
                 }
             }
             if !relevant {
@@ -472,14 +590,46 @@ fn extract_facts_with(
             // sanitizer silences a noisy negative before a co-occurring
             // policy is even considered), and the gate tier order puts
             // sanitizers first so the context is already learned.
-            let mut base_trial = f_builtin.clone();
-            for pc in &published_cands {
-                apply_candidate(&mut base_trial, pc);
-            }
-            let (base_pos, base_neg) = p.alert_flags(f_config, &base_trial);
-            let mut trial = base_trial.clone();
-            apply_candidate(&mut trial, &cand);
-            let (pos_alerts, neg_alerts) = p.alert_flags(f_config, &trial);
+            // Published context only changes when a fact is published, so the
+            // base verdict is memoised per (family, published set) instead of
+            // being re-measured for every candidate.
+            let (base_pos, base_neg) = if published_cands.is_empty() {
+                match baseline.get(&p.id) {
+                    Some(b) => (b.positive_alerts, b.negative_alerts),
+                    None => (false, false),
+                }
+            } else {
+                let base_key = format!("base|{}|{pub_fp}", p.source_hash);
+                if let Some(v) = cache.get(&base_key) {
+                    v
+                } else {
+                    let mut base_trial = f_builtin.clone();
+                    for pc in &published_cands {
+                        apply_candidate(&mut base_trial, pc);
+                    }
+                    let v = p.alert_flags(f_config, &base_trial);
+                    cache.put(base_key, v);
+                    v
+                }
+            };
+            // With nothing published yet the trial table IS the voter table.
+            let (pos_alerts, neg_alerts) = if published_cands.is_empty() {
+                (vote_pos, vote_neg)
+            } else {
+                let trial_key = format!("pub|{}|{key}|{pub_fp}", p.source_hash);
+                if let Some(v) = cache.get(&trial_key) {
+                    v
+                } else {
+                    let mut trial = f_builtin.clone();
+                    for pc in &published_cands {
+                        apply_candidate(&mut trial, pc);
+                    }
+                    apply_candidate(&mut trial, &cand);
+                    let v = p.alert_flags(f_config, &trial);
+                    cache.put(trial_key, v);
+                    v
+                }
+            };
             // Negative-noise regression: applies to every relevant family,
             // voters included — no family may confirm a fact whose cost is
             // its own sibling twin turning noisy. Failed separation stays a
@@ -602,6 +752,7 @@ fn extract_facts_with(
             candidate_reports.push(CandidateReport {
                 key: key.clone(),
                 support,
+                cells: cell_count,
                 voted_by: fams.clone(),
                 verdict: "rejected",
                 reason: Some(reason),
@@ -614,6 +765,7 @@ fn extract_facts_with(
         candidate_reports.push(CandidateReport {
             key: key.clone(),
             support,
+            cells: cell_count,
             voted_by: fams.clone(),
             verdict: "published",
             reason: None,
@@ -650,7 +802,10 @@ fn extract_facts_with(
             classes,
             family,
             support,
-            status: if support >= 2 {
+            cells: cell_count,
+            // Confirmation needs two independent witnesses. Two families that
+            // share a shape cell are one witness, however many files they add.
+            status: if cell_count >= 2 {
                 "confirmed"
             } else {
                 "provisional"
@@ -674,186 +829,6 @@ fn extract_facts_with(
         let kb = fact_key(&b.entry);
         ka.cmp(&kb)
     });
+    cache.save();
     (learned, published)
-}
-
-/// Baseline separation evidence for one family (built-in tables only).
-#[derive(Debug, Clone, Copy, Serialize)]
-struct Baseline {
-    positive_alerts: bool,
-    negative_alerts: bool,
-    separates: bool,
-}
-
-/// One candidate's journey through the replay gate. A rejected candidate
-/// used to vanish with no output at all; `reason` is why it vanished.
-#[derive(Debug, Clone, Serialize)]
-struct CandidateReport {
-    key: String,
-    support: u32,
-    voted_by: Vec<String>,
-    verdict: &'static str,
-    reason: Option<String>,
-}
-
-/// Everything the bundler decided about one family.
-#[derive(Debug, Clone, Serialize)]
-struct FamilyReport {
-    id: String,
-    baseline: Baseline,
-    notes: Vec<String>,
-    candidates: Vec<CandidateReport>,
-    learned: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct LearnSummary {
-    families: usize,
-    candidates: usize,
-    published: usize,
-    rejected: usize,
-    families_not_separating_at_baseline: Vec<String>,
-    families_that_taught_nothing: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct LearnReport {
-    schema: &'static str,
-    summary: LearnSummary,
-    families: Vec<FamilyReport>,
-}
-
-/// Per-family outcome log: printed under `FXDBG`, written as JSON when
-/// `FXREPORT=<path>` is set. This is the answer to "why didn't the bundle
-/// learn X": baseline flags say what the engine saw, `notes` say what the
-/// proposal stage did with it, and each candidate's `reason` says why the
-/// replay gate refused it.
-fn emit_learn_report(
-    families: &[Family],
-    prepared: &[PreparedFamily],
-    baseline: &FxHashMap<String, Baseline>,
-    family_notes: &FxHashMap<String, Vec<String>>,
-    candidate_reports: &[CandidateReport],
-    published: &[LearnedFact],
-) {
-    let dbg = std::env::var("FXDBG").is_ok();
-    let report_path = std::env::var("FXREPORT").ok().filter(|p| !p.is_empty());
-    if !dbg && report_path.is_none() {
-        return;
-    }
-
-    let mut ids: Vec<String> = families.iter().map(|f| f.id.clone()).collect();
-    ids.sort();
-    ids.dedup();
-    let prepared_ids: Vec<&str> = prepared.iter().map(|p| p.id.as_str()).collect();
-
-    let mut family_reports = Vec::with_capacity(ids.len());
-    for id in ids {
-        let mut notes = family_notes.get(&id).cloned().unwrap_or_default();
-        if !prepared_ids.contains(&id.as_str()) {
-            notes.push(
-                "family skipped: it could not be lowered, so the replay gate never saw it"
-                    .to_string(),
-            );
-        }
-        let baseline = baseline.get(&id).copied().unwrap_or(Baseline {
-            positive_alerts: false,
-            negative_alerts: false,
-            separates: false,
-        });
-        let fam_candidates: Vec<CandidateReport> = candidate_reports
-            .iter()
-            .filter(|c| c.voted_by.contains(&id))
-            .cloned()
-            .collect();
-        let learned: Vec<String> = published
-            .iter()
-            .filter(|f| f.families.contains(&id))
-            .map(|f| {
-                let (kind, name) = fact_key(&f.entry);
-                format!("{kind}:{name}")
-            })
-            .collect();
-
-        if dbg {
-            let cand_summary = if fam_candidates.is_empty() {
-                "(none proposed)".to_string()
-            } else {
-                fam_candidates
-                    .iter()
-                    .map(|c| {
-                        if c.verdict == "published" {
-                            format!("{}=PUBLISHED", c.key)
-                        } else {
-                            format!("{}=rejected", c.key)
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
-            eprintln!(
-                "[facts] family {id}: baseline positive_alerts={} negative_alerts={} separates={} | candidates: {cand_summary} | learned {} fact(s){}",
-                baseline.positive_alerts,
-                baseline.negative_alerts,
-                baseline.separates,
-                learned.len(),
-                if learned.is_empty() { " <- TAUGHT NOTHING" } else { "" }
-            );
-            if learned.is_empty() {
-                for c in &fam_candidates {
-                    if let Some(r) = &c.reason {
-                        eprintln!("[facts]   rejected {c}: {r}", c = c.key);
-                    }
-                }
-            }
-            for n in &notes {
-                eprintln!("[facts]   note: {n}");
-            }
-        }
-
-        family_reports.push(FamilyReport {
-            id,
-            baseline,
-            notes,
-            candidates: fam_candidates,
-            learned,
-        });
-    }
-
-    let report = LearnReport {
-        schema: "frensense-learn-report/1",
-        summary: LearnSummary {
-            families: family_reports.len(),
-            candidates: candidate_reports.len(),
-            published: candidate_reports
-                .iter()
-                .filter(|c| c.verdict == "published")
-                .count(),
-            rejected: candidate_reports
-                .iter()
-                .filter(|c| c.verdict == "rejected")
-                .count(),
-            families_not_separating_at_baseline: family_reports
-                .iter()
-                .filter(|f| !f.baseline.separates)
-                .map(|f| f.id.clone())
-                .collect(),
-            families_that_taught_nothing: family_reports
-                .iter()
-                .filter(|f| f.learned.is_empty())
-                .map(|f| f.id.clone())
-                .collect(),
-        },
-        families: family_reports,
-    };
-
-    if let Some(path) = report_path {
-        match serde_json::to_string_pretty(&report) {
-            Ok(json) => match std::fs::write(&path, json) {
-                Ok(()) => eprintln!("[facts] learn report written to {path}"),
-                Err(e) => eprintln!("[facts] learn report write failed for {path}: {e}"),
-            },
-            Err(e) => eprintln!("[facts] learn report serialization failed: {e}"),
-        }
-    }
 }

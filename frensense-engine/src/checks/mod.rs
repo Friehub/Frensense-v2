@@ -3,10 +3,7 @@
 // Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
 
 //! Non-dataflow checks: policy assertions over the lowered IR that need no
-//! taint analysis.
-//!
-//! Two tiers, deliberately separated:
-//!
+//! taint analysis. Two tiers, deliberately separated:
 //! **Built-in seed checks** (`weak_hash` and future structural rules) supply
 //! only *mechanism*, how to look at the IR. They are the bootstrapping
 //! oracle, kept minimal so shape-thinking cannot creep back in.
@@ -19,18 +16,18 @@
 //!
 //! Line drawn: **built-in = how to look; learned = what to conclude.**
 
-pub mod guard_bypass;
-pub mod health;
+pub(crate) mod guard_bypass;
+pub(crate) mod health;
 pub(crate) mod int_overflow;
-pub mod leak;
+pub(crate) mod leak;
 pub mod memory_summary;
 pub(crate) mod noreturn;
 pub(crate) mod oob;
 pub mod policy;
-pub mod registry;
-pub mod schema_policy;
-pub mod uaf;
-pub mod weak_hash;
+pub(crate) mod registry;
+pub(crate) mod schema_policy;
+pub(crate) mod uaf;
+pub(crate) mod weak_hash;
 
 /// Text of a caught panic payload (`&str` and `String` payloads; anything else
 /// is reported as `unknown panic`).
@@ -50,6 +47,8 @@ mod divergence_tests;
 mod guard_bypass_tests;
 #[cfg(test)]
 mod int_overflow_tests;
+#[cfg(test)]
+mod leak_doc_tests;
 #[cfg(test)]
 mod leak_tests;
 #[cfg(test)]

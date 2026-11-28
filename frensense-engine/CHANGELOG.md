@@ -10,10 +10,52 @@ Built-in vocabulary tables live in `frensense-packgen`; the `.frc` envelope
 lives in `frensense-bundler`. Their changes appear here only when they alter
 what this crate does.
 
-## [0.9.2]
+## [0.10.0]
+
+### Breaking
+
+- **The forward-analysis plumbing is no longer public.**
+  `analysis::forward::{bindings, edges, predicates, summaries}` and the
+  internals of `checks::leak` are `pub(crate)`, and `SinkFinding::alert`
+  narrows with them: no workspace crate, doctest or documented consumer
+  reached those paths, and `unreachable_pub` allows narrowing rather than a
+  re-export (AGENTS.md §7.1). A narrowed surface takes the middle number.
+
+### Added
+
+- `SanitizerFact::sanitizes_args` is enforced by the guard map. The field was
+  published but ignored at every construction site, so `"all arguments and
+  the receiver"` was the only reachable reading. A fact that declares slots
+  now validates a value only when it reaches the guard call in one of them:
+  a fact proven for `check(allowlist, value)` (slot 1) no longer clears the
+  argument it does not inspect, and taint arriving there still reaches its
+  sink. The empty set keeps the legacy reading, so every in-tree producer
+  (spec seeding, language packs, bundles) behaves exactly as before.
+- `FactTable::qualify_sanitizer`: apply a sanitizer's class scope and its
+  declared argument slots in one call, onto every installed copy of the fact
+  (a class-scoped fact is stored once per class). Bundles publish the slots
+  in their payload's `sanitizer_args` table (format v9) because no wire fact
+  variant carries them.
+- `sanitizes_args` is honoured by **transform** (non-guard) sanitizers too. A
+  transform fact's cut used to be its whole result node, so the call read as
+  neutralising everything it was handed and the slots had nothing to say.
+  Declared slots now move the cut onto the incoming argument edges: the call
+  neutralises the values that enter through the slots it names, an unlisted
+  argument keeps its edge, and taint arriving there still reaches its sink.
+  The walk reports this as the `"sanitizer-args"` cut reason so `--explain`
+  distinguishes it from a whole-node cut, and an empty set keeps the legacy
+  result-node reading.
 
 ### Fixed
 
+- Dispatch resolution no longer reads a file qualifier as a class. Lowered
+  names are file-qualified (`app.ts::main`), and splitting such a name on `.`
+  fabricated a class `app`, which made the unknown-receiver arm unreachable for
+  every top-level function in a file whose name contains a dot: a call like
+  `client.missing()` then bound to any program function merely named `missing`
+  and the site stopped being reported as external. The enclosing class now
+  comes only from the part after the file qualifier, and only when that part is
+  a qualified method name (#193).
 - A finding whose function has no file entry, or whose file has no source
   text, was dropped without a trace when results were located. They are now
   counted in `ScanTelemetry::suppressed` under the new reason

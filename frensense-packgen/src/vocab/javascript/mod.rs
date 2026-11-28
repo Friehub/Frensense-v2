@@ -6,6 +6,7 @@
 //!
 //! Framework-specific knowledge lives in dedicated modules:
 //! - `core.rs`: Generic DOM, Node.js, and core JavaScript/TypeScript APIs.
+//! - `angular.rs`: DomSanitizer bypass sinks (templates are sanitized).
 //! - `nextjs.rs`: Next.js App Router and Pages Router (`next/server`, `next/navigation`, `next/headers`, `next/cache`).
 //! - `vue.rs`: Vue 3, Vue Router (`vue-router`), and Pinia reactivity/routing.
 //! - `nestjs.rs`: NestJS controller route decorators and database ORM sinks (`@nestjs/typeorm`, `@nestjs/mongoose`).
@@ -15,6 +16,7 @@
 //!
 //! JavaScript and TypeScript share this vocabulary set.
 
+mod angular;
 mod core;
 mod nestjs;
 mod nextjs;
@@ -64,6 +66,15 @@ struct SharedJsVocabTables {
     route_patterns: &'static [&'static str],
 }
 
+/// The core sink table plus every framework module's added sinks.
+static SINK_NAMES: LazyLock<&'static [(&'static str, crate::role_map::SinkLabel)]> =
+    LazyLock::new(|| {
+        let mut names = Vec::new();
+        names.extend_from_slice(core::JS_SINK_NAMES);
+        names.extend_from_slice(angular::ANGULAR_SINK_NAMES);
+        Box::leak(names.into_boxed_slice())
+    });
+
 static SHARED_TABLES: LazyLock<SharedJsVocabTables> = LazyLock::new(|| {
     let mut package_scoped_sinks = Vec::new();
     package_scoped_sinks.extend_from_slice(core::JS_PACKAGE_SCOPED_SINKS);
@@ -110,7 +121,7 @@ fn make_vocab(language: &'static str, s: &SharedJsVocabTables) -> LanguageVocab 
         // `eval` is a global builtin in both dialects: `engine.eval(x)` on an
         // unqualified receiver is not the language's eval (WI-12).
         global_only_sinks: &["eval"],
-        sink_names: core::JS_SINK_NAMES,
+        sink_names: *SINK_NAMES,
         package_scoped_sinks: s.package_scoped_sinks,
         sink_signatures: s.sink_signatures,
         idor_sinks: core::JS_IDOR_SINKS,

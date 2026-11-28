@@ -192,3 +192,42 @@ def u():
 "#;
     assert_clean(&scan_py(src), "py_double_quote_guard");
 }
+
+// A package-less dotted sanitizer fact names its own origin: `shlex.quote`
+// is shell quoting. Installing it under the derived `shlex` root keeps it
+// from silencing a SQL sink whose origin is a different package while the
+// legitimate command shape stays cut.
+#[test]
+fn py_shell_quote_does_not_silence_a_sql_sink() {
+    let src = r#"
+import shlex
+import sqlite3
+from flask import Flask, request
+
+app = Flask(__name__)
+
+@app.route("/u")
+def u():
+    uid = request.args.get("id")
+    return str(sqlite3.connect("x").execute("SELECT * FROM t WHERE id = " + shlex.quote(uid)).fetchall())
+"#;
+    assert_detected(&scan_py(src), "py_shell_quote_sql", "execute");
+}
+
+#[test]
+fn py_shell_quote_still_clears_a_command_sink() {
+    let src = r#"
+import os
+import shlex
+from flask import Flask, request
+
+app = Flask(__name__)
+
+@app.route("/u")
+def u():
+    name = request.args.get("name")
+    os.system("ls " + shlex.quote(name))
+    return "ok"
+"#;
+    assert_clean(&scan_py(src), "py_shell_quote_command");
+}

@@ -453,7 +453,7 @@ pub(crate) fn result_payload_detailed(
     let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
     let telem = telemetry.unwrap_or(&empty_telem);
     let cov = coverage.cloned().unwrap_or_default();
-    let analysis = super::scan_file::mcp_analysis(&cov, telem, incomplete);
+    let analysis = super::scan_file::mcp_analysis(&cov, telem, incomplete, None);
     let files: Vec<Value> = ranges
         .iter()
         .map(|(f, rs)| {

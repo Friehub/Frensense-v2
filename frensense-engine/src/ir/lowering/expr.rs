@@ -611,7 +611,7 @@ impl<'a> LoweringContext<'a> {
     /// property-sink path as `el.innerHTML = html`. Children are lowered in
     /// place so nested elements keep their own attribute stores.
     pub(crate) fn visit_jsx_element(&mut self, node: Node) -> Option<Operand> {
-        let props = self.new_temp(node);
+        let props = self.new_typed_temp(node, Some(crate::ir::JSX_PROPS_BASE_KIND));
         self.ir.push_instruction(
             self.current_block,
             Instruction::Allocate {

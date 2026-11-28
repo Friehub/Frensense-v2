@@ -20,7 +20,7 @@
 //! 1. Analyse the function's own SVFG, treating callees as black boxes.
 //! 2. Where a callee already has a summary, apply it (relational: "if argument
 //!    slot `s` is tainted, the return value becomes tainted").
-//! 3. Produce a [`TaintSummary`] and cache it.
+//! 3. Produce a `TaintSummary` and cache it.
 //!
 //! Because callees are summarised before callers, every function is analysed
 //! exactly once, for a corpus with shared utility libraries, the summary is
@@ -45,7 +45,7 @@
 //!
 //! * [`ProgramSvfg::cross_edges`], the explicit interprocedural edge list
 //!   (deterministic, serialisable, feeds task 4.5's corpus graph store).
-//! * [`ProgramSvfg`]'s per-function [`TaintSummary`]s, computed bottom-up.
+//! * [`ProgramSvfg`]'s per-function `TaintSummary`s, computed bottom-up.
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -56,13 +56,13 @@ use crate::graph::svfg::{NodeKey, NodeKind, Svfg, SvfgBuilder};
 use crate::ir::function::*;
 
 /// Call-site bindings: which callees a call reaches and how arguments map to formals.
-pub mod bindings;
+pub(crate) mod bindings;
 /// Interprocedural value-flow edges between call sites and callees.
-pub mod edges;
+pub(crate) mod edges;
 /// Source, sink and sanitizer predicates over the fact table.
-pub mod predicates;
+pub(crate) mod predicates;
 /// Per-function summaries used to cut or pass taint across calls.
-pub mod summaries;
+pub(crate) mod summaries;
 
 pub(crate) use bindings::*;
 pub use predicates::SinkAlert;
@@ -112,6 +112,20 @@ pub struct ProgramSvfg<'a> {
     /// Local pass-through edges `(fn, from, to)` suppressed because a summary
     /// replaced them. Consulted by both the summary BFS and the taint engine.
     suppressed: FxHashSet<(usize, NodeKey, NodeKey)>,
+    /// Dispatch resolution retained after binding discovery. The taint
+    /// walker asks it the same question the interprocedural layer did: does
+    /// this call run program code, or a library's?
+    callgraph: CallGraph,
+}
+
+impl ProgramSvfg<'_> {
+    /// Dispatch resolution for this program.
+    ///
+    /// The caller must not hold the returned borrow across a mutation of the
+    /// program; scope it to the question being answered.
+    pub(crate) fn callgraph(&self) -> &CallGraph {
+        &self.callgraph
+    }
 }
 
 impl<'a> ProgramSvfg<'a> {
@@ -130,7 +144,7 @@ impl<'a> ProgramSvfg<'a> {
         config: &TaintConfig,
         facts: &FactTable,
     ) -> Self {
-        Self::new_with_module_aliases(irs, config, facts, None, None)
+        Self::new_with_module_aliases(irs, config, facts, None, None, None)
     }
 
     /// Build a [`ProgramSvfg`] with explicit module aliases and function-to-file mappings.
@@ -140,6 +154,7 @@ impl<'a> ProgramSvfg<'a> {
         facts: &FactTable,
         aliases: Option<&FxHashMap<String, FxHashMap<String, String>>>,
         fn_file: Option<&FxHashMap<String, String>>,
+        namespace_aliases: Option<&FxHashMap<String, FxHashMap<String, String>>>,
     ) -> Self {
         // 1. Build per-function SVFGs (deterministic name order).
         let mut names: Vec<&String> = irs.keys().collect();
@@ -167,23 +182,27 @@ impl<'a> ProgramSvfg<'a> {
             .map(|(i, f)| (f.name.clone(), i))
             .collect();
 
-        let mut prog = Self {
-            functions,
-            func_index,
-            topological_order: Vec::new(),
-            cross_edges: FxHashMap::default(),
-            suppressed: FxHashSet::default(),
-        };
-
         // Resolve the call graph once (aliases, receiver-class methods,
         // higher-order callbacks) and use it for all binding discovery.
+        // It is retained on the program afterwards: the taint walker needs
+        // the same answer to tell a library call from program code.
         let mut borrowed: FxHashMap<String, &FunctionIR> = FxHashMap::default();
         for (name, ir) in irs.iter() {
             borrowed.insert(name.clone(), ir);
         }
         let callgraph = CallGraphBuilder::new(&borrowed)
             .with_aliases(aliases, fn_file)
+            .with_namespace_aliases(namespace_aliases)
             .build();
+
+        let mut prog = Self {
+            functions,
+            func_index,
+            topological_order: Vec::new(),
+            cross_edges: FxHashMap::default(),
+            suppressed: FxHashSet::default(),
+            callgraph: CallGraph::default(),
+        };
 
         if crate::debug_flags::DebugFlags::get().mem {
             eprintln!(
@@ -199,6 +218,7 @@ impl<'a> ProgramSvfg<'a> {
         }
 
         prog.discover_bindings(&callgraph);
+        prog.callgraph = callgraph;
         if crate::debug_flags::DebugFlags::get().mem {
             eprintln!(
                 "[mem]   bindings={} rss_kb={}",

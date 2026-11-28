@@ -326,6 +326,7 @@ fn install_language_group(
                     role,
                     label,
                     global_only: false,
+                    base_kinds: Vec::new(),
                 };
                 match package {
                     Some(pkg) => {
@@ -422,32 +423,14 @@ fn install_language_group(
                 guard_style,
                 ..
             } => {
-                let fact = SanitizerFact {
-                    call: call.clone(),
-                    package: package.clone(),
-                    kind: kind.clone(),
-                    sanitizes_args: Default::default(),
-                    guard_style: *guard_style,
-                };
-                match package {
-                    Some(pkg) => {
-                        // Package-scoped sanitizer: install ONLY under
-                        // (package, call). No universal `sanitizer_facts`
-                        // entry and no `config.sanitizers` entry, both
-                        // are consulted without import context, so a
-                        // universal alias would cut the call on ANY
-                        // receiver and silence true findings whose origin
-                        // is a different package (or unknown). Matching
-                        // is origin-gated (`sanitizer_fact_scoped`).
-                        facts
-                            .scoped_sanitizer_facts
-                            .insert((pkg.clone(), call.clone()), fact);
-                    }
-                    None => {
-                        config.sanitizers.insert(call.clone());
-                        facts.sanitizer_facts.entry(call.clone()).or_insert(fact);
-                    }
-                }
+                super::sanitizer_scope::install_language_sanitizer(
+                    config,
+                    facts,
+                    call,
+                    package.as_deref(),
+                    kind,
+                    *guard_style,
+                );
             }
             LearnedFactEntry::LanguagePropagator {
                 call,

@@ -2,25 +2,6 @@
 pub mod frensense_engine
 pub mod frensense_engine::analysis
 pub mod frensense_engine::analysis::forward
-pub mod frensense_engine::analysis::forward::bindings
-pub struct frensense_engine::analysis::forward::bindings::CallBinding
-pub frensense_engine::analysis::forward::bindings::CallBinding::args: alloc::vec::Vec<(frensense_engine::graph::svfg::NodeKey, usize)>
-pub frensense_engine::analysis::forward::bindings::CallBinding::call_site: frensense_engine::graph::svfg::NodeKey
-pub frensense_engine::analysis::forward::bindings::CallBinding::callee_name: alloc::string::String
-pub frensense_engine::analysis::forward::bindings::CallBinding::callees: alloc::vec::Vec<usize>
-pub frensense_engine::analysis::forward::bindings::CallBinding::receiver: core::option::Option<frensense_engine::graph::svfg::NodeKey>
-pub frensense_engine::analysis::forward::bindings::CallBinding::ret_node: core::option::Option<frensense_engine::graph::svfg::NodeKey>
-pub mod frensense_engine::analysis::forward::edges
-pub mod frensense_engine::analysis::forward::predicates
-pub struct frensense_engine::analysis::forward::predicates::SinkAlert
-pub frensense_engine::analysis::forward::predicates::SinkAlert::class: frensense_engine::analysis::taint::engine::FindingClass
-pub frensense_engine::analysis::forward::predicates::SinkAlert::function: alloc::string::String
-pub frensense_engine::analysis::forward::predicates::SinkAlert::sink: alloc::string::String
-pub frensense_engine::analysis::forward::predicates::SinkAlert::slot: usize
-pub mod frensense_engine::analysis::forward::summaries
-pub struct frensense_engine::analysis::forward::summaries::TaintSummary
-pub frensense_engine::analysis::forward::summaries::TaintSummary::function_name: alloc::string::String
-pub frensense_engine::analysis::forward::summaries::TaintSummary::param_taints_return: alloc::vec::Vec<bool>
 pub struct frensense_engine::analysis::forward::FunctionEntry<'a>
 pub frensense_engine::analysis::forward::FunctionEntry::arg_slots: rustc_hash::FxHashMap<frensense_engine::graph::svfg::NodeKey, (usize, usize)>
 pub frensense_engine::analysis::forward::FunctionEntry::bindings: alloc::vec::Vec<frensense_engine::analysis::forward::bindings::CallBinding>
@@ -79,7 +60,7 @@ pub struct frensense_engine::analysis::taint::engine::SanitizerSuppression
 pub frensense_engine::analysis::taint::engine::SanitizerSuppression::call: alloc::string::String
 pub frensense_engine::analysis::taint::engine::SanitizerSuppression::classes: alloc::vec::Vec<alloc::string::String>
 #[non_exhaustive] pub struct frensense_engine::analysis::taint::engine::SinkFinding
-pub frensense_engine::analysis::taint::engine::SinkFinding::alert: core::option::Option<frensense_engine::analysis::forward::predicates::SinkAlert>
+pub frensense_engine::analysis::taint::engine::SinkFinding::alert: core::option::Option<frensense_engine::analysis::forward::SinkAlert>
 pub frensense_engine::analysis::taint::engine::SinkFinding::arg_slot: usize
 pub frensense_engine::analysis::taint::engine::SinkFinding::cut_reasons: alloc::vec::Vec<&'static str>
 pub frensense_engine::analysis::taint::engine::SinkFinding::finding_class: frensense_engine::analysis::taint::engine::FindingClass
@@ -97,7 +78,7 @@ pub fn frensense_engine::analysis::taint::engine::SinkFinding::builder() -> fren
 pub fn frensense_engine::analysis::taint::engine::SinkFinding::classify_from_cwe(&mut self, &str) -> bool
 pub struct frensense_engine::analysis::taint::engine::SinkFindingBuilder
 impl frensense_engine::analysis::taint::engine::SinkFindingBuilder
-pub fn frensense_engine::analysis::taint::engine::SinkFindingBuilder::alert(self, core::option::Option<frensense_engine::analysis::forward::predicates::SinkAlert>) -> Self
+pub fn frensense_engine::analysis::taint::engine::SinkFindingBuilder::alert(self, core::option::Option<frensense_engine::analysis::forward::SinkAlert>) -> Self
 pub fn frensense_engine::analysis::taint::engine::SinkFindingBuilder::arg_slot(self, usize) -> Self
 pub fn frensense_engine::analysis::taint::engine::SinkFindingBuilder::build(self) -> frensense_engine::analysis::taint::engine::SinkFinding
 pub fn frensense_engine::analysis::taint::engine::SinkFindingBuilder::cut_reasons(self, alloc::vec::Vec<&'static str>) -> Self
@@ -113,478 +94,6 @@ pub fn frensense_engine::analysis::taint::engine::SinkFindingBuilder::source_des
 pub fn frensense_engine::analysis::taint::engine::SinkFindingBuilder::suppressions(self, alloc::vec::Vec<frensense_engine::analysis::taint::engine::SanitizerSuppression>) -> Self
 pub fn frensense_engine::analysis::taint::engine::SinkFindingBuilder::verdict(self, frensense_engine::analysis::taint::engine::BackwardVerdict) -> Self
 pub mod frensense_engine::analysis::taint::facts
-pub mod frensense_engine::analysis::taint::facts::authored
-pub enum frensense_engine::analysis::taint::facts::authored::AuthoredPolicyEntry
-pub frensense_engine::analysis::taint::facts::authored::AuthoredPolicyEntry::IntegerOverflowRule
-pub frensense_engine::analysis::taint::facts::authored::AuthoredPolicyEntry::IntegerOverflowRule::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::authored::AuthoredPolicyEntry::IntegerOverflowRule::rule: alloc::string::String
-pub frensense_engine::analysis::taint::facts::authored::AuthoredPolicyEntry::IntegerOverflowRule::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::authored::AuthoredPolicyEntry::IntegerOverflowRule::wrap_threshold: u128
-pub frensense_engine::analysis::taint::facts::authored::AuthoredPolicyEntry::Policy(frensense_engine::analysis::taint::facts::PolicyFact)
-pub mod frensense_engine::analysis::taint::facts::config
-pub fn frensense_engine::analysis::taint::facts::config::apply_language_entries(&mut frensense_engine::analysis::taint::config::TaintConfig, &mut frensense_engine::analysis::taint::facts::FactTable, &[frensense_engine::analysis::taint::facts::LearnedFactEntry], &[&str])
-pub fn frensense_engine::analysis::taint::facts::config::languages_for_exts<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a str>) -> alloc::vec::Vec<&'static str>
-pub fn frensense_engine::analysis::taint::facts::config::tables_from_exts<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a str>) -> (frensense_engine::analysis::taint::config::TaintConfig, frensense_engine::analysis::taint::facts::FactTable)
-pub fn frensense_engine::analysis::taint::facts::config::tables_from_exts_with_pack<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a str>, &[frensense_engine::analysis::taint::facts::LearnedFactEntry]) -> (frensense_engine::analysis::taint::config::TaintConfig, frensense_engine::analysis::taint::facts::FactTable)
-pub mod frensense_engine::analysis::taint::facts::entries
-pub enum frensense_engine::analysis::taint::facts::entries::LearnedFactEntry
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Allocator
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Allocator::name: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::BufferBuiltin
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::BufferBuiltin::dst_arg: core::option::Option<usize>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::BufferBuiltin::len_arg: usize
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::BufferBuiltin::name: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::BufferBuiltin::src_arg: core::option::Option<usize>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Check
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Check::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Check::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Check::rule: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Check::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Check::unless_guard: core::option::Option<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Check::unless_range_check: core::option::Option<alloc::vec::Vec<alloc::string::String>>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::CollectionConstructors
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::CollectionConstructors::values: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Deallocator
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Deallocator::name: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::GrammarFeature
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::GrammarFeature::feature: frensense_engine::analysis::taint::facts::GrammarFeature
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::GrammarFeature::language: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::GrammarFeature::node_kind: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::GrammarRole
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::GrammarRole::language: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::GrammarRole::node_kind: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::GrammarRole::role: frensense_engine::analysis::taint::facts::TeachableNodeRole
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::GuardBypass(frensense_engine::analysis::taint::facts::GuardBypassFact)
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::GuardDenylistPattern
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::GuardDenylistPattern::pattern: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Hints
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Hints::kind: frensense_engine::analysis::taint::facts::HintKind
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Hints::values: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IdorFinderSink
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IdorFinderSink::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IdorFinderSink::keys: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IdorKey
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IdorKey::key: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::InsecureConfigRule
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::InsecureConfigRule::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::InsecureConfigRule::prefix: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::InsecureConfigRule::rule_id: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::InsecureConfigRule::selectors: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::InsecureConfigRule::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IntegerOverflowRule
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IntegerOverflowRule::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IntegerOverflowRule::rule: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IntegerOverflowRule::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IntegerOverflowRule::wrap_threshold: u128
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IntegerOverflowUnboundedRule
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IntegerOverflowUnboundedRule::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IntegerOverflowUnboundedRule::rule: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IntegerOverflowUnboundedRule::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::IntegerOverflowUnboundedRule::wrap_threshold: u128
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::KeySizeRule
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::KeySizeRule::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::KeySizeRule::kind: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::KeySizeRule::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::KeySizeRule::min_bits: i64
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::KeySizeRule::rule_id: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::KeySizeRule::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::KeySizeRule::slot: usize
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageAmbiguousVerbs
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageAmbiguousVerbs::language: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageAmbiguousVerbs::values: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageIdorSink
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageIdorSink::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageIdorSink::keys: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageIdorSink::language: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguagePropagator
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguagePropagator::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguagePropagator::language: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguagePropagator::tainted_arg: core::option::Option<usize>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguagePropagator::tainted_receiver: bool
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageRoutePattern
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageRoutePattern::language: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageRoutePattern::pattern: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSanitizer
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSanitizer::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSanitizer::guard_style: bool
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSanitizer::kind: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSanitizer::language: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSanitizer::package: core::option::Option<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSessionRoot
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSessionRoot::language: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSessionRoot::root: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSink
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSink::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSink::language: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSink::role: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSinkGlobalOnly
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSinkGlobalOnly::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSinkGlobalOnly::language: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSinkSlots
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSinkSlots::binding_args_safe: bool
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSinkSlots::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSinkSlots::dangerous_args: alloc::collections::btree::set::BTreeSet<usize>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSinkSlots::language: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSinkSlots::package: core::option::Option<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSource
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSource::language: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSource::package: core::option::Option<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::LanguageSource::pattern: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::MemoryContract
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::MemoryContract::consumes_params: alloc::vec::Vec<usize>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::MemoryContract::name: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::MemoryContract::return_capacity: frensense_engine::checks::memory_summary::CapacitySpec
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::MemoryContract::returns_fresh: bool
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::NullTokens
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::NullTokens::values: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Policy
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Policy::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Policy::require: alloc::vec::Vec<frensense_engine::analysis::taint::facts::PolicyRequirement>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Policy::rule: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Policy::scope: frensense_engine::analysis::taint::facts::PolicyScope
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Policy::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Policy::when_call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::PolicyScoped
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::PolicyScoped::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::PolicyScoped::package: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::PolicyScoped::require: alloc::vec::Vec<frensense_engine::analysis::taint::facts::PolicyRequirement>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::PolicyScoped::rule: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::PolicyScoped::scope: frensense_engine::analysis::taint::facts::PolicyScope
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::PolicyScoped::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::PolicyScoped::when_call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Propagator
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Propagator::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Propagator::input_args: alloc::vec::Vec<usize>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Propagator::preserves_taint: bool
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::ReceiverParams
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::ReceiverParams::values: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Sanitizer
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Sanitizer::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Sanitizer::guard_style: bool
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Sanitizer::kind: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Sanitizer::package: core::option::Option<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::SchemaDescribeMethods
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::SchemaDescribeMethods::values: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::SchemaPolicy(frensense_engine::analysis::taint::facts::SchemaPolicyFact)
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::SessionAccessors
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::SessionAccessors::values: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Sink
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Sink::binding_args_safe: bool
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Sink::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Sink::dangerous_args: alloc::collections::btree::set::BTreeSet<usize>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Sink::package: core::option::Option<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Source
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Source::package: core::option::Option<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::Source::pattern: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::StackAllocators
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::StackAllocators::values: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::SuspiciousHashWrappers
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::SuspiciousHashWrappers::calls: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::WeakCrypto(frensense_engine::analysis::taint::facts::WeakCryptoFact)
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::WeakPrimitiveRule
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::WeakPrimitiveRule::bare_calls: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::WeakPrimitiveRule::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::WeakPrimitiveRule::requires_credential_context: bool
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::WeakPrimitiveRule::rule_id: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::WeakPrimitiveRule::selector_calls: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::WeakPrimitiveRule::selector_slot: usize
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::WeakPrimitiveRule::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::entries::LearnedFactEntry::WeakPrimitiveRule::weak_selectors: alloc::vec::Vec<alloc::string::String>
-impl frensense_engine::analysis::taint::facts::LearnedFactEntry
-pub fn frensense_engine::analysis::taint::facts::LearnedFactEntry::apply(&self, &mut frensense_engine::analysis::taint::facts::FactTable)
-pub fn frensense_engine::analysis::taint::facts::LearnedFactEntry::apply_with(&self, &mut frensense_engine::analysis::taint::facts::FactTable, frensense_engine::analysis::taint::facts::Provenance)
-pub fn frensense_engine::analysis::taint::facts::LearnedFactEntry::finding_identities(&self) -> alloc::vec::Vec<alloc::string::String>
-pub fn frensense_engine::analysis::taint::facts::entries::fact_table_from_entries(&[frensense_engine::analysis::taint::facts::LearnedFactEntry]) -> frensense_engine::analysis::taint::facts::FactTable
-pub fn frensense_engine::analysis::taint::facts::entries::fact_table_from_entries_with(&[frensense_engine::analysis::taint::facts::LearnedFactEntry], frensense_engine::analysis::taint::facts::Provenance) -> frensense_engine::analysis::taint::facts::FactTable
-pub mod frensense_engine::analysis::taint::facts::kinds
-pub enum frensense_engine::analysis::taint::facts::kinds::AllocCapacity
-pub frensense_engine::analysis::taint::facts::kinds::AllocCapacity::Param(usize)
-pub frensense_engine::analysis::taint::facts::kinds::AllocCapacity::ParamProduct(usize, usize)
-pub frensense_engine::analysis::taint::facts::kinds::AllocCapacity::Unknown
-pub enum frensense_engine::analysis::taint::facts::kinds::GrammarFeature
-pub frensense_engine::analysis::taint::facts::kinds::GrammarFeature::Cast
-pub frensense_engine::analysis::taint::facts::kinds::GrammarFeature::DeclarationAssignment
-pub frensense_engine::analysis::taint::facts::kinds::GrammarFeature::DestructuringPattern
-pub frensense_engine::analysis::taint::facts::kinds::GrammarFeature::PairEntry
-pub frensense_engine::analysis::taint::facts::kinds::GrammarFeature::PairPattern
-pub frensense_engine::analysis::taint::facts::kinds::GrammarFeature::PropertyKind
-pub frensense_engine::analysis::taint::facts::kinds::GrammarFeature::TemplateFragment
-pub frensense_engine::analysis::taint::facts::kinds::GrammarFeature::TemplateString
-pub frensense_engine::analysis::taint::facts::kinds::GrammarFeature::TernaryStraightLine
-pub enum frensense_engine::analysis::taint::facts::kinds::HintKind
-pub frensense_engine::analysis::taint::facts::kinds::HintKind::AuthGuard
-pub frensense_engine::analysis::taint::facts::kinds::HintKind::CredentialContext
-pub frensense_engine::analysis::taint::facts::kinds::HintKind::JwtAlgorithm
-pub frensense_engine::analysis::taint::facts::kinds::HintKind::KdfReceiver
-pub frensense_engine::analysis::taint::facts::kinds::HintKind::PreparedStatementPrefix
-pub frensense_engine::analysis::taint::facts::kinds::HintKind::SecurityContext
-pub frensense_engine::analysis::taint::facts::kinds::HintKind::UrlArg
-pub frensense_engine::analysis::taint::facts::kinds::HintKind::UrlLiteral
-pub frensense_engine::analysis::taint::facts::kinds::HintKind::UrlParam
-pub frensense_engine::analysis::taint::facts::kinds::HintKind::WeakHashDisclaimer
-impl frensense_engine::analysis::taint::facts::HintKind
-pub const frensense_engine::analysis::taint::facts::HintKind::ALL: [frensense_engine::analysis::taint::facts::HintKind; 10]
-pub const fn frensense_engine::analysis::taint::facts::HintKind::index(self) -> usize
-pub const fn frensense_engine::analysis::taint::facts::HintKind::name(self) -> &'static str
-pub enum frensense_engine::analysis::taint::facts::kinds::PolicyRequirement
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::BannedArgLiteral
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::BannedArgLiteral::slot: usize
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::BannedArgLiteral::values: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::BannedNamedArgLiteral
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::BannedNamedArgLiteral::name: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::BannedNamedArgLiteral::values: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::GuardCall
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::GuardCall::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::NotCall
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::NotCall::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::RangeCheck
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::RangeCheck::ops: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::RequireArgKey
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::RequireArgKey::keys: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::RequireArgKey::slot: usize
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::RequireCall
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::RequireCall::any_of: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::RequireNamedArgLiteral
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::RequireNamedArgLiteral::name: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::RequireNamedArgLiteral::values: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::RequiredArgLiteral
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::RequiredArgLiteral::slot: usize
-pub frensense_engine::analysis::taint::facts::kinds::PolicyRequirement::RequiredArgLiteral::values: alloc::vec::Vec<alloc::string::String>
-impl frensense_engine::analysis::taint::facts::PolicyRequirement
-pub fn frensense_engine::analysis::taint::facts::PolicyRequirement::call_names(&self) -> alloc::vec::Vec<&str>
-pub enum frensense_engine::analysis::taint::facts::kinds::PolicyScope
-pub frensense_engine::analysis::taint::facts::kinds::PolicyScope::Function
-pub frensense_engine::analysis::taint::facts::kinds::PolicyScope::Module
-pub enum frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Arguments
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Assignment
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Assignment::lhs_field: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Assignment::rhs_field: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::AsyncBlock
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Await
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::BinaryOp
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Block
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Branch
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Call
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Call::args_field: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Call::callee_field: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Catch
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::ClassDef
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Composite
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Conditional
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::ContextManager
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Declaration
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Declaration::name_field: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Declaration::value_field: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::ErrorGuard
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::ErrorPropagation
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Export
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Finally
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Function
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Function::body_field: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Function::is_method: bool
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Function::name_field: core::option::Option<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Function::params_field: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Identifier
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Import
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::KeywordArgument
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::KeywordArgument::name_field: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::KeywordArgument::value_field: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Literal
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Loop
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Match
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::MemberAccess
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::MemberAccess::object_field: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::MemberAccess::property_field: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Other
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Parameters
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Return
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Throw
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Try
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::UnaryOp
-pub frensense_engine::analysis::taint::facts::kinds::TeachableNodeRole::Unsafe
-impl core::convert::From<&frensense_lang::spec::NodeRole> for frensense_engine::analysis::taint::facts::TeachableNodeRole
-pub fn frensense_engine::analysis::taint::facts::TeachableNodeRole::from(&frensense_lang::spec::NodeRole) -> Self
-pub struct frensense_engine::analysis::taint::facts::kinds::BufferBuiltinSpec
-pub frensense_engine::analysis::taint::facts::kinds::BufferBuiltinSpec::dst_arg: core::option::Option<usize>
-pub frensense_engine::analysis::taint::facts::kinds::BufferBuiltinSpec::len_arg: usize
-pub frensense_engine::analysis::taint::facts::kinds::BufferBuiltinSpec::name: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::BufferBuiltinSpec::src_arg: core::option::Option<usize>
-pub struct frensense_engine::analysis::taint::facts::kinds::GuardBypassFact
-pub frensense_engine::analysis::taint::facts::kinds::GuardBypassFact::containment_callees: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::GuardBypassFact::credential_params: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::GuardBypassFact::credential_sinks: alloc::vec::Vec<alloc::string::String>
-pub struct frensense_engine::analysis::taint::facts::kinds::InsecureConfigRule
-pub frensense_engine::analysis::taint::facts::kinds::InsecureConfigRule::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::InsecureConfigRule::prefix: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::InsecureConfigRule::rule_id: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::InsecureConfigRule::selectors: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::InsecureConfigRule::severity: alloc::string::String
-pub struct frensense_engine::analysis::taint::facts::kinds::IntegerOverflowRule
-pub frensense_engine::analysis::taint::facts::kinds::IntegerOverflowRule::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::IntegerOverflowRule::rule_id: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::IntegerOverflowRule::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::IntegerOverflowRule::unbounded_product: bool
-pub frensense_engine::analysis::taint::facts::kinds::IntegerOverflowRule::wrap_threshold: u128
-pub struct frensense_engine::analysis::taint::facts::kinds::KeySizeRule
-pub frensense_engine::analysis::taint::facts::kinds::KeySizeRule::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::KeySizeRule::kind: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::KeySizeRule::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::KeySizeRule::min_bits: i64
-pub frensense_engine::analysis::taint::facts::kinds::KeySizeRule::rule_id: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::KeySizeRule::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::KeySizeRule::slot: usize
-pub struct frensense_engine::analysis::taint::facts::kinds::LearnedCheckFact
-pub frensense_engine::analysis::taint::facts::kinds::LearnedCheckFact::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::LearnedCheckFact::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::LearnedCheckFact::rule: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::LearnedCheckFact::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::LearnedCheckFact::unless_guard: core::option::Option<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::LearnedCheckFact::unless_range_check: core::option::Option<alloc::vec::Vec<alloc::string::String>>
-pub struct frensense_engine::analysis::taint::facts::kinds::MemoryContractFact
-pub frensense_engine::analysis::taint::facts::kinds::MemoryContractFact::consumes_params: alloc::vec::Vec<usize>
-pub frensense_engine::analysis::taint::facts::kinds::MemoryContractFact::name: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::MemoryContractFact::return_capacity: frensense_engine::checks::memory_summary::CapacitySpec
-pub frensense_engine::analysis::taint::facts::kinds::MemoryContractFact::returns_fresh: bool
-pub struct frensense_engine::analysis::taint::facts::kinds::MemoryFuncSpec
-pub frensense_engine::analysis::taint::facts::kinds::MemoryFuncSpec::capacity: frensense_engine::analysis::taint::facts::AllocCapacity
-pub frensense_engine::analysis::taint::facts::kinds::MemoryFuncSpec::consumes_params: &'static [usize]
-pub frensense_engine::analysis::taint::facts::kinds::MemoryFuncSpec::name: &'static str
-pub frensense_engine::analysis::taint::facts::kinds::MemoryFuncSpec::returns_fresh: bool
-pub struct frensense_engine::analysis::taint::facts::kinds::PolicyFact
-pub frensense_engine::analysis::taint::facts::kinds::PolicyFact::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::PolicyFact::package: core::option::Option<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::PolicyFact::require: alloc::vec::Vec<frensense_engine::analysis::taint::facts::PolicyRequirement>
-pub frensense_engine::analysis::taint::facts::kinds::PolicyFact::rule: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::PolicyFact::scope: frensense_engine::analysis::taint::facts::PolicyScope
-pub frensense_engine::analysis::taint::facts::kinds::PolicyFact::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::PolicyFact::when_call: alloc::string::String
-pub struct frensense_engine::analysis::taint::facts::kinds::SanitizerFact
-pub frensense_engine::analysis::taint::facts::kinds::SanitizerFact::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::SanitizerFact::guard_style: bool
-pub frensense_engine::analysis::taint::facts::kinds::SanitizerFact::kind: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::SanitizerFact::package: core::option::Option<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::SanitizerFact::sanitizes_args: alloc::collections::btree::set::BTreeSet<usize>
-pub struct frensense_engine::analysis::taint::facts::kinds::SchemaPolicyFact
-pub frensense_engine::analysis::taint::facts::kinds::SchemaPolicyFact::bound_keywords: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::SchemaPolicyFact::builders: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::SchemaPolicyFact::enforcers: alloc::vec::Vec<alloc::string::String>
-pub struct frensense_engine::analysis::taint::facts::kinds::SinkSignature
-pub frensense_engine::analysis::taint::facts::kinds::SinkSignature::binding_args_safe: bool
-pub frensense_engine::analysis::taint::facts::kinds::SinkSignature::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::SinkSignature::dangerous_args: alloc::collections::btree::set::BTreeSet<usize>
-pub frensense_engine::analysis::taint::facts::kinds::SinkSignature::global_only: bool
-pub frensense_engine::analysis::taint::facts::kinds::SinkSignature::idor_keys: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::SinkSignature::label: core::option::Option<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::SinkSignature::package: core::option::Option<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::SinkSignature::role: frensense_lang::severity::SinkRole
-impl frensense_engine::analysis::taint::facts::SinkSignature
-pub fn frensense_engine::analysis::taint::facts::SinkSignature::all_args(&str) -> Self
-pub fn frensense_engine::analysis::taint::facts::SinkSignature::is_binding(&self, usize) -> bool
-pub fn frensense_engine::analysis::taint::facts::SinkSignature::is_dangerous(&self, usize) -> bool
-pub fn frensense_engine::analysis::taint::facts::SinkSignature::with_args(&str, &[usize]) -> Self
-pub struct frensense_engine::analysis::taint::facts::kinds::WeakCryptoFact
-pub frensense_engine::analysis::taint::facts::kinds::WeakCryptoFact::call: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::WeakCryptoFact::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::WeakCryptoFact::rule_id: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::WeakCryptoFact::selector_slot: core::option::Option<usize>
-pub frensense_engine::analysis::taint::facts::kinds::WeakCryptoFact::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::WeakCryptoFact::weak_selectors: alloc::vec::Vec<alloc::string::String>
-pub struct frensense_engine::analysis::taint::facts::kinds::WeakPrimitiveRule
-pub frensense_engine::analysis::taint::facts::kinds::WeakPrimitiveRule::bare_calls: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::WeakPrimitiveRule::message: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::WeakPrimitiveRule::requires_credential_context: bool
-pub frensense_engine::analysis::taint::facts::kinds::WeakPrimitiveRule::rule_id: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::WeakPrimitiveRule::selector_calls: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::kinds::WeakPrimitiveRule::selector_slot: usize
-pub frensense_engine::analysis::taint::facts::kinds::WeakPrimitiveRule::severity: alloc::string::String
-pub frensense_engine::analysis::taint::facts::kinds::WeakPrimitiveRule::weak_selectors: alloc::vec::Vec<alloc::string::String>
-pub const frensense_engine::analysis::taint::facts::kinds::ALLOWLIST_SANITIZER_KIND: &str
-pub const frensense_engine::analysis::taint::facts::kinds::DEFAULT_SANITIZER_KIND: &str
-pub mod frensense_engine::analysis::taint::facts::signatures
-pub const frensense_engine::analysis::taint::facts::signatures::CLASS_SCOPED_SANITIZER_PREFIX: &str
-pub mod frensense_engine::analysis::taint::facts::table
-pub struct frensense_engine::analysis::taint::facts::table::FactTable
-pub frensense_engine::analysis::taint::facts::table::FactTable::auth_guard_hints: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::bare_sink_names: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::buffer_builtins: alloc::vec::Vec<frensense_engine::analysis::taint::facts::BufferBuiltinSpec>
-pub frensense_engine::analysis::taint::facts::table::FactTable::client_roots: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::collection_constructors: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::containment_callees: rustc_hash::FxHashMap<alloc::string::String, frensense_engine::analysis::taint::facts::Provenance>
-pub frensense_engine::analysis::taint::facts::table::FactTable::credential_context_hints: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::credential_params: rustc_hash::FxHashMap<alloc::string::String, frensense_engine::analysis::taint::facts::Provenance>
-pub frensense_engine::analysis::taint::facts::table::FactTable::credential_sinks: rustc_hash::FxHashMap<alloc::string::String, frensense_engine::analysis::taint::facts::Provenance>
-pub frensense_engine::analysis::taint::facts::table::FactTable::custom_allocators: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::custom_deallocators: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::grammar_features: rustc_hash::FxHashMap<(alloc::string::String, alloc::string::String), rustc_hash::FxHashSet<frensense_engine::analysis::taint::facts::GrammarFeature>>
-pub frensense_engine::analysis::taint::facts::table::FactTable::grammar_roles: rustc_hash::FxHashMap<(alloc::string::String, alloc::string::String), frensense_engine::analysis::taint::facts::TeachableNodeRole>
-pub frensense_engine::analysis::taint::facts::table::FactTable::guard_denylist_patterns: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::idor_finder_sinks: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::idor_keys: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::insecure_config_selectors: alloc::vec::Vec<frensense_engine::analysis::taint::facts::InsecureConfigRule>
-pub frensense_engine::analysis::taint::facts::table::FactTable::integer_overflow_rules: alloc::vec::Vec<(frensense_engine::analysis::taint::facts::IntegerOverflowRule, frensense_engine::analysis::taint::facts::Provenance)>
-pub frensense_engine::analysis::taint::facts::table::FactTable::jwt_algorithm_hints: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::kdf_receiver_hints: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::key_size_rules: alloc::vec::Vec<frensense_engine::analysis::taint::facts::KeySizeRule>
-pub frensense_engine::analysis::taint::facts::table::FactTable::lang_sink_signatures: rustc_hash::FxHashMap<alloc::string::String, rustc_hash::FxHashMap<alloc::string::String, frensense_engine::analysis::taint::facts::SinkSignature>>
-pub frensense_engine::analysis::taint::facts::table::FactTable::lang_sources: rustc_hash::FxHashMap<alloc::string::String, rustc_hash::FxHashSet<alloc::string::String>>
-pub frensense_engine::analysis::taint::facts::table::FactTable::learned_checks: alloc::vec::Vec<(frensense_engine::analysis::taint::facts::LearnedCheckFact, frensense_engine::analysis::taint::facts::Provenance)>
-pub frensense_engine::analysis::taint::facts::table::FactTable::learned_sources: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::max_complexity: core::option::Option<usize>
-pub frensense_engine::analysis::taint::facts::table::FactTable::memory_contracts: alloc::vec::Vec<frensense_engine::analysis::taint::facts::MemoryContractFact>
-pub frensense_engine::analysis::taint::facts::table::FactTable::memory_functions: alloc::vec::Vec<frensense_engine::analysis::taint::facts::MemoryFuncSpec>
-pub frensense_engine::analysis::taint::facts::table::FactTable::null_tokens: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::policy_facts: alloc::vec::Vec<(frensense_engine::analysis::taint::facts::PolicyFact, frensense_engine::analysis::taint::facts::Provenance)>
-pub frensense_engine::analysis::taint::facts::table::FactTable::prepared_statement_prefixes: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::propagator_blocks_receiver: rustc_hash::FxHashMap<alloc::string::String, bool>
-pub frensense_engine::analysis::taint::facts::table::FactTable::propagators: rustc_hash::FxHashMap<alloc::string::String, alloc::vec::Vec<usize>>
-pub frensense_engine::analysis::taint::facts::table::FactTable::receiver_labels: rustc_hash::FxHashMap<(alloc::string::String, alloc::string::String), alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::receiver_params: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::receiver_qualified_sinks: rustc_hash::FxHashMap<alloc::string::String, rustc_hash::FxHashSet<alloc::string::String>>
-pub frensense_engine::analysis::taint::facts::table::FactTable::receiver_roles: rustc_hash::FxHashMap<(alloc::string::String, alloc::string::String), frensense_lang::severity::SinkRole>
-pub frensense_engine::analysis::taint::facts::table::FactTable::route_patterns: rustc_hash::FxHashMap<alloc::string::String, alloc::vec::Vec<alloc::string::String>>
-pub frensense_engine::analysis::taint::facts::table::FactTable::sanitizer_facts: rustc_hash::FxHashMap<alloc::string::String, frensense_engine::analysis::taint::facts::SanitizerFact>
-pub frensense_engine::analysis::taint::facts::table::FactTable::schema_builders: rustc_hash::FxHashMap<alloc::string::String, frensense_engine::analysis::taint::facts::Provenance>
-pub frensense_engine::analysis::taint::facts::table::FactTable::schema_describe_methods: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::schema_enforcers: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::schema_keywords: rustc_hash::FxHashMap<alloc::string::String, frensense_engine::analysis::taint::facts::Provenance>
-pub frensense_engine::analysis::taint::facts::table::FactTable::scoped_sanitizer_facts: rustc_hash::FxHashMap<(alloc::string::String, alloc::string::String), frensense_engine::analysis::taint::facts::SanitizerFact>
-pub frensense_engine::analysis::taint::facts::table::FactTable::scoped_sink_signatures: rustc_hash::FxHashMap<(alloc::string::String, alloc::string::String), frensense_engine::analysis::taint::facts::SinkSignature>
-pub frensense_engine::analysis::taint::facts::table::FactTable::scoped_sources: rustc_hash::FxHashSet<(alloc::string::String, alloc::string::String)>
-pub frensense_engine::analysis::taint::facts::table::FactTable::security_context_hints: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::session_accessors: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::session_roots: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::sink_signatures: rustc_hash::FxHashMap<alloc::string::String, frensense_engine::analysis::taint::facts::SinkSignature>
-pub frensense_engine::analysis::taint::facts::table::FactTable::stack_allocators: alloc::vec::Vec<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::suspicious_hash_wrappers: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::url_arg_hints: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::url_literal_hints: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::url_param_hints: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::verb_sinks: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::weak_crypto_rules: alloc::vec::Vec<frensense_engine::analysis::taint::facts::WeakCryptoFact>
-pub frensense_engine::analysis::taint::facts::table::FactTable::weak_hash_disclaimer_tokens: rustc_hash::FxHashSet<alloc::string::String>
-pub frensense_engine::analysis::taint::facts::table::FactTable::weak_hash_rules: alloc::vec::Vec<frensense_engine::analysis::taint::facts::WeakPrimitiveRule>
-impl frensense_engine::analysis::taint::facts::FactTable
-pub fn frensense_engine::analysis::taint::facts::FactTable::add_class_scoped_sanitizer(&mut self, frensense_engine::analysis::taint::facts::SanitizerFact, &[alloc::string::String])
-pub fn frensense_engine::analysis::taint::facts::FactTable::is_sink_call_scoped(&self, &str, core::option::Option<&str>, core::option::Option<&str>, core::option::Option<&str>) -> bool
-pub fn frensense_engine::analysis::taint::facts::FactTable::sanitizer_classes(&self, &str, core::option::Option<&str>) -> alloc::vec::Vec<alloc::string::String>
-pub fn frensense_engine::analysis::taint::facts::FactTable::sanitizer_fact(&self, &str) -> core::option::Option<&frensense_engine::analysis::taint::facts::SanitizerFact>
-pub fn frensense_engine::analysis::taint::facts::FactTable::scope_sanitizer(&mut self, &str, core::option::Option<&str>, &[alloc::string::String]) -> bool
-pub fn frensense_engine::analysis::taint::facts::FactTable::sink_signature(&self, &str) -> core::option::Option<&frensense_engine::analysis::taint::facts::SinkSignature>
-impl frensense_engine::analysis::taint::facts::FactTable
-pub fn frensense_engine::analysis::taint::facts::FactTable::from_config(&frensense_engine::analysis::taint::config::TaintConfig) -> Self
-pub fn frensense_engine::analysis::taint::facts::FactTable::get_grammar_role(&self, &str, &str) -> core::option::Option<frensense_lang::spec::NodeRole>
-pub fn frensense_engine::analysis::taint::facts::FactTable::has_grammar_feature(&self, &str, &str, frensense_engine::analysis::taint::facts::GrammarFeature) -> core::option::Option<bool>
-pub fn frensense_engine::analysis::taint::facts::FactTable::is_idor_finder_sink(&self, &str) -> bool
-pub fn frensense_engine::analysis::taint::facts::FactTable::is_idor_key(&self, &str) -> bool
-pub fn frensense_engine::analysis::taint::facts::FactTable::language_sources(&self, &str) -> core::option::Option<&rustc_hash::FxHashSet<alloc::string::String>>
-pub fn frensense_engine::analysis::taint::facts::FactTable::merge(&mut self, &frensense_engine::analysis::taint::facts::FactTable)
-pub fn frensense_engine::analysis::taint::facts::FactTable::propagator_blocks_receiver(&self, &str) -> bool
-pub fn frensense_engine::analysis::taint::facts::FactTable::sink_signature_for_language(&self, &str, core::option::Option<&str>) -> core::option::Option<&frensense_engine::analysis::taint::facts::SinkSignature>
-pub fn frensense_engine::analysis::taint::facts::FactTable::source_patterns(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
-pub mod frensense_engine::analysis::taint::facts::vocabulary
-pub const frensense_engine::analysis::taint::facts::vocabulary::FACT_VOCABULARY_FINGERPRINT: u64
-pub fn frensense_engine::analysis::taint::facts::vocabulary::fact_vocabulary_fingerprint() -> u64
 pub enum frensense_engine::analysis::taint::facts::AllocCapacity
 pub frensense_engine::analysis::taint::facts::AllocCapacity::Param(usize)
 pub frensense_engine::analysis::taint::facts::AllocCapacity::ParamProduct(usize, usize)
@@ -938,11 +447,10 @@ pub frensense_engine::analysis::taint::facts::FactTable::weak_hash_disclaimer_to
 pub frensense_engine::analysis::taint::facts::FactTable::weak_hash_rules: alloc::vec::Vec<frensense_engine::analysis::taint::facts::WeakPrimitiveRule>
 impl frensense_engine::analysis::taint::facts::FactTable
 pub fn frensense_engine::analysis::taint::facts::FactTable::add_class_scoped_sanitizer(&mut self, frensense_engine::analysis::taint::facts::SanitizerFact, &[alloc::string::String])
-pub fn frensense_engine::analysis::taint::facts::FactTable::is_sink_call_scoped(&self, &str, core::option::Option<&str>, core::option::Option<&str>, core::option::Option<&str>) -> bool
+pub fn frensense_engine::analysis::taint::facts::FactTable::qualify_sanitizer(&mut self, &str, core::option::Option<&str>, &[alloc::string::String], &[usize]) -> bool
 pub fn frensense_engine::analysis::taint::facts::FactTable::sanitizer_classes(&self, &str, core::option::Option<&str>) -> alloc::vec::Vec<alloc::string::String>
 pub fn frensense_engine::analysis::taint::facts::FactTable::sanitizer_fact(&self, &str) -> core::option::Option<&frensense_engine::analysis::taint::facts::SanitizerFact>
 pub fn frensense_engine::analysis::taint::facts::FactTable::scope_sanitizer(&mut self, &str, core::option::Option<&str>, &[alloc::string::String]) -> bool
-pub fn frensense_engine::analysis::taint::facts::FactTable::sink_signature(&self, &str) -> core::option::Option<&frensense_engine::analysis::taint::facts::SinkSignature>
 impl frensense_engine::analysis::taint::facts::FactTable
 pub fn frensense_engine::analysis::taint::facts::FactTable::from_config(&frensense_engine::analysis::taint::config::TaintConfig) -> Self
 pub fn frensense_engine::analysis::taint::facts::FactTable::get_grammar_role(&self, &str, &str) -> core::option::Option<frensense_lang::spec::NodeRole>
@@ -954,6 +462,9 @@ pub fn frensense_engine::analysis::taint::facts::FactTable::merge(&mut self, &fr
 pub fn frensense_engine::analysis::taint::facts::FactTable::propagator_blocks_receiver(&self, &str) -> bool
 pub fn frensense_engine::analysis::taint::facts::FactTable::sink_signature_for_language(&self, &str, core::option::Option<&str>) -> core::option::Option<&frensense_engine::analysis::taint::facts::SinkSignature>
 pub fn frensense_engine::analysis::taint::facts::FactTable::source_patterns(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+impl frensense_engine::analysis::taint::facts::FactTable
+pub fn frensense_engine::analysis::taint::facts::FactTable::is_sink_call_scoped(&self, &str, core::option::Option<&str>, core::option::Option<&str>, core::option::Option<&str>) -> bool
+pub fn frensense_engine::analysis::taint::facts::FactTable::sink_signature(&self, &str) -> core::option::Option<&frensense_engine::analysis::taint::facts::SinkSignature>
 pub struct frensense_engine::analysis::taint::facts::GuardBypassFact
 pub frensense_engine::analysis::taint::facts::GuardBypassFact::containment_callees: alloc::vec::Vec<alloc::string::String>
 pub frensense_engine::analysis::taint::facts::GuardBypassFact::credential_params: alloc::vec::Vec<alloc::string::String>
@@ -1112,12 +623,6 @@ pub fn frensense_engine::analysis::value::ValueInfo::const_int(&self, frensense_
 pub fn frensense_engine::analysis::value::ValueInfo::const_str(&self, frensense_engine::ir::function::VarId) -> core::option::Option<&str>
 pub fn frensense_engine::analysis::value::analyze(&frensense_engine::ir::function::FunctionIR) -> frensense_engine::analysis::value::ValueInfo
 pub mod frensense_engine::checks
-pub mod frensense_engine::checks::guard_bypass
-pub fn frensense_engine::checks::guard_bypass::check(&frensense_engine::ir::function::FunctionIR, &frensense_engine::analysis::taint::facts::FactTable) -> alloc::vec::Vec<frensense_engine::checks::CheckerFinding>
-pub mod frensense_engine::checks::health
-pub fn frensense_engine::checks::health::check(&frensense_engine::ir::function::FunctionIR) -> alloc::vec::Vec<frensense_engine::checks::CheckerFinding>
-pub mod frensense_engine::checks::leak
-pub fn frensense_engine::checks::leak::check(&frensense_engine::ir::function::FunctionIR, &frensense_engine::checks::memory_summary::MemorySummaryRegistry, &frensense_engine::analysis::taint::facts::FactTable) -> alloc::vec::Vec<frensense_engine::checks::CheckerFinding>
 pub mod frensense_engine::checks::memory_summary
 pub enum frensense_engine::checks::memory_summary::CapacitySpec
 pub frensense_engine::checks::memory_summary::CapacitySpec::Exact(i64)
@@ -1140,15 +645,6 @@ pub fn frensense_engine::checks::memory_summary::MemorySummaryRegistry::returns_
 pub mod frensense_engine::checks::policy
 pub fn frensense_engine::checks::policy::check_program(&[&frensense_engine::ir::function::FunctionIR], &frensense_engine::analysis::taint::facts::FactTable) -> alloc::vec::Vec<frensense_engine::checks::CheckerFinding>
 pub fn frensense_engine::checks::policy::guard_dominates_trigger_call(&frensense_engine::ir::function::FunctionIR, &str, &str) -> bool
-pub mod frensense_engine::checks::registry
-pub mod frensense_engine::checks::schema_policy
-pub fn frensense_engine::checks::schema_policy::check(&frensense_engine::ir::function::FunctionIR, &frensense_engine::analysis::taint::facts::FactTable) -> alloc::vec::Vec<frensense_engine::checks::CheckerFinding>
-pub mod frensense_engine::checks::uaf
-pub mod frensense_engine::checks::uaf::discovery
-pub mod frensense_engine::checks::uaf::types
-pub mod frensense_engine::checks::uaf::walker
-pub mod frensense_engine::checks::weak_hash
-pub fn frensense_engine::checks::weak_hash::check(&frensense_engine::ir::function::FunctionIR, &frensense_engine::analysis::taint::facts::FactTable) -> alloc::vec::Vec<frensense_engine::checks::CheckerFinding>
 pub enum frensense_engine::checks::Provenance
 pub frensense_engine::checks::Provenance::Authored
 pub frensense_engine::checks::Provenance::Learned
@@ -1175,10 +671,6 @@ pub fn frensense_engine::debug_flags::DebugFlags::get() -> Self
 pub fn frensense_engine::debug_flags::DebugFlags::install_from(impl core::ops::function::Fn(&'static str) -> core::option::Option<std::ffi::os_str::OsString>)
 pub fn frensense_engine::debug_flags::rss_kb() -> u64
 pub mod frensense_engine::graph
-pub mod frensense_engine::graph::callgraph
-pub mod frensense_engine::graph::heap
-pub mod frensense_engine::graph::module
-pub const frensense_engine::graph::module::MAX_REEXPORT_RESOLVE_DEPTH: usize
 pub mod frensense_engine::graph::svfg
 pub enum frensense_engine::graph::svfg::NodeKind
 pub frensense_engine::graph::svfg::NodeKind::ActualArg
@@ -1211,7 +703,6 @@ pub mod frensense_engine::harness
 pub fn frensense_engine::harness::lower_source(&str, &str, &str) -> core::result::Result<rustc_hash::FxHashMap<alloc::string::String, frensense_engine::ir::function::FunctionIR>, alloc::string::String>
 pub fn frensense_engine::harness::lower_source_with_facts(&str, &str, &str, core::option::Option<&frensense_engine::analysis::taint::facts::FactTable>) -> core::result::Result<rustc_hash::FxHashMap<alloc::string::String, frensense_engine::ir::function::FunctionIR>, alloc::string::String>
 pub mod frensense_engine::ir
-pub mod frensense_engine::ir::control
 pub mod frensense_engine::ir::function
 pub enum frensense_engine::ir::function::AllocationKind
 pub frensense_engine::ir::function::AllocationKind::Array
@@ -1372,8 +863,6 @@ pub frensense_engine::ir::function::VarMetadata::object_keys: alloc::vec::Vec<al
 pub frensense_engine::ir::function::VarMetadata::source_name: core::option::Option<alloc::string::String>
 pub frensense_engine::ir::function::VarMetadata::type_name: core::option::Option<alloc::string::String>
 pub mod frensense_engine::ir::lowering
-pub mod frensense_engine::ir::lowering::assign
-pub mod frensense_engine::ir::lowering::call
 pub mod frensense_engine::ir::lowering::context
 pub struct frensense_engine::ir::lowering::context::LoweringContext<'a>
 pub frensense_engine::ir::lowering::context::LoweringContext::env: alloc::vec::Vec<rustc_hash::FxHashMap<alloc::string::String, frensense_engine::ir::function::VarId>>
@@ -1399,8 +888,6 @@ impl<'a> frensense_engine::ir::lowering::context::LoweringContext<'a>
 pub fn frensense_engine::ir::lowering::context::LoweringContext<'a>::visit_unary_op(&mut self, tree_sitter::Node<'_>) -> core::option::Option<frensense_engine::ir::function::Operand>
 impl core::fmt::Debug for frensense_engine::ir::lowering::context::LoweringContext<'_>
 pub fn frensense_engine::ir::lowering::context::LoweringContext<'_>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-pub mod frensense_engine::ir::lowering::decl
-pub mod frensense_engine::ir::lowering::expr
 pub struct frensense_engine::ir::lowering::LoweringContext<'a>
 pub frensense_engine::ir::lowering::LoweringContext::env: alloc::vec::Vec<rustc_hash::FxHashMap<alloc::string::String, frensense_engine::ir::function::VarId>>
 pub frensense_engine::ir::lowering::LoweringContext::facts: core::option::Option<&'a frensense_engine::analysis::taint::facts::FactTable>

@@ -1,11 +1,11 @@
 [package]
 name = "frensense-engine"
-version = "0.9.1"
+version = "0.10.0"
 authors = ["Friehub Developers"]
 edition = "2024"
 description = "Frensense engine core - IR lowering, value-flow analysis, interprocedural taint, and policy checks"
 license = "GPL-3.0-only"
-readme = "../README.md"
+readme = "README.md"
 repository = "https://github.com/Friehub/Frensense-v2"
 documentation = "https://frensense.friehub.cloud"
 rust-version = "1.95"
@@ -17,7 +17,7 @@ name = "frensense_engine"
 workspace = true
 
 [dependencies]
-frensense-lang = { path = "../frensense-lang", version = "0.8.2" }
+frensense-lang = { path = "../frensense-lang", version = "0.9.0" }
 
 tree-sitter = "0.23"
 tree-sitter-rust = { version = "0.23", optional = true }

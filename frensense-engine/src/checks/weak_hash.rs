@@ -44,7 +44,7 @@ fn receiver_path(ir: &FunctionIR, facts: &FactTable) -> Option<String> {
 
 /// The weak-hash / weak-crypto rule: scan one function for security-weak
 /// primitives.
-pub fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
+pub(crate) fn check(ir: &FunctionIR, facts: &FactTable) -> Vec<CheckerFinding> {
     check_function(ir, facts)
 }
 

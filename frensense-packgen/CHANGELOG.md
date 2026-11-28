@@ -20,6 +20,12 @@ There is no semver contract here (nothing is published, and
 
 ### Added
 
+- **Python sink facts from the OWASP run (patch 0037).** `os.path.exists` joins
+  the path-traversal sinks, and `elementpath.select(root, expr)` is an XPath
+  sink at argument slot 1, alongside the existing `xpath` / `XPath` entries.
+  The two cover the misses where a joined path was only tested for existence
+  and where an ElementPath expression was evaluated instead of an lxml one.
+
 - **Framework-specific knowledge files for JavaScript and TypeScript.**
   Reorganized the JS/TS vocabulary out of a single monolithic table into
   per-framework modules:

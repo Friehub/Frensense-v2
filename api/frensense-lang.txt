@@ -457,14 +457,15 @@ pub frensense_lang::severity::SanitizerKind::HtmlEscape
 pub frensense_lang::severity::SanitizerKind::NoSqlParameterize
 pub frensense_lang::severity::SanitizerKind::PathNormalize
 pub frensense_lang::severity::SanitizerKind::SessionTrust
+pub frensense_lang::severity::SanitizerKind::ShellQuote
 pub frensense_lang::severity::SanitizerKind::SqlParameterize
 pub frensense_lang::severity::SanitizerKind::UrlEncode
-impl frensense_lang::severity::SanitizerKind
-pub fn frensense_lang::severity::SanitizerKind::defeats_classes(&self, frensense_lang::severity::SinkRole, core::option::Option<&str>, &[alloc::string::String]) -> bool
-pub fn frensense_lang::severity::SanitizerKind::defeats_role_and_label(&self, frensense_lang::severity::SinkRole, core::option::Option<&str>) -> bool
-pub fn frensense_lang::severity::SanitizerKind::defeats_sink(&self, frensense_lang::severity::SinkRole, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String]) -> bool
-pub fn frensense_lang::severity::SanitizerKind::from_slug(&str) -> core::option::Option<Self>
-pub fn frensense_lang::severity::SanitizerKind::slug(&self) -> &'static str
+impl frensense_lang::SanitizerKind
+pub fn frensense_lang::SanitizerKind::defeats_classes(&self, frensense_lang::severity::SinkRole, core::option::Option<&str>, &[alloc::string::String]) -> bool
+pub fn frensense_lang::SanitizerKind::defeats_role_and_label(&self, frensense_lang::severity::SinkRole, core::option::Option<&str>) -> bool
+pub fn frensense_lang::SanitizerKind::defeats_sink(&self, frensense_lang::severity::SinkRole, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String]) -> bool
+pub fn frensense_lang::SanitizerKind::from_slug(&str) -> core::option::Option<Self>
+pub fn frensense_lang::SanitizerKind::slug(&self) -> &'static str
 pub enum frensense_lang::severity::Severity
 pub frensense_lang::severity::Severity::Critical
 pub frensense_lang::severity::Severity::Info
@@ -604,6 +605,8 @@ pub frensense_lang::spec::PackageCategory::SqlDatabase
 pub frensense_lang::spec::PackageCategory::TemplateEngine
 pub frensense_lang::spec::PackageCategory::Testing
 pub frensense_lang::spec::PackageCategory::WebSocket
+impl frensense_lang::spec::PackageCategory
+pub fn frensense_lang::spec::PackageCategory::sink_role(&self) -> core::option::Option<frensense_lang::severity::SinkRole>
 pub enum frensense_lang::spec::TaintOrigin
 pub frensense_lang::spec::TaintOrigin::Custom(alloc::string::String)
 pub frensense_lang::spec::TaintOrigin::Database
@@ -1208,6 +1211,8 @@ pub frensense_lang::PackageCategory::SqlDatabase
 pub frensense_lang::PackageCategory::TemplateEngine
 pub frensense_lang::PackageCategory::Testing
 pub frensense_lang::PackageCategory::WebSocket
+impl frensense_lang::spec::PackageCategory
+pub fn frensense_lang::spec::PackageCategory::sink_role(&self) -> core::option::Option<frensense_lang::severity::SinkRole>
 #[non_exhaustive] pub enum frensense_lang::ParseError
 pub frensense_lang::ParseError::Cancelled
 pub frensense_lang::ParseError::Grammar(tree_sitter::LanguageError)
@@ -1240,14 +1245,15 @@ pub frensense_lang::SanitizerKind::HtmlEscape
 pub frensense_lang::SanitizerKind::NoSqlParameterize
 pub frensense_lang::SanitizerKind::PathNormalize
 pub frensense_lang::SanitizerKind::SessionTrust
+pub frensense_lang::SanitizerKind::ShellQuote
 pub frensense_lang::SanitizerKind::SqlParameterize
 pub frensense_lang::SanitizerKind::UrlEncode
-impl frensense_lang::severity::SanitizerKind
-pub fn frensense_lang::severity::SanitizerKind::defeats_classes(&self, frensense_lang::severity::SinkRole, core::option::Option<&str>, &[alloc::string::String]) -> bool
-pub fn frensense_lang::severity::SanitizerKind::defeats_role_and_label(&self, frensense_lang::severity::SinkRole, core::option::Option<&str>) -> bool
-pub fn frensense_lang::severity::SanitizerKind::defeats_sink(&self, frensense_lang::severity::SinkRole, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String]) -> bool
-pub fn frensense_lang::severity::SanitizerKind::from_slug(&str) -> core::option::Option<Self>
-pub fn frensense_lang::severity::SanitizerKind::slug(&self) -> &'static str
+impl frensense_lang::SanitizerKind
+pub fn frensense_lang::SanitizerKind::defeats_classes(&self, frensense_lang::severity::SinkRole, core::option::Option<&str>, &[alloc::string::String]) -> bool
+pub fn frensense_lang::SanitizerKind::defeats_role_and_label(&self, frensense_lang::severity::SinkRole, core::option::Option<&str>) -> bool
+pub fn frensense_lang::SanitizerKind::defeats_sink(&self, frensense_lang::severity::SinkRole, core::option::Option<&str>, core::option::Option<&str>, &[alloc::string::String]) -> bool
+pub fn frensense_lang::SanitizerKind::from_slug(&str) -> core::option::Option<Self>
+pub fn frensense_lang::SanitizerKind::slug(&self) -> &'static str
 pub enum frensense_lang::Severity
 pub frensense_lang::Severity::Critical
 pub frensense_lang::Severity::Info

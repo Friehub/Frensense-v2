@@ -131,6 +131,32 @@ fn truncate_path(path: &str, max_len: usize) -> String {
     }
 }
 
+/// Whether this run is watched by a person: text output, interactive stderr and
+/// progress not switched off.
+///
+/// `--json`, `--sarif` and `--github` exist for pipes, CI and editors; a notice
+/// line in front of machine output is noise there, and a redirected stderr is
+/// nobody watching.
+#[must_use]
+fn notice_wanted(format: &str, quiet: bool, is_tty: bool) -> bool {
+    !quiet && format == "text" && is_tty
+}
+
+/// Say, once per scan, that the report records telemetry and keeps it local.
+///
+/// There is no first-run state: the marker would live in a home directory or
+/// the scanned tree, and the notice promises neither. So the line prints on
+/// every interactive scan and stays silent for machine formats, redirected
+/// stderr and `--no-progress`.
+pub fn announce_telemetry(format: &str, quiet: bool) {
+    if !notice_wanted(format, quiet, std::io::stderr().is_terminal()) {
+        return;
+    }
+    eprintln!(
+        "frensense: telemetry is recorded in this report and never uploaded (paths included);\n         FRENSENSE_TELEMETRY_PATHS=basename redacts them."
+    );
+}
+
 impl ProgressReporter {
     /// Create a new progress reporter.
     #[must_use]
@@ -286,6 +312,23 @@ impl ScanObserver for ProgressReporter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The telemetry line is for a person at a terminal: machine formats,
+    /// redirected stderr and `--no-progress` must stay silent, because a notice
+    /// in front of parseable output breaks the parser that reads it.
+    #[test]
+    fn the_telemetry_notice_is_for_humans_only() {
+        assert!(notice_wanted("text", false, true));
+        assert!(!notice_wanted("text", true, true), "--no-progress is quiet");
+        assert!(
+            !notice_wanted("json", false, true),
+            "json is machine output"
+        );
+        assert!(
+            !notice_wanted("text", false, false),
+            "redirected stderr is nobody watching"
+        );
+    }
 
     #[test]
     fn format_rss_handles_ranges() {

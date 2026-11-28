@@ -43,8 +43,8 @@
 //! reproduces today's behaviour, override it per grammar where the spelling
 //! differs, and pin both in `providers/node_vocabulary_tests.rs`.
 
+mod category;
 use std::borrow::Cow;
-
 use tree_sitter::Node;
 
 // ── Supporting types ─────────────────────────────────────────────────────────
@@ -213,8 +213,6 @@ pub enum NodeRole {
     /// Anything the engine does not need to inspect.
     Other,
 }
-
-impl NodeRole {}
 
 /// A statement that transfers control to a labelled block or out of the
 /// current loop/switch.
@@ -469,6 +467,10 @@ impl ModuleItem {
 ///
 /// The trait is object-safe: it can be stored as `Arc<dyn LanguageSpec>` in
 /// the [`LanguageRegistry`](crate::registry::LanguageRegistry).
+/// A component field visible to a template: its name and the span of its
+/// initializer in the file.
+pub type TemplateBinding = (String, (usize, usize));
+
 pub trait LanguageSpec: Send + Sync + 'static {
     // ── Identity ─────────────────────────────────────────────────────────
 
@@ -481,18 +483,26 @@ pub trait LanguageSpec: Send + Sync + 'static {
     /// The tree-sitter `Language` object for parsing.
     fn tree_sitter_language(&self) -> tree_sitter::Language;
 
-    /// Rewrites the source into something the grammar can parse, run
-    /// immediately before lowering. The default is the identity: the
-    /// source is parsed as-is.
-    ///
-    /// **Position contract**: the rewrite MUST preserve every byte offset
-    /// — same total length, same newline layout — so tree-sitter nodes and
-    /// every line/column derived from them still point at the original
-    /// file. Single-file-container formats (Vue SFCs, and later Svelte or
-    /// Astro) use this to blank template markup into same-length runs of
-    /// spaces instead of extracting script text to a separate buffer.
+    /// Rewrites the source before parsing. Defaults to the identity.
+    /// **Position contract**: same byte length and newlines, so parse offsets
+    /// and derived line/columns still point at the original file.
     fn preprocess<'a>(&self, source: &'a str) -> std::borrow::Cow<'a, str> {
         std::borrow::Cow::Borrowed(source)
+    }
+
+    /// Unescaped template writes to lower and report; see `javascript::sfc`.
+    fn template_writes(&self, _source: &str) -> Vec<(usize, usize)> {
+        Vec::new()
+    }
+
+    /// Expressions lowered for analysis only, without a write sink.
+    fn template_expressions(&self, _source: &str) -> Vec<(usize, usize)> {
+        Vec::new()
+    }
+
+    /// Component fields an inline template can read (Angular).
+    fn template_bindings(&self, _source: &str) -> Vec<TemplateBinding> {
+        Vec::new()
     }
 
     /// The language key the FactTable and learned bundles key this spec's
@@ -508,19 +518,9 @@ pub trait LanguageSpec: Send + Sync + 'static {
 
     /// Classify a tree-sitter node kind into a [`NodeRole`].
     ///
-    /// This is the single hot-path entry point for all engine subsystems.
-    /// The returned variant carries the field names needed by the caller so
-    /// no second lookup is required.
-    ///
+    /// The single hot-path entry point for all engine subsystems.
     /// ```rust,ignore
-    /// match spec.classify(node.kind()) {
-    ///     NodeRole::Call { callee_field, args_field } => {
-    ///         let callee = node.child_by_field_name(callee_field);
-    ///         // …
-    ///     }
-    ///     NodeRole::Assignment { lhs_field, rhs_field } => { /* … */ }
-    ///     _ => {}
-    /// }
+    /// if let NodeRole::Call { callee_field, .. } = spec.classify(node.kind()) { /* … */ }
     /// ```
     fn classify(&self, kind: &str) -> NodeRole;
 

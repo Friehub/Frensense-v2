@@ -442,7 +442,7 @@ fn extend_leaks(
 
 /// Run the allocation-lifetime check over one function.
 ///
-/// ```
+/// ```text
 /// use frensense_engine::checks::memory_summary::{CapacitySpec, MemorySummary, MemorySummaryRegistry};
 /// use frensense_engine::analysis::taint::facts::FactTable;
 /// use frensense_engine::harness::lower_source;
@@ -473,7 +473,7 @@ fn extend_leaks(
 /// // Released on the only path: no leak.
 /// assert!(rules("void f(void) { char *p = malloc(8); free(p); }").is_empty());
 /// ```
-pub fn check(
+pub(crate) fn check(
     ir: &FunctionIR,
     summaries: &MemorySummaryRegistry,
     facts: &crate::analysis::taint::facts::FactTable,

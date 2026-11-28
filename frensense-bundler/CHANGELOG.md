@@ -11,6 +11,47 @@ its replay gate, the corpus `lint` checks, and the embedded default-pack asset.
 in *this* file, so a format change - not the root changelog - is what records
 artifact compatibility.
 
+## [0.10.0]
+
+### Breaking
+
+- **`LoadedBundle` gained fields and `SanitizerArgScope` is `#[non_exhaustive]`.**
+  A consumer that builds or destructures either type must go through the
+  loaders; the slot table is data the payload owns, so it stays extensible.
+
+### Format
+
+- **`BUNDLE_VERSION` is now 9.** The v9 payload adds `sanitizer_args`: the
+  argument slots each learned sanitizer validates, authored per corpus family
+  with `[frensense] sanitized-args:` or proven by the build (see below). Exactly like the class scope it rides in
+  a side table, because the engine's `SanitizerFact::sanitizes_args` has no
+  wire variant. `LoadedBundle` gains `sanitizer_args`, and
+  `effective_sanitizer_scopes` now returns an `EffectiveSanitizerScope` that
+  joins the class scope with the declared slots, so a consumer applies both
+  with one `FactTable::qualify_sanitizer` call. v6, v7 and v8 bundles still
+  load unchanged, with empty tables and the legacy "all arguments" reading.
+
+### Added
+
+- `[frensense] sanitized-args: <slot>[, ...]` on a corpus family: the slots a
+  declared sanitizer actually inspects (`sanitizer: check` +
+  `sanitized-args: 1`). The build-time cross-class canary replays the fact
+  with the same qualification, so a narrowed fact that stops separating a
+  family's negative fails the build instead of shipping.
+- **Proven argument slots.** A sanitizer whose families author no
+  `sanitized-args:` line is probed instead of left unqualified - guard-style
+  facts through the guard map, transform facts through the argument edges
+  their cut covers. The published fact, narrowed to one slot, is replayed
+  against the families that taught it, and a slot that still silences their
+  negatives while they alert with no fact at all is a slot the corpus proves.
+  The probe spans the call's observed arity (`max_call_arity`), so it tries
+  every argument position the samples pass and never stops at a fixed number
+  of slots. A fact no probe pins keeps the legacy all-arguments reading, so the
+  build never narrows one on a guess. This is the in-tree producer of slot
+  sets: a corpus build now ships them with no authoring at all.
+- `SanitizerArgScope` and `BundlePayloadV9` payload types,
+  `EffectiveSanitizerScope`, and `LoadedBundle::sanitizer_args`.
+
 ## [0.9.0]
 
 ### Breaking

@@ -19,12 +19,20 @@
 //! the tree the parser sees is plain TS, because the Vue markup is
 //! whitespace by then.
 //!
+//! Markup that *writes* rendered HTML (`v-html`, `v-text`) is reported as
+//! expression spans by [`LanguageSpec::template_writes`] rather than rewritten
+//! into code; the engine lowers the write in its IR (see
+//! `frensense_engine::module_scope`). See [`super::sfc`] for the shared
+//! blanking mechanics and [`super::mod`] for the steps to add another
+//! component format.
+//!
 //! Security vocabulary (sinks, sources, sanitizers) lives in
 //! `frensense-packgen`; this file is mechanism only.
 
 use std::borrow::Cow;
 
 use super::family::{JsDialect, JsFamily};
+use super::sfc::{comment_ranges, extract_script_blocks, in_ranges, starts_with_ci};
 
 /// A `.vue` SFC whose script blocks are parsed with the TypeScript/TSX
 /// grammar after its `preprocess` blanks the template and style sections in
@@ -32,7 +40,8 @@ use super::family::{JsDialect, JsFamily};
 ///
 /// The script blocks are TypeScript, so every behavioural method comes from
 /// the JavaScript family's blanket [`LanguageSpec`](crate::spec::LanguageSpec)
-/// implementation; this type adds only the SFC rewrite.
+/// implementation; this type adds only the SFC rewrite and its template-write
+/// vocabulary.
 #[derive(Debug)]
 pub struct VueSpec;
 
@@ -45,100 +54,101 @@ impl JsFamily for VueSpec {
     fn preprocess_source<'a>(&self, source: &'a str) -> Cow<'a, str> {
         extract_script_blocks(source)
     }
-}
 
-/// True when `bytes` starts with `tag` (ASCII case-insensitive).
-fn starts_with_ci(bytes: &[u8], tag: &str) -> bool {
-    bytes.len() >= tag.len() && bytes[..tag.len()].eq_ignore_ascii_case(tag.as_bytes())
-}
-
-/// Index of the next case-insensitive occurrence of `tag` in `bytes`.
-#[must_use]
-fn find_ci(bytes: &[u8], tag: &str) -> Option<usize> {
-    if bytes.len() < tag.len() {
-        return None;
+    /// The expressions `v-html`/`v-text` render. The engine lowers each into
+    /// the template-write sink after the script body, so the value is defined
+    /// before it is written and no spare bytes are needed.
+    fn template_writes_source(&self, source: &str) -> Vec<(usize, usize)> {
+        let bytes = source.as_bytes();
+        let templates = template_spans(bytes);
+        let comments = comment_ranges(bytes, &templates);
+        template_sinks(bytes, &templates, &comments)
+            .into_iter()
+            .map(|(_, start, end)| (start, end))
+            .collect()
     }
-    (0..=bytes.len() - tag.len()).find(|&i| starts_with_ci(&bytes[i..], tag))
 }
 
-/// Rewrite an SFC: keep only bytes inside `<script>` blocks, blank the rest.
-///
-/// Blanked bytes become spaces (newlines are kept), so the output is a valid
-/// TS module with exactly the same length and newline layout as the input.
-/// Every offset — and therefore every reported line/column — stays anchored
-/// to the original file.
-///
-/// Note: a `<script src="…">` block has an empty body, so its attribute
-/// string (and the empty body) stay verbatim between the (blanked) tags.
-/// That is deliberate: `src="…"` is a valid TS expression sequence of
-/// nothing once we blank it, and keeping the body region lets a stray
-/// `<script>` inside markup degrade to a parse error rather than vanish.
-#[must_use]
-pub(super) fn extract_script_blocks(source: &str) -> Cow<'_, str> {
-    let bytes = source.as_bytes();
-    // Fast path: the source is not an SFC at all (no `<script` and no
-    // `<template`), so it is ordinary TS already: return it untouched. A
-    // template-only component (no `<script`) is still an SFC and must be
-    // blanked so the parser sees an empty module, not HTML.
-    if find_ci(bytes, "<script").is_none() && find_ci(bytes, "<template").is_none() {
-        return Cow::Borrowed(source);
-    }
-
-    // Byte mask: true = keep verbatim, false = blank to space (newline kept).
-    let mut keep = vec![false; bytes.len()];
-
+/// Byte spans of every `<template>` element body, nesting aware.
+fn template_spans(bytes: &[u8]) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut open: Vec<usize> = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
-        if !starts_with_ci(&bytes[i..], "<script") {
-            i += 1;
+        let rest = bytes.get(i..).unwrap_or_default();
+        if starts_with_ci(rest, "<template") {
+            open.push(i);
+            i += 9;
             continue;
         }
-        // `"<script"` must be followed by `>`, `/` or whitespace: rejects
-        // `<scriptx`-shaped markup around real code.
-        let after = bytes.get(i + 7).copied();
-        if !after.is_some_and(|c| c == b'>' || c == b'/' || c.is_ascii_whitespace()) {
-            i += 1;
+        if starts_with_ci(rest, "</template") {
+            if let Some(start) = open.pop() {
+                if let Some(gt) = rest.iter().position(|&c| c == b'>') {
+                    spans.push((start, i + gt + 1));
+                }
+            }
+            i += 10;
             continue;
         }
-        // Blank the opener `<script … >`.
-        let Some(gt_rel) = bytes[i..].iter().position(|&c| c == b'>') else {
-            break; // malformed opener: nothing more to keep
-        };
-        let body_start = i + gt_rel + 1;
-        match find_ci(&bytes[body_start..], "</script") {
-            Some(rel_end) => {
-                let body_end = body_start + rel_end;
-                keep[body_start..body_end].fill(true);
-                // Blank the closer `</script … >`; resume scanning after it.
-                i = bytes[body_end..]
-                    .iter()
-                    .position(|&c| c == b'>')
-                    .map_or(bytes.len(), |p| body_end + p + 1);
-            }
-            None => {
-                // Unterminated block: keep the remainder as code; whatever
-                // the file had reached EOF is what the parser sees.
-                keep[body_start..].fill(true);
-                break;
-            }
-        }
+        i += 1;
     }
-
-    let blanked: Vec<u8> = blank(bytes, &keep);
-    Cow::Owned(String::from_utf8(blanked).expect("blanking preserves valid UTF-8"))
+    spans
 }
 
-/// Blank `bytes` per `keep`: kept bytes verbatim, others space (newline kept).
+/// Template writes: each directive marker inside `templates`, as `(marker
+/// start, expression start, expression end)`.
 ///
-/// A non-ASCII blanked character becomes one space per original byte, so the
-/// byte length — and every offset after it — is unchanged, and the result
-/// stays valid UTF-8.
-fn blank(bytes: &[u8], keep: &[bool]) -> Vec<u8> {
-    bytes
-        .iter()
-        .zip(keep)
-        .map(|(&byte, &kept)| if kept || byte == b'\n' { byte } else { b' ' })
-        .collect()
+/// [`LanguageSpec::template_writes`](crate::spec::LanguageSpec::template_writes)
+/// hands the expression spans to the engine, which lowers the write in its IR;
+/// this module never rewrites the directive into code.
+///
+/// Only quoted directives are recognised (`v-html="expr"`); a directive
+/// without a value has nothing to render, and Vue does not accept a bare
+/// `v-html` in a template anyway.
+fn template_sinks(
+    bytes: &[u8],
+    templates: &[(usize, usize)],
+    comments: &[(usize, usize)],
+) -> Vec<(usize, usize, usize)> {
+    let mut sinks = Vec::new();
+    for &(start, end) in templates {
+        let mut i = start;
+        while i < end {
+            let marker = [b"v-html=".as_slice(), b"v-text=".as_slice()]
+                .into_iter()
+                .find(|m| {
+                    bytes
+                        .get(i..i + m.len())
+                        .is_some_and(|hit| hit.eq_ignore_ascii_case(m))
+                });
+            let Some(marker) = marker else {
+                i += 1;
+                continue;
+            };
+            if in_ranges(comments, i) {
+                i += marker.len();
+                continue;
+            }
+            let quote = i + marker.len();
+            if bytes.get(quote) != Some(&b'"') {
+                i += marker.len();
+                continue;
+            }
+            let expr_start = quote + 1;
+            let Some(rel_close) = bytes
+                .get(expr_start..end)
+                .and_then(|rest| rest.iter().position(|&c| c == b'"'))
+            else {
+                break;
+            };
+            let expr_end = expr_start + rel_close;
+            if expr_end > expr_start {
+                sinks.push((i, expr_start, expr_end));
+            }
+            i = expr_end + 1;
+        }
+    }
+    sinks
 }
 
 #[cfg(test)]
@@ -254,6 +264,37 @@ mod tests {
             Cow::Borrowed(s) => assert_eq!(s, src),
             Cow::Owned(_) => panic!("plain TS must be returned borrowed"),
         }
+    }
+
+    /// The engine reads the expression span, not a rewritten call: render
+    /// length must not be limited by spare bytes anywhere in the file.
+    #[test]
+    fn v_html_reports_its_expression_span() {
+        let sfc = "<template>\n  <div v-html=\"user.profile.bio\"></div>\n</template>\n<script setup lang=\"ts\">\nconst user = location.search\n</script>\n";
+        let writes = VueSpec.template_writes(sfc);
+        assert_eq!(writes.len(), 1, "one template write: {writes:?}");
+        let (start, end) = writes[0];
+        assert_eq!(&sfc[start..end], "user.profile.bio");
+        assert!(
+            !VueSpec.preprocess(sfc).contains("user.profile.bio"),
+            "the markup itself is still blanked, not rewritten into code"
+        );
+    }
+
+    #[test]
+    fn v_text_reports_too_and_plain_markup_does_not() {
+        let sfc = "<template><p v-text=\"msg\"></p><span :title=\"x\"></span></template>\n<script>const msg = a</script>\n<style>.x { color: red; }</style>\n";
+        let writes = VueSpec.template_writes(sfc);
+        assert_eq!(writes.len(), 1, "only html/text directives: {writes:?}");
+        assert_eq!(&sfc[writes[0].0..writes[0].1], "msg");
+    }
+
+    #[test]
+    fn directives_outside_a_template_are_not_writes() {
+        let sfc = "<script>const a = 'v-html=\"x\"';</script>\n";
+        assert!(VueSpec.template_writes(sfc).is_empty());
+        let out = extract_script_blocks(sfc);
+        assert!(out.contains("v-html"), "script text must not be rewritten");
     }
 
     #[test]

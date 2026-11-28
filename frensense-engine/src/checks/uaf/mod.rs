@@ -13,15 +13,15 @@
 //! - `uninit`: Uninitialized pointer deallocation detection on error paths
 
 /// Candidate collection and alias checks.
-pub mod discovery;
+pub(crate) mod discovery;
 /// Greatest-fixpoint must-reach dataflow used to validate discovered pairs.
 pub(crate) mod must_exec;
 /// Core data structures: violations, free sites, pairs and cross-function context.
-pub mod types;
+pub(crate) mod types;
 /// Uninitialized pointer deallocation detection on error paths.
 pub(crate) mod uninit;
 /// Backward SVFG traversal for provenance and free-site discovery.
-pub mod walker;
+pub(crate) mod walker;
 
 use rustc_hash::FxHashMap;
 

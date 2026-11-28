@@ -42,7 +42,7 @@ use std::fmt;
 /// or the fact-entry vocabulary requires a bump here. The engine's
 /// `FACT_VOCABULARY_FINGERPRINT` ratchet catches vocabulary movement; this
 /// number catches layout movement. `docs/FORMATS.md` records both.
-pub const BUNDLE_VERSION: u32 = 8;
+pub const BUNDLE_VERSION: u32 = 10;
 
 pub const BUNDLE_MAGIC: &[u8; 4] = b"FRC1";
 
@@ -573,7 +573,7 @@ mod tests {
     /// The prefix peek agrees with the decoded header for every shape.
     #[test]
     fn version_prefix_matches_decoded_header() {
-        for version in [6u32, 8] {
+        for version in [6u32, BUNDLE_VERSION] {
             let header = if version == 6 {
                 BundleHeader::legacy(3, [0; 32])
             } else {

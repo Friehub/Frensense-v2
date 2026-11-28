@@ -11,6 +11,7 @@
 //! severity, impact, and tags (plus observation on the checker path).
 
 use super::Engine;
+use super::angular_scope;
 use crate::engine::files::{UnsupportedSourceFile, collect_files_with};
 use crate::{Advisory, Result, Severity};
 use std::path::Path;
@@ -80,7 +81,7 @@ impl Engine {
                 .and_then(|e| e.to_str())
                 .map(str::to_lowercase)
                 .unwrap_or_default();
-            if frensense_lang::spec_for_ext(&ext).is_none() {
+            if frensense_lang::spec_for_path(p).is_none() {
                 if root.is_file() {
                     unsupported += 1;
                 }
@@ -142,9 +143,11 @@ impl Engine {
         let mut groups: std::collections::BTreeMap<&'static str, Vec<(String, String, String)>> =
             std::collections::BTreeMap::new();
         for f in &files {
-            if let Some(spec) = frensense_lang::spec_for_ext(&f.2) {
+            if let Some(spec) = frensense_lang::spec_for_path(std::path::Path::new(&f.0)) {
                 let family = match spec.name() {
-                    "javascript" | "typescript" | "vue" => "javascript",
+                    "javascript" | "typescript" | "vue" | "svelte" | "astro" | "angular" => {
+                        "javascript"
+                    }
                     other => other,
                 };
                 groups.entry(family).or_default().push(f.clone());
@@ -193,6 +196,7 @@ impl Engine {
             ));
             let scanned_langs = languages_for_exts(group.iter().map(|(_, _, ext)| ext.as_str()));
             apply_language_entries(&mut config, &mut facts, pack_entries, &scanned_langs);
+            super::bundle_scopes::apply_pack(&mut facts, frensense_bundler::format::default_pack());
             if let Some(loaded) = &loaded_bundle {
                 // The trust tier filters here, once, for every consumer: a
                 // custom bundle may not ship sanitizers and a community one
@@ -200,16 +204,9 @@ impl Engine {
                 let permitted = loaded.effective_learned_facts();
                 apply_language_entries(&mut config, &mut facts, &permitted, &scanned_langs);
                 facts.merge(&fact_table_from_entries(&permitted));
-                // Class scopes ride beside the facts in the payload (v8+), so
-                // the installed fact keeps the engine's published shape and
-                // is re-scoped here to the classes its family proved.
-                for scope in loaded.effective_sanitizer_scopes() {
-                    facts.scope_sanitizer(&scope.call, scope.package.as_deref(), &scope.classes);
-                }
-            }
-            // Bundle-learned source patterns widen the taint config.
-            for pattern in facts.source_patterns() {
-                config.sources.insert(pattern.to_string());
+                // Scopes ride beside the facts in the payload; the installed
+                // fact keeps the engine's shape.
+                super::bundle_scopes::apply(&mut facts, &mut config, loaded);
             }
             facts.max_complexity = self.max_complexity;
             let group_offset = global_completed;
@@ -233,9 +230,7 @@ impl Engine {
                     .name("frensense-scanner-group".into())
                     .stack_size(32 * 1024 * 1024)
                     .spawn_scoped(scope, move || {
-                        // The runner owns the per-file loop, so progress is
-                        // just the loop counter it already has; the engine
-                        // exposes per-file lowering, not a progress hook.
+                        // Progress is the loop counter; the engine exposes per-file lowering.
                         let started = std::time::Instant::now();
                         let mut builder = scan::ProgramBuilder::new();
                         let mut errors = read_failures_count;
@@ -249,7 +244,8 @@ impl Engine {
                                     errors,
                                 );
                             }
-                            let report = builder.add_file(path, source, ext, Some(&facts));
+                            let report =
+                                angular_scope::add_file(&mut builder, path, source, ext, &facts);
                             if report.error.is_some() {
                                 errors += 1;
                             }
@@ -1215,7 +1211,7 @@ mod bundle_pattern_tests {
     use super::{advisory_from_checker, apply_bundle_pattern};
     use crate::Severity;
     use crate::engine::Engine;
-    use frensense_bundler::format::{BundlePattern, BundlePayloadV8, write_bundle};
+    use frensense_bundler::format::{BundlePattern, BundlePayload, write_bundle};
     use frensense_engine::analysis::taint::facts::Provenance;
     use frensense_engine::checks::CheckerFinding;
 
@@ -1414,13 +1410,15 @@ mod bundle_pattern_tests {
     /// the load -> index -> advisory path.
     #[test]
     fn bundle_loaded_pattern_reaches_scan_advisories() {
-        let payload = BundlePayloadV8 {
-            patterns: vec![pattern(&["weak_hash"])],
-            learned_facts: vec![],
-            policy_pack: vec![],
-            sanitizer_scopes: vec![],
-            policy_meta: vec![],
-        };
+        let payload = BundlePayload::new(
+            vec![pattern(&["weak_hash"])],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+        );
         let bytes: &'static [u8] = Box::leak(
             write_bundle(&payload, 1)
                 .expect("bundle writes")

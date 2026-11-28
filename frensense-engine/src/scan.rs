@@ -18,11 +18,14 @@ use crate::analysis::taint::engine::{BackwardTaintEngine, SinkFinding};
 use crate::analysis::taint::facts::FactTable;
 use crate::checks::{self, CheckerFinding};
 use crate::ir::function::FunctionIR;
+#[cfg(test)]
+use frensense_lang::spec::{Export, Import, ModuleItem};
+
+mod prepared;
 use crate::telemetry::{
     CapHit, FileTiming, FunctionTiming, InputAccounting, PhaseTiming, ScanTelemetry,
     SuppressionCount, millis_since,
 };
-use frensense_lang::spec::{Export, Import, ModuleItem};
 
 /// Scan a set of source files under a config and fact table.
 ///
@@ -157,52 +160,7 @@ pub fn scan_file(
     result
 }
 
-/// A program lowered once, ready for repeated scans under different fact
-/// tables. The replay gate lowers each family exactly once and re-scans it
-/// per candidate fact, lowering dominates scan cost, so this turns the
-/// gate's O(candidates × families) lowerings into O(families).
-pub struct PreparedProgram {
-    irs: FxHashMap<String, FunctionIR>,
-    fn_file: FxHashMap<String, String>,
-    file_source: FxHashMap<String, String>,
-    /// Per file, the local names that an import binds to a program function.
-    pub file_aliases: FxHashMap<String, FxHashMap<String, String>>,
-    /// Per file, the local names that an import binds to an external package.
-    pub(crate) file_package_imports:
-        FxHashMap<String, FxHashMap<String, crate::graph::module::PackageImport>>,
-    /// Import declarations per file (see `ModuleResolution`).
-    ///
-    /// `ModuleResolution`: crate::graph::module::ModuleResolution
-    pub file_imports: FxHashMap<String, Vec<Import>>,
-    /// Export/re-export declarations per file, with visibility and kind.
-    pub file_exports: FxHashMap<String, Vec<Export>>,
-    /// Every top-level declaration per file, exported or not.
-    pub file_module_items: FxHashMap<String, Vec<ModuleItem>>,
-    /// Files that could not be lowered, with the reason. The scan continues
-    /// without them and says so; it never drops one silently.
-    pub lower_errors: Vec<String>,
-    /// Files whose parse tree contained errors, so they were analyzed from
-    /// whatever tree-sitter recovered rather than from an intact tree.
-    pub parse_partial: Vec<String>,
-    /// Number of source inputs attempted by this prepared program.
-    pub submitted: usize,
-    /// Safety cap events that happened during per-file lowering.
-    pub(crate) lower_caps: Vec<CapHit>,
-    /// Paths that failed lowering, independent of error message formatting.
-    pub lower_failed_files: Vec<String>,
-    /// Lowering cost per file, feeding the slowest-file report.
-    pub(crate) file_timings: Vec<FileTiming>,
-}
-
-impl std::fmt::Debug for PreparedProgram {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PreparedProgram")
-            .field("files", &self.file_timings.len())
-            .field("functions", &self.irs.len())
-            .field("lower_errors", &self.lower_errors.len())
-            .finish()
-    }
-}
+pub use prepared::PreparedProgram;
 
 /// Stack size for the per-file lowering thread (the default 4 MiB overflows
 /// on deeply nested real-world functions; one such overflow used to abort the
@@ -224,6 +182,7 @@ fn lower_isolated(
     source: &str,
     ext: &str,
     facts: Option<&FactTable>,
+    companion: Option<(&str, &[frensense_lang::spec::TemplateBinding])>,
 ) -> Result<IsolatedLowering, String> {
     type Lowered = Result<(FxHashMap<String, FunctionIR>, bool), String>;
     type JoinOutcome = Result<(Lowered, Vec<CapHit>), Box<dyn std::any::Any + Send + 'static>>;
@@ -231,7 +190,8 @@ fn lower_isolated(
         let handle = std::thread::Builder::new()
             .stack_size(LOWER_STACK_BYTES)
             .spawn_scoped(scope, || {
-                let lowered = crate::harness::lower_source_detailed(path, source, ext, facts);
+                let lowered =
+                    crate::harness::lower_source_detailed(path, source, ext, facts, companion);
                 let caps = crate::telemetry::drain_caps();
                 (lowered, caps)
             })?;
@@ -313,8 +273,22 @@ impl<'a> ProgramBuilder<'a> {
         ext: &str,
         facts: Option<&FactTable>,
     ) -> FileReport {
+        self.add_file_with_companion(path, source, ext, facts, None)
+    }
+
+    /// [`add_file`](Self::add_file) with a companion source for external
+    /// Angular templates: the sibling component file whose field initializers
+    /// become the template's component scope.
+    pub fn add_file_with_companion(
+        &mut self,
+        path: &str,
+        source: &'a str,
+        ext: &str,
+        facts: Option<&FactTable>,
+        companion: Option<(&str, &[frensense_lang::spec::TemplateBinding])>,
+    ) -> FileReport {
         let started = Instant::now();
-        let lowered = lower_isolated(path, source, ext, facts);
+        let lowered = lower_isolated(path, source, ext, facts, companion);
         let ms = millis_since(started);
         match lowered {
             Ok((functions, parse_partial, caps)) => {
@@ -451,6 +425,7 @@ impl<'a> ProgramBuilder<'a> {
             file_source,
             file_aliases: res.file_aliases,
             file_package_imports: res.file_package_imports,
+            file_namespace_aliases: res.file_namespace_aliases,
             file_imports: res.file_imports,
             file_exports: res.file_exports,
             file_module_items: res.file_module_items,
@@ -603,6 +578,7 @@ pub fn scan_prepared(
             facts,
             Some(&prepared.file_aliases),
             Some(&prepared.fn_file),
+            Some(&prepared.file_namespace_aliases),
         );
         if mem_probe {
             eprintln!(

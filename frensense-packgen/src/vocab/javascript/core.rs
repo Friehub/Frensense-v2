@@ -24,9 +24,7 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
     // XSS. They are declared bare because an attribute write has no receiver
     // root to qualify: the field name alone is the sink, exactly as `srcdoc`
     // above. Declared here, ahead of the dotted `location.href` entry, so the
-    // bare name's role wins the shadow that entry would otherwise publish
-    // first (`location.href` keeps OpenRedirect on its own full key and
-    // receiver pair).
+    // bare name's role wins (`location.href` keeps OpenRedirect on its key).
     ("href", crate::role_map::SinkLabel::XssReflected),
     ("src", crate::role_map::SinkLabel::XssReflected),
     ("setAttribute", crate::role_map::SinkLabel::XssDom),
@@ -217,6 +215,7 @@ pub(super) static JS_SINK_NAMES: &[(&str, crate::role_map::SinkLabel)] = &[
         "dangerouslySetInnerHTML",
         crate::role_map::SinkLabel::XssDom,
     ),
+    ("vhtml", crate::role_map::SinkLabel::XssDom), // SFC template writes
     // MongoDB / ORM
     ("updateOne", crate::role_map::SinkLabel::NoSqlInjection),
     ("updateMany", crate::role_map::SinkLabel::NoSqlInjection),

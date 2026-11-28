@@ -2,6 +2,8 @@
 // Copyright (c) 2024-2026 Friehub
 // Use in proprietary products without GPL obligations needs a separate license: https://friehub.cloud/licensing
 
+mod angular_scope;
+mod bundle_scopes;
 pub(crate) mod runner;
 
 use crate::{FileId, Severity};

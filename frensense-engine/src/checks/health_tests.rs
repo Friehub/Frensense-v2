@@ -42,8 +42,15 @@ fn each_decision_adds_one() {
 fn only_outliers_are_reported() {
     let small = lower_source("t.py", &branchy(5), "py").unwrap();
     let big = lower_source("t.py", &branchy(30), "py").unwrap();
-    assert!(small.values().all(|ir| check(ir).is_empty()));
-    let found: Vec<_> = big.values().flat_map(check).collect();
+    assert!(
+        small
+            .values()
+            .all(|ir| check_with_limit(ir, MAX_COMPLEXITY).is_empty())
+    );
+    let found: Vec<_> = big
+        .values()
+        .flat_map(|ir| check_with_limit(ir, MAX_COMPLEXITY))
+        .collect();
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].rule, FUNCTION_COMPLEXITY);
     assert!(found[0].params.contains(&("complexity", "31".to_string())));

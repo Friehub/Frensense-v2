@@ -66,7 +66,7 @@ pub mod frensense_bundler::extract::family
 pub struct frensense_bundler::extract::family::Family
 pub frensense_bundler::extract::family::Family::declared_check_call: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::family::Family::id: alloc::string::String
-pub frensense_bundler::extract::family::Family::metadata: frensense_bundler::extract::family::FamilyMetadata
+pub frensense_bundler::extract::family::Family::metadata: frensense_bundler::extract::metadata::FamilyMetadata
 pub frensense_bundler::extract::family::Family::negatives: alloc::vec::Vec<(alloc::string::String, alloc::string::String, alloc::string::String)>
 pub frensense_bundler::extract::family::Family::positives: alloc::vec::Vec<(alloc::string::String, alloc::string::String, alloc::string::String)>
 impl frensense_bundler::extract::family::Family
@@ -76,6 +76,7 @@ pub frensense_bundler::extract::family::FamilyMetadata::check_rule: core::option
 pub frensense_bundler::extract::family::FamilyMetadata::class: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::family::FamilyMetadata::cvss: core::option::Option<f32>
 pub frensense_bundler::extract::family::FamilyMetadata::cwe: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::family::FamilyMetadata::expect: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::extract::family::FamilyMetadata::guards: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::extract::family::FamilyMetadata::impact: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::family::FamilyMetadata::improvement: core::option::Option<alloc::string::String>
@@ -85,14 +86,16 @@ pub frensense_bundler::extract::family::FamilyMetadata::package: core::option::O
 pub frensense_bundler::extract::family::FamilyMetadata::policy_authored: bool
 pub frensense_bundler::extract::family::FamilyMetadata::purpose: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::family::FamilyMetadata::require_arg_keys: alloc::vec::Vec<(usize, alloc::string::String)>
+pub frensense_bundler::extract::family::FamilyMetadata::sanitized_args: alloc::vec::Vec<usize>
 pub frensense_bundler::extract::family::FamilyMetadata::sanitizers: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::extract::family::FamilyMetadata::severity: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::family::FamilyMetadata::status: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::family::FamilyMetadata::tier: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::family::FamilyMetadata::unbounded_product: bool
 pub frensense_bundler::extract::family::FamilyMetadata::wrap_max: core::option::Option<u128>
-impl frensense_bundler::extract::family::FamilyMetadata
-pub fn frensense_bundler::extract::family::FamilyMetadata::parse(&str, &str, usize) -> Self
+impl frensense_bundler::extract::metadata::FamilyMetadata
+pub fn frensense_bundler::extract::metadata::FamilyMetadata::declared_policy_call(&self) -> core::option::Option<alloc::string::String>
+pub fn frensense_bundler::extract::metadata::FamilyMetadata::parse(&str, &str, usize) -> Self
 pub struct frensense_bundler::extract::family::LearnedFact
 pub frensense_bundler::extract::family::LearnedFact::classes: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::extract::family::LearnedFact::entry: frensense_engine::analysis::taint::facts::entries::LearnedFactEntry
@@ -106,8 +109,8 @@ pub struct frensense_bundler::extract::gate::PreparedFamily
 pub frensense_bundler::extract::gate::PreparedFamily::calls: alloc::collections::btree::set::BTreeSet<alloc::string::String>
 pub frensense_bundler::extract::gate::PreparedFamily::cwe: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::gate::PreparedFamily::id: alloc::string::String
-pub frensense_bundler::extract::gate::PreparedFamily::neg: frensense_engine::scan::PreparedProgram
-pub frensense_bundler::extract::gate::PreparedFamily::pos: frensense_engine::scan::PreparedProgram
+pub frensense_bundler::extract::gate::PreparedFamily::neg: frensense_engine::scan::prepared::PreparedProgram
+pub frensense_bundler::extract::gate::PreparedFamily::pos: frensense_engine::scan::prepared::PreparedProgram
 impl frensense_bundler::extract::gate::PreparedFamily
 pub fn frensense_bundler::extract::gate::PreparedFamily::alert_flags(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable) -> (bool, bool)
 pub fn frensense_bundler::extract::gate::PreparedFamily::downstream_echo(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable, &str, &alloc::collections::btree::set::BTreeSet<alloc::string::String>) -> core::option::Option<alloc::string::String>
@@ -117,6 +120,32 @@ pub fn frensense_bundler::extract::gate::alerts(&frensense_engine::scan::ScanRes
 pub fn frensense_bundler::extract::gate::alerts_with_cwe(&frensense_engine::scan::ScanResult, core::option::Option<&str>) -> bool
 pub fn frensense_bundler::extract::gate::scan_variant(&[(alloc::string::String, alloc::string::String, alloc::string::String)], &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable) -> frensense_engine::scan::ScanResult
 pub fn frensense_bundler::extract::gate::separates(&frensense_bundler::extract::family::Family, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable) -> bool
+pub mod frensense_bundler::extract::metadata
+pub struct frensense_bundler::extract::metadata::FamilyMetadata
+pub frensense_bundler::extract::metadata::FamilyMetadata::check_rule: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::class: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::cvss: core::option::Option<f32>
+pub frensense_bundler::extract::metadata::FamilyMetadata::cwe: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::expect: alloc::vec::Vec<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::guards: alloc::vec::Vec<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::impact: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::improvement: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::observation: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::owasp: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::package: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::policy_authored: bool
+pub frensense_bundler::extract::metadata::FamilyMetadata::purpose: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::require_arg_keys: alloc::vec::Vec<(usize, alloc::string::String)>
+pub frensense_bundler::extract::metadata::FamilyMetadata::sanitized_args: alloc::vec::Vec<usize>
+pub frensense_bundler::extract::metadata::FamilyMetadata::sanitizers: alloc::vec::Vec<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::severity: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::status: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::tier: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::metadata::FamilyMetadata::unbounded_product: bool
+pub frensense_bundler::extract::metadata::FamilyMetadata::wrap_max: core::option::Option<u128>
+impl frensense_bundler::extract::metadata::FamilyMetadata
+pub fn frensense_bundler::extract::metadata::FamilyMetadata::declared_policy_call(&self) -> core::option::Option<alloc::string::String>
+pub fn frensense_bundler::extract::metadata::FamilyMetadata::parse(&str, &str, usize) -> Self
 pub mod frensense_bundler::extract::noise
 pub fn frensense_bundler::extract::noise::guard_priority(&str) -> i32
 pub fn frensense_bundler::extract::noise::is_exception_name(&str) -> bool
@@ -176,7 +205,7 @@ pub fn frensense_bundler::extract::candidate::Candidate::to_learned_entry_scoped
 pub struct frensense_bundler::extract::Family
 pub frensense_bundler::extract::Family::declared_check_call: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::Family::id: alloc::string::String
-pub frensense_bundler::extract::Family::metadata: frensense_bundler::extract::family::FamilyMetadata
+pub frensense_bundler::extract::Family::metadata: frensense_bundler::extract::metadata::FamilyMetadata
 pub frensense_bundler::extract::Family::negatives: alloc::vec::Vec<(alloc::string::String, alloc::string::String, alloc::string::String)>
 pub frensense_bundler::extract::Family::positives: alloc::vec::Vec<(alloc::string::String, alloc::string::String, alloc::string::String)>
 impl frensense_bundler::extract::family::Family
@@ -186,6 +215,7 @@ pub frensense_bundler::extract::FamilyMetadata::check_rule: core::option::Option
 pub frensense_bundler::extract::FamilyMetadata::class: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::FamilyMetadata::cvss: core::option::Option<f32>
 pub frensense_bundler::extract::FamilyMetadata::cwe: core::option::Option<alloc::string::String>
+pub frensense_bundler::extract::FamilyMetadata::expect: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::extract::FamilyMetadata::guards: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::extract::FamilyMetadata::impact: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::FamilyMetadata::improvement: core::option::Option<alloc::string::String>
@@ -195,14 +225,16 @@ pub frensense_bundler::extract::FamilyMetadata::package: core::option::Option<al
 pub frensense_bundler::extract::FamilyMetadata::policy_authored: bool
 pub frensense_bundler::extract::FamilyMetadata::purpose: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::FamilyMetadata::require_arg_keys: alloc::vec::Vec<(usize, alloc::string::String)>
+pub frensense_bundler::extract::FamilyMetadata::sanitized_args: alloc::vec::Vec<usize>
 pub frensense_bundler::extract::FamilyMetadata::sanitizers: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::extract::FamilyMetadata::severity: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::FamilyMetadata::status: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::FamilyMetadata::tier: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::FamilyMetadata::unbounded_product: bool
 pub frensense_bundler::extract::FamilyMetadata::wrap_max: core::option::Option<u128>
-impl frensense_bundler::extract::family::FamilyMetadata
-pub fn frensense_bundler::extract::family::FamilyMetadata::parse(&str, &str, usize) -> Self
+impl frensense_bundler::extract::metadata::FamilyMetadata
+pub fn frensense_bundler::extract::metadata::FamilyMetadata::declared_policy_call(&self) -> core::option::Option<alloc::string::String>
+pub fn frensense_bundler::extract::metadata::FamilyMetadata::parse(&str, &str, usize) -> Self
 pub struct frensense_bundler::extract::LearnedFact
 pub frensense_bundler::extract::LearnedFact::classes: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::extract::LearnedFact::entry: frensense_engine::analysis::taint::facts::entries::LearnedFactEntry
@@ -214,8 +246,8 @@ pub struct frensense_bundler::extract::PreparedFamily
 pub frensense_bundler::extract::PreparedFamily::calls: alloc::collections::btree::set::BTreeSet<alloc::string::String>
 pub frensense_bundler::extract::PreparedFamily::cwe: core::option::Option<alloc::string::String>
 pub frensense_bundler::extract::PreparedFamily::id: alloc::string::String
-pub frensense_bundler::extract::PreparedFamily::neg: frensense_engine::scan::PreparedProgram
-pub frensense_bundler::extract::PreparedFamily::pos: frensense_engine::scan::PreparedProgram
+pub frensense_bundler::extract::PreparedFamily::neg: frensense_engine::scan::prepared::PreparedProgram
+pub frensense_bundler::extract::PreparedFamily::pos: frensense_engine::scan::prepared::PreparedProgram
 impl frensense_bundler::extract::gate::PreparedFamily
 pub fn frensense_bundler::extract::gate::PreparedFamily::alert_flags(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable) -> (bool, bool)
 pub fn frensense_bundler::extract::gate::PreparedFamily::downstream_echo(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable, &str, &alloc::collections::btree::set::BTreeSet<alloc::string::String>) -> core::option::Option<alloc::string::String>
@@ -304,7 +336,7 @@ pub mod frensense_bundler::fact_extract::family
 pub struct frensense_bundler::fact_extract::family::Family
 pub frensense_bundler::fact_extract::family::Family::declared_check_call: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::family::Family::id: alloc::string::String
-pub frensense_bundler::fact_extract::family::Family::metadata: frensense_bundler::extract::family::FamilyMetadata
+pub frensense_bundler::fact_extract::family::Family::metadata: frensense_bundler::extract::metadata::FamilyMetadata
 pub frensense_bundler::fact_extract::family::Family::negatives: alloc::vec::Vec<(alloc::string::String, alloc::string::String, alloc::string::String)>
 pub frensense_bundler::fact_extract::family::Family::positives: alloc::vec::Vec<(alloc::string::String, alloc::string::String, alloc::string::String)>
 impl frensense_bundler::extract::family::Family
@@ -314,6 +346,7 @@ pub frensense_bundler::fact_extract::family::FamilyMetadata::check_rule: core::o
 pub frensense_bundler::fact_extract::family::FamilyMetadata::class: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::family::FamilyMetadata::cvss: core::option::Option<f32>
 pub frensense_bundler::fact_extract::family::FamilyMetadata::cwe: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::family::FamilyMetadata::expect: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::fact_extract::family::FamilyMetadata::guards: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::fact_extract::family::FamilyMetadata::impact: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::family::FamilyMetadata::improvement: core::option::Option<alloc::string::String>
@@ -323,14 +356,16 @@ pub frensense_bundler::fact_extract::family::FamilyMetadata::package: core::opti
 pub frensense_bundler::fact_extract::family::FamilyMetadata::policy_authored: bool
 pub frensense_bundler::fact_extract::family::FamilyMetadata::purpose: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::family::FamilyMetadata::require_arg_keys: alloc::vec::Vec<(usize, alloc::string::String)>
+pub frensense_bundler::fact_extract::family::FamilyMetadata::sanitized_args: alloc::vec::Vec<usize>
 pub frensense_bundler::fact_extract::family::FamilyMetadata::sanitizers: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::fact_extract::family::FamilyMetadata::severity: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::family::FamilyMetadata::status: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::family::FamilyMetadata::tier: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::family::FamilyMetadata::unbounded_product: bool
 pub frensense_bundler::fact_extract::family::FamilyMetadata::wrap_max: core::option::Option<u128>
-impl frensense_bundler::extract::family::FamilyMetadata
-pub fn frensense_bundler::extract::family::FamilyMetadata::parse(&str, &str, usize) -> Self
+impl frensense_bundler::extract::metadata::FamilyMetadata
+pub fn frensense_bundler::extract::metadata::FamilyMetadata::declared_policy_call(&self) -> core::option::Option<alloc::string::String>
+pub fn frensense_bundler::extract::metadata::FamilyMetadata::parse(&str, &str, usize) -> Self
 pub struct frensense_bundler::fact_extract::family::LearnedFact
 pub frensense_bundler::fact_extract::family::LearnedFact::classes: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::fact_extract::family::LearnedFact::entry: frensense_engine::analysis::taint::facts::entries::LearnedFactEntry
@@ -344,8 +379,8 @@ pub struct frensense_bundler::fact_extract::gate::PreparedFamily
 pub frensense_bundler::fact_extract::gate::PreparedFamily::calls: alloc::collections::btree::set::BTreeSet<alloc::string::String>
 pub frensense_bundler::fact_extract::gate::PreparedFamily::cwe: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::gate::PreparedFamily::id: alloc::string::String
-pub frensense_bundler::fact_extract::gate::PreparedFamily::neg: frensense_engine::scan::PreparedProgram
-pub frensense_bundler::fact_extract::gate::PreparedFamily::pos: frensense_engine::scan::PreparedProgram
+pub frensense_bundler::fact_extract::gate::PreparedFamily::neg: frensense_engine::scan::prepared::PreparedProgram
+pub frensense_bundler::fact_extract::gate::PreparedFamily::pos: frensense_engine::scan::prepared::PreparedProgram
 impl frensense_bundler::extract::gate::PreparedFamily
 pub fn frensense_bundler::extract::gate::PreparedFamily::alert_flags(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable) -> (bool, bool)
 pub fn frensense_bundler::extract::gate::PreparedFamily::downstream_echo(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable, &str, &alloc::collections::btree::set::BTreeSet<alloc::string::String>) -> core::option::Option<alloc::string::String>
@@ -355,6 +390,32 @@ pub fn frensense_bundler::fact_extract::gate::alerts(&frensense_engine::scan::Sc
 pub fn frensense_bundler::fact_extract::gate::alerts_with_cwe(&frensense_engine::scan::ScanResult, core::option::Option<&str>) -> bool
 pub fn frensense_bundler::fact_extract::gate::scan_variant(&[(alloc::string::String, alloc::string::String, alloc::string::String)], &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable) -> frensense_engine::scan::ScanResult
 pub fn frensense_bundler::fact_extract::gate::separates(&frensense_bundler::extract::family::Family, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable) -> bool
+pub mod frensense_bundler::fact_extract::metadata
+pub struct frensense_bundler::fact_extract::metadata::FamilyMetadata
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::check_rule: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::class: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::cvss: core::option::Option<f32>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::cwe: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::expect: alloc::vec::Vec<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::guards: alloc::vec::Vec<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::impact: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::improvement: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::observation: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::owasp: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::package: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::policy_authored: bool
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::purpose: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::require_arg_keys: alloc::vec::Vec<(usize, alloc::string::String)>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::sanitized_args: alloc::vec::Vec<usize>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::sanitizers: alloc::vec::Vec<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::severity: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::status: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::tier: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::unbounded_product: bool
+pub frensense_bundler::fact_extract::metadata::FamilyMetadata::wrap_max: core::option::Option<u128>
+impl frensense_bundler::extract::metadata::FamilyMetadata
+pub fn frensense_bundler::extract::metadata::FamilyMetadata::declared_policy_call(&self) -> core::option::Option<alloc::string::String>
+pub fn frensense_bundler::extract::metadata::FamilyMetadata::parse(&str, &str, usize) -> Self
 pub mod frensense_bundler::fact_extract::noise
 pub fn frensense_bundler::fact_extract::noise::guard_priority(&str) -> i32
 pub fn frensense_bundler::fact_extract::noise::is_exception_name(&str) -> bool
@@ -414,7 +475,7 @@ pub fn frensense_bundler::extract::candidate::Candidate::to_learned_entry_scoped
 pub struct frensense_bundler::fact_extract::Family
 pub frensense_bundler::fact_extract::Family::declared_check_call: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::Family::id: alloc::string::String
-pub frensense_bundler::fact_extract::Family::metadata: frensense_bundler::extract::family::FamilyMetadata
+pub frensense_bundler::fact_extract::Family::metadata: frensense_bundler::extract::metadata::FamilyMetadata
 pub frensense_bundler::fact_extract::Family::negatives: alloc::vec::Vec<(alloc::string::String, alloc::string::String, alloc::string::String)>
 pub frensense_bundler::fact_extract::Family::positives: alloc::vec::Vec<(alloc::string::String, alloc::string::String, alloc::string::String)>
 impl frensense_bundler::extract::family::Family
@@ -424,6 +485,7 @@ pub frensense_bundler::fact_extract::FamilyMetadata::check_rule: core::option::O
 pub frensense_bundler::fact_extract::FamilyMetadata::class: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::FamilyMetadata::cvss: core::option::Option<f32>
 pub frensense_bundler::fact_extract::FamilyMetadata::cwe: core::option::Option<alloc::string::String>
+pub frensense_bundler::fact_extract::FamilyMetadata::expect: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::fact_extract::FamilyMetadata::guards: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::fact_extract::FamilyMetadata::impact: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::FamilyMetadata::improvement: core::option::Option<alloc::string::String>
@@ -433,14 +495,16 @@ pub frensense_bundler::fact_extract::FamilyMetadata::package: core::option::Opti
 pub frensense_bundler::fact_extract::FamilyMetadata::policy_authored: bool
 pub frensense_bundler::fact_extract::FamilyMetadata::purpose: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::FamilyMetadata::require_arg_keys: alloc::vec::Vec<(usize, alloc::string::String)>
+pub frensense_bundler::fact_extract::FamilyMetadata::sanitized_args: alloc::vec::Vec<usize>
 pub frensense_bundler::fact_extract::FamilyMetadata::sanitizers: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::fact_extract::FamilyMetadata::severity: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::FamilyMetadata::status: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::FamilyMetadata::tier: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::FamilyMetadata::unbounded_product: bool
 pub frensense_bundler::fact_extract::FamilyMetadata::wrap_max: core::option::Option<u128>
-impl frensense_bundler::extract::family::FamilyMetadata
-pub fn frensense_bundler::extract::family::FamilyMetadata::parse(&str, &str, usize) -> Self
+impl frensense_bundler::extract::metadata::FamilyMetadata
+pub fn frensense_bundler::extract::metadata::FamilyMetadata::declared_policy_call(&self) -> core::option::Option<alloc::string::String>
+pub fn frensense_bundler::extract::metadata::FamilyMetadata::parse(&str, &str, usize) -> Self
 pub struct frensense_bundler::fact_extract::LearnedFact
 pub frensense_bundler::fact_extract::LearnedFact::classes: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::fact_extract::LearnedFact::entry: frensense_engine::analysis::taint::facts::entries::LearnedFactEntry
@@ -452,8 +516,8 @@ pub struct frensense_bundler::fact_extract::PreparedFamily
 pub frensense_bundler::fact_extract::PreparedFamily::calls: alloc::collections::btree::set::BTreeSet<alloc::string::String>
 pub frensense_bundler::fact_extract::PreparedFamily::cwe: core::option::Option<alloc::string::String>
 pub frensense_bundler::fact_extract::PreparedFamily::id: alloc::string::String
-pub frensense_bundler::fact_extract::PreparedFamily::neg: frensense_engine::scan::PreparedProgram
-pub frensense_bundler::fact_extract::PreparedFamily::pos: frensense_engine::scan::PreparedProgram
+pub frensense_bundler::fact_extract::PreparedFamily::neg: frensense_engine::scan::prepared::PreparedProgram
+pub frensense_bundler::fact_extract::PreparedFamily::pos: frensense_engine::scan::prepared::PreparedProgram
 impl frensense_bundler::extract::gate::PreparedFamily
 pub fn frensense_bundler::extract::gate::PreparedFamily::alert_flags(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable) -> (bool, bool)
 pub fn frensense_bundler::extract::gate::PreparedFamily::downstream_echo(&self, &frensense_engine::analysis::taint::config::TaintConfig, &frensense_engine::analysis::taint::facts::table::FactTable, &str, &alloc::collections::btree::set::BTreeSet<alloc::string::String>) -> core::option::Option<alloc::string::String>
@@ -512,7 +576,7 @@ pub frensense_bundler::format::BundlePattern::owasp: core::option::Option<alloc:
 pub frensense_bundler::format::BundlePattern::rules: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::format::BundlePattern::severity: core::option::Option<alloc::string::String>
 pub struct frensense_bundler::format::BundlePayloadV5
-pub frensense_bundler::format::BundlePayloadV5::learned_facts: alloc::vec::Vec<frensense_bundler::format::types::LearnedFactEntryV5>
+pub frensense_bundler::format::BundlePayloadV5::learned_facts: alloc::vec::Vec<frensense_bundler::format::legacy::LearnedFactEntryV5>
 pub frensense_bundler::format::BundlePayloadV5::patterns: alloc::vec::Vec<frensense_bundler::format::BundlePattern>
 pub frensense_bundler::format::BundlePayloadV5::policy_pack: alloc::vec::Vec<frensense_engine::analysis::taint::facts::authored::AuthoredPolicyEntry>
 pub struct frensense_bundler::format::BundlePayloadV6
@@ -525,6 +589,19 @@ pub frensense_bundler::format::BundlePayloadV8::patterns: alloc::vec::Vec<frense
 pub frensense_bundler::format::BundlePayloadV8::policy_meta: alloc::vec::Vec<frensense_bundler::format::PolicyMeta>
 pub frensense_bundler::format::BundlePayloadV8::policy_pack: alloc::vec::Vec<frensense_engine::analysis::taint::facts::authored::AuthoredPolicyEntry>
 pub frensense_bundler::format::BundlePayloadV8::sanitizer_scopes: alloc::vec::Vec<frensense_bundler::format::SanitizerScope>
+pub struct frensense_bundler::format::BundlePayloadV9
+pub frensense_bundler::format::BundlePayloadV9::learned_facts: alloc::vec::Vec<frensense_engine::analysis::taint::facts::entries::LearnedFactEntry>
+pub frensense_bundler::format::BundlePayloadV9::patterns: alloc::vec::Vec<frensense_bundler::format::BundlePattern>
+pub frensense_bundler::format::BundlePayloadV9::policy_meta: alloc::vec::Vec<frensense_bundler::format::PolicyMeta>
+pub frensense_bundler::format::BundlePayloadV9::policy_pack: alloc::vec::Vec<frensense_engine::analysis::taint::facts::authored::AuthoredPolicyEntry>
+pub frensense_bundler::format::BundlePayloadV9::sanitizer_args: alloc::vec::Vec<frensense_bundler::format::SanitizerArgScope>
+pub frensense_bundler::format::BundlePayloadV9::sanitizer_scopes: alloc::vec::Vec<frensense_bundler::format::SanitizerScope>
+#[non_exhaustive] pub struct frensense_bundler::format::EffectiveSanitizerScope<'a>
+pub frensense_bundler::format::EffectiveSanitizerScope::args: &'a [usize]
+pub frensense_bundler::format::EffectiveSanitizerScope::call: &'a str
+pub frensense_bundler::format::EffectiveSanitizerScope::classes: &'a [alloc::string::String]
+pub frensense_bundler::format::EffectiveSanitizerScope::family: core::option::Option<&'a str>
+pub frensense_bundler::format::EffectiveSanitizerScope::package: core::option::Option<&'a str>
 pub struct frensense_bundler::format::EngineRequirement
 pub frensense_bundler::format::EngineRequirement::max_exclusive: core::option::Option<[u32; 3]>
 pub frensense_bundler::format::EngineRequirement::min: [u32; 3]
@@ -540,22 +617,29 @@ pub frensense_bundler::format::LoadedBundle::learned_facts: alloc::vec::Vec<fren
 pub frensense_bundler::format::LoadedBundle::patterns: alloc::vec::Vec<frensense_bundler::format::BundlePattern>
 pub frensense_bundler::format::LoadedBundle::policy_meta: alloc::vec::Vec<frensense_bundler::format::PolicyMeta>
 pub frensense_bundler::format::LoadedBundle::policy_pack: alloc::vec::Vec<frensense_engine::analysis::taint::facts::authored::AuthoredPolicyEntry>
+pub frensense_bundler::format::LoadedBundle::sanitizer_args: alloc::vec::Vec<frensense_bundler::format::SanitizerArgScope>
 pub frensense_bundler::format::LoadedBundle::sanitizer_scopes: alloc::vec::Vec<frensense_bundler::format::SanitizerScope>
 impl frensense_bundler::format::LoadedBundle
 pub fn frensense_bundler::format::LoadedBundle::effective_learned_facts(&self) -> alloc::vec::Vec<frensense_engine::analysis::taint::facts::entries::LearnedFactEntry>
-pub fn frensense_bundler::format::LoadedBundle::effective_sanitizer_scopes(&self) -> alloc::vec::Vec<&frensense_bundler::format::SanitizerScope>
+pub fn frensense_bundler::format::LoadedBundle::effective_sanitizer_scopes(&self) -> alloc::vec::Vec<frensense_bundler::format::EffectiveSanitizerScope<'_>>
 pub fn frensense_bundler::format::LoadedBundle::policy_tier(&self, &str) -> core::option::Option<&str>
 pub fn frensense_bundler::format::LoadedBundle::withheld_sanitizers(&self) -> usize
 pub fn frensense_bundler::format::LoadedBundle::withheld_sanitizers_notice(&self) -> core::option::Option<alloc::string::String>
-pub struct frensense_bundler::format::PolicyMeta
+#[non_exhaustive] pub struct frensense_bundler::format::PolicyMeta
 pub frensense_bundler::format::PolicyMeta::rule: alloc::string::String
 pub frensense_bundler::format::PolicyMeta::status: alloc::string::String
 pub frensense_bundler::format::PolicyMeta::tier: alloc::string::String
-pub struct frensense_bundler::format::SanitizerScope
+#[non_exhaustive] pub struct frensense_bundler::format::SanitizerArgScope
+pub frensense_bundler::format::SanitizerArgScope::args: alloc::vec::Vec<usize>
+pub frensense_bundler::format::SanitizerArgScope::call: alloc::string::String
+pub frensense_bundler::format::SanitizerArgScope::package: core::option::Option<alloc::string::String>
+#[non_exhaustive] pub struct frensense_bundler::format::SanitizerScope
 pub frensense_bundler::format::SanitizerScope::call: alloc::string::String
 pub frensense_bundler::format::SanitizerScope::classes: alloc::vec::Vec<alloc::string::String>
 pub frensense_bundler::format::SanitizerScope::family: core::option::Option<alloc::string::String>
 pub frensense_bundler::format::SanitizerScope::package: core::option::Option<alloc::string::String>
+impl frensense_bundler::format::SanitizerScope
+pub fn frensense_bundler::format::SanitizerScope::new(alloc::string::String, core::option::Option<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, core::option::Option<alloc::string::String>) -> Self
 pub const frensense_bundler::format::BUNDLE_MAGIC: &[u8; 4]
 pub const frensense_bundler::format::BUNDLE_VERSION: u32
 pub const frensense_bundler::format::MIN_SUPPORTED_VERSION: u32
@@ -570,7 +654,7 @@ pub fn frensense_bundler::format::read_bundle_parts(&[u8]) -> core::result::Resu
 pub fn frensense_bundler::format::write_bundle<T: serde_core::ser::Serialize>(&T, u32) -> core::result::Result<alloc::vec::Vec<u8>, alloc::string::String>
 pub fn frensense_bundler::format::write_bundle_pinned<T: serde_core::ser::Serialize>(&T, u32, frensense_bundler::format::EngineRequirement) -> core::result::Result<alloc::vec::Vec<u8>, alloc::string::String>
 pub fn frensense_bundler::format::write_bundle_pinned_with_trust<T: serde_core::ser::Serialize>(&T, u32, frensense_bundler::format::EngineRequirement, frensense_bundler::format::BundleTrust) -> core::result::Result<alloc::vec::Vec<u8>, alloc::string::String>
-pub type frensense_bundler::format::BundlePayload = frensense_bundler::format::BundlePayloadV8
+pub type frensense_bundler::format::BundlePayload = frensense_bundler::format::BundlePayloadV9
 pub mod frensense_bundler::lint
 pub enum frensense_bundler::lint::Level
 pub frensense_bundler::lint::Level::Error

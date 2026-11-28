@@ -53,6 +53,30 @@ execSync('ls ' + process.argv[2]);
     assert_detected(&scan_ts(src), "ts_module_expression", "execSync");
 }
 
+/// A module-level definition feeding a later module-level sink: the two
+/// statements are separate AST children, so they only link if the declaration
+/// is lowered into the same IR as the sink.
+#[test]
+fn probe_module_scope_declaration_feeds_sink() {
+    let src = r#"
+import { execSync } from 'child_process';
+
+const input = process.argv[2];
+execSync('ls ' + input);
+"#;
+    assert_detected(&scan_ts(src), "ts_module_decl_to_sink", "execSync");
+}
+
+/// Same shape on a request field: the definition is the source, not a literal.
+#[test]
+fn probe_module_scope_request_definition_feeds_sink() {
+    let src = r#"
+const q = req.query.q;
+eval(q);
+"#;
+    assert_detected(&scan_ts(src), "ts_module_request_to_eval", "eval");
+}
+
 /// Control: the function form keeps working, and the module IR must not add a
 /// second copy of the same finding.
 #[test]

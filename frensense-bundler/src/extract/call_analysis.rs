@@ -263,6 +263,57 @@ pub fn variant_has_range_check_on_call(
     false
 }
 
+/// The most arguments any call site passes to `call` across `files`.
+///
+/// `None` means no sample calls `call` with any argument. Callers that need a
+/// search bound (the sanitizer slot probe) take it from here rather than from
+/// a fixed guess, so the bound is what the corpus shows and not what a
+/// constant assumes.
+pub(crate) fn max_call_arity(files: &[(String, String, String)], call: &str) -> Option<usize> {
+    let mut max: Option<usize> = None;
+    for (path, source, ext) in files {
+        let Ok(irs) = frensense_engine::harness::lower_source(path, source, ext) else {
+            continue;
+        };
+        for ir in irs.values() {
+            for block in ir.blocks.values() {
+                for instr in &block.instructions {
+                    let (name, args) = match instr {
+                        Instruction::CallStatic { func, args, .. } => (func, args),
+                        Instruction::CallVirtual { method, args, .. } => (method, args),
+                        _ => continue,
+                    };
+                    if name.as_str() == call {
+                        max = Some(max.map_or(args.len(), |seen| seen.max(args.len())));
+                    }
+                }
+            }
+        }
+    }
+    max
+}
+
+#[cfg(test)]
+mod arity_tests {
+    use super::max_call_arity;
+
+    fn files(src: &str) -> Vec<(String, String, String)> {
+        vec![("t.ts".to_string(), src.to_string(), "ts".to_string())]
+    }
+
+    /// The bound is the widest site in the sample, not the first or an average.
+    #[test]
+    fn the_arity_is_the_largest_observed_call_site() {
+        let src = "export function f(a: any, b: any) {\n  check(a);\n  check(a, b, 1);\n  other(a, b, 1, 2, 3);\n}\n";
+        assert_eq!(max_call_arity(&files(src), "check"), Some(3));
+        assert_eq!(
+            max_call_arity(&files(src), "absent"),
+            None,
+            "a call the sample never makes has no arity to bound a search with"
+        );
+    }
+}
+
 pub fn extract_call_arg_literals(
     irs: &[FunctionIR],
 ) -> FxHashMap<(String, usize), BTreeSet<String>> {

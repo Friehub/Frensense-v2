@@ -138,4 +138,8 @@ pub(crate) static PY_WEB_SINKS: &[(&str, crate::role_map::SinkLabel)] = &[
     // XPath injection (CWE-643): lxml `XPath(expr)` / `element.xpath(expr)`.
     ("XPath", crate::role_map::SinkLabel::XpathInjection),
     ("xpath", crate::role_map::SinkLabel::XpathInjection),
+    (
+        "elementpath.select",
+        crate::role_map::SinkLabel::XpathInjection,
+    ),
 ];

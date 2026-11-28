@@ -34,6 +34,8 @@
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod analysis;
+#[cfg(test)]
+mod angular_template_tests;
 pub mod checks;
 #[cfg(test)]
 mod dataflow_probes_tests;
@@ -45,6 +47,7 @@ pub mod harness;
 pub mod ir;
 #[cfg(test)]
 mod language_scope_tests;
+mod module_scope;
 #[cfg(test)]
 mod package_scoped_sanitizer_tests;
 #[cfg(test)]
@@ -54,6 +57,8 @@ mod probes;
 #[cfg(test)]
 mod regression_gate_tests;
 pub mod scan;
+#[cfg(test)]
+mod store_sink_base_tests;
 pub mod telemetry;
 #[cfg(test)]
 mod type_source_tests;

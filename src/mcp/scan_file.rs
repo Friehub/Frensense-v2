@@ -158,30 +158,16 @@ pub(crate) fn mcp_analysis(
     coverage: &crate::policy::Coverage,
     telemetry: &frensense_engine::telemetry::ScanTelemetry,
     incomplete: &[frensense_engine::scan::IncompleteFunction],
+    target: Option<&std::path::Path>,
 ) -> Value {
-    let status = crate::cli::reporting::status_with_coverage(telemetry, incomplete, Some(coverage));
-    json!({
-        "status": status,
-        "coverage": {
-            "files_found": coverage.files_found,
-            "files_analyzed": coverage.files_analyzed,
-            "files_not_analyzed": coverage.files_not_analyzed(),
-            "files_unsupported": coverage.files_unsupported,
-            "files_failed": coverage.files_failed,
-            "sink_sites": coverage.sink_sites,
-            "files_with_sink_sites": coverage.files_with_sink_sites,
-            "files_without_sink_sites": coverage.files_without_sink_sites,
-            "no_sink_files": coverage.no_sink_files,
-            "unresolved_sites": coverage.unresolved_sites,
-            "unresolved_sample": coverage.unresolved_sample.iter().map(|s| json!({
-                "file": s.file,
-                "line": s.line,
-                "sink": s.sink,
-            })).collect::<Vec<Value>>(),
-        },
-        "functions": telemetry.input.functions,
-        "parse_partial": telemetry.input.parse_partial,
-    })
+    crate::cli::telemetry::analysis_payload(
+        Some(telemetry),
+        Some(coverage),
+        &[],
+        None,
+        incomplete,
+        target.and_then(|p| p.to_str()),
+    )
 }
 
 /// Build the JSON-RPC `tools/call` result payload with coverage.
@@ -201,7 +187,7 @@ pub(crate) fn result_payload_detailed(
     let empty_telem = frensense_engine::telemetry::ScanTelemetry::default();
     let telem = telemetry.unwrap_or(&empty_telem);
     let cov = coverage.cloned().unwrap_or_default();
-    let analysis = mcp_analysis(&cov, telem, incomplete);
+    let analysis = mcp_analysis(&cov, telem, incomplete, Some(path));
     let message = if !advisories.is_empty() {
         None
     } else if !cov.recognized_anything() {

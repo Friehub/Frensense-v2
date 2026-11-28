@@ -7,7 +7,7 @@
 //! false-positive fixes quietly stopped working needs the reason.
 
 use frensense_bundler::format::{
-    load_bundle, write_bundle_pinned_with_trust, BundlePayloadV8, BundleTrust, EngineRequirement,
+    load_bundle, write_bundle_pinned_with_trust, BundlePayload, BundleTrust, EngineRequirement,
     LoadedBundle, SanitizerScope,
 };
 use frensense_engine::analysis::taint::facts::LearnedFactEntry;
@@ -24,17 +24,22 @@ fn sanitizer(call: &str, package: Option<&str>) -> LearnedFactEntry {
 /// Build and reload a two-sanitizer bundle at `trust`. `None` means the
 /// write or reload failed, which every test below treats as a failure.
 fn build(trust: BundleTrust, scopes: Vec<SanitizerScope>) -> Option<LoadedBundle> {
-    let payload = BundlePayloadV8 {
-        patterns: vec![],
-        learned_facts: vec![
+    let payload = BundlePayload::new(
+        vec![],
+        vec![
             sanitizer("isPublicHost", Some("net-utils")),
             sanitizer("looksSafe", None),
         ],
-        policy_pack: vec![],
-        sanitizer_scopes: scopes,
-        policy_meta: vec![],
-    };
-    let req = EngineRequirement::same_series([0, 9, 1]);
+        vec![],
+        scopes,
+        vec![],
+        Vec::new(),
+        Vec::new(),
+    );
+    // Pin whatever engine this test is compiled against, not a literal: a
+    // literal silently stops loading the moment the engine's series moves.
+    let engine = EngineRequirement::parse_triple(frensense_engine::VERSION).unwrap_or([0, 0, 0]);
+    let req = EngineRequirement::same_series(engine);
     let bytes = write_bundle_pinned_with_trust(&payload, 0, req, trust).ok()?;
     load_bundle(&bytes).ok()
 }
@@ -52,12 +57,12 @@ fn custom_bundle_withholds_every_sanitizer_and_says_why() {
 
 #[test]
 fn community_bundle_withholds_only_the_unscoped_sanitizer() {
-    let scope = SanitizerScope {
-        call: "isPublicHost".to_string(),
-        package: Some("net-utils".to_string()),
-        classes: vec!["net.ssrf".to_string()],
-        family: None,
-    };
+    let scope = SanitizerScope::new(
+        "isPublicHost".to_string(),
+        Some("net-utils".to_string()),
+        vec!["net.ssrf".to_string()],
+        None,
+    );
     let b = build(BundleTrust::Community, vec![scope]);
     assert!(b.is_some(), "bundle must build and reload");
     let Some(b) = b else { return };

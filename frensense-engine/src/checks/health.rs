@@ -75,19 +75,6 @@ pub(crate) fn check_with_limit(ir: &FunctionIR, max: usize) -> Vec<CheckerFindin
     }]
 }
 
-/// Default-threshold entry point used by the registry.
-///
-/// ```
-/// use frensense_engine::checks::health::check;
-/// use frensense_engine::harness::lower_source;
-///
-/// let fns = lower_source("t.ts", "function g() { return 0 }", "ts").unwrap();
-/// assert!(check(&fns["g"]).is_empty());
-/// ```
-pub fn check(ir: &FunctionIR) -> Vec<CheckerFinding> {
-    check_with_limit(ir, MAX_COMPLEXITY)
-}
-
 #[cfg(test)]
 #[path = "health_tests.rs"]
 mod tests;
